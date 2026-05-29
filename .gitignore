@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.tsbuild/
+out/
+
+# TypeScript incremental / project-reference build info
+*.tsbuildinfo
+
+# Turborepo
+.turbo/
+
+# Test / coverage artifacts
+coverage/
+.vitest/
+
+# Playwright (added in T002+)
+test-results/
+playwright-report/
+playwright/.cache/
+blob-report/
+
+# Vite (added in T003+)
+.vite/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json

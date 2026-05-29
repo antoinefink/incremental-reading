@@ -1,0 +1,18 @@
+{
+  "name": "@interleave/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "dev": "echo \"@interleave/web: no Vite dev server yet (wired in T003)\"",
+    "build": "echo \"@interleave/web: no build step yet (wired in T002/T003)\"",
+    "test": "echo \"@interleave/web: no tests yet (wired in T002)\"",
+    "lint": "echo \"@interleave/web: no lint yet (wired in T002)\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@interleave/core": "workspace:*"
+  }
+}

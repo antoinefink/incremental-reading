@@ -1,0 +1,21 @@
+{
+  "name": "@interleave/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "dev": "echo \"@interleave/core: no dev step yet (wired in T002+)\"",
+    "build": "echo \"@interleave/core: no build step yet (wired in T002)\"",
+    "test": "echo \"@interleave/core: no tests yet (wired in T002)\"",
+    "lint": "echo \"@interleave/core: no lint yet (wired in T002)\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

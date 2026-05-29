@@ -1,0 +1,21 @@
+{
+  "name": "@interleave/scheduler",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "dev": "echo \"@interleave/scheduler: no dev step yet (wired in T002+)\"",
+    "build": "echo \"@interleave/scheduler: no build step yet (wired in T002)\"",
+    "test": "echo \"@interleave/scheduler: no tests yet (wired in T002)\"",
+    "lint": "echo \"@interleave/scheduler: no lint yet (wired in T002)\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}
