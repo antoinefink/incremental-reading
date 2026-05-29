@@ -340,6 +340,69 @@ mark.extracted {
   color: var(--text-3);
 }
 
+/* ---------- Floating selection toolbar (T019) ---------- */
+/* Ported from design/kit/styles/app.css (`.sel-toolbar` / `.sel-tool`) against
+   the canonical tokens — `design/kit` is immutable reference, this is the
+   rebuilt renderer copy. No hard-coded colors; every value derives from a token. */
+.sel-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+}
+.sel-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.sel-tool:hover {
+  background: var(--surface-2);
+}
+.sel-tool:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.sel-tool svg {
+  width: 14px;
+  height: 14px;
+}
+.sel-tool--accent {
+  color: var(--accent-text);
+}
+.tool-div {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 2px;
+}
+
+/* The toolbar's entrance animation (the kit's `.fade-up`). */
+@keyframes selFadeUp {
+  from {
+    transform: translate(-50%, -100%) translateY(7px);
+  }
+  to {
+    transform: translate(-50%, -100%) translateY(0);
+  }
+}
+.sel-toolbar.fade-up {
+  animation: selFadeUp var(--med) var(--ease) both;
+}
+
 /* Loading / empty / desktop-only states. */
 .reader-state {
   display: flex;

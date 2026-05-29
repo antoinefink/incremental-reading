@@ -62,4 +62,11 @@ export {
   buildSchema,
   interleaveExtensions,
 } from "./schema";
+// Selection → source-location resolution (T019): turn a live ProseMirror
+// selection into the stable block-ids + offsets + snapshot the selection toolbar
+// hands to the highlight (T020) / extraction (T021) commands. Headless + pure.
+export {
+  resolveSelectionLocation,
+  type SelectionLocation,
+} from "./selection-location";
 export { emptyDoc, toPlainText } from "./serialize";

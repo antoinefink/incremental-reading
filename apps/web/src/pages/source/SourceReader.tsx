@@ -19,12 +19,15 @@
  * "Extracts from this source" children — so the reader reuses the shell's right
  * panel rather than building a parallel one (per the spec).
  *
- * Scope guard: the SELECTION TOOLBAR, Extract, Cloze, Highlight, and processed-
- * span collapse are M4 (T019–T026). T018 DISPLAYS extracted spans + sets read-
- * points; it must NOT create extracts/highlights. The `E`/`C`/`H` selection
- * shortcuts are reserved for the M4 toolbar and intentionally not implemented.
- * Postpone / Mark done / Lower priority have no scheduling path until M5
- * (T027–T031); they render disabled with a TODO rather than inventing one.
+ * Scope (M4): the SELECTION TOOLBAR is wired here in T019 — selecting text pops the
+ * inline Extract / Cloze / Highlight / Copy / Cancel toolbar (`useTextSelection` +
+ * `SelectionToolbar`) with the `E`/`C`/`H`/`Esc` shortcuts, WITHOUT breaking the
+ * ProseMirror selection. The toolbar is presentational and delegates each action to
+ * callbacks: Copy/Cancel are renderer-only (clipboard + dismiss), while Highlight
+ * (T020), Extract (T021), and Cloze (M6 / T033–T034) are stubs that toast until
+ * those tasks land — T019 ships the UI seam only, no persistence. Postpone / Mark
+ * done / Lower priority have no scheduling path until M5 (T027–T031); they render
+ * disabled with a TODO rather than inventing one.
  */
 
 import {
@@ -38,6 +41,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { Prio, SchedulerChip, Status } from "../../components/inspector/primitives";
 import { appApi, type InspectorData, isDesktop } from "../../lib/appApi";
+import { SelectionToolbar, type SelectionToolbarAction } from "../../reader/SelectionToolbar";
+import { useTextSelection } from "../../reader/useTextSelection";
 import { Kbd } from "../../shell/Kbd";
 import { useSelection } from "../../shell/selection";
 import { useDocument } from "./useDocument";
@@ -135,6 +140,9 @@ export function SourceReader() {
   const [flash, setFlash] = useState<string | null>(null);
   // The live Tiptap editor instance (for read-point capture/jump + decoration).
   const editorRef = useRef<Editor | null>(null);
+  // A reactive mirror of the editor instance so the selection hook (T019) re-binds
+  // its listeners when the editor (re)mounts; the ref above stays for imperative use.
+  const [editor, setEditor] = useState<Editor | null>(null);
   const [editorReady, setEditorReady] = useState(false);
   // Whether we have already jumped to the read-point for the current load.
   const jumpedRef = useRef(false);
@@ -167,10 +175,11 @@ export function SourceReader() {
   // reflects the async-loaded body (Tiptap only reads `content` on creation).
   const editorKey = `${id ?? "none"}:${doc.status}`;
 
-  const onEditorReady = useCallback((editor: Editor | null) => {
-    editorRef.current = editor;
-    setEditorReady(editor !== null);
-    if (editor === null) jumpedRef.current = false;
+  const onEditorReady = useCallback((instance: Editor | null) => {
+    editorRef.current = instance;
+    setEditor(instance);
+    setEditorReady(instance !== null);
+    if (instance === null) jumpedRef.current = false;
   }, []);
 
   // Reset the jump latch whenever the document reloads.
@@ -183,6 +192,82 @@ export function SourceReader() {
     setFlash(message);
     setTimeout(() => setFlash(null), 1600);
   }, []);
+
+  // Text-selection toolbar (T019). The hook owns the anchor + resolved location;
+  // this page owns only the action wiring. Highlight is wired in T020, Extract in
+  // T021, Cloze in M6 (T033/T034) — for now those are stubs. Copy/Cancel are
+  // renderer-only (no IPC). Using or dismissing the toolbar never mutates the doc.
+  const selection = useTextSelection(editor, editorReady);
+
+  const onSelectionAction = useCallback(
+    (action: SelectionToolbarAction) => {
+      const loc = selection.location;
+      switch (action) {
+        case "copy": {
+          if (loc?.selectedText && typeof navigator !== "undefined" && navigator.clipboard) {
+            void navigator.clipboard.writeText(loc.selectedText).then(
+              () => toast("Copied to clipboard"),
+              () => toast("Could not copy"),
+            );
+          }
+          selection.dismiss();
+          break;
+        }
+        case "highlight":
+          // T020 wires highlight persistence; surface a stub acknowledgement.
+          toast("Highlight lands in T020");
+          selection.dismiss();
+          break;
+        case "extract":
+          // T021 wires extraction; surface a stub acknowledgement.
+          toast("Extract lands in T021");
+          selection.dismiss();
+          break;
+        case "cloze":
+          // The card builder (Cloze) lands in M6 (T033/T034).
+          toast("Cloze lands in M6");
+          selection.dismiss();
+          break;
+        case "cancel":
+          selection.dismiss();
+          break;
+      }
+    },
+    [selection, toast],
+  );
+
+  // Keyboard while the toolbar is open: E → extract, C → cloze, H → highlight
+  // (Escape → cancel is handled inside the hook). Mirrors the prototype's onKey;
+  // ignored when there is no live selection / toolbar.
+  //
+  // The reader's editor is contentEditable, so a bare letter would otherwise be
+  // TYPED into the selection (mutating the doc — exactly what T019 forbids on a
+  // mere selection). We listen in the CAPTURE phase so this handler runs before
+  // ProseMirror's own keydown handler and `preventDefault()` reliably suppresses
+  // the character insertion. We also drop a real field (INPUT/TEXTAREA/SELECT) and
+  // any IME composition so we never steal a genuine keystroke.
+  useEffect(() => {
+    if (!desktop || !selection.position) return;
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+      const k = e.key.toLowerCase();
+      if (k === "e") {
+        e.preventDefault();
+        onSelectionAction("extract");
+      } else if (k === "c") {
+        e.preventDefault();
+        onSelectionAction("cloze");
+      } else if (k === "h") {
+        e.preventDefault();
+        onSelectionAction("highlight");
+      }
+    }
+    // Capture phase: beat ProseMirror's editable-surface handler to the event.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [desktop, selection.position, onSelectionAction]);
 
   // Push the reader's display decorations (read-point divider + extracted markers)
   // into the editor as ProseMirror decorations, and resume at the read-point on
@@ -382,6 +467,8 @@ export function SourceReader() {
           )}
         </div>
       </div>
+
+      <SelectionToolbar position={selection.position} onAction={onSelectionAction} />
 
       {flash ? (
         <div className="reader-flash" data-testid="reader-flash" role="status">
