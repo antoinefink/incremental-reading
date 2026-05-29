@@ -9,6 +9,7 @@
     { "path": "packages/ui" },
     { "path": "packages/testing" },
     { "path": "apps/web" },
-    { "path": "apps/api" }
+    { "path": "apps/api" },
+    { "path": "apps/desktop" }
   ]
 }

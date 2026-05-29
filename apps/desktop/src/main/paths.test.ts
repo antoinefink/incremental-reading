@@ -1,0 +1,83 @@
+/**
+ * App-paths tests (T007).
+ *
+ * Verifies the app data directory + asset-vault skeleton are computed and created
+ * correctly. Electron's `app` is mocked because these tests run under Vitest
+ * (no Electron runtime); the `INTERLEAVE_DATA_DIR` override path is the one the
+ * Playwright restart spec also uses to isolate its data dir.
+ */
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Electron is not available under Vitest; stub the single import paths.ts uses.
+vi.mock("electron", () => ({
+  app: {
+    getPath: (name: string) => path.join(os.tmpdir(), "interleave-electron-mock", name),
+  },
+}));
+
+import { computeAppPaths, ensureVaultSkeleton, initAppPaths, resolveDataDir } from "./paths";
+
+let dir: string;
+const prevOverride = process.env.INTERLEAVE_DATA_DIR;
+
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "interleave-paths-"));
+});
+
+afterEach(() => {
+  fs.rmSync(dir, { recursive: true, force: true });
+  if (prevOverride === undefined) {
+    delete process.env.INTERLEAVE_DATA_DIR;
+  } else {
+    process.env.INTERLEAVE_DATA_DIR = prevOverride;
+  }
+});
+
+describe("app paths", () => {
+  it("computes the canonical DB + vault layout under the data dir", () => {
+    const paths = computeAppPaths(dir);
+    expect(paths.dataDir).toBe(dir);
+    expect(paths.dbPath).toBe(path.join(dir, "app.sqlite"));
+    expect(paths.assetsDir).toBe(path.join(dir, "assets"));
+    expect(paths.exportsDir).toBe(path.join(dir, "exports"));
+    expect(paths.backupsDir).toBe(path.join(dir, "backups"));
+  });
+
+  it("creates the vault skeleton (idempotently)", () => {
+    const paths = computeAppPaths(dir);
+    ensureVaultSkeleton(paths);
+    ensureVaultSkeleton(paths); // second call must not throw
+
+    expect(fs.existsSync(paths.assetsDir)).toBe(true);
+    expect(fs.existsSync(path.join(paths.assetsDir, "sources"))).toBe(true);
+    expect(fs.existsSync(path.join(paths.assetsDir, "media"))).toBe(true);
+    expect(fs.existsSync(paths.exportsDir)).toBe(true);
+    expect(fs.existsSync(paths.backupsDir)).toBe(true);
+  });
+
+  it("honors INTERLEAVE_DATA_DIR over the Electron app-data path", () => {
+    process.env.INTERLEAVE_DATA_DIR = dir;
+    expect(resolveDataDir()).toBe(path.resolve(dir));
+  });
+
+  it("falls back to the Electron app-data path when no override is set", () => {
+    delete process.env.INTERLEAVE_DATA_DIR;
+    const resolved = resolveDataDir();
+    // Mocked appData root + our app folder name.
+    expect(resolved).toBe(
+      path.join(os.tmpdir(), "interleave-electron-mock", "appData", "Interleave"),
+    );
+  });
+
+  it("initAppPaths resolves + creates in one call", () => {
+    process.env.INTERLEAVE_DATA_DIR = dir;
+    const paths = initAppPaths();
+    expect(paths.dataDir).toBe(path.resolve(dir));
+    expect(fs.existsSync(paths.dbPath)).toBe(false); // DB created by DbService, not here
+    expect(fs.existsSync(paths.assetsDir)).toBe(true);
+  });
+});

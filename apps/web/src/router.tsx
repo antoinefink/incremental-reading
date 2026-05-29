@@ -18,9 +18,11 @@
  * <Outlet/>.
  *
  * No domain logic here — routes render placeholders; data wiring lands after
- * PGlite (T007) and the repositories (T008).
+ * the Electron shell + native SQLite (T007) and the repositories (T008), reached
+ * through the typed `window.appApi` bridge.
  */
 import { createRootRoute, createRoute, createRouter, useParams } from "@tanstack/react-router";
+import { DesktopStatusPanel } from "./components/DesktopStatusPanel";
 import { Placeholder } from "./pages/Placeholder";
 import { Shell } from "./shell/Shell";
 
@@ -112,15 +114,30 @@ const searchRoute = createRoute({
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
-  component: () => (
-    <Placeholder
-      routeId="settings"
-      icon="settings"
-      title="Settings"
-      body="Review budget, retention, default intervals, keyboard layout, and theme."
-    />
-  ),
+  component: SettingsScreen,
 });
+
+/**
+ * Settings route. The full settings UI lands with T011; for now it renders the
+ * placeholder plus the desktop status panel, which is the renderer's first real
+ * consumer of the typed `window.appApi` bridge (health, DB status, and a
+ * persisted setting that survives an app restart).
+ */
+function SettingsScreen() {
+  return (
+    <div className="flex h-full min-h-full flex-col overflow-auto">
+      <Placeholder
+        routeId="settings"
+        icon="settings"
+        title="Settings"
+        body="Review budget, retention, default intervals, keyboard layout, and theme."
+      />
+      <div className="px-7 pb-10">
+        <DesktopStatusPanel />
+      </div>
+    </div>
+  );
+}
 
 const routeTree = rootRoute.addChildren([
   indexRoute,

@@ -8,6 +8,11 @@ build/
 .tsbuild/
 out/
 
+# Electron desktop: bundled main/preload + the vendored, Electron-ABI native copy
+# of better-sqlite3 (rebuilt by apps/desktop/scripts/vendor-native.mjs)
+apps/desktop/dist/
+apps/desktop/native/
+
 # TypeScript incremental / project-reference build info
 *.tsbuildinfo
 

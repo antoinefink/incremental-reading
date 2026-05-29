@@ -1,0 +1,32 @@
+{
+  "name": "@interleave/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Interleave Electron desktop shell — main process, preload bridge, native SQLite, IPC.",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build:bundle": "node build.mjs",
+    "build": "node build.mjs",
+    "dev": "node scripts/dev.mjs",
+    "start": "node build.mjs && electron .",
+    "test": "vitest run",
+    "lint": "echo \"@interleave/desktop: linted at the workspace root via Biome\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "rebuild:native": "node scripts/vendor-native.mjs",
+    "postinstall": "node scripts/vendor-native.mjs"
+  },
+  "dependencies": {
+    "@interleave/core": "workspace:*",
+    "@interleave/db": "workspace:*",
+    "better-sqlite3": "^12.10.0",
+    "drizzle-orm": "^0.45.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
+    "@types/node": "^22.10.0",
+    "electron": "^38.8.6",
+    "esbuild": "^0.25.12"
+  }
+}

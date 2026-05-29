@@ -36,12 +36,27 @@ export function applyPragmas(sqlite: SqliteDatabase): void {
   sqlite.pragma("busy_timeout = 5000");
 }
 
+/** Options for {@link openDatabase}. */
+export interface OpenDatabaseOptions {
+  /**
+   * Absolute path to a prebuilt `better_sqlite3.node` addon. Passed straight to
+   * `better-sqlite3`'s `nativeBinding`, which `require`s it directly (bypassing
+   * the `bindings` lookup). The Electron main process uses this to load an
+   * Electron-ABI binary while the package's default (Node-ABI) binary keeps
+   * serving Node/Vitest/dev scripts. Omit it to use the default resolution.
+   */
+  readonly nativeBinding?: string;
+}
+
 /**
  * Open a SQLite database at `filename` (use `":memory:"` for tests) and return a
- * Drizzle client bound to the schema. Pragmas are applied on open.
+ * Drizzle client bound to the schema. Pragmas are applied on open. Pass
+ * `nativeBinding` to load a specific (e.g. Electron-ABI) native addon.
  */
-export function openDatabase(filename: string): DbHandle {
-  const sqlite = new Database(filename);
+export function openDatabase(filename: string, options: OpenDatabaseOptions = {}): DbHandle {
+  const sqlite = options.nativeBinding
+    ? new Database(filename, { nativeBinding: options.nativeBinding })
+    : new Database(filename);
   applyPragmas(sqlite);
   const db = drizzle(sqlite, { schema });
   return { db, sqlite };

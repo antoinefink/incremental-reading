@@ -21,6 +21,7 @@ export {
   applyPragmas,
   type DbHandle,
   type InterleaveDatabase,
+  type OpenDatabaseOptions,
   openDatabase,
   type SqliteDatabase,
 } from "./client";
