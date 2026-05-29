@@ -1,0 +1,626 @@
+/* ============================================================
+   Interleave — app shell stylesheet (T004)
+
+   The persistent workspace chrome: left sidebar, top command bar, central
+   work area, right inspector placeholder, bottom status bar, plus the ⌘K
+   command palette and the ? cheat sheet.
+
+   This rebuilds the *visual output* of design/kit/styles/app.css (the shell
+   section + the cmdk/cheat overlays) for our React 19 + Tailwind v4 stack. It
+   is NOT a copy of the Babel-in-browser prototype structure — the markup is
+   rebuilt in React components and the layout dims/colors come exclusively from
+   the design tokens (--sidebar-w/--inspector-w/--topbar-h, surfaces, borders,
+   text tiers). No hard-coded colors; spacing uses the 4px token scale.
+
+   Complex selectors (hover, pseudo-element accents, the conic streak ring) live
+   here rather than as Tailwind utilities so the chrome stays terse and matches
+   the kit pixel-for-pixel; every value still resolves to a token.
+   ============================================================ */
+
+/* ---- Root frame ---- */
+.app-shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--canvas);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-base);
+}
+
+/* Base helpers declared first so later compound selectors that reference them
+   (e.g. `.shell-statusbar__hint .shell-kbd`) don't trip descending-specificity. */
+.shell-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+/* keyboard hint pill */
+.shell-kbd {
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  font-weight: 500;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.shell-kbd-group {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+/* ---- Sidebar ---- */
+.shell-sidebar {
+  width: var(--sidebar-w);
+  flex: none;
+  background: var(--sunken);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.shell-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 14px var(--s-6);
+  height: var(--topbar-h);
+  flex: none;
+}
+.shell-brand__logo {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.shell-brand__name {
+  font-size: var(--t-base);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.shell-brand__sub {
+  font-size: 9px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.shell-nav {
+  padding: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.shell-nav__item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  height: 32px;
+  padding: 0 var(--s-4);
+  border-radius: var(--r-md);
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--t-base);
+  font-weight: 500;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  text-decoration: none;
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.shell-nav__item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.shell-nav__item--on {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+.shell-nav__item--on svg {
+  color: var(--accent-text);
+}
+.shell-nav__item svg {
+  width: 17px;
+  height: 17px;
+  flex: none;
+}
+.shell-nav__item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.shell-nav__badge {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  font-weight: 600;
+  color: var(--text-3);
+  background: var(--surface-2);
+  padding: 1px var(--s-2);
+  border-radius: var(--r-full);
+  min-width: 20px;
+  text-align: center;
+}
+.shell-nav__item--on .shell-nav__badge {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+.shell-nav__label {
+  font-size: var(--t-2xs);
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: var(--s-5) var(--s-5) var(--s-1);
+}
+
+.shell-sidebar__foot {
+  margin-top: auto;
+  padding: var(--s-4);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.shell-streak {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: var(--s-1) var(--s-3);
+}
+.shell-streak svg {
+  color: var(--text-3);
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+.shell-streak__n {
+  font-weight: 500;
+  font-size: var(--t-xs);
+  color: var(--text-2);
+}
+.shell-streak__l {
+  margin-left: auto;
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+
+.shell-userchip-wrap {
+  position: relative;
+}
+.shell-userchip {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-md);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  color: var(--text);
+}
+.shell-userchip:hover {
+  background: var(--surface-2);
+}
+.shell-userchip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.shell-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-full);
+  background: linear-gradient(135deg, var(--accent), var(--el-extract));
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  flex: none;
+}
+.shell-userchip__name {
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+.shell-userchip__sub {
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+}
+.shell-usermenu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+  padding: var(--s-1);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.shell-usermenu__item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 30px;
+  padding: 0 9px;
+  border: none;
+  background: transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  color: var(--text);
+  width: 100%;
+  text-align: left;
+}
+.shell-usermenu__item:hover {
+  background: var(--surface-2);
+}
+.shell-usermenu__item svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-2);
+}
+.shell-usermenu__item .shell-grow {
+  flex: 1;
+}
+.shell-usermenu__sep {
+  height: 1px;
+  background: var(--border);
+  border: none;
+  margin: 2px 0;
+}
+
+/* ---- Main column ---- */
+.shell-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.shell-topbar {
+  height: var(--topbar-h);
+  flex: none;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: var(--s-5);
+  padding: 0 var(--s-6);
+  background: color-mix(in oklch, var(--canvas) 80%, transparent);
+  backdrop-filter: blur(8px);
+}
+.shell-cmdbar {
+  flex: 1;
+  min-width: 0;
+  max-width: 560px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 34px;
+  padding: 0 var(--s-5);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-3);
+  cursor: text;
+  font-family: var(--font-ui);
+  font-size: var(--t-base);
+  transition: border-color var(--fast) var(--ease);
+}
+.shell-cmdbar:hover {
+  border-color: var(--text-3);
+}
+.shell-cmdbar:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.shell-cmdbar svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+.shell-cmdbar__ph {
+  flex: 1;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shell-page {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* bottom status bar */
+.shell-statusbar {
+  height: 26px;
+  flex: none;
+  border-top: 1px solid var(--border);
+  background: var(--sunken);
+  display: flex;
+  align-items: center;
+  gap: var(--s-6);
+  padding: 0 var(--s-6);
+}
+.shell-statusbar__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+}
+.shell-statusbar__hint .shell-kbd {
+  height: 15px;
+  min-width: 15px;
+}
+.shell-statusbar__spacer {
+  flex: 1;
+}
+
+/* ---- Right inspector (placeholder container — filled by T010) ---- */
+.shell-inspector {
+  width: var(--inspector-w);
+  flex: none;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.shell-inspector__head {
+  height: var(--topbar-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--s-6);
+  border-bottom: 1px solid var(--border);
+}
+.shell-inspector__title {
+  font-size: var(--t-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-2);
+}
+.shell-inspector__body {
+  overflow-y: auto;
+  padding: var(--s-6);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  flex: 1;
+}
+.shell-inspector__placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--s-3);
+  height: 100%;
+  color: var(--text-3);
+}
+.shell-inspector__placeholder svg {
+  width: 22px;
+  height: 22px;
+}
+.shell-inspector__placeholder p {
+  margin: 0;
+  font-size: var(--t-sm);
+  max-width: 200px;
+  line-height: var(--lh-snug);
+}
+
+/* Shared dismiss backdrop for the ⌘K / ? overlays — a real <button> (so click-
+   to-dismiss is keyboard-reachable) stretched behind the centered panel. */
+.shell-overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: default;
+}
+
+/* ---- Command palette (⌘K) ---- */
+.shell-cmdk-overlay {
+  position: fixed;
+  inset: 0;
+  background: oklch(0.2 0.02 262 / 0.32);
+  backdrop-filter: blur(2px);
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 14vh;
+}
+.shell-cmdk {
+  position: relative;
+  z-index: 1;
+  width: 560px;
+  max-width: 90vw;
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+.shell-cmdk__input {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: 14px var(--s-6);
+  border-bottom: 1px solid var(--border);
+}
+.shell-cmdk__input svg {
+  width: 18px;
+  height: 18px;
+  color: var(--text-3);
+}
+.shell-cmdk__input input {
+  border: none;
+  background: none;
+  outline: none;
+  font-family: var(--font-ui);
+  font-size: var(--t-lg);
+  color: var(--text);
+  width: 100%;
+}
+.shell-cmdk__input input::placeholder {
+  color: var(--text-3);
+}
+.shell-cmdk__list {
+  max-height: 360px;
+  overflow-y: auto;
+  padding: var(--s-2);
+}
+.shell-cmdk__group {
+  font-size: var(--t-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  padding: var(--s-3) var(--s-4) var(--s-1);
+}
+.shell-cmdk__item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  height: 38px;
+  padding: 0 var(--s-4);
+  border-radius: var(--r-md);
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-base);
+}
+.shell-cmdk__item svg {
+  width: 16px;
+  height: 16px;
+  color: var(--text-2);
+}
+.shell-cmdk__item--on {
+  background: var(--surface-2);
+}
+.shell-cmdk__item--on svg {
+  color: var(--accent-text);
+}
+.shell-cmdk__item .shell-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- Cheat sheet (?) ---- */
+.shell-cheat-overlay {
+  position: fixed;
+  inset: 0;
+  background: oklch(0.2 0.02 262 / 0.4);
+  backdrop-filter: blur(3px);
+  z-index: 150;
+  display: grid;
+  place-items: center;
+}
+.shell-cheat {
+  position: relative;
+  z-index: 1;
+  width: 720px;
+  max-width: 92vw;
+  max-height: 84vh;
+  overflow-y: auto;
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-pop);
+  padding: 22px 26px;
+}
+.shell-cheat__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.shell-cheat__head h3 {
+  margin: 0;
+  font-size: var(--t-lg);
+  font-weight: 600;
+}
+.shell-cheat__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-md);
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.shell-cheat__close:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.shell-cheat__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 26px 40px;
+}
+.shell-cheat__group h4 {
+  font-size: var(--t-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  margin: 0 0 var(--s-3);
+}
+.shell-cheat__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s-1) 0;
+  border-bottom: 1px solid var(--border-faint);
+  font-size: var(--t-sm);
+}
+.shell-cheat__row:last-child {
+  border-bottom: none;
+}

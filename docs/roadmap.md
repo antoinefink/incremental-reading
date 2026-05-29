@@ -39,7 +39,7 @@ Detailed specs: [`tasks/M1-foundations.md`](./tasks/M1-foundations.md)
   Done when: strict TypeScript, Biome, Vitest, Playwright, the Dockerfiles/`docker-compose.yml`/`Makefile`, and CI are wired so CI rejects type errors, lint errors, unit failures, and one smoke E2E failure.
 - [x] **T003 — Scaffold the React app** · done · _deps: T002_
   Done when: `apps/web` runs with Vite + React + TS + TanStack Router + Tailwind v4 and has routes `/`, `/inbox`, `/queue`, `/source/$id`, `/review`, `/search`, `/settings`.
-- [ ] **T004 — App shell skeleton** · _deps: T003_
+- [x] **T004 — App shell skeleton** · done · _deps: T003_
   Done when: left sidebar, top command bar, central work area, right inspector, bottom status bar; every main route uses the same shell and is keyboard-navigable.
 - [ ] **T005 — Domain language in `packages/core`** · _deps: T001_
   Done when: documented TS types for `Element`, `ElementType`, `ElementStatus`, `DistillationStage`, `Priority`, `ReviewState`, `ReviewLog`, `Source`, `Document`, `ElementRelation`, used by app and tests.
@@ -304,6 +304,7 @@ overload management, semantic search, AI, media, reliability, scale.
 
 Record notable completions / decisions here as tasks land (newest first).
 
+- 2026-05-29 - T004 App shell skeleton - done. Keyboard-first shell with left sidebar, top command bar, central work area, right inspector, and bottom status bar; every main route renders through the same shell and is keyboard-navigable.
 - 2026-05-29 - T003 Scaffold the React app - done. Vite + React 19 + TS + TanStack Router + Tailwind v4 in apps/web with routes /, /inbox, /queue, /source/$id, /review, /search, /settings, wired to the design tokens.
 - 2026-05-29 - T002 Tooling + Docker + CI gates - done. Strict TypeScript, Biome, Vitest, Playwright smoke E2E, Dockerfiles + docker-compose + Makefile, and GitHub Actions CI wired so CI rejects type errors, lint errors, unit failures, and a smoke E2E failure.
 - 2026-05-29 - T001 Create the monorepo - done. pnpm + Turborepo workspace with apps/{web,api} and packages/{core,db,scheduler,editor,ui,testing}; root typecheck/lint/test scripts pass.

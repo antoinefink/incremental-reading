@@ -20,7 +20,7 @@ export function Placeholder({ icon, title, body, routeId }: PlaceholderProps) {
   return (
     <div
       data-testid={`route-${routeId}`}
-      className="flex h-full flex-col items-center justify-center gap-3 px-7 py-8 text-center"
+      className="flex h-full min-h-full flex-col items-center justify-center gap-3 px-7 py-8 text-center"
     >
       <div className="grid size-12 place-items-center rounded-lg bg-accent-soft text-accent-text">
         <Icon name={icon} size={26} />

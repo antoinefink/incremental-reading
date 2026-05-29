@@ -1,24 +1,57 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 /**
- * Smoke E2E (T002, extended in T003).
+ * App-shell E2E (T002 smoke, extended in T003/T004).
  *
- * Verifies the real React + TanStack Router app boots and is navigable. This is
- * the gate the Definition of Done refers to: if the app fails to boot, a route
- * fails to load, or in-app navigation breaks, `make e2e` (and CI) fails.
+ * Verifies the real React + TanStack Router app boots, that every main route
+ * renders inside the persistent shell (sidebar / command bar / work area /
+ * inspector / status bar), and that the keyboard-first chrome works: every
+ * route is reachable by keyboard, ⌘K opens the command palette, ? opens the
+ * cheat sheet, and the shell renders in both light and dark (data-theme).
+ *
+ * This is the gate the Definition of Done refers to: if the app fails to boot,
+ * a route fails to load, the shell is missing, or the keyboard workflow breaks,
+ * `make e2e` (and CI) fails.
  */
-test("app boots and the home route renders", async ({ page }) => {
+
+/** The seven typed routes and their in-page route-content test ids. */
+const ROUTES: ReadonlyArray<[string, string]> = [
+  ["/", "route-home"],
+  ["/inbox", "route-inbox"],
+  ["/queue", "route-queue"],
+  ["/source/demo-1", "route-source"],
+  ["/review", "route-review"],
+  ["/search", "route-search"],
+  ["/settings", "route-settings"],
+];
+
+/** Asserts the persistent shell chrome is present on the current page. */
+async function expectShell(page: Page) {
+  await expect(page.getByTestId("command-bar")).toBeVisible();
+  await expect(page.getByTestId("inspector")).toBeVisible();
+  await expect(page.getByTestId("status-bar")).toBeVisible();
+  await expect(page.getByTestId("user-chip")).toBeVisible();
+}
+
+test("app boots and the home route renders inside the shell", async ({ page }) => {
   await page.goto("/");
 
   await expect(page).toHaveTitle(/Interleave/);
   await expect(page.getByTestId("route-home")).toBeVisible();
+  await expectShell(page);
+});
+
+test("every main route renders inside the same shell", async ({ page }) => {
+  for (const [url, testId] of ROUTES) {
+    await page.goto(url);
+    await expect(page.getByTestId(testId)).toBeVisible();
+    await expectShell(page);
+  }
 });
 
 test("navigates between routes via the sidebar", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("route-home")).toBeVisible();
 
-  // Click into the queue, then into review — two in-app navigations.
   await page.getByTestId("nav-queue").click();
   await expect(page).toHaveURL(/\/queue$/);
   await expect(page.getByTestId("route-queue")).toBeVisible();
@@ -28,31 +61,73 @@ test("navigates between routes via the sidebar", async ({ page }) => {
   await expect(page.getByTestId("route-review")).toBeVisible();
 });
 
-test("all seven routes load by URL", async ({ page }) => {
-  const routes: ReadonlyArray<[string, string]> = [
-    ["/", "route-home"],
-    ["/inbox", "route-inbox"],
-    ["/queue", "route-queue"],
-    ["/source/demo-1", "route-source"],
-    ["/review", "route-review"],
-    ["/search", "route-search"],
-    ["/settings", "route-settings"],
-  ];
+test("routes are reachable by keyboard (g + letter navigation)", async ({ page }) => {
+  await page.goto("/");
 
-  for (const [url, testId] of routes) {
-    await page.goto(url);
-    await expect(page.getByTestId(testId)).toBeVisible();
-  }
+  // g then q → queue
+  await page.keyboard.press("g");
+  await page.keyboard.press("q");
+  await expect(page).toHaveURL(/\/queue$/);
+  await expect(page.getByTestId("route-queue")).toBeVisible();
+
+  // g then r → review
+  await page.keyboard.press("g");
+  await page.keyboard.press("r");
+  await expect(page).toHaveURL(/\/review$/);
+  await expect(page.getByTestId("route-review")).toBeVisible();
+
+  // g then i → inbox
+  await page.keyboard.press("g");
+  await page.keyboard.press("i");
+  await expect(page).toHaveURL(/\/inbox$/);
+  await expect(page.getByTestId("route-inbox")).toBeVisible();
 });
 
-test("theme toggle flips the data-theme attribute", async ({ page }) => {
+test("⌘K opens the command palette and can navigate from it", async ({ page }) => {
+  await page.goto("/");
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByTestId("command-palette")).toBeVisible();
+
+  // Filtering + Enter runs the top match.
+  await page.getByLabel("Command palette search").fill("Review session");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("command-palette")).toBeHidden();
+  await expect(page).toHaveURL(/\/review$/);
+  await expect(page.getByTestId("route-review")).toBeVisible();
+
+  // Esc closes it again.
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByTestId("command-palette")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("command-palette")).toBeHidden();
+});
+
+test("? opens the keyboard cheat sheet", async ({ page }) => {
+  await page.goto("/");
+
+  await page.keyboard.press("?");
+  await expect(page.getByTestId("cheat-sheet")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Keyboard shortcuts" })).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("cheat-sheet")).toBeHidden();
+});
+
+test("the shell renders in both light and dark themes", async ({ page }) => {
   await page.goto("/");
   const html = page.locator("html");
+
   const before = await html.getAttribute("data-theme");
 
-  await page.getByTestId("theme-toggle").click();
+  // The theme toggle lives in the user-chip menu.
+  await page.getByTestId("user-chip").click();
+  await page.getByRole("menuitem", { name: /mode/i }).click();
 
   const after = await html.getAttribute("data-theme");
   expect(after).not.toBe(before);
   expect(["light", "dark"]).toContain(after);
+
+  // Shell chrome stays intact after the theme flip.
+  await expectShell(page);
 });
