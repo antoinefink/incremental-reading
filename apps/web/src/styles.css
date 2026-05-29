@@ -1,0 +1,133 @@
+/* ============================================================
+   Interleave — global stylesheet (T003)
+
+   Layering, in order:
+   1. The canonical design tokens (design/tokens.css) — the single source of
+      truth for color, type, spacing, radii, layout dims, motion. Imported
+      ONCE here and nowhere else. It also pulls in the IBM Plex superfamily and
+      sets base body styles + light/dark via [data-theme].
+   2. Tailwind v4, whose @theme is DERIVED from those tokens below (never
+      re-declared) so utilities resolve to the live CSS variables. Because the
+      theme maps to `var(--…)`, toggling [data-theme] re-themes every utility
+      with no `dark:` variant required.
+   ============================================================ */
+
+@import "../../../design/tokens.css";
+@import "tailwindcss";
+
+/* Dark mode is driven by the [data-theme="dark"] attribute (tokens.css), NOT
+   Tailwind's `.dark` class. Point the `dark:` variant at the attribute so any
+   future use stays consistent with the token strategy. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* Derive the Tailwind theme FROM the design tokens. `@theme inline` emits the
+   token's `var(--…)` reference (not its resolved value) into the generated
+   utilities, so e.g. `bg-surface` becomes `background: var(--surface)` and
+   re-themes automatically when [data-theme] flips. */
+@theme inline {
+  /* Fonts */
+  --font-ui: var(--font-ui);
+  --font-read: var(--font-read);
+  --font-mono: var(--font-mono);
+
+  /* Type scale */
+  --text-2xs: var(--t-2xs);
+  --text-xs: var(--t-xs);
+  --text-sm: var(--t-sm);
+  --text-base: var(--t-base);
+  --text-md: var(--t-md);
+  --text-lg: var(--t-lg);
+  --text-xl: var(--t-xl);
+  --text-2xl: var(--t-2xl);
+  --text-3xl: var(--t-3xl);
+
+  /* Spacing (4px base scale) */
+  --spacing-1: var(--s-1);
+  --spacing-2: var(--s-2);
+  --spacing-3: var(--s-3);
+  --spacing-4: var(--s-4);
+  --spacing-5: var(--s-5);
+  --spacing-6: var(--s-6);
+  --spacing-7: var(--s-7);
+  --spacing-8: var(--s-8);
+  --spacing-9: var(--s-9);
+  --spacing-10: var(--s-10);
+  --spacing-12: var(--s-12);
+
+  /* Radii */
+  --radius-xs: var(--r-xs);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+  --radius-full: var(--r-full);
+
+  /* Surfaces / borders / text */
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-sunken: var(--sunken);
+  --color-raised: var(--raised);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-faint: var(--border-faint);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-text-on-accent: var(--text-on-accent);
+
+  /* Accent */
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-soft-bd: var(--accent-soft-bd);
+  --color-accent-text: var(--accent-text);
+
+  /* Status */
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  /* Priority */
+  --color-prio-a: var(--prio-a);
+  --color-prio-a-soft: var(--prio-a-soft);
+  --color-prio-b: var(--prio-b);
+  --color-prio-b-soft: var(--prio-b-soft);
+  --color-prio-c: var(--prio-c);
+  --color-prio-c-soft: var(--prio-c-soft);
+  --color-prio-d: var(--prio-d);
+  --color-prio-d-soft: var(--prio-d-soft);
+
+  /* Element-type hues */
+  --color-el-source: var(--el-source);
+  --color-el-extract: var(--el-extract);
+  --color-el-card: var(--el-card);
+  --color-el-task: var(--el-task);
+  --color-el-concept: var(--el-concept);
+  --color-el-media: var(--el-media);
+  --color-el-topic: var(--el-topic);
+  --color-el-synthesis: var(--el-synthesis);
+
+  /* Scheduler accents — the load-bearing FSRS vs attention split */
+  --color-sched-fsrs: var(--sched-fsrs);
+  --color-sched-attn: var(--sched-attn);
+
+  /* Reading marks */
+  --color-mark-hl: var(--mark-hl);
+  --color-mark-extract: var(--mark-extract);
+  --color-mark-extract-bd: var(--mark-extract-bd);
+
+  /* Layout dims (exposed as spacing-like tokens for w-/h- usage if needed) */
+  --spacing-sidebar: var(--sidebar-w);
+  --spacing-inspector: var(--inspector-w);
+  --spacing-topbar: var(--topbar-h);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}

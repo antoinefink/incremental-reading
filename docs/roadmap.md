@@ -37,7 +37,7 @@ Detailed specs: [`tasks/M1-foundations.md`](./tasks/M1-foundations.md)
   Done when: pnpm workspace with `apps/web`, `apps/api`, `packages/{core,db,scheduler,editor,ui,testing}` exists and `make dev`, `make test`, `make typecheck`, `make lint` run from the repo root.
 - [x] **T002 — Tooling + Docker + CI gates** · done · _deps: T001_
   Done when: strict TypeScript, Biome, Vitest, Playwright, the Dockerfiles/`docker-compose.yml`/`Makefile`, and CI are wired so CI rejects type errors, lint errors, unit failures, and one smoke E2E failure.
-- [ ] **T003 — Scaffold the React app** · _deps: T002_
+- [x] **T003 — Scaffold the React app** · done · _deps: T002_
   Done when: `apps/web` runs with Vite + React + TS + TanStack Router + Tailwind v4 and has routes `/`, `/inbox`, `/queue`, `/source/$id`, `/review`, `/search`, `/settings`.
 - [ ] **T004 — App shell skeleton** · _deps: T003_
   Done when: left sidebar, top command bar, central work area, right inspector, bottom status bar; every main route uses the same shell and is keyboard-navigable.
@@ -304,6 +304,7 @@ overload management, semantic search, AI, media, reliability, scale.
 
 Record notable completions / decisions here as tasks land (newest first).
 
+- 2026-05-29 - T003 Scaffold the React app - done. Vite + React 19 + TS + TanStack Router + Tailwind v4 in apps/web with routes /, /inbox, /queue, /source/$id, /review, /search, /settings, wired to the design tokens.
 - 2026-05-29 - T002 Tooling + Docker + CI gates - done. Strict TypeScript, Biome, Vitest, Playwright smoke E2E, Dockerfiles + docker-compose + Makefile, and GitHub Actions CI wired so CI rejects type errors, lint errors, unit failures, and a smoke E2E failure.
 - 2026-05-29 - T001 Create the monorepo - done. pnpm + Turborepo workspace with apps/{web,api} and packages/{core,db,scheduler,editor,ui,testing}; root typecheck/lint/test scripts pass.
 </content>
