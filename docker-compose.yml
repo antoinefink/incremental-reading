@@ -1,0 +1,75 @@
+# Interleave dev/CI stack (MVP, local-first phase).
+#
+# Two services only — there is no server database yet (PGlite runs in the
+# browser). `app` is the Node/pnpm toolchain (dev server, typecheck, Vitest,
+# Biome); `e2e` is the official Playwright image for browser tests.
+#
+# The repo is bind-mounted into /workspace so edits are live. Every node_modules
+# directory is masked by a named volume so the container's install (correct
+# Linux binaries) never collides with the host's. The pnpm content-addressable
+# store is a named volume too, so installs are cached across runs.
+#
+# Gold-standard phase adds api/worker/db (PostgreSQL 18 + pgvector)/minio.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
+    image: interleave-app
+    init: true
+    working_dir: /workspace
+    entrypoint: ["/workspace/docker/entrypoint.sh"]
+    environment:
+      CI: ${CI:-}
+    ports:
+      - "5173:5173"
+    command: ["pnpm", "--filter", "@interleave/web", "dev"]
+    volumes:
+      - .:/workspace
+      - pnpm-store:/pnpm/store
+      - root_node_modules:/workspace/node_modules
+      - web_node_modules:/workspace/apps/web/node_modules
+      - api_node_modules:/workspace/apps/api/node_modules
+      - core_node_modules:/workspace/packages/core/node_modules
+      - db_node_modules:/workspace/packages/db/node_modules
+      - scheduler_node_modules:/workspace/packages/scheduler/node_modules
+      - editor_node_modules:/workspace/packages/editor/node_modules
+      - ui_node_modules:/workspace/packages/ui/node_modules
+      - testing_node_modules:/workspace/packages/testing/node_modules
+
+  e2e:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.e2e
+    image: interleave-e2e
+    init: true
+    working_dir: /workspace
+    entrypoint: ["/workspace/docker/entrypoint.sh"]
+    environment:
+      CI: ${CI:-}
+    command: ["pnpm", "exec", "playwright", "test"]
+    volumes:
+      - .:/workspace
+      - pnpm-store:/pnpm/store
+      - root_node_modules:/workspace/node_modules
+      - web_node_modules:/workspace/apps/web/node_modules
+      - api_node_modules:/workspace/apps/api/node_modules
+      - core_node_modules:/workspace/packages/core/node_modules
+      - db_node_modules:/workspace/packages/db/node_modules
+      - scheduler_node_modules:/workspace/packages/scheduler/node_modules
+      - editor_node_modules:/workspace/packages/editor/node_modules
+      - ui_node_modules:/workspace/packages/ui/node_modules
+      - testing_node_modules:/workspace/packages/testing/node_modules
+
+volumes:
+  pnpm-store:
+  root_node_modules:
+  web_node_modules:
+  api_node_modules:
+  core_node_modules:
+  db_node_modules:
+  scheduler_node_modules:
+  editor_node_modules:
+  ui_node_modules:
+  testing_node_modules:

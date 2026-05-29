@@ -1,0 +1,20 @@
+# Playwright E2E image for Interleave.
+#
+# Built FROM the official Playwright image so the browser binaries and all OS
+# dependencies match the installed @playwright/test version exactly (keep this
+# tag in lockstep with package.json#devDependencies["@playwright/test"]).
+FROM mcr.microsoft.com/playwright:v1.60.0-noble
+
+# Match the toolchain image: Corepack-managed pnpm pinned to the repo version.
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable && corepack prepare pnpm@9.12.1 --activate
+
+ENV PNPM_HOME=/pnpm
+ENV PATH="${PNPM_HOME}:${PATH}"
+RUN pnpm config set store-dir /pnpm/store --global
+
+WORKDIR /workspace
+
+# Source is bind-mounted at runtime. The Makefile/compose invocation runs
+# `pnpm exec playwright test`; CI passes the smoke spec explicitly.
+CMD ["pnpm", "exec", "playwright", "test"]
