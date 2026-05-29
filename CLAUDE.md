@@ -31,26 +31,29 @@ documented plan in [`docs/`](./docs/). Before starting any work:
 5. After finishing: check the box in `roadmap.md`, record the commit, note anything that
    changes downstream tasks, and commit as a single coherent change referencing the task ID.
 
-## Docker-first workflow
+## Runtime & tooling (native pnpm is canonical)
 
-**Everything runs in Docker.** Do not depend on host Node/pnpm. The canonical commands are
-`make` targets that wrap `docker compose` (defined in T002):
+**The desktop app runs natively, not in Docker.** The canonical app is an Electron desktop
+shell with a native SQLite database (better-sqlite3) — that needs host access to the app data
+directory, native modules, and a real window, so it cannot live in a container. Use native
+`pnpm` to run, develop, and test the desktop app:
 
 | Command | Purpose |
 |---------|---------|
-| `make dev` | Start the dev stack with hot reload |
-| `make typecheck` | Typecheck the workspace (in a container) |
-| `make test` | Vitest unit/domain tests (in a container) |
-| `make e2e` | Playwright E2E (official Playwright image) |
-| `make lint` | Biome format/lint check |
-| `make migrate` | Run Drizzle migrations (server phase) |
-| `make seed` | Load demo fixtures |
-| `make shell` | Shell into the toolchain container |
-| `make down` | Stop the stack |
+| `pnpm dev` | Start the Electron app + Vite renderer with hot reload |
+| `pnpm typecheck` | Typecheck the workspace |
+| `pnpm test` | Vitest unit/domain/repository tests |
+| `pnpm e2e` | Playwright E2E against the Electron app |
+| `pnpm lint` | Biome format/lint check |
+| `pnpm db:generate` | Generate Drizzle (SQLite dialect) migrations |
+| `pnpm db:migrate` | Run Drizzle migrations against the local SQLite DB |
+| `pnpm db:reset:dev` | Reset the dev SQLite DB |
+| `pnpm seed` | Load demo fixtures into the dev SQLite DB |
 
-Compose grows by phase: MVP = one Node `app` service + a Playwright `e2e` service (PGlite
-runs in the browser, so there is no server DB yet). Gold-standard adds `api`, `worker`,
-`db` (PostgreSQL 18 + pgvector), and `minio`.
+Docker is **not** canonical for the desktop app. The existing `docker compose` / `Makefile`
+setup is kept but **re-scoped to the future server phase only** — it provisions the
+gold-standard services (`api`, `worker`, `db` = PostgreSQL 18 + pgvector, `minio`) when cloud
+sync work begins. Do not use it to build, run, or test the local desktop app.
 
 ## Design system (visual source of truth)
 
@@ -71,17 +74,28 @@ summarized in [`docs/design-system.md`](./docs/design-system.md). For any UI-bea
 
 Use the planned stack unless a task explicitly says otherwise:
 
-- React + TypeScript + Vite
+- React + TypeScript + Vite **renderer** (UI only)
+- Electron desktop shell (main process, preload bridge, lifecycle, windows, native menus, IPC)
+- Native SQLite via **better-sqlite3** (Electron main/worker side) as the canonical local database
+- Drizzle ORM + migrations (**SQLite dialect**)
+- Filesystem **asset vault** for PDFs, HTML snapshots, images, media, exports, backups
 - TanStack Router
 - Tiptap / ProseMirror for rich-text documents
-- PGlite for local-first browser persistence
-- Drizzle ORM for schema and migrations
 - FSRS for active-recall card scheduling
-- Custom scheduler for sources/topics/extracts
-- Vitest for unit/domain tests
-- Playwright for end-to-end flows
+- Custom attention scheduler for sources/topics/extracts
+- Vitest for unit/domain/repository tests
+- Playwright for end-to-end flows (against the Electron app)
 - Tailwind/Radix-style primitives for UI; `lucide-react` for icons
-- Later: Hono API, PostgreSQL, background workers, browser extension, Tauri desktop app
+- Later (server phase only): Hono API, PostgreSQL + pgvector, background workers, operation-log
+  cloud sync, browser extension
+
+Core principle: **SQLite is the canonical local database. The filesystem is the canonical
+local asset vault. The React app is the UI. Electron owns trusted local capabilities. The
+renderer never talks directly to SQLite or arbitrary filesystem APIs.**
+
+Tauri is deprioritized to a possible future alternative shell only — do not build both Electron
+and Tauri. A PWA/browser version is deprioritized (possibly added later via a separate adapter);
+the canonical app is the desktop app.
 
 Favor boring, explicit, type-safe architecture over clever abstractions.
 
@@ -134,45 +148,127 @@ Keep domain logic out of React components.
 Use this layering:
 
 ```txt
-UI components
-  → route/actions/hooks
-  → repositories/services
-  → domain packages
-  → database
+React UI (renderer)
+  → typed client API wrapper
+  → Electron preload bridge (window.appApi)
+  → Electron main / DB service (validated IPC)
+  → local-db repositories/services + domain packages
+  → SQLite + filesystem asset vault
 ```
 
-React components may orchestrate UI state, but they should not contain scheduling rules, SQL, document-transformation algorithms, or card-quality heuristics.
+The **renderer never touches SQLite or arbitrary filesystem APIs**. It calls the narrow typed
+`window.appApi` surface; the Electron main process owns all trusted local capabilities and runs
+the repositories/services. React components may orchestrate UI state — selection, dialogs,
+optimistic state — but they must not contain SQL, scheduling rules, extraction-lineage logic,
+review-state transitions, document-transformation algorithms, card-quality heuristics, or
+backup logic.
 
-Use repository/service modules for persistence and domain operations:
+Repositories and transactional domain operations live in `packages/local-db` (SQLite adapter via
+better-sqlite3), behind the Electron/IPC boundary:
 
 - `ElementRepository`
 - `DocumentRepository`
-- `ReviewRepository`
 - `SourceRepository`
-- `SchedulerService`
-- `ExtractionService`
-- `CardService`
-- `QueueService`
+- `ReviewRepository`
+- `QueueRepository`
+- `SearchRepository`
+- `AssetRepository`
+- `SettingsRepository`
+- `OperationLogRepository`
+
+Domain services (`SchedulerService`, `ExtractionService`, `CardService`, `QueueService`) compose
+these repositories. The Drizzle schema, migrations, and generated types (SQLite dialect) live in
+`packages/db`. New domain types (`Asset`, `AssetLocation`, `OperationLogEntry`, `LocalVaultPath`,
+alongside the existing `Element` family) live in `packages/core`. The Electron main/preload/
+lifecycle/windows/IPC/paths/backups live in `apps/desktop`; `apps/web` stays a pure UI renderer
+that calls `window.appApi` in desktop mode. `apps/api` and `apps/worker` remain later-only.
 
 Prefer small composable domain functions with tests over large UI-coupled handlers.
+
+## Electron runtime & security
+
+The desktop shell (`apps/desktop`) owns the main process, preload bridge, lifecycle, windows,
+native menus, IPC, filesystem paths, and backups. Security defaults are non-negotiable:
+
+- `contextIsolation: true`, `nodeIntegration: false`, `enableRemoteModule: false`,
+  and `sandbox: true` where practical.
+- The renderer has **no** raw Node, filesystem, or SQLite access.
+- The preload exposes a **narrow typed** `window.appApi` with **validated IPC payloads**
+  (Zod or equivalent). Example surface: `app.health()`, `db.getStatus()`,
+  `settings.get/update()`, `elements.create/update()`, `sources.importManual()`,
+  `extractions.create()`, `cards.review()`, `queue.next()`, `search.query()`, `backups.create()`.
+- **Never** expose a generic `db.query(sql)` to the renderer.
+- In dev, Electron loads the Vite dev server; in production it loads the built renderer files.
+
+## SQLite rules
+
+- Use **better-sqlite3** + Drizzle (SQLite dialect).
+- On open, set `PRAGMA foreign_keys = ON`, `journal_mode = WAL`, `busy_timeout = 5000`.
+- Multi-table domain operations run in transactions.
+- Local full-text search uses FTS5 (`source_fts`, `extract_fts`, `card_fts`) when search lands.
+- The DB lives under the app data directory, e.g.
+  `~/Library/Application Support/<app>/app.sqlite` (plus `-wal`/`-shm`), with sibling
+  `assets/` and `backups/` directories.
+- **Do not** store large PDF/image/audio/video blobs in SQLite. Store the bytes in the asset
+  vault and keep metadata/hashes/relative paths/source-refs/lifecycle in SQLite.
+- Generate stable UUID/ULID-style IDs in domain services.
+
+Initial M1 SQLite tables: `elements`, `documents`, `document_blocks`, `document_marks`,
+`sources`, `source_locations`, `element_relations`, `read_points`, `cards`, `review_states`,
+`review_logs`, `concepts`, `tags`, `element_tags`, `tasks`, `assets`, `operation_log`,
+`settings`. FTS tables arrive with search later.
+
+## Asset vault
+
+Large assets live on the filesystem, managed exclusively by Electron (**never the renderer**).
+SQLite stores stable asset IDs, relative paths, content hashes, MIME types, sizes, timestamps,
+and owning element IDs. Layout under the app data directory:
+
+- `assets/sources/<source_id>/` — `original.html`, `cleaned.html`, `original.pdf`, `snapshot.json`
+- `assets/media/<asset_id>/` — `original.bin`, `thumbnail.webp`, `ocr.json`
+- `exports/`
+- `backups/<timestamp>/` — `app.sqlite`, `assets-manifest.json`
+
+Do not expose arbitrary file read/write to the renderer; all vault access goes through typed
+`window.appApi` commands.
 
 ## Data rules
 
 All important user actions should be persistable, testable, and eventually syncable.
 
-Design every mutation as if it may later become an operation-log entry:
+There is an `operation_log` table **from day one**. Every meaningful mutation is representable
+as a command/op and appended to the log inside the same transaction as the mutation:
 
 - `create_element`
 - `update_element`
-- `delete_element`
-- `create_extract`
-- `create_card`
+- `soft_delete_element`
+- `restore_element`
+- `create_source`
 - `update_document`
 - `set_read_point`
+- `create_extract`
+- `create_card`
 - `add_review_log`
 - `reschedule_element`
+- `add_relation`
+- `remove_relation`
+- `add_tag`
+- `remove_tag`
 
-Do not silently destroy user data. Prefer soft delete, undoable actions, trash, and explicit destructive confirmations for bulk operations.
+The operation log later supports backup, audit, undo, and cloud sync. Do **not** overbuild sync
+now — just make mutations command-like and logged.
+
+Persistence rules:
+
+- SQLite runs with `foreign_keys = ON`, `journal_mode = WAL`, `busy_timeout = 5000`
+  (see [SQLite rules](#sqlite-rules)).
+- Multi-table domain mutations run in a single transaction.
+- Large assets (PDFs, snapshots, images, media) live in the filesystem **asset vault**; only
+  their metadata/hashes/relative paths/owning element IDs live in SQLite
+  (see [Asset vault](#asset-vault)).
+
+Do not silently destroy user data. Prefer soft delete (`deleted_at`), undoable actions, trash,
+and explicit destructive confirmations for bulk operations.
 
 Stable IDs matter. Document blocks should have stable IDs because source locations, extracts, read-points, and future sync depend on them.
 
@@ -282,7 +378,7 @@ AI-generated cards, when implemented later, must be drafts until explicitly appr
 
 ## UX rules
 
-Design desktop-first for modern browsers.
+Design desktop-first for the Electron desktop app (the renderer is a modern Chromium runtime).
 
 The app should feel like a professional knowledge workspace:
 
@@ -322,9 +418,12 @@ Do not create isolated feature UIs that cannot later fit into these surfaces.
 
 ## MVP boundaries
 
+The MVP ships as a **local-first Electron desktop app** (macOS at minimum), with native SQLite
+in the app data directory and assets in the filesystem vault — **not** a PWA.
+
 For the MVP, prioritize:
 
-- local-first persistence
+- local-first persistence (native SQLite + filesystem asset vault)
 - manual source import
 - inbox triage
 - source reader
@@ -348,6 +447,8 @@ For the MVP, prioritize:
 
 Avoid implementing these until the core loop is solid, unless explicitly requested:
 
+- PGlite / browser-storage-as-source-of-truth (replaced by native SQLite — do not reintroduce)
+- a PWA / browser-first build (the canonical app is the Electron desktop app)
 - cloud sync
 - browser extension
 - PDF/EPUB import
@@ -384,21 +485,32 @@ Use Playwright for end-to-end flows:
 - open original source
 - backup/export
 
-A feature is not complete unless it works after reload.
+Playwright runs against the Electron app where feasible; the MVP flow adds a restart-app +
+verify-persistence step. A feature is not complete unless it works after **app restart**.
 
 ## Definition of done
 
 A task is done only when:
 
-- `make typecheck` passes (runs `pnpm typecheck` in Docker)
-- `make test` passes (Vitest in Docker)
-- relevant `make e2e` (Playwright) tests pass
+- `pnpm typecheck` passes
+- `pnpm test` passes (Vitest)
+- relevant Playwright/Electron tests pass where applicable
 - database migrations are included if schema changed
+- repositories/services have tests for important domain logic
 - fixtures/seed data are updated if useful
-- the feature survives page reload
+- the feature survives **app restart**
 - source lineage is preserved
+- meaningful mutations append `operation_log` entries
+- **no raw DB or filesystem access is exposed to the renderer**
 - no unrelated refactors are included
 - the roadmap box is checked `[x]` with the commit reference
+
+For persistence features, additionally:
+
+- data is written to SQLite and remains after restart
+- multi-table mutations run in transactions
+- foreign keys are enforced
+- dangerous actions soft-delete and/or are undoable
 
 For risky data changes, include migration/backfill notes.
 

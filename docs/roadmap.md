@@ -2,7 +2,20 @@
 
 This is the **single source of truth for orchestration**. Each entry is one buildable
 task. An agent picks the lowest-numbered unchecked task whose dependencies are all `[x]`,
-builds the feature + tests in Docker, then checks the box and records the commit.
+builds the feature + tests with native pnpm (`pnpm typecheck` / `pnpm test` / `pnpm lint`),
+then checks the box and records the commit.
+
+> **Architecture (authoritative):** the MVP ships as a local-first **Electron desktop app**
+> on a **native SQLite** database (via **better-sqlite3** + Drizzle, SQLite dialect) — **not**
+> a browser PWA, and **not** PGlite. The React + TypeScript + Vite app is a pure **renderer**;
+> the **Electron** shell (main process, preload, IPC) owns all trusted local capabilities.
+> SQLite is the canonical local database; the filesystem **asset vault** is the canonical
+> local store for PDFs/snapshots/images/media/exports/backups. The renderer **never** talks
+> directly to SQLite or arbitrary filesystem APIs — it calls a narrow typed `window.appApi`
+> bridge. Layering: React UI → typed client API wrapper → preload bridge → Electron main/DB
+> service → `packages/local-db` repositories/services → SQLite + vault. Native **pnpm** is the
+> canonical way to run/dev/test the desktop app; the Docker/compose/Makefile setup is re-scoped
+> to the **future server phase only** (`api`/`worker`/`db`/`minio`).
 
 **Status legend:** `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked.
 Add `· (branch/commit)` after the title when you start/finish.
@@ -27,34 +40,35 @@ Reference docs: [`concept`](./concept.md) · [`architecture`](./architecture.md)
 
 # Part I — Decent MVP (T001–T050)
 
-Goal: a genuinely useful single-person, local-first incremental reading app. **No** PDF,
-sync, AI, browser extension, or mobile yet.
+Goal: a genuinely useful single-person, local-first incremental reading app — a local-first
+**Electron desktop app** on **native SQLite**. **No** PDF, sync, AI, browser extension, or
+mobile yet.
 
 ## M1 — Foundations & local persistence (T001–T011)
 Detailed specs: [`tasks/M1-foundations.md`](./tasks/M1-foundations.md)
 
 - [x] **T001 — Create the monorepo** · done · _deps: none_
-  Done when: pnpm workspace with `apps/web`, `apps/api`, `packages/{core,db,scheduler,editor,ui,testing}` exists and `make dev`, `make test`, `make typecheck`, `make lint` run from the repo root.
-- [x] **T002 — Tooling + Docker + CI gates** · done · _deps: T001_
-  Done when: strict TypeScript, Biome, Vitest, Playwright, the Dockerfiles/`docker-compose.yml`/`Makefile`, and CI are wired so CI rejects type errors, lint errors, unit failures, and one smoke E2E failure.
-- [x] **T003 — Scaffold the React app** · done · _deps: T002_
-  Done when: `apps/web` runs with Vite + React + TS + TanStack Router + Tailwind v4 and has routes `/`, `/inbox`, `/queue`, `/source/$id`, `/review`, `/search`, `/settings`.
+  Done when: pnpm workspace with `apps/web` (the Electron **renderer**, pure UI), `apps/api`, `packages/{core,db,scheduler,editor,ui,testing}` exists and root scripts run from the repo root. (Pivot: `apps/desktop` (Electron main/preload/lifecycle) and `packages/local-db` are added in T007/T008; native pnpm — `pnpm typecheck`/`pnpm test`/`pnpm lint` — is the canonical desktop toolchain.)
+- [x] **T002 — Tooling + CI gates (Docker re-scoped to server phase)** · done · _deps: T001_
+  Done when: strict TypeScript, Biome, Vitest, Playwright, and CI are wired so CI rejects type errors, lint errors, unit failures, and one smoke E2E failure. (Pivot: native `pnpm typecheck`/`pnpm test`/`pnpm lint` are canonical for the desktop app; the existing Dockerfiles/`docker-compose.yml`/`Makefile` are kept but re-scoped to the **future server phase only** — `api`/`worker`/`db`/`minio` — and are no longer canonical for building/running the app.)
+- [x] **T003 — Scaffold the React renderer** · done · _deps: T002_
+  Done when: `apps/web` runs as the Vite + React + TS + TanStack Router + Tailwind v4 **renderer** with routes `/`, `/inbox`, `/queue`, `/source/$id`, `/review`, `/search`, `/settings`. (Pivot: `apps/web` is a pure UI renderer that talks to `window.appApi` in desktop mode, not a standalone PWA.)
 - [x] **T004 — App shell skeleton** · done · _deps: T003_
   Done when: left sidebar, top command bar, central work area, right inspector, bottom status bar; every main route uses the same shell and is keyboard-navigable.
 - [ ] **T005 — Domain language in `packages/core`** · _deps: T001_
-  Done when: documented TS types for `Element`, `ElementType`, `ElementStatus`, `DistillationStage`, `Priority`, `ReviewState`, `ReviewLog`, `Source`, `Document`, `ElementRelation`, used by app and tests.
-- [ ] **T006 — Initial Drizzle schema** · _deps: T005_
-  Done when: Drizzle tables for `elements`, `documents`, `sources`, `element_relations`, `element_locations`, `review_states`, `review_logs`, `concepts`, `tags`, `element_tags`, `settings`; migrations can create and reset a dev database.
-- [ ] **T007 — PGlite local persistence** · _deps: T006, T003_
-  Done when: the web app reads/writes via PGlite (IndexedDB VFS) behind a data-layer interface; data persists after page reload and browser restart.
-- [ ] **T008 — Repository classes** · _deps: T007_
-  Done when: `ElementRepository`, `DocumentRepository`, `ReviewRepository`, `SourceRepository`, `SettingsRepository` exist with tests; no React component writes SQL directly.
-- [ ] **T009 — Seed data & fixtures** · _deps: T008_
-  Done when: `make seed` creates a realistic demo collection (≥1 source with children, ≥1 extract chain, ≥1 card) usable in dev and tests.
+  Done when: documented TS types for `Element`, `ElementType`, `ElementStatus`, `DistillationStage`, `Priority`, `ReviewState`, `ReviewLog`, `Source`, `Document`, `ElementRelation`, `ElementLocation`, plus the new desktop types `Asset`, `AssetLocation`, `OperationLogEntry`, and `LocalVaultPath`, used by app and tests.
+- [ ] **T006 — Native SQLite + Drizzle schema** · _deps: T005_
+  Done when: `packages/db` holds the Drizzle schema (**SQLite dialect**) and migrations for `elements`, `documents`, `document_blocks`, `document_marks`, `sources`, `source_locations`, `element_relations`, `read_points`, `cards`, `review_states`, `review_logs`, `concepts`, `tags`, `element_tags`, `tasks`, `assets`, `operation_log`, and `settings`; types align with `@interleave/core`; `drizzle-kit generate`/`migrate` plus a dev-reset can create and reset a dev database; schema round-trips against a temporary in-memory **better-sqlite3** DB in tests. Stable UUID/ULID-style IDs are generated in domain services. FTS tables (`source_fts`, `extract_fts`, `card_fts`) arrive with search later. (Pivot: native SQLite via better-sqlite3 — **no PGlite**.)
+- [ ] **T007 — Electron desktop shell + native SQLite persistence** · _deps: T006, T003_
+  Done when: `apps/desktop` exists with a secure Electron window (`contextIsolation: true`, `nodeIntegration: false`, `sandbox` where practical, `enableRemoteModule: false`) and a **narrow typed preload bridge** exposing `window.appApi` (initially `app.health()`, `db.getStatus()`, `settings.get/update()`) with validated IPC payloads (Zod or equivalent); the app data directory is initialized (e.g. `~/Library/Application Support/<app>/` with `app.sqlite` + `-wal`/`-shm`, `assets/`, `backups/`); SQLite is opened via better-sqlite3 with `PRAGMA foreign_keys=ON`, `journal_mode=WAL`, `busy_timeout=5000`; Drizzle migrations run on startup (explicit/safe in production); in dev Electron loads the Vite dev server and in production it loads the built renderer files; a health command is callable from the renderer through `window.appApi`; data **persists across app restart**. The renderer has no raw Node/filesystem/SQLite access and never sees a generic `db.query(sql)`. (Pivot: replaces the old PGlite task entirely — native SQLite, not browser storage.)
+- [ ] **T008 — Repository classes in `packages/local-db`** · _deps: T007_
+  Done when: `ElementRepository`, `DocumentRepository`, `SourceRepository`, `ReviewRepository`, `QueueRepository`, `SearchRepository`, `AssetRepository`, `SettingsRepository`, and `OperationLogRepository` live in `packages/local-db` behind the Electron/IPC boundary; meaningful mutations are transactional (multi-table operations in one transaction) and append `operation_log` entries; deletes are soft (`deleted_at`); the renderer consumes repositories **only** via typed `window.appApi` commands (no React component touches SQL); per-repo smoke tests cover referential integrity + persistence.
+- [ ] **T009 — Desktop dev seed & fixtures** · _deps: T008_
+  Done when: a desktop dev seed command resets the dev SQLite DB and creates a realistic demo collection — a source with document blocks, an extract with a source location, a sub-extract, a Q&A card, a cloze card, review state/logs, concepts/tags, asset metadata, and `operation_log` entries; shared factories/fixtures live in `packages/testing` and are reused by both Vitest and Playwright.
 - [ ] **T010 — Universal element inspector** · _deps: T008, T004_
-  Done when: the right panel shows any selected element's type, status, stage, priority, due date, parent, children, source, tags, and review metadata.
-- [ ] **T011 — Local settings** · _deps: T008_
-  Done when: settings for daily review budget, default desired retention, default topic interval, default source priority, keyboard layout, and theme persist locally and are read by scheduler code.
+  Done when: the right panel shows any selected element's type, status, stage, priority, due date, parent, children, source, tags, and review metadata — fetched **through the typed `window.appApi`** (never direct DB access from the renderer).
+- [ ] **T011 — Local settings in SQLite** · _deps: T008_
+  Done when: settings for daily review budget, default desired retention, default topic interval, default source priority, keyboard layout, and theme persist in the SQLite `settings` table (user/domain settings prefer SQLite; Electron config is used only for app-level desktop settings if needed) and are read by scheduler code through the typed API.
 
 ## M2 — Capture & inbox (T012–T014)
 
@@ -150,16 +164,16 @@ Detailed specs: [`tasks/M1-foundations.md`](./tasks/M1-foundations.md)
 - [ ] **T046 — Import/process balance warnings** · _deps: T045_
   Done when: the app warns when imports outpace processing, showing sources imported / extracts created / cards created / reviews due this week.
 - [ ] **T047 — Backup / export** · _deps: T008_
-  Done when: local export to JSON (+ media) covers elements/documents/review-states/review-logs/sources/relations/settings/schema-version, and re-imports into a fresh app.
+  Done when: an Electron-managed backup exports a ZIP of `app.sqlite` + the `assets/` vault + a `manifest.json` (schema version, app version, timestamp, integrity hashes) into `backups/<timestamp>/`; the format is designed for restore from the start so a backup re-imports into a fresh install. (Pivot: backup is SQLite file + filesystem asset vault, not a JSON dump.)
 
-## M10 — Keyboard, E2E & ship MVP (T048–T050)
+## M10 — Keyboard, E2E & ship MVP as Electron desktop (T048–T050)
 
 - [ ] **T048 — Keyboard shortcuts & command palette** · _deps: T031, T037, T021_
-  Done when: shortcuts exist for next-item, extract, cloze, postpone, done, delete, raise/lower priority, search, open-parent, open-source, and command palette; the main workflow is mouse-free.
+  Done when: shortcuts exist for next-item, extract, cloze, postpone, done, delete, raise/lower priority, search, open-parent, open-source, and command palette; the main workflow is mouse-free. Shortcuts invoke commands through the **same typed `window.appApi` path** as the UI buttons (no separate mutation path).
 - [ ] **T049 — MVP end-to-end tests** · _deps: T048, T047_
-  Done when: Playwright covers import → activate → read → extract → convert-to-card → review → reschedule → search → backup.
-- [ ] **T050 — Ship MVP as local-first PWA** · _deps: T049_
-  Done when: installability, offline loading, persistence warnings, backup prompts, and onboarding are polished; one person can use it daily for a week with no manual DB edits.
+  Done when: Playwright runs against the **Electron app** where feasible and covers import → activate → read → extract → convert-to-card → review → reschedule → search → backup, plus a **restart-app → verify-persistence** step proving data survives an app restart.
+- [ ] **T050 — Ship MVP as a local-first Electron desktop app** · _deps: T049_
+  Done when: the app builds and runs as an Electron desktop app on macOS at minimum — SQLite persists in the app data directory, assets persist in the vault, backup works, the core loop works, the app survives restart, and no raw DB/filesystem APIs are exposed to the renderer; backup prompts and onboarding are polished; one person can use it daily for a week with no manual DB edits. (Pivot: ships as a desktop app, not a PWA.)
 
 ---
 
@@ -177,11 +191,11 @@ overload management, semantic search, AI, media, reliability, scale.
 - [ ] **T053 — Authentication** · _deps: T052_
   Done when: email/password or passkey-first auth identifies the user and protects cloud data; self-host/personal mode remains possible.
 - [ ] **T054 — Operation-log sync design** · _deps: T052_
-  Done when: every local mutation appends a deterministic op (`create_element`, `update_element`, …) to `operation_log`.
+  Done when: sync is designed around the local SQLite `operation_log` (introduced in T006/T008) shipping deterministic ops (`create_element`, `update_element`, …) to server Postgres via typed domain operations — **not** PGlite/Electric/PowerSync (PowerSync may be reconsidered later). Every local mutation already appends a deterministic op to `operation_log`.
 - [ ] **T055 — One-way backup sync** · _deps: T054, T053_
-  Done when: a user can back up local data to the server and restore onto a fresh browser profile (no multi-device conflict resolution yet).
+  Done when: a user can back up the local SQLite DB + asset vault to the server and restore onto a fresh desktop install (no multi-device conflict resolution yet).
 - [ ] **T056 — Two-way sync** · _deps: T055_
-  Done when: device IDs, op IDs, sync cursors, conflict detection, and safe-field LWW let two devices converge after divergent edits (documents not silently merged).
+  Done when: device IDs, op IDs, sync cursors, conflict detection, and safe-field LWW let two desktop installs converge after divergent edits via the op-log + server Postgres (documents not silently merged).
 - [ ] **T057 — Conflict UI** · _deps: T056_
   Done when: same-document/card edits on two devices surface a resolver (local/remote/source history); destructive conflicts require explicit choice.
 
@@ -199,9 +213,9 @@ overload management, semantic search, AI, media, reliability, scale.
 ## M13 — Browser extension (T062–T063)
 
 - [ ] **T062 — Browser extension MVP** · _deps: T060, T053_
-  Done when: a Manifest V3 extension can "save page" / "save selection" / "save to inbox" via its service worker.
+  Done when: a Manifest V3 extension can "save page" / "save selection" / "save to inbox" via its service worker. (Pivot: the extension sends captures to the **Electron app** or the cloud API; it never writes the SQLite DB directly.)
 - [ ] **T063 — Side-panel capture** · _deps: T062_
-  Done when: the extension's Side Panel shows inbox/import UI beside the page and can save a selection with priority + reason.
+  Done when: the extension's Side Panel shows inbox/import UI beside the page and can save a selection with priority + reason, routed to the Electron app or cloud API (not direct DB writes).
 
 ## M14 — PDF / EPUB / document import (T064–T070)
 
@@ -264,7 +278,7 @@ overload management, semantic search, AI, media, reliability, scale.
 ## M18 — Semantic search & AI (T087–T095)
 
 - [ ] **T087 — Semantic search** · _deps: T052, T042_
-  Done when: embeddings for sources/extracts/cards are stored in Postgres/pgvector (optionally local) and search finds conceptually related material without keyword match.
+  Done when: embeddings for sources/extracts/cards are stored in **Postgres/pgvector** (optionally a local vector option) and search finds conceptually related material without keyword match. (Pivot: semantic search uses Postgres/pgvector, not PGlite.)
 - [ ] **T088 — Related-item suggestions** · _deps: T087_
   Done when: each element shows similar extracts, possible duplicates, prerequisite concepts, and sibling sources.
 - [ ] **T089 — Contradiction detection** · _deps: T087_
@@ -286,8 +300,8 @@ overload management, semantic search, AI, media, reliability, scale.
 
 - [ ] **T096 — Branch/subset/semantic review modes** · _deps: T087, T037_
   Done when: review by concept, source, search query, branch, stale items, leeches, or random audit works outside normal scheduling.
-- [ ] **T097 — Tauri desktop app** · _deps: T050_
-  Done when: `apps/desktop` wraps the web app with local file access, native menus, global shortcuts, clipboard helpers, filesystem backups, and local media storage.
+- [ ] **T097 — Tauri shell (deprioritized — possible future alternative)** · _deps: T050_
+  Deprioritized: the canonical desktop shell is **Electron** (`apps/desktop`, shipped in T050). Do **not** build both Electron and Tauri. This task is parked as a possible future alternative shell only; if ever revisited, a Tauri shell would reuse the same renderer, typed `window.appApi` surface, SQLite DB, and asset vault — native menus, global shortcuts, clipboard helpers, filesystem backups, and local media storage all already belong to the Electron shell.
 - [ ] **T098 — End-to-end encryption for sync** · _deps: T055_
   Done when: user content is encrypted before upload where practical (at minimum encrypted backups; ideally per-user keys + device recovery) so server compromise doesn't trivially reveal data.
 
@@ -304,6 +318,7 @@ overload management, semantic search, AI, media, reliability, scale.
 
 Record notable completions / decisions here as tasks land (newest first).
 
+- 2026-05-29 - Architecture pivot to Electron + native SQLite. The project moves from a PGlite/browser-first PWA to a local-first **Electron desktop app** on a **native SQLite** database (better-sqlite3 + Drizzle, SQLite dialect), with a filesystem **asset vault** for PDFs/snapshots/media/exports/backups and an `operation_log` from day one. The React + Vite app becomes a pure **renderer** that talks to a narrow typed `window.appApi` preload bridge; Electron (main/preload/IPC) owns all trusted local capabilities and the renderer never touches SQLite or arbitrary filesystem APIs. New monorepo additions: `apps/desktop` and `packages/local-db`; `packages/db` keeps the schema/migrations (now SQLite dialect). Native **pnpm** (`pnpm typecheck`/`pnpm test`/`pnpm lint`) is the canonical desktop toolchain; the Docker/compose/Makefile setup is kept but re-scoped to the future server phase (`api`/`worker`/`db`/`minio`). Definition of Done now requires features to survive **app restart**. Roadmap content revised in place (T001–T011, T047–T050) and pivot notes added to gold-standard sync/extension/semantic-search/desktop tasks; task numbering unchanged. Cloud sync (T051+) is designed around the SQLite op-log + Postgres (not Electric/PGlite/PowerSync now); Tauri (T097) is deprioritized to a possible future alternative shell only; a PWA/browser version is deprioritized.
 - 2026-05-29 - T004 App shell skeleton - done. Keyboard-first shell with left sidebar, top command bar, central work area, right inspector, and bottom status bar; every main route renders through the same shell and is keyboard-navigable.
 - 2026-05-29 - T003 Scaffold the React app - done. Vite + React 19 + TS + TanStack Router + Tailwind v4 in apps/web with routes /, /inbox, /queue, /source/$id, /review, /search, /settings, wired to the design tokens.
 - 2026-05-29 - T002 Tooling + Docker + CI gates - done. Strict TypeScript, Biome, Vitest, Playwright smoke E2E, Dockerfiles + docker-compose + Makefile, and GitHub Actions CI wired so CI rejects type errors, lint errors, unit failures, and a smoke E2E failure.

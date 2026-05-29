@@ -1,8 +1,16 @@
 # Architecture
 
-This describes the chosen stack, *why* each piece was chosen, the monorepo layout, and
-the Docker-first workflow. Treat it as the default; a task may override a choice only if it
+This describes the chosen stack, *why* each piece was chosen, the monorepo layout, and the
+runtime/tooling workflow. Treat it as the default; a task may override a choice only if it
 says so explicitly.
+
+> **Architecture pivot.** Interleave is a long-lived **personal knowledge database** — closer
+> to Anki/Zotero/Obsidian than a web app — holding years of sources, extracts, cards,
+> review-logs, PDFs, snapshots, media, and lineage. Durability and recoverability beat
+> browser-only convenience. The canonical app is therefore an **Electron desktop app** with a
+> **native SQLite database** and a **filesystem asset vault** — not a PGlite/browser-first
+> PWA. SQLite is boring, proven, inspectable, backup-friendly, and fits this
+> relational/scheduling-heavy domain; large assets live on the filesystem, not in the DB.
 
 ## Guiding principles
 
@@ -19,8 +27,13 @@ says so explicitly.
 ## Stack & rationale
 
 ### Frontend
-- **React 19 + TypeScript + Vite** — best ecosystem, editor integrations, testing, and
-  agent-coding support. Vite fits a no-SEO local-first app and targets modern browsers.
+- **React 19 + TypeScript + Vite RENDERER** — best ecosystem, editor integrations, testing,
+  and agent-coding support. The React app is **UI only**: it is the Electron **renderer** and
+  never touches SQLite or the filesystem directly. The **Electron desktop shell** owns all
+  trusted local capabilities (main process, preload, lifecycle, windows, native menus, IPC,
+  filesystem paths, backups). The renderer reaches them through a narrow typed bridge
+  (`window.appApi.*`) exposed by the **preload** script. In dev, Electron loads the Vite dev
+  server; in production it loads the built renderer files.
 - **TanStack Router** — type-safe routing and typed search params; this app has many deep
   states (queue filters, source views, review modes, search).
 - **Tiptap / ProseMirror** for rich documents — chosen over Lexical because incremental
@@ -32,11 +45,21 @@ says so explicitly.
 - **Zustand or Jotai** for small client UI state only (never domain logic).
 
 ### Local data
-- **PGlite + Drizzle ORM** — a real Postgres-like relational model in the browser via WASM,
-  with Drizzle support, so schema/query thinking is shared with the eventual server. Use
-  the **IndexedDB VFS** in browsers (OPFS isn't supported in Safari).
-- All data access goes through **repository interfaces** so the implementation can be
-  swapped or synced later.
+- **Native SQLite via `better-sqlite3` + Drizzle ORM (SQLite dialect)** — SQLite is the
+  canonical local database. It is boring, proven, inspectable, backup-friendly, and fits a
+  relational, scheduling-heavy, audit-heavy, long-lived domain. The database is opened on the
+  Electron **main/DB-service side** (main process or a worker); the renderer never opens it.
+  Drizzle keeps schema/query thinking shared with the eventual Postgres server.
+- **Filesystem asset vault** — PDFs, HTML snapshots, images, audio/video, exports, and backups
+  live on the filesystem (the canonical local **asset vault**), never as blobs in SQLite.
+  SQLite stores only asset metadata: stable IDs, relative paths, content hashes, MIME types,
+  sizes, timestamps, and owning element IDs.
+- All data access goes through **repository interfaces** (in `packages/local-db`) behind the
+  Electron/IPC boundary, so the implementation can be synced to a server later.
+
+> **Core principle.** SQLite is the canonical local database. The filesystem is the canonical
+> local asset vault. The React app is the UI. Electron owns trusted local capabilities. The
+> **renderer never talks directly to SQLite or arbitrary filesystem APIs.**
 
 ### Backend (later — gold-standard phase)
 - **Node.js + TypeScript + Hono** — small, Web-Standards-based, typed RPC to share API
@@ -55,9 +78,12 @@ says so explicitly.
   model (see [`scheduling-and-priority.md`](./scheduling-and-priority.md)).
 
 ### Later platforms
-- **Tauri 2** desktop shell (smaller/more native than Electron; same React frontend).
-- **Manifest V3 browser extension** for capture (service worker + Side Panel API).
+- **Manifest V3 browser extension** for capture (service worker + Side Panel API) — sends
+  captures to the Electron app or the cloud API; it never writes the database directly.
 - **PDF.js** for PDF rendering/extraction; **Mozilla Readability** for article extraction.
+- **Tauri 2** is **deprioritized** to a possible future alternative shell only. We build
+  **Electron**, not both. A PWA/browser version is likewise deprioritized (possible later via
+  a separate adapter); the canonical app is the desktop app.
 
 ### Testing
 - **Vitest** for unit/domain tests; **Playwright** for E2E flows; **Storybook** for complex
@@ -70,15 +96,18 @@ complexity).
 
 ```txt
 apps/
-  web/         React + Vite app (the MVP lives almost entirely here)
-  api/         Hono API server (gold-standard phase)
-  worker/      background jobs: imports, AI, embeddings, OCR, sync cleanup
-  extension/   Manifest V3 browser extension for capture
-  desktop/     Tauri wrapper around the web app
+  desktop/     Electron shell: main process, preload bridge, lifecycle, windows,
+               native menus, IPC, app-data paths, backups (owns trusted capabilities)
+  web/         React + Vite app — the pure UI RENDERER; calls window.appApi in desktop mode
+  api/         Hono API server (later-only, gold-standard phase)
+  worker/      background jobs (later-only): imports, AI, embeddings, OCR, sync cleanup
+  extension/   Manifest V3 browser extension for capture (later)
 
 packages/
   core/        domain types: Element model, scheduler interfaces, enums
-  db/          Drizzle schemas, migrations, repositories
+  db/          Drizzle schema, migrations, generated types (SQLite dialect now)
+  local-db/    SQLite adapter (better-sqlite3): repositories + transactional domain
+               operations + operation-log append, behind the Electron/IPC boundary
   scheduler/   FSRS wrapper + topic/extract scheduler
   editor/      Tiptap extensions, cloze marks, extraction commands
   importers/   Readability, PDF, EPUB, video, RSS, email import logic
@@ -89,57 +118,122 @@ packages/
 ## Layering (enforced)
 
 ```txt
-UI components
-  → route/actions/hooks
-  → repositories/services
-  → domain packages (packages/core, packages/scheduler, packages/editor)
-  → database (packages/db → PGlite / PostgreSQL)
+React UI (renderer)
+  → typed client API wrapper
+  → Electron preload bridge (window.appApi)
+  → Electron main / DB service
+  → local-db repositories/services (packages/local-db)
+  → SQLite + filesystem asset vault
 ```
 
-React may orchestrate UI state but must not contain SQL, scheduling rules, document-
-transformation algorithms, or card-quality heuristics. Persistence and domain operations
-live in repository/service modules: `ElementRepository`, `DocumentRepository`,
-`ReviewRepository`, `SourceRepository`, `SettingsRepository`, `SchedulerService`,
-`ExtractionService`, `CardService`, `QueueService`.
+React components may orchestrate UI state — selection, dialogs, optimistic state — but must
+**not** contain SQL, scheduling rules, document-transformation algorithms, card-quality
+heuristics, extraction-lineage logic, review-state transitions, or backup logic. Persistence
+and domain operations live in repository/service modules: `ElementRepository`,
+`DocumentRepository`, `SourceRepository`, `ReviewRepository`, `QueueRepository`,
+`SearchRepository`, `AssetRepository`, `SettingsRepository`, `OperationLogRepository`,
+`SchedulerService`, `ExtractionService`, `CardService`, `QueueService`. The renderer reaches
+them **only** through typed `window.appApi` commands — never directly.
 
-## Operation-log-shaped mutations
+## Electron runtime & security
 
-Every important mutation must be designed as if it will become an operation-log entry
-(`create_element`, `update_element`, `delete_element`, `create_extract`, `create_card`,
-`update_document`, `set_read_point`, `add_review_log`, `reschedule_element`). This makes the
-MVP testable and the eventual sync layer tractable. Never silently destroy user data —
-prefer soft delete, trash, and undo.
+The Electron shell is the trust boundary. Locked-down by default:
 
-## Docker-first workflow
+- `contextIsolation: true`, `nodeIntegration: false`, `enableRemoteModule: false`, and
+  `sandbox: true` where practical. The renderer has **no** raw Node, filesystem, or SQLite
+  access.
+- The **preload** exposes a single narrow, typed surface, `window.appApi.*`, with **validated
+  IPC payloads** (Zod or equivalent on the main side). Example commands: `app.health()`,
+  `db.getStatus()`, `settings.get/update()`, `elements.create/update()`,
+  `sources.importManual()`, `extractions.create()`, `cards.review()`, `queue.next()`,
+  `search.query()`, `backups.create()`.
+- **Never** expose a generic `db.query(sql)` (or arbitrary file read/write) to the renderer.
+- In dev, Electron loads the Vite dev server; in production it loads the built renderer files.
 
-**Everything runs in Docker.** Agents must not depend on host Node/pnpm versions. The
-canonical commands are thin wrappers (a `Makefile`) over `docker compose`:
+## SQLite rules
+
+- `better-sqlite3` + Drizzle (SQLite dialect). On open, set `PRAGMA foreign_keys = ON`,
+  `journal_mode = WAL`, and `busy_timeout = 5000`.
+- Multi-table domain operations run inside **transactions**; foreign keys are enforced.
+- **FTS5** powers local full-text search (added with search later).
+- The database lives under the OS app-data directory, e.g.
+  `~/Library/Application Support/<app>/app.sqlite` (plus `-wal`/`-shm` siblings), alongside
+  `assets/` and `backups/`.
+- **No large blobs in SQLite.** PDFs, images, audio, and video go to the asset vault; SQLite
+  keeps metadata, hashes, relative paths, source-refs, and lifecycle.
+- IDs are stable UUID/ULID-style values generated in domain services.
+
+## Asset vault (Electron-managed)
+
+The asset vault is owned by Electron (never the renderer). Layout under the app-data
+directory:
+
+```txt
+assets/
+  sources/<source_id>/   original.html, cleaned.html, original.pdf, snapshot.json
+  media/<asset_id>/      original.bin, thumbnail.webp, ocr.json
+exports/
+backups/<timestamp>/     app.sqlite, assets-manifest.json
+```
+
+SQLite stores stable asset IDs, relative paths, content hashes, MIME types, sizes,
+timestamps, and owning element IDs. Arbitrary file read/write is **never** exposed to the
+renderer; the renderer requests assets through typed `window.appApi` commands.
+
+## Operation log (from day one)
+
+An `operation_log` table exists from the first schema. Every meaningful mutation is
+representable as a command/op and is appended to the log: `create_element`, `update_element`,
+`soft_delete_element`, `restore_element`, `create_source`, `update_document`,
+`set_read_point`, `create_extract`, `create_card`, `add_review_log`, `reschedule_element`,
+`add_relation`, `remove_relation`, `add_tag`, `remove_tag`. This makes the app testable now
+and supports backup/audit/undo and the eventual cloud-sync layer. Do **not** overbuild sync
+now — just make mutations command-like and logged. Never silently destroy user data — prefer
+soft delete (`deleted_at`), trash, and undo.
+
+## Runtime & tooling
+
+**Native `pnpm` is the canonical way to run, develop, and test the desktop app.** Because the
+app uses a native module (`better-sqlite3`) and an Electron shell, the desktop dev loop runs
+on the host, not in a container. The Definition of Done uses:
 
 | Command | What it does |
 |---------|--------------|
-| `make dev` | Start the dev stack (web + deps) with hot reload |
-| `make typecheck` | `pnpm typecheck` across the workspace, in a container |
-| `make test` | Vitest unit/domain tests, in a container |
-| `make e2e` | Playwright E2E (uses the official Playwright image) |
-| `make lint` | Biome format/lint check |
-| `make migrate` | Run Drizzle migrations (server phase) |
-| `make seed` | Load demo fixtures |
-| `make shell` | Open a shell in the toolchain container |
-| `make down` | Stop the stack |
+| `pnpm dev` | Start the Electron app with the Vite dev server (hot reload) |
+| `pnpm typecheck` | TypeScript across the workspace |
+| `pnpm test` | Vitest unit/domain tests |
+| `pnpm e2e` | Playwright (drives the Electron app where feasible) |
+| `pnpm lint` | Biome format/lint check |
+| `pnpm db:generate` | Generate Drizzle (SQLite dialect) migrations |
+| `pnpm db:migrate` | Run Drizzle migrations against the local SQLite DB |
+| `pnpm db:reset:dev` | Reset the dev SQLite DB |
+| `pnpm seed` | Load demo fixtures into the dev SQLite DB |
 
-`docker-compose.yml` grows by phase:
-
-- **MVP (local-first):** one Node toolchain service (`app`) running pnpm/Vite/Vitest, plus a
-  Playwright service for E2E. No server database — PGlite runs in the browser.
-- **Gold-standard:** add `api`, `worker`, `db` (PostgreSQL 18), and `minio` (S3-compatible),
-  plus `pgvector` on the db image.
-
-> The Dockerfiles, `docker-compose.yml`, and `Makefile` are created in **Milestone 1**
-> (tasks T001–T002). The Definition of Done in `CLAUDE.md` runs these Docker commands.
+> **Docker is no longer canonical for the desktop app.** The existing
+> Docker/`docker-compose.yml`/`Makefile` setup is **kept but re-scoped to the future server
+> phase only** — `api`, `worker`, `db` (PostgreSQL 18 + `pgvector`), and `minio`
+> (S3-compatible). It does not run the Electron desktop app, and the MVP no longer ships any
+> browser/PGlite database service. Compose grows only when the gold-standard server work
+> begins.
 
 ## What we are explicitly NOT building yet
 
 Per MVP boundaries: no cloud sync, browser extension, PDF/EPUB import, AI features, semantic
 search, video/audio, image occlusion, complex encryption, or collaboration until the core
 loop is solid. These are scheduled in the gold-standard milestones (M11–M20).
+
+Also explicitly **not** part of the canonical app:
+
+- **PGlite / browser-WASM databases.** The canonical local store is native SQLite via
+  `better-sqlite3`. PGlite is not used.
+- **A PWA / browser-first build.** The canonical app is the Electron desktop app; a
+  browser version is deprioritized and would only ever arrive later via a separate adapter.
+- **Tauri.** Deprioritized to a possible future alternative shell only — we build Electron,
+  not both.
+
+When the server arrives (M11+), cloud sync is designed around the local SQLite
+`operation_log` + server Postgres + typed domain ops + conflict resolution + asset
+upload/download (not PGlite/Electric/PowerSync now; PowerSync may be reconsidered later).
+Semantic search (T087) uses Postgres/`pgvector` (optionally a local vector option), not
+PGlite.
 </content>

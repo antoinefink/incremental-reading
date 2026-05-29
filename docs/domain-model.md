@@ -70,38 +70,78 @@ Lineage is sacred. A card must trace: `card → extract → source location → 
 - `parent element ID` and `source element ID` on extracts/cards
 - `element_relations` for typed edges (parent-child, derived-from, sibling-group, concept
   membership, references)
-- `element_locations` for source positions (block IDs, offsets, page numbers, timestamps)
+- `source_locations` for source positions (block IDs, offsets, page numbers, timestamps)
+
+## Desktop & persistence types
+
+Alongside the element-centric types (`Element`, `ElementType`, `ElementStatus`,
+`DistillationStage`, `Priority`, `ReviewState`, `ReviewLog`, `Source`, `Document`,
+`ElementRelation`, `ElementLocation`), `packages/core` defines the types that describe how
+knowledge is stored durably on the desktop. SQLite is the canonical local database, the
+filesystem is the canonical local asset vault, and these types are the bridge between them:
+
+```txt
+Asset             metadata for a large binary owned by an element (PDF, HTML snapshot,
+                  image, audio, video, export): id, owning element ID, kind, MIME type,
+                  size, content hash, timestamps. The bytes live in the vault, never in
+                  SQLite.
+AssetLocation     where an asset's bytes live in the vault: stable asset ID + relative
+                  path (e.g. assets/sources/<source_id>/original.pdf), resolved to an
+                  absolute path only by the Electron main/DB service.
+LocalVaultPath    a relative, vault-rooted path resolved by Electron against the app data
+                  directory (assets/, exports/, backups/). The renderer never sees or
+                  resolves raw filesystem paths.
+OperationLogEntry one command-shaped, logged mutation (create_element, update_element,
+                  soft_delete_element, restore_element, create_source, update_document,
+                  set_read_point, create_extract, create_card, add_review_log,
+                  reschedule_element, add_relation, remove_relation, add_tag, remove_tag):
+                  id, op type, payload, element ID, timestamp. Persisted in `operation_log`
+                  from day one to support backup/audit/undo and later cloud sync.
+```
 
 ## Core tables (Drizzle)
 
-Local (PGlite) and server (PostgreSQL) share these. Server adds user/device/sync fields.
+The canonical local store is **native SQLite** (`better-sqlite3` + Drizzle, SQLite dialect),
+opened by the Electron main/DB service and reached only through the typed `window.appApi`
+bridge — never by the renderer directly. Large assets (PDFs, HTML snapshots, images, media)
+live on the **filesystem asset vault**, not in the database; SQLite stores their metadata,
+hashes, relative paths, and owning element IDs. The later, server-only Postgres schema
+(M11 cloud sync) reuses these definitions and adds user/device/sync fields.
+
+The initial M1 schema (defined in `packages/db`, generated/migrated with `drizzle-kit`):
 
 ```txt
 elements          id, type, status, stage, priority, due_at, title, created_at,
                   updated_at, deleted_at, parent_id, source_id, ...
 documents         element_id, prosemirror_json, plain_text, schema_version, ...
+document_blocks   id, document_id, block_type, order, stable_block_id, ...
+document_marks    id, document_id, block_id, mark_type, range, attrs, ...
 sources           element_id, url, canonical_url, original_url, author, published_at,
                   accessed_at, snapshot_key, reason_added, read_point, status, ...
-element_relations id, from_element_id, to_element_id, relation_type, sibling_group_id, ...
-element_locations id, element_id, source_element_id, block_ids[], start_offset,
+source_locations  id, element_id, source_element_id, block_ids[], start_offset,
                   end_offset, page, timestamp_ms, region, label, selected_text, ...
+element_relations id, from_element_id, to_element_id, relation_type, sibling_group_id, ...
+read_points       id, element_id, document_id, block_id, offset, updated_at, ...
+cards             element_id, kind, prompt, answer, cloze, source_location_id, ...
 review_states     element_id (card), due_at, stability, difficulty, elapsed_days,
                   scheduled_days, reps, lapses, fsrs_state, ...
 review_logs       id, element_id, rating, reviewed_at, response_ms, prev/next state, ...
 concepts          id, parent_concept_id, name, ...
 tags              id, name
 element_tags      element_id, tag_id
-media_assets      id, element_id, kind, storage_key, mime, width, height, duration_ms, ...
 tasks             element_id, task_type, due_at, status, ...
-operation_log     id, op_type, payload, element_id, device_id, created_at, ...   (sync)
-sync_cursors      device_id, last_op_id, ...                                     (sync)
+assets            id, owning_element_id, kind, location, relative_path, content_hash,
+                  mime, size, width, height, duration_ms, created_at, ...
+operation_log     id, op_type, payload, element_id, created_at, ...
 settings          key, value
 ```
 
-> Not every column exists from day one. The MVP introduces tables incrementally per the
-> roadmap; gold-standard milestones add `operation_log`, `sync_cursors`, `media_assets`,
-> and server-only fields. **Any schema change ships with a Drizzle migration** (see
-> Definition of Done in `CLAUDE.md`).
+> Not every column exists from day one, but the MVP introduces these tables per the
+> roadmap, and **`operation_log` exists from day one** — every meaningful mutation appends
+> an entry so backup/audit/undo and the eventual cloud-sync layer stay tractable. FTS5
+> tables (`source_fts`, `extract_fts`, `card_fts`) arrive with full-text search later.
+> Stable UUID/ULID-style IDs are generated in domain services. **Any schema change ships
+> with a Drizzle migration** (see Definition of Done in `CLAUDE.md`).
 
 ## Document/editor rules
 
@@ -117,8 +157,12 @@ metadata, and inherited concept/tags/priority where appropriate.
 
 ## Operation-log-shaped mutations
 
-Every important mutation is designed to become an operation-log entry: `create_element`,
-`update_element`, `delete_element`, `create_extract`, `create_card`, `update_document`,
-`set_read_point`, `add_review_log`, `reschedule_element`. This is true even in the MVP
-(where the log may not be persisted yet) so the eventual sync layer is tractable.
+Every meaningful mutation is command-shaped and appended to the `operation_log` table
+**from day one**: `create_element`, `update_element`, `soft_delete_element`,
+`restore_element`, `create_source`, `update_document`, `set_read_point`, `create_extract`,
+`create_card`, `add_review_log`, `reschedule_element`, `add_relation`, `remove_relation`,
+`add_tag`, `remove_tag`. Mutations run as transactions in the Electron main/`packages/local-db`
+layer and are exposed to the renderer only through typed `window.appApi` commands — the
+renderer never issues SQL. We do not overbuild sync now; logging command-shaped mutations
+keeps backup/audit/undo and the eventual cloud-sync layer tractable.
 </content>
