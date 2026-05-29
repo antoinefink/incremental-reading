@@ -271,6 +271,39 @@ export interface InboxTriageResult {
   readonly deleted: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// documents.get() / documents.save()  (T015 — editable rich-text body)
+// ---------------------------------------------------------------------------
+
+export interface DocumentsGetRequest {
+  readonly elementId: string;
+}
+
+/** The persisted document body (ProseMirror JSON + plain-text mirror). */
+export interface DocumentPayload {
+  readonly prosemirrorJson: unknown;
+  readonly plainText: string;
+  readonly schemaVersion: number;
+  readonly updatedAt: string;
+}
+
+export interface DocumentsGetResult {
+  readonly document: DocumentPayload | null;
+}
+
+export interface DocumentsSaveRequest {
+  readonly elementId: string;
+  /** The ProseMirror document JSON (schema owned by `@interleave/editor`). */
+  readonly prosemirrorJson: unknown;
+  /** The flattened plain-text mirror, computed renderer-side via `toPlainText`. */
+  readonly plainText: string;
+  readonly schemaVersion?: number;
+}
+
+export interface DocumentsSaveResult {
+  readonly document: DocumentPayload;
+}
+
 /** The exact shape the preload exposes as `window.appApi`. */
 export interface AppApi {
   readonly app: {
@@ -296,6 +329,10 @@ export interface AppApi {
     list(): Promise<InboxListResult>;
     get(request: InboxGetRequest): Promise<InboxGetResult>;
     triage(request: InboxTriageRequest): Promise<InboxTriageResult>;
+  };
+  readonly documents: {
+    get(request: DocumentsGetRequest): Promise<DocumentsGetResult>;
+    save(request: DocumentsSaveRequest): Promise<DocumentsSaveResult>;
   };
 }
 
@@ -373,5 +410,13 @@ export const appApi = {
   /** Apply one triage action to an inbox source (T012). */
   triageInboxItem(request: InboxTriageRequest): Promise<InboxTriageResult> {
     return requireAppApi().inbox.triage(request);
+  },
+  /** Load an element's document body (ProseMirror JSON + plain text) (T015). */
+  getDocument(request: DocumentsGetRequest): Promise<DocumentsGetResult> {
+    return requireAppApi().documents.get(request);
+  },
+  /** Upsert an element's document body; logs `update_document` (T015). */
+  saveDocument(request: DocumentsSaveRequest): Promise<DocumentsSaveResult> {
+    return requireAppApi().documents.save(request);
   },
 } as const;

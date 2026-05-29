@@ -1,12 +1,28 @@
 /**
- * @interleave/editor — Tiptap/ProseMirror extensions and extraction commands.
+ * @interleave/editor — Tiptap/ProseMirror schema, serialization, and the React
+ * source editor.
  *
- * Documents are the substrate for extraction lineage, not just display: this
- * package owns stable block IDs, highlight / extracted-span / processed-span /
- * cloze marks, and the extraction commands (T015+). Nothing is implemented yet —
- * this trivial export only proves the package resolves across the workspace.
+ * Documents are the substrate for extraction lineage, not just display. This
+ * package owns the **constrained** document schema (T015), the framework-
+ * agnostic JSON↔plain-text helpers (T015), and — landing in later M3/M4 tasks —
+ * stable block IDs, highlight / extracted-span / processed-span / cloze marks,
+ * and the extraction commands. The schema + serialization stay React-free so
+ * they are unit-testable without a DOM; only {@link SourceEditor} pulls in React.
  */
+
 export const EDITOR_PACKAGE = "@interleave/editor" as const;
 
-/** Placeholder until the editor extensions are defined in T015+. */
-export const editorPlaceholder = (): string => EDITOR_PACKAGE;
+export {
+  SourceEditor,
+  type SourceEditorChange,
+  type SourceEditorProps,
+} from "./SourceEditor";
+export {
+  ALLOWED_HEADING_LEVELS,
+  ALLOWED_MARK_NAMES,
+  ALLOWED_NODE_NAMES,
+  buildExtensions,
+  buildSchema,
+  interleaveExtensions,
+} from "./schema";
+export { emptyDoc, toPlainText } from "./serialize";

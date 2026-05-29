@@ -17,6 +17,8 @@ import { contextBridge, ipcRenderer } from "electron";
 import { IPC_CHANNELS } from "../shared/channels";
 import type {
   AppApi,
+  DocumentsGetRequest,
+  DocumentsSaveRequest,
   InboxGetRequest,
   InboxTriageRequest,
   InspectorGetRequest,
@@ -54,6 +56,11 @@ const appApi: AppApi = {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.inboxList),
     get: (request: InboxGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.inboxGet, request),
     triage: (request: InboxTriageRequest) => ipcRenderer.invoke(IPC_CHANNELS.inboxTriage, request),
+  },
+  documents: {
+    get: (request: DocumentsGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.documentsGet, request),
+    save: (request: DocumentsSaveRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.documentsSave, request),
   },
 };
 

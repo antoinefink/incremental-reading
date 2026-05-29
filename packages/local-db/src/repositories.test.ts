@@ -372,6 +372,75 @@ describe("DocumentRepository", () => {
     expect(types).toContain("update_document");
     expect(types).toContain("set_read_point");
   });
+
+  it("round-trips rich ProseMirror JSON + plainText unchanged (T015 persistence path)", () => {
+    const sources = new SourceRepository(handle.db);
+    const documents = new DocumentRepository(handle.db);
+    const ops = new OperationLogRepository(handle.db);
+
+    const { element: source } = sources.create({ title: "Editable body", priority: 0.5 });
+
+    // A document exercising the full constrained schema (headings, marks, lists,
+    // blockquote, code block, hr) — exactly what `documents.save` would send.
+    const richJson = {
+      type: "doc",
+      content: [
+        { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Title" }] },
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "bold", marks: [{ type: "bold" }] },
+            { type: "text", text: " plain " },
+            {
+              type: "text",
+              text: "link",
+              marks: [{ type: "link", attrs: { href: "https://example.com" } }],
+            },
+          ],
+        },
+        {
+          type: "bulletList",
+          content: [
+            {
+              type: "listItem",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "one" }] }],
+            },
+          ],
+        },
+        { type: "codeBlock", content: [{ type: "text", text: "const x = 1;" }] },
+        { type: "horizontalRule" },
+      ],
+    };
+    const plainText = "Title\nbold plain link\none\nconst x = 1;";
+
+    documents.upsert({ elementId: source.id, prosemirrorJson: richJson, plainText });
+
+    const loaded = documents.findById(source.id);
+    // The JSON survives byte-for-byte through the JSON.stringify/parse round-trip.
+    expect(loaded?.prosemirrorJson).toEqual(richJson);
+    expect(loaded?.plainText).toBe(plainText);
+    expect(loaded?.schemaVersion).toBe(1);
+
+    // Re-saving edited content updates the same row (no duplicate document) and
+    // appends a second update_document.
+    const editedJson = {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "edited" }] }],
+    };
+    documents.upsert({ elementId: source.id, prosemirrorJson: editedJson, plainText: "edited" });
+
+    const reloaded = documents.findById(source.id);
+    expect(reloaded?.prosemirrorJson).toEqual(editedJson);
+    expect(reloaded?.plainText).toBe("edited");
+
+    const rowCount = handle.sqlite
+      .prepare("SELECT COUNT(*) AS n FROM documents WHERE element_id = ?")
+      .get(source.id) as { n: number };
+    expect(rowCount.n).toBe(1);
+
+    const updateOps = ops.listForElement(source.id).filter((e) => e.opType === "update_document");
+    expect(updateOps.length).toBe(2);
+  });
 });
 
 describe("ReviewRepository — FSRS state/logs", () => {

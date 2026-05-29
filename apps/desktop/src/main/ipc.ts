@@ -11,6 +11,8 @@
 import { app, ipcMain } from "electron";
 import {
   DbStatusRequestSchema,
+  DocumentsGetRequestSchema,
+  DocumentsSaveRequestSchema,
   HealthRequestSchema,
   type HealthResult,
   InboxGetRequestSchema,
@@ -98,6 +100,16 @@ export function registerIpcHandlers(dbService: DbService): () => void {
   ipcMain.handle(IPC_CHANNELS.inboxTriage, (_event, rawRequest: unknown) => {
     const request = InboxTriageRequestSchema.parse(rawRequest);
     return dbService.triageInboxItem(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.documentsGet, (_event, rawRequest: unknown) => {
+    const request = DocumentsGetRequestSchema.parse(rawRequest);
+    return dbService.getDocument(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.documentsSave, (_event, rawRequest: unknown) => {
+    const request = DocumentsSaveRequestSchema.parse(rawRequest);
+    return dbService.saveDocument(request);
   });
 
   return () => {

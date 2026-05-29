@@ -28,6 +28,10 @@ import {
 import { seedDemoCollection } from "@interleave/testing";
 import type {
   DbStatus,
+  DocumentsGetRequest,
+  DocumentsGetResult,
+  DocumentsSaveRequest,
+  DocumentsSaveResult,
   InboxGetResult,
   InboxItemSummary,
   InboxListResult,
@@ -342,6 +346,49 @@ export class DbService {
       accessedAt: provenance?.accessedAt ?? null,
       charCount: plainText.length,
       previewSnippet,
+    };
+  }
+
+  /**
+   * Load an element's document body (T015) through {@link DocumentRepository}.
+   * Returns the ProseMirror JSON + plain-text mirror + schema version, or `null`
+   * when the element has no document row yet. Read-only; never re-parses the JSON.
+   */
+  getDocument(request: DocumentsGetRequest): DocumentsGetResult {
+    const doc = this.repos.documents.findById(request.elementId as ElementId);
+    if (!doc) return { document: null };
+    return {
+      document: {
+        prosemirrorJson: doc.prosemirrorJson,
+        plainText: doc.plainText,
+        schemaVersion: doc.schemaVersion,
+        updatedAt: doc.updatedAt,
+      },
+    };
+  }
+
+  /**
+   * Upsert an element's document body (T015) through {@link DocumentRepository},
+   * which persists the body + `plainText` and appends `update_document` in one
+   * transaction. The main process stores EXACTLY what the renderer sent — it does
+   * not re-parse ProseMirror (the renderer already enforced the constrained
+   * schema and computed `plainText`). Stable `document_blocks` derivation lands in
+   * T016, so `blocks` are intentionally not refreshed here.
+   */
+  saveDocument(request: DocumentsSaveRequest): DocumentsSaveResult {
+    const saved = this.repos.documents.upsert({
+      elementId: request.elementId as ElementId,
+      prosemirrorJson: request.prosemirrorJson,
+      plainText: request.plainText,
+      ...(request.schemaVersion !== undefined ? { schemaVersion: request.schemaVersion } : {}),
+    });
+    return {
+      document: {
+        prosemirrorJson: saved.prosemirrorJson,
+        plainText: saved.plainText,
+        schemaVersion: saved.schemaVersion,
+        updatedAt: saved.updatedAt,
+      },
     };
   }
 

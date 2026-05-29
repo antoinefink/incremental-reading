@@ -442,6 +442,62 @@ export interface InboxTriageResult {
 }
 
 // ---------------------------------------------------------------------------
+// documents.get() / documents.save()  (T015 — editable rich-text body)
+// ---------------------------------------------------------------------------
+
+/**
+ * The document editor surface (T015). The renderer loads an element's body as
+ * ProseMirror JSON + its flattened `plainText` mirror, edits it in the
+ * constrained Tiptap editor, and saves it back. The MAIN process persists
+ * exactly what it receives via `DocumentRepository.upsert` (which logs
+ * `update_document`) — it does NOT re-parse ProseMirror; the renderer computes
+ * `plainText` with the editor's `toPlainText` so the stored mirror stays in sync
+ * with the JSON. There is still no generic `db.query`.
+ *
+ * `prosemirrorJson` is `z.unknown()` on the wire: the schema is owned by
+ * `@interleave/editor`, not the contract, and the body is bounded by the IPC
+ * payload limit rather than re-validated structurally here (the renderer already
+ * enforced the constrained schema; main-side re-parsing is intentionally out of
+ * scope for T015 — block-ID derivation lands in T016).
+ */
+
+export const DocumentsGetRequestSchema = z.object({
+  /** The owning element id whose body to load. */
+  elementId: ElementIdSchema,
+});
+export type DocumentsGetRequest = z.infer<typeof DocumentsGetRequestSchema>;
+
+/** The persisted document body returned to the renderer, or `null` when absent. */
+export interface DocumentPayload {
+  readonly prosemirrorJson: unknown;
+  readonly plainText: string;
+  readonly schemaVersion: number;
+  readonly updatedAt: string;
+}
+
+export interface DocumentsGetResult {
+  /** The element's document body, or `null` when no document row exists. */
+  readonly document: DocumentPayload | null;
+}
+
+export const DocumentsSaveRequestSchema = z.object({
+  /** The owning element id whose body to upsert. */
+  elementId: ElementIdSchema,
+  /** The ProseMirror document JSON (schema owned by `@interleave/editor`). */
+  prosemirrorJson: z.unknown(),
+  /** The flattened plain-text mirror, computed renderer-side via `toPlainText`. */
+  plainText: z.string().max(4_000_000),
+  /** The schema version the JSON was authored against; defaults to `1`. */
+  schemaVersion: z.number().int().positive().optional(),
+});
+export type DocumentsSaveRequest = z.infer<typeof DocumentsSaveRequestSchema>;
+
+export interface DocumentsSaveResult {
+  /** The body after the save (the value the renderer should treat as canonical). */
+  readonly document: DocumentPayload;
+}
+
+// ---------------------------------------------------------------------------
 // The typed surface the renderer sees as `window.appApi`.
 // ---------------------------------------------------------------------------
 
@@ -486,5 +542,11 @@ export interface AppApi {
     get(request: InboxGetRequest): Promise<InboxGetResult>;
     /** Apply one triage action to a source (T012). */
     triage(request: InboxTriageRequest): Promise<InboxTriageResult>;
+  };
+  readonly documents: {
+    /** Load an element's document body (ProseMirror JSON + plain text) (T015). */
+    get(request: DocumentsGetRequest): Promise<DocumentsGetResult>;
+    /** Upsert an element's document body; logs `update_document` (T015). */
+    save(request: DocumentsSaveRequest): Promise<DocumentsSaveResult>;
   };
 }

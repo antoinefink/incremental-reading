@@ -21,6 +21,8 @@ export const IPC_CHANNELS = {
   inboxList: "inbox:list",
   inboxGet: "inbox:get",
   inboxTriage: "inbox:triage",
+  documentsGet: "documents:get",
+  documentsSave: "documents:save",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

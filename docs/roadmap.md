@@ -81,7 +81,7 @@ Detailed specs: [`tasks/M1-foundations.md`](./tasks/M1-foundations.md)
 
 ## M3 — Document editor & reading (T015–T018)
 
-- [ ] **T015 — Tiptap document editor** · _deps: T013, T005_
+- [x] **T015 — Tiptap document editor** · done · _deps: T013, T005_
   Done when: a source body renders/edits with a constrained schema (headings, paragraphs, bold, italic, links, blockquotes, lists, code, hr); edits save and reload.
 - [ ] **T016 — Stable block IDs** · _deps: T015_
   Done when: every block node has a stable ID preserved across imports and saves (basis for extraction/read-points/sync).
@@ -318,6 +318,7 @@ overload management, semantic search, AI, media, reliability, scale.
 
 Record notable completions / decisions here as tasks land (newest first).
 
+- 2026-05-29 - T015 Tiptap document editor - done. Source bodies render/edit through a constrained Tiptap/ProseMirror schema (headings, paragraphs, bold, italic, links, blockquotes, lists, code, hr) in `packages/editor` (`schema.ts`, `serialize.ts`, `SourceEditor.tsx`); edits serialize to ProseMirror JSON and save/reload via the typed `window.appApi` document surface. Renderer never touches the DB directly.
 - 2026-05-29 - T014 Source provenance fields - done. Manual imports now capture canonical URL, original URL, accessed date, and snapshot provenance fields (no remote fetching). URL normalization/canonicalization lives in `packages/core` (`url.ts`); the schema, typed `window.appApi` import contract, and the "New source" modal persist these fields, and the inspector surfaces them. Renderer never touches the DB directly.
 - 2026-05-29 - T013 Manual text import - done. The "New source" modal now accepts a body that is stored both as plain text and as ProseMirror JSON; a pasted article appears as a source in the inbox. Plain-text-to-ProseMirror conversion lives in `packages/core`; the typed `window.appApi` source-import surface persists both representations, and renderer never touches the DB directly.
 - 2026-05-29 - T012 Inbox - done. Sources can be created in the inbox, listed, viewed, kept, prioritized, accepted into active learning, or deleted — all via the typed `window.appApi` surface (no renderer DB access). Mutations run in single transactions and append `operation_log` entries; deletes are soft.

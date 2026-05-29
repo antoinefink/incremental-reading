@@ -12,10 +12,26 @@
     }
   },
   "scripts": {
-    "dev": "echo \"@interleave/editor: no dev step yet (wired in T002+)\"",
-    "build": "echo \"@interleave/editor: no build step yet (wired in T002)\"",
-    "test": "echo \"@interleave/editor: no tests yet (wired in T002)\"",
-    "lint": "echo \"@interleave/editor: no lint yet (wired in T002)\"",
+    "dev": "echo \"@interleave/editor: no dev step\"",
+    "build": "echo \"@interleave/editor: no build step\"",
+    "test": "vitest run",
+    "lint": "echo \"@interleave/editor: linted from repo root via biome\"",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@interleave/core": "workspace:*",
+    "@tiptap/core": "^3.23.6",
+    "@tiptap/pm": "^3.23.6",
+    "@tiptap/react": "^3.23.6",
+    "@tiptap/starter-kit": "^3.23.6"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.15",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
   }
 }

@@ -9,6 +9,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  DocumentsGetRequestSchema,
+  DocumentsSaveRequestSchema,
   InboxGetRequestSchema,
   InboxTriageRequestSchema,
   InspectorGetRequestSchema,
@@ -22,7 +24,7 @@ import {
 } from "./contract";
 
 describe("IPC channels", () => {
-  it("exposes exactly the M1 commands plus the M2 inbox mutation surface and no generic SQL channel", () => {
+  it("exposes exactly the M1 commands plus the M2 inbox mutation + M3 document surface and no generic SQL channel", () => {
     expect(Object.values(IPC_CHANNELS).sort()).toEqual(
       [
         "app:health",
@@ -37,6 +39,8 @@ describe("IPC channels", () => {
         "inbox:list",
         "inbox:get",
         "inbox:triage",
+        "documents:get",
+        "documents:save",
       ].sort(),
     );
     expect(Object.values(IPC_CHANNELS)).not.toContain("db:query");
@@ -242,5 +246,73 @@ describe("InboxTriageRequestSchema (T012)", () => {
 
   it("requires an id", () => {
     expect(() => InboxTriageRequestSchema.parse({ action: { kind: "accept" } })).toThrow();
+  });
+});
+
+describe("DocumentsGetRequestSchema (T015)", () => {
+  it("accepts a non-empty elementId", () => {
+    expect(DocumentsGetRequestSchema.parse({ elementId: "el_1" })).toEqual({ elementId: "el_1" });
+  });
+
+  it("rejects a missing / empty elementId", () => {
+    expect(() => DocumentsGetRequestSchema.parse({})).toThrow();
+    expect(() => DocumentsGetRequestSchema.parse({ elementId: "" })).toThrow();
+  });
+});
+
+describe("DocumentsSaveRequestSchema (T015)", () => {
+  it("accepts a body with ProseMirror JSON + plain text (no schemaVersion)", () => {
+    const json = { type: "doc", content: [{ type: "paragraph" }] };
+    const parsed = DocumentsSaveRequestSchema.parse({
+      elementId: "el_1",
+      prosemirrorJson: json,
+      plainText: "",
+    });
+    expect(parsed.elementId).toBe("el_1");
+    expect(parsed.prosemirrorJson).toEqual(json);
+    expect(parsed.plainText).toBe("");
+    expect(parsed.schemaVersion).toBeUndefined();
+  });
+
+  it("accepts an explicit positive integer schemaVersion", () => {
+    const parsed = DocumentsSaveRequestSchema.parse({
+      elementId: "el_1",
+      prosemirrorJson: { type: "doc", content: [] },
+      plainText: "hi",
+      schemaVersion: 1,
+    });
+    expect(parsed.schemaVersion).toBe(1);
+  });
+
+  it("treats prosemirrorJson as opaque (any JSON value is accepted on the wire)", () => {
+    expect(
+      DocumentsSaveRequestSchema.parse({ elementId: "el_1", prosemirrorJson: null, plainText: "" })
+        .prosemirrorJson,
+    ).toBeNull();
+  });
+
+  it("rejects a missing elementId, a non-string plainText, and a bad schemaVersion", () => {
+    expect(() =>
+      DocumentsSaveRequestSchema.parse({ prosemirrorJson: {}, plainText: "x" }),
+    ).toThrow();
+    expect(() =>
+      DocumentsSaveRequestSchema.parse({ elementId: "el_1", prosemirrorJson: {}, plainText: 42 }),
+    ).toThrow();
+    expect(() =>
+      DocumentsSaveRequestSchema.parse({
+        elementId: "el_1",
+        prosemirrorJson: {},
+        plainText: "x",
+        schemaVersion: 0,
+      }),
+    ).toThrow();
+    expect(() =>
+      DocumentsSaveRequestSchema.parse({
+        elementId: "el_1",
+        prosemirrorJson: {},
+        plainText: "x",
+        schemaVersion: 1.5,
+      }),
+    ).toThrow();
   });
 });
