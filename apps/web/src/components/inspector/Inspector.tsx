@@ -21,18 +21,22 @@
  * stage, postponed ×N, `--sched-attn`).
  */
 
+import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   appApi,
   type ElementSummary,
   type InspectorData,
   isDesktop,
+  type LineageData,
   type LineageItem,
+  type LineageNode,
 } from "../../lib/appApi";
 import { useNavigateToLocation } from "../../reader/navigateToLocation";
 import { useSelection } from "../../shell/selection";
 import { Icon } from "../Icon";
 import "./inspector.css";
+import { LineageTree } from "./LineageTree";
 import {
   FsrsStats,
   MetaRow,
@@ -123,11 +127,15 @@ function ElementPicker({
 /** The full metadata view for one inspected element. */
 function InspectorBody({
   data,
+  lineage,
   onSelect,
+  onPickLineageNode,
   onJumpToLocation,
 }: {
   data: InspectorData;
+  lineage: LineageData | null;
   onSelect: (id: string) => void;
+  onPickLineageNode: (node: LineageNode) => void;
   onJumpToLocation: (location: NonNullable<InspectorData["location"]>) => void;
 }) {
   const { element, scheduler, parent, children, source, provenance, location, tags, review } = data;
@@ -288,6 +296,19 @@ function InspectorBody({
         )}
       </div>
 
+      {/* Lineage (T023): the full navigable tree — source → extract → sub-extract
+          → card — rooted at the lineage root, with the active element highlighted.
+          Clicking any node navigates there (up OR down the chain). */}
+      {lineage && lineage.nodes.length > 0 && (
+        <div className="insp-sec" data-testid="lineage-section">
+          <div className="insp-sec__title">
+            <span>Lineage</span>
+            <span className="insp-sec__count">{lineage.nodes.length}</span>
+          </div>
+          <LineageTree nodes={lineage.nodes} onPick={onPickLineageNode} />
+        </div>
+      )}
+
       {/* Review metadata (cards only). */}
       {review && (
         <div className="insp-sec" data-testid="review-section">
@@ -327,9 +348,11 @@ function InspectorBody({
  */
 export function Inspector() {
   const { selectedId, select } = useSelection();
+  const navigate = useNavigate();
   const navigateToLocation = useNavigateToLocation();
   const desktop = isDesktop();
   const [data, setData] = useState<InspectorData | null>(null);
+  const [lineage, setLineage] = useState<LineageData | null>(null);
   const [elements, setElements] = useState<readonly ElementSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -363,11 +386,15 @@ export function Inspector() {
     };
   }, [refreshTick]);
 
-  // Fetch the selected element's full payload through the bridge.
+  // Fetch the selected element's full payload + its lineage tree through the
+  // bridge. Both are read-only `window.appApi` reads; the lineage tree (T023) is
+  // computed main-side and crosses IPC as flat nodes (the renderer only renders +
+  // navigates). A lineage failure degrades silently — the rest of the panel stays.
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick is a deliberate re-fetch trigger
   useEffect(() => {
     if (!isDesktop() || !selectedId) {
       setData(null);
+      setLineage(null);
       return;
     }
     let cancelled = false;
@@ -386,12 +413,34 @@ export function Inspector() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+    appApi
+      .getLineage({ id: selectedId })
+      .then((res) => {
+        if (!cancelled) setLineage(res.lineage);
+      })
+      .catch(() => {
+        if (!cancelled) setLineage(null);
+      });
     return () => {
       cancelled = true;
     };
   }, [selectedId, refreshTick]);
 
   const onSelect = useCallback((id: string) => select(id), [select]);
+
+  // Clicking a lineage node navigates BOTH directions (T023): re-select the node
+  // (driving the inspector) and, for a source/topic, open its reader at
+  // `/source/$id` so the user lands on the page for that element. Cards/extracts
+  // select in the inspector (their dedicated views land in M4 T024 / M6).
+  const onPickLineageNode = useCallback(
+    (node: LineageNode) => {
+      select(node.id);
+      if (node.type === "source" || node.type === "topic") {
+        void navigate({ to: "/source/$id", params: { id: node.id } });
+      }
+    },
+    [select, navigate],
+  );
 
   const headerTitle = data ? typeLabel(data.element.type) : "Inspector";
 
@@ -429,7 +478,13 @@ export function Inspector() {
         ) : selectedId && loading && !data ? (
           <p className="insp-empty">Loading…</p>
         ) : selectedId && data ? (
-          <InspectorBody data={data} onSelect={onSelect} onJumpToLocation={navigateToLocation} />
+          <InspectorBody
+            data={data}
+            lineage={lineage}
+            onSelect={onSelect}
+            onPickLineageNode={onPickLineageNode}
+            onJumpToLocation={navigateToLocation}
+          />
         ) : selectedId && !data ? (
           <p className="insp-empty" data-testid="inspector-missing">
             That element is no longer available.

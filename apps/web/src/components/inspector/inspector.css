@@ -411,6 +411,40 @@
   text-overflow: ellipsis;
 }
 
+/* Lineage tree (T023): depth-indented rows mirroring design/kit components.jsx. */
+.tree-row {
+  display: flex;
+  align-items: stretch;
+}
+.tree-row .tree-node {
+  flex: 1;
+  min-width: 0;
+}
+/* One spacer per depth level, with the kit's faint vertical guide line. */
+.tree-indent {
+  width: 14px;
+  flex: none;
+  align-self: stretch;
+  position: relative;
+}
+.tree-indent::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+/* Faint, mono trailing meta (stage / card type / "sub-extract"). */
+.tree-node__meta {
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+  flex: none;
+  white-space: nowrap;
+}
+
 /* ---------- Element picker (selection mechanism) ---------- */
 .insp-picker {
   display: flex;

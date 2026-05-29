@@ -58,6 +58,11 @@ export {
   schedulerKindForType,
 } from "./inspector-query";
 export {
+  type LineageData,
+  type LineageNode,
+  LineageQuery,
+} from "./lineage-query";
+export {
   type AppendOpInput,
   OperationLogRepository,
 } from "./operation-log-repository";

@@ -25,6 +25,7 @@ import {
   InspectorGetRequestSchema,
   InspectorListRequestSchema,
   IPC_CHANNELS,
+  LineageGetRequestSchema,
   ReadPointGetRequestSchema,
   ReadPointSetRequestSchema,
   SettingsGetAllRequestSchema,
@@ -86,6 +87,11 @@ export function registerIpcHandlers(dbService: DbService): () => void {
   ipcMain.handle(IPC_CHANNELS.inspectorGet, (_event, rawRequest: unknown) => {
     const request = InspectorGetRequestSchema.parse(rawRequest);
     return dbService.getInspectorData(request.id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.lineageGet, (_event, rawRequest: unknown) => {
+    const request = LineageGetRequestSchema.parse(rawRequest);
+    return dbService.getLineage(request.id);
   });
 
   ipcMain.handle(IPC_CHANNELS.sourcesImportManual, (_event, rawRequest: unknown) => {

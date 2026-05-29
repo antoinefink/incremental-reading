@@ -20,6 +20,7 @@ import {
   InboxTriageRequestSchema,
   InspectorGetRequestSchema,
   IPC_CHANNELS,
+  LineageGetRequestSchema,
   ReadPointGetRequestSchema,
   ReadPointSetRequestSchema,
   SettingKeySchema,
@@ -31,7 +32,7 @@ import {
 } from "./contract";
 
 describe("IPC channels", () => {
-  it("exposes exactly the M1 commands plus the M2 inbox mutation + M3 document/read-point + M4 marks/extraction surface and no generic SQL channel", () => {
+  it("exposes exactly the M1 commands plus the M2 inbox mutation + M3 document/read-point + M4 marks/extraction/lineage surface and no generic SQL channel", () => {
     expect(Object.values(IPC_CHANNELS).sort()).toEqual(
       [
         "app:health",
@@ -42,6 +43,7 @@ describe("IPC channels", () => {
         "settings:updateMany",
         "inspector:list",
         "inspector:get",
+        "lineage:get",
         "sources:importManual",
         "inbox:list",
         "inbox:get",
@@ -141,6 +143,17 @@ describe("InspectorGetRequestSchema", () => {
   it("rejects a missing or empty id", () => {
     expect(() => InspectorGetRequestSchema.parse({})).toThrow();
     expect(() => InspectorGetRequestSchema.parse({ id: "" })).toThrow();
+  });
+});
+
+describe("LineageGetRequestSchema (T023)", () => {
+  it("accepts a non-empty element id", () => {
+    expect(LineageGetRequestSchema.parse({ id: "el_123" })).toEqual({ id: "el_123" });
+  });
+
+  it("rejects a missing or empty id", () => {
+    expect(() => LineageGetRequestSchema.parse({})).toThrow();
+    expect(() => LineageGetRequestSchema.parse({ id: "" })).toThrow();
   });
 });
 

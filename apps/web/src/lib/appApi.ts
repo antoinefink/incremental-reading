@@ -196,6 +196,41 @@ export interface InspectorGetResult {
 }
 
 // ---------------------------------------------------------------------------
+// lineage.get()  (T023 — the full navigable element hierarchy)
+// ---------------------------------------------------------------------------
+
+/** One flattened lineage node (depth-indented `tree-row`/`tree-node`). */
+export interface LineageNode {
+  readonly id: string;
+  readonly type: string;
+  readonly title: string;
+  readonly stage: string;
+  /** Indentation depth from the lineage root (root = 0). */
+  readonly depth: number;
+  /** Short trailing label (stage / card type / "sub-extract" / "source"). */
+  readonly meta: string;
+  /** True for the element the lineage was requested for (the inspector's focus). */
+  readonly active: boolean;
+}
+
+/** The lineage payload for one element: the root id + the flattened tree. */
+export interface LineageData {
+  readonly elementId: string;
+  /** The lineage root (`source`/`topic`) the tree is rooted at. */
+  readonly rootId: string;
+  /** Depth-ordered, flattened nodes (pre-order DFS) for the `LineageTree`. */
+  readonly nodes: readonly LineageNode[];
+}
+
+export interface LineageGetRequest {
+  readonly id: string;
+}
+
+export interface LineageGetResult {
+  readonly lineage: LineageData | null;
+}
+
+// ---------------------------------------------------------------------------
 // sources.importManual() / inbox.list() / inbox.get() / inbox.triage()  (T012)
 // ---------------------------------------------------------------------------
 
@@ -493,6 +528,9 @@ export interface AppApi {
     list(): Promise<InspectorListResult>;
     get(request: InspectorGetRequest): Promise<InspectorGetResult>;
   };
+  readonly lineage: {
+    get(request: LineageGetRequest): Promise<LineageGetResult>;
+  };
   readonly sources: {
     importManual(request: SourcesImportManualRequest): Promise<SourcesImportManualResult>;
   };
@@ -577,6 +615,10 @@ export const appApi = {
   /** The full inspector payload for one element (read-only). */
   getInspectorData(request: InspectorGetRequest): Promise<InspectorGetResult> {
     return requireAppApi().inspector.get(request);
+  },
+  /** The full, depth-tagged lineage tree for one element (read-only) (T023). */
+  getLineage(request: LineageGetRequest): Promise<LineageGetResult> {
+    return requireAppApi().lineage.get(request);
   },
   /** Create a source in the inbox with its body (T012 + T013). */
   importManualSource(request: SourcesImportManualRequest): Promise<SourcesImportManualResult> {

@@ -26,6 +26,7 @@ import type {
   InboxGetRequest,
   InboxTriageRequest,
   InspectorGetRequest,
+  LineageGetRequest,
   ReadPointGetRequest,
   ReadPointSetRequest,
   SettingsGetRequest,
@@ -53,6 +54,9 @@ const appApi: AppApi = {
   inspector: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.inspectorList),
     get: (request: InspectorGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.inspectorGet, request),
+  },
+  lineage: {
+    get: (request: LineageGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.lineageGet, request),
   },
   sources: {
     importManual: (request: SourcesImportManualRequest) =>

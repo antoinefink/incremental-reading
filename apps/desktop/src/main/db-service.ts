@@ -25,6 +25,7 @@ import {
   ExtractionService,
   InboxQuery,
   InspectorQuery,
+  LineageQuery,
   type Repositories,
 } from "@interleave/local-db";
 import { seedDemoCollection } from "@interleave/testing";
@@ -50,6 +51,7 @@ import type {
   InboxTriageResult,
   InspectorGetResult,
   InspectorListResult,
+  LineageGetResult,
   ReadPointGetRequest,
   ReadPointGetResult,
   ReadPointSetRequest,
@@ -67,6 +69,7 @@ export class DbService {
   private handle: DbHandle | null = null;
   private repositories: Repositories | null = null;
   private inspector: InspectorQuery | null = null;
+  private lineage: LineageQuery | null = null;
   private inboxQuery: InboxQuery | null = null;
   private extraction: ExtractionService | null = null;
   private migrated = false;
@@ -99,6 +102,7 @@ export class DbService {
     migrateDatabase(this.handle.db, options.migrationsDir);
     this.repositories = createRepositories(this.handle.db);
     this.inspector = new InspectorQuery(this.repositories);
+    this.lineage = new LineageQuery(this.repositories);
     this.inboxQuery = new InboxQuery(this.repositories);
     this.extraction = new ExtractionService(this.handle.db);
     this.migrated = true;
@@ -111,6 +115,7 @@ export class DbService {
     this.handle = null;
     this.repositories = null;
     this.inspector = null;
+    this.lineage = null;
     this.inboxQuery = null;
     this.extraction = null;
     this.migrated = false;
@@ -216,6 +221,24 @@ export class DbService {
   /** The full inspector payload for one element, or `null` if unknown/deleted. */
   getInspectorData(id: string): InspectorGetResult {
     return { data: this.inspectorQuery.get(id as ElementId) };
+  }
+
+  /** Read-only lineage query layer (T023), bound to the open database. */
+  private get lineageQuery(): LineageQuery {
+    if (!this.lineage) {
+      throw new Error("DbService: database is not open");
+    }
+    return this.lineage;
+  }
+
+  /**
+   * The full, depth-tagged lineage tree for one element (T023), or `null` when the
+   * id is unknown/soft-deleted. The {@link LineageQuery} resolves the lineage ROOT
+   * and flattens the `source → extract → sub-extract → card` descendant tree —
+   * read-only lineage computed main-side so the renderer only renders + navigates.
+   */
+  getLineage(id: string): LineageGetResult {
+    return { lineage: this.lineageQuery.get(id as ElementId) };
   }
 
   /** Read-only inbox query layer (T012), bound to the open database. */

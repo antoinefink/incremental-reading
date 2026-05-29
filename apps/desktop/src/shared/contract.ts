@@ -331,6 +331,54 @@ export interface InspectorGetResult {
 }
 
 // ---------------------------------------------------------------------------
+// lineage.get()  (T023 — the full navigable element hierarchy)
+// ---------------------------------------------------------------------------
+
+/**
+ * The element hierarchy surface (T023). Where `inspector.get` returns ONE hop of
+ * lineage (direct parent + children), `lineage.get` returns the WHOLE chain: for
+ * any element the main process resolves the lineage ROOT (the owning
+ * `source`/`topic`) and walks DOWN through `source → extract → sub-extract → card`
+ * into a FLATTENED, depth-tagged node list the renderer renders as the kit's
+ * `LineageTree` and navigates in BOTH directions. Read-only — the renderer never
+ * re-derives the tree client-side, and there is still no generic `db.query`.
+ */
+
+/** One flattened lineage node (depth-indented `tree-row`/`tree-node`). */
+export interface LineageNode {
+  readonly id: string;
+  readonly type: string;
+  readonly title: string;
+  readonly stage: string;
+  /** Indentation depth from the lineage root (root = 0). */
+  readonly depth: number;
+  /** Short trailing label (stage / card type / "sub-extract" / "source"). */
+  readonly meta: string;
+  /** True for the element the lineage was requested for (the inspector's focus). */
+  readonly active: boolean;
+}
+
+/** The lineage payload for one element: the root id + the flattened tree. */
+export interface LineageData {
+  readonly elementId: string;
+  /** The lineage root (`source`/`topic`) the tree is rooted at. */
+  readonly rootId: string;
+  /** Depth-ordered, flattened nodes (pre-order DFS) for the `LineageTree`. */
+  readonly nodes: readonly LineageNode[];
+}
+
+export const LineageGetRequestSchema = z.object({
+  /** The element id whose lineage tree to build. */
+  id: ElementIdSchema,
+});
+export type LineageGetRequest = z.infer<typeof LineageGetRequestSchema>;
+
+export interface LineageGetResult {
+  /** The lineage tree, or `null` when the id is unknown/soft-deleted. */
+  readonly lineage: LineageData | null;
+}
+
+// ---------------------------------------------------------------------------
 // sources.importManual() / inbox.list() / inbox.get() / inbox.triage()  (T012)
 // ---------------------------------------------------------------------------
 
@@ -801,6 +849,10 @@ export interface AppApi {
     list(): Promise<InspectorListResult>;
     /** The full inspector payload for one element (read-only). */
     get(request: InspectorGetRequest): Promise<InspectorGetResult>;
+  };
+  readonly lineage: {
+    /** The full, depth-tagged lineage tree for one element (read-only) (T023). */
+    get(request: LineageGetRequest): Promise<LineageGetResult>;
   };
   readonly sources: {
     /** Create a source in the `inbox` (T012; body lands with T013). */
