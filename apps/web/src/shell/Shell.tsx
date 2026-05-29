@@ -21,6 +21,7 @@
  * No domain logic lives here: navigation goes through TanStack Router and the
  * nav/command catalogues are static config.
  */
+import type { LocalVaultPath, VaultRoot } from "@interleave/core";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
@@ -210,6 +211,16 @@ function Inspector() {
   );
 }
 
+/**
+ * The local asset vault the desktop app persists into. Typed with the real
+ * `@interleave/core` vocabulary so the renderer references the vault root by its
+ * canonical name — and demonstrably never resolves a raw filesystem path itself
+ * (path resolution belongs to the Electron main process; T007). Real status
+ * (open/migrated) will arrive from `window.appApi` once the shell lands.
+ */
+const VAULT_ROOT: VaultRoot = "assets";
+const VAULT_DB_PATH: LocalVaultPath = { root: VAULT_ROOT, relativePath: "app.sqlite" };
+
 function StatusBar() {
   return (
     <footer className="shell-statusbar" data-testid="status-bar">
@@ -226,7 +237,9 @@ function StatusBar() {
         Shortcuts
       </span>
       <span className="shell-statusbar__spacer" />
-      <span className="shell-statusbar__hint">Local vault · offline-first</span>
+      <span className="shell-statusbar__hint" data-vault-root={VAULT_DB_PATH.root}>
+        Local vault · offline-first
+      </span>
     </footer>
   );
 }

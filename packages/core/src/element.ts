@@ -1,0 +1,112 @@
+/**
+ * The universal `Element` primitive and its lineage neighbours (T005).
+ *
+ * `Element` is the single object model for the whole product (sources, topics,
+ * extracts, cards, tasks, concepts, media fragments, synthesis notes). Lineage
+ * is sacred: an element knows its `parentId` and `sourceId`, and typed edges in
+ * {@link ElementRelation} plus positions in {@link ElementLocation} let a card
+ * trace back `card → extract → source location → source metadata → original
+ * document context`. These shapes are framework-agnostic (no React/Drizzle/
+ * better-sqlite3); `packages/db` mirrors them as the SQLite schema (T006) and
+ * `packages/local-db` reads/writes them behind the Electron/IPC boundary (T008).
+ */
+
+import type { DistillationStage, ElementStatus, ElementType, RelationType } from "./enums";
+import type {
+  BlockId,
+  ElementId,
+  IsoTimestamp,
+  RelationId,
+  SiblingGroupId,
+  SourceLocationId,
+} from "./ids";
+import type { Priority } from "./priority";
+
+/**
+ * The universal element row (`elements` table). Every learnable/processable unit
+ * is one of these. `stage` ({@link DistillationStage}) and `status`
+ * ({@link ElementStatus}) are deliberately separate axes. `deletedAt` is a soft
+ * delete — set, not destroyed — so the trash can restore it.
+ *
+ * Lineage fields:
+ *  - `parentId` — the element this was lifted/derived from (extract→source,
+ *    sub-extract→extract, card→extract). `null` for top-level sources.
+ *  - `sourceId` — the ultimate owning `source` element, denormalized so any
+ *    descendant can reach its origin without walking the whole chain.
+ */
+export interface Element {
+  readonly id: ElementId;
+  readonly type: ElementType;
+  status: ElementStatus;
+  stage: DistillationStage;
+  /** Normalized numeric priority `0.0`–`1.0`; surfaced as A/B/C/D in the UI. */
+  priority: Priority;
+  /** When this element next wants attention/review; `null` if unscheduled. */
+  dueAt: IsoTimestamp | null;
+  title: string;
+  /** Origin element this was derived from; `null` for top-level sources. */
+  parentId: ElementId | null;
+  /** The owning `source` element (lineage root); `null` only on a source itself. */
+  sourceId: ElementId | null;
+  readonly createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
+  /** Soft-delete marker; non-null means "in the trash", recoverable. */
+  deletedAt: IsoTimestamp | null;
+}
+
+/**
+ * A typed edge between two elements (`element_relations` table). Relationships
+ * are explicit rows, NOT implicit nesting — this keeps lineage queryable in both
+ * directions and lets sibling cards be grouped (`siblingGroupId`) so they are
+ * not shown back-to-back in review.
+ */
+export interface ElementRelation {
+  readonly id: RelationId;
+  readonly fromElementId: ElementId;
+  readonly toElementId: ElementId;
+  readonly relationType: RelationType;
+  /** Set when `relationType` is `sibling_group`; groups interfering siblings. */
+  readonly siblingGroupId: SiblingGroupId | null;
+  readonly createdAt: IsoTimestamp;
+}
+
+/**
+ * A precise position inside a source (`source_locations` table) — the anchor
+ * that makes lineage *actionable* ("jump to the exact paragraph"). An extract or
+ * card references one of these; it captures the stable block IDs, character
+ * offsets, page, media timestamp, and a `selectedText` snapshot so the origin
+ * survives even if the source document is later re-imported.
+ */
+export interface ElementLocation {
+  readonly id: SourceLocationId;
+  /** The element this location belongs to (e.g. the extract). */
+  readonly elementId: ElementId;
+  /** The `source`/parent element this location points INTO. */
+  readonly sourceElementId: ElementId;
+  /** Stable block IDs spanned by the selection (order preserved). */
+  readonly blockIds: readonly BlockId[];
+  /** Character offset within the first block, when available. */
+  readonly startOffset: number | null;
+  /** Character offset within the last block, when available. */
+  readonly endOffset: number | null;
+  /** 1-based page number for paginated sources (PDF/EPUB), else `null`. */
+  readonly page: number | null;
+  /** Media timestamp in milliseconds for audio/video sources, else `null`. */
+  readonly timestampMs: number | null;
+  /** Human-readable label, e.g. "Chapter 2 · ¶4". */
+  readonly label: string | null;
+  /** Verbatim snapshot of the selected text at extraction time. */
+  readonly selectedText: string;
+}
+
+/**
+ * A read-point (`read_points` table): how far the user has processed a
+ * source/topic, so reopening resumes near where they left off. Updated as the
+ * user reads and auto-advanced when they extract.
+ */
+export interface ReadPoint {
+  readonly elementId: ElementId;
+  readonly blockId: BlockId;
+  readonly offset: number;
+  updatedAt: IsoTimestamp;
+}

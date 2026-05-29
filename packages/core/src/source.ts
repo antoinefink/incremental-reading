@@ -1,0 +1,66 @@
+/**
+ * Source & Document types (T005).
+ *
+ * A `Source` is the provenance side-table for a `source`-type {@link Element}
+ * (`sources` table, keyed by `elementId`); a `Document` is the editable body
+ * (`documents` table). Together they preserve the bottom of the lineage chain —
+ * the origin metadata and original document context a card must be able to trace
+ * back to. These are plain data shapes (no React/Drizzle/better-sqlite3).
+ *
+ * The ProseMirror document is the substrate for extraction lineage: blocks carry
+ * stable IDs and marks carry highlight/extracted-span/processed-span/cloze
+ * annotations. Those structures are detailed in `domain-model.md`; here we model
+ * the row-level vocabulary the rest of the app imports.
+ */
+
+import type { ElementId, IsoTimestamp } from "./ids";
+
+/**
+ * Provenance metadata for a `source` element (`sources` table). `snapshotKey`
+ * points at the saved snapshot asset in the vault (the bytes are NOT in SQLite).
+ * `readPoint` mirrors the last read position for quick resume. Most fields are
+ * optional because manual imports may omit them (auto-fetch lands later, M12).
+ */
+export interface Source {
+  /** Mirrors the owning `source` element's id (one-to-one). */
+  readonly elementId: ElementId;
+  /** As-entered URL, if the source came from the web. */
+  url: string | null;
+  /** Normalized URL used for duplicate detection (tracking params stripped). */
+  canonicalUrl: string | null;
+  /** Original/pre-redirect URL, preserved for provenance. */
+  originalUrl: string | null;
+  author: string | null;
+  publishedAt: IsoTimestamp | null;
+  /** When the user imported/snapshotted the source. */
+  accessedAt: IsoTimestamp | null;
+  /** Vault key/relative path of the saved snapshot asset, if any. */
+  snapshotKey: string | null;
+  /** Why the user added this source (free text), aiding later triage. */
+  reasonAdded: string | null;
+}
+
+/** The ProseMirror schema version a stored document was authored against. */
+export type DocumentSchemaVersion = number;
+
+/**
+ * An editable rich-text body for an element (`documents` table). Stores the
+ * ProseMirror JSON (as an opaque structure) plus a flattened `plainText`
+ * mirror used for full-text search and previews. Block-level stable IDs and
+ * marks live in `document_blocks` / `document_marks` (modeled in `packages/db`);
+ * they are the anchors extracts and read-points depend on.
+ */
+export interface Document {
+  /** Mirrors the owning element's id (one-to-one). */
+  readonly elementId: ElementId;
+  /**
+   * ProseMirror document JSON. Typed as `unknown` here on purpose: `packages/core`
+   * stays framework-agnostic and must not depend on the editor's node schema
+   * (that lives in `packages/editor`). Repositories/editor narrow it.
+   */
+  prosemirrorJson: unknown;
+  /** Flattened text mirror for search/preview; kept in sync with the JSON. */
+  plainText: string;
+  schemaVersion: DocumentSchemaVersion;
+  updatedAt: IsoTimestamp;
+}
