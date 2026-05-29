@@ -31,7 +31,7 @@ export {
   ElementRepository,
   type UpdateElementInput,
 } from "./element-repository";
-export { newElementId, nowIso } from "./ids";
+export { newElementId, newRowId, newSiblingGroupId, nowIso } from "./ids";
 export {
   type AppendOpInput,
   OperationLogRepository,

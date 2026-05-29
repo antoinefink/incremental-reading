@@ -11,6 +11,15 @@ importers:
       '@biomejs/biome':
         specifier: ^2.4.16
         version: 2.4.16
+      '@interleave/db':
+        specifier: workspace:*
+        version: link:packages/db
+      '@interleave/local-db':
+        specifier: workspace:*
+        version: link:packages/local-db
+      '@interleave/testing':
+        specifier: workspace:*
+        version: link:packages/testing
       '@playwright/test':
         specifier: ^1.60.0
         version: 1.60.0
@@ -144,9 +153,6 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)
     devDependencies:
-      '@interleave/testing':
-        specifier: workspace:*
-        version: link:../testing
       better-sqlite3:
         specifier: ^12.10.0
         version: 12.10.0
@@ -155,9 +161,15 @@ importers:
 
   packages/testing:
     dependencies:
+      '@interleave/core':
+        specifier: workspace:*
+        version: link:../core
       '@interleave/db':
         specifier: workspace:*
         version: link:../db
+      '@interleave/local-db':
+        specifier: workspace:*
+        version: link:../local-db
 
   packages/ui: {}
 

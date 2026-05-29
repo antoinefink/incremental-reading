@@ -16,7 +16,6 @@
 
 import type { BlockId, ElementId, FsrsState, ReviewRating } from "@interleave/core";
 import type { DbHandle } from "@interleave/db";
-import { createInMemoryDb } from "@interleave/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AssetRepository } from "./asset-repository";
 import { DocumentRepository } from "./document-repository";
@@ -27,6 +26,7 @@ import { ReviewRepository } from "./review-repository";
 import { SearchRepository } from "./search-repository";
 import { SettingsRepository } from "./settings-repository";
 import { SourceRepository } from "./source-repository";
+import { createInMemoryDb } from "./test-db";
 
 let handle: DbHandle;
 

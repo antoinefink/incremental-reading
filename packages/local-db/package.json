@@ -24,7 +24,6 @@
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
-    "@interleave/testing": "workspace:*",
     "better-sqlite3": "^12.10.0"
   }
 }

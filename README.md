@@ -29,6 +29,7 @@ directory, and a real window, so it runs natively with **pnpm**, not in Docker.
 | `pnpm db:generate` | Generate Drizzle (SQLite dialect) migrations |
 | `pnpm db:migrate` | Run Drizzle migrations against the local dev SQLite DB |
 | `pnpm db:reset:dev` | Reset the dev SQLite DB |
+| `pnpm seed` | Reset the dev SQLite DB and load the demo collection (through the repositories) |
 
 ### First run
 

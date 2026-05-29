@@ -20,10 +20,14 @@
     "e2e": "playwright test",
     "db:generate": "pnpm --filter @interleave/db db:generate",
     "db:migrate": "pnpm --filter @interleave/db db:migrate",
-    "db:reset:dev": "pnpm --filter @interleave/db db:reset:dev"
+    "db:reset:dev": "pnpm --filter @interleave/db db:reset:dev",
+    "seed": "tsx scripts/seed-dev.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
+    "@interleave/db": "workspace:*",
+    "@interleave/local-db": "workspace:*",
+    "@interleave/testing": "workspace:*",
     "@playwright/test": "^1.60.0",
     "@types/node": "^22.10.0",
     "tsx": "^4.20.6",
