@@ -26,6 +26,16 @@ export {
 } from "./block-id";
 export { type BlockIdMinter, newBlockId } from "./block-ids";
 export { blockIdsOf, type DocumentBlockInput, toBlockInputs } from "./blocks";
+// Jump-to-source (T022): actionable lineage — scroll the originating block into
+// view + flash the kit's accent ring, resolving ALWAYS by stable block id.
+export {
+  flashBlock,
+  JUMP_FLASH_MS,
+  type JumpToSourceOptions,
+  type JumpToSourceResult,
+  jumpToSource,
+  scrollBlockIntoView,
+} from "./jump-to-source";
 // Document marks (T020 →): highlight (and, later, processed-span) Tiptap marks +
 // commands. Marks are applied through these commands, never DOM surgery; the
 // canonical persistence is a `document_marks` row keyed by stable block id + range.

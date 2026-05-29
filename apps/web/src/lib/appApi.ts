@@ -161,6 +161,14 @@ export interface LocationSummary {
   readonly label: string | null;
   readonly selectedText: string;
   readonly page: number | null;
+  /** The source element this location points INTO — the reader to open on jump (T022). */
+  readonly sourceElementId: string;
+  /** Ordered STABLE block ids the selection spans (the scroll target is the first). */
+  readonly blockIds: readonly string[];
+  /** Char offset within the FIRST spanned block (caret target), or `null`. */
+  readonly startOffset: number | null;
+  /** Char offset within the LAST spanned block, or `null`. */
+  readonly endOffset: number | null;
 }
 
 export interface InspectorData {

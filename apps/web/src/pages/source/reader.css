@@ -170,6 +170,20 @@ mark.extracted {
   scroll-margin-top: 80px;
 }
 
+/* Jump-to-source flash (T022): the originating block gets the kit's accent ring
+   for a beat after the user clicks "Jump to source" on an extract. The ring is a
+   transient node decoration cleared by the editor after JUMP_FLASH_MS. */
+.reader .jumped {
+  scroll-margin-top: 80px;
+  border-radius: var(--r-md);
+  margin: 4px -8px;
+  padding: 6px 8px;
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 0 0 7px var(--accent-soft);
+  transition: box-shadow var(--med) var(--ease);
+}
+
 /* ---------- Reader page chrome (header + action bar + columns) ---------- */
 .reader-screen {
   display: flex;

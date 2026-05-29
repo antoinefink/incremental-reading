@@ -29,6 +29,7 @@ import {
   isDesktop,
   type LineageItem,
 } from "../../lib/appApi";
+import { useNavigateToLocation } from "../../reader/navigateToLocation";
 import { useSelection } from "../../shell/selection";
 import { Icon } from "../Icon";
 import "./inspector.css";
@@ -79,6 +80,7 @@ function LineageRow({ item, onSelect }: { item: LineageItem; onSelect: (id: stri
       type="button"
       className="tree-node"
       data-testid="lineage-row"
+      data-element-id={item.id}
       onClick={() => onSelect(item.id)}
     >
       <TypeIcon type={item.type} />
@@ -122,9 +124,11 @@ function ElementPicker({
 function InspectorBody({
   data,
   onSelect,
+  onJumpToLocation,
 }: {
   data: InspectorData;
   onSelect: (id: string) => void;
+  onJumpToLocation: (location: NonNullable<InspectorData["location"]>) => void;
 }) {
   const { element, scheduler, parent, children, source, provenance, location, tags, review } = data;
   return (
@@ -233,10 +237,23 @@ function InspectorBody({
         </div>
       )}
 
-      {/* Source location — actionable lineage (jump-to-paragraph). */}
+      {/* Source location — actionable lineage (jump-to-paragraph, T022). */}
       {location && (
-        <div className="insp-sec">
-          <div className="insp-sec__title">Source location</div>
+        <div className="insp-sec" data-testid="location-section">
+          <div className="insp-sec__title">
+            <span>Source location</span>
+            {location.blockIds.length > 0 && (
+              <button
+                type="button"
+                className="insp-jump"
+                data-testid="location-jump"
+                title="Open the source and scroll to this paragraph"
+                onClick={() => onJumpToLocation(location)}
+              >
+                <Icon name="external" size={13} /> Jump to source
+              </button>
+            )}
+          </div>
           {location.label && <MetaRow k="Label">{location.label}</MetaRow>}
           <blockquote className="insp-quote" data-testid="location-quote">
             {location.selectedText}
@@ -310,6 +327,7 @@ function InspectorBody({
  */
 export function Inspector() {
   const { selectedId, select } = useSelection();
+  const navigateToLocation = useNavigateToLocation();
   const desktop = isDesktop();
   const [data, setData] = useState<InspectorData | null>(null);
   const [elements, setElements] = useState<readonly ElementSummary[]>([]);
@@ -411,7 +429,7 @@ export function Inspector() {
         ) : selectedId && loading && !data ? (
           <p className="insp-empty">Loading…</p>
         ) : selectedId && data ? (
-          <InspectorBody data={data} onSelect={onSelect} />
+          <InspectorBody data={data} onSelect={onSelect} onJumpToLocation={navigateToLocation} />
         ) : selectedId && !data ? (
           <p className="insp-empty" data-testid="inspector-missing">
             That element is no longer available.

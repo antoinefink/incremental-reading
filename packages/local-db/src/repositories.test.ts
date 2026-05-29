@@ -236,6 +236,17 @@ describe("SourceRepository — lineage", () => {
     expect(elementsRepo.findById(card.parentId as ElementId)?.id).toBe(extract.id);
     expect(elementsRepo.findById(card.sourceId as ElementId)?.type).toBe("source");
     expect(sources.listLocationsForSource(source.id).map((l) => l.id)).toContain(location.id);
+
+    // T022 — the read side of actionable lineage: looking up the extract's location
+    // by its OWN element id returns the stored block ids / offsets / label / snapshot
+    // the renderer needs to jump back to the exact paragraph.
+    const forExtract = sources.findLocationForElement(extract.id);
+    expect(forExtract?.sourceElementId).toBe(source.id);
+    expect(forExtract?.blockIds).toEqual(["blk_1"]);
+    expect(forExtract?.startOffset).toBe(0);
+    expect(forExtract?.endOffset).toBe(44);
+    expect(forExtract?.label).toBe("Intro · ¶1");
+    expect(forExtract?.selectedText).toContain("skill-acquisition efficiency");
   });
 
   it("rejects an extract pointing at a non-existent source (foreign key)", () => {

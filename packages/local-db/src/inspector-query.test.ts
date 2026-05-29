@@ -141,6 +141,12 @@ describe("InspectorQuery.get — cards (FSRS scheduler)", () => {
     expect(data?.source?.id).toBe(sourceId);
     expect(data?.location?.label).toBe("Definition · ¶1");
     expect(data?.location?.selectedText).toContain("We define the intelligence");
+    // T022 — the location carries the full jump target so the renderer can open the
+    // source reader and scroll/flash the originating block with NO extra IPC.
+    expect(data?.location?.sourceElementId).toBe(sourceId);
+    expect(data?.location?.blockIds).toEqual(["blk_def_p1"]);
+    expect(data?.location?.startOffset).toBe(0);
+    expect(data?.location?.endOffset).toBe(80);
   });
 
   it("reports no retrievability for a brand-new, never-reviewed card", () => {

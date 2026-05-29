@@ -98,7 +98,7 @@ Detailed specs: [`tasks/M1-foundations.md`](./tasks/M1-foundations.md)
   Done when: highlight marks persist as document annotations and can be removed (highlights are NOT extracts).
 - [x] **T021 — Extraction** · _deps: T019, T008_ · done
   Done when: Extract creates a child `extract` element with its own document body, source reference, parent link, source location, inherited priority, and scheduled review state; the parent text is visually marked extracted.
-- [ ] **T022 — Source locations** · _deps: T021_
+- [x] **T022 — Source locations** · _deps: T021_ · done
   Done when: each extract stores source element ID, block IDs, start/end offsets, and a human-readable label; the user can jump from an extract back to the exact paragraph.
 - [ ] **T023 — Element hierarchy view** · _deps: T021, T010_
   Done when: source pages show a tree of children (extracts/sub-extracts/cards) and extract pages show parent + children; navigation works both directions.
@@ -318,6 +318,7 @@ overload management, semantic search, AI, media, reliability, scale.
 
 Record notable completions / decisions here as tasks land (newest first).
 
+- 2026-05-29 - T022 Source locations - done. Each extract now persists its source element ID, source block IDs, start/end offsets, and a human-readable label, and the user can jump from an extract back to the exact paragraph in the originating source. Source-location logic and the jump-to-source flow run through the typed `window.appApi` surface; lineage is preserved and survives app restart.
 - 2026-05-29 - T021 Extraction (keystone) - done. Extracting selected source text now creates a child `extract` element with its own document body, a source reference back to the originating source, a parent link, a persisted source location (source element ID, block IDs, start/end offsets, human-readable label), inherited priority, and a scheduled review state; the parent text is visually marked as an extracted span in the reader. Extraction is transactional, appends `operation_log` entries, preserves source lineage, and survives app restart; the renderer drives it only through the typed `window.appApi` surface (no direct DB access).
 - 2026-05-29 - T020 Highlights - done. Highlights now persist as document marks (annotations), distinct from extracts: applying "Highlight" from the selection toolbar stores a highlight mark on the underlying document and renders it in the reader, and highlights can be removed without affecting extracts. Mark logic lives in `packages/editor` (`marks/`) with unit tests; the renderer hook is `apps/web/src/pages/source/useHighlights.ts`, persistence flows through the typed `window.appApi` document surface (channels + contract + ipc + db-service + document-repository), and the renderer never touches the DB directly. Survives app restart (Playwright `tests/electron/highlights.spec.ts`).
 - 2026-05-29 - T019 Text-selection toolbar - done. Selecting text in the source reader now surfaces an inline toolbar (Extract, Cloze, Highlight, Copy, Cancel) anchored to the selection without breaking editor selection. Selection-to-source-location logic lives in `packages/editor` (`selection-location.ts`) with unit tests; the toolbar UI/positioning lives in `apps/web/src/reader/`, wired into `SourceReader.tsx`. Covered by Playwright `tests/electron/selection-toolbar.spec.ts`.

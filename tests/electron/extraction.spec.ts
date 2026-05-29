@@ -103,7 +103,12 @@ async function inspectExtract(page: Page, id: string) {
             element: { type: string; stage: string; status: string; dueAt: string | null };
             scheduler: { kind: string };
             source: { id: string } | null;
-            location: { selectedText: string; label: string | null } | null;
+            location: {
+              selectedText: string;
+              label: string | null;
+              sourceElementId: string;
+              blockIds: string[];
+            } | null;
             review: unknown | null;
           } | null;
         }>;
@@ -112,6 +117,18 @@ async function inspectExtract(page: Page, id: string) {
     const { data } = await api.inspector.get({ id: elementId });
     return data;
   }, id);
+}
+
+/**
+ * Select an extract in the inspector by clicking its lineage row (in the source's
+ * "Children" section), so the inspector shows that extract's "Source location" +
+ * "Jump to source" affordance (T022).
+ */
+async function selectExtractInInspector(page: Page, extractId: string): Promise<void> {
+  const row = page.locator(`[data-testid="lineage-row"][data-element-id="${extractId}"]`).first();
+  await expect(row).toBeVisible();
+  await row.click();
+  await expect(page.getByTestId("inspector-content")).toBeVisible();
 }
 
 /** Count `extracted_span` marks on the source body, via the bridge. */
@@ -188,6 +205,16 @@ test("extracting selected text creates a scheduled extract + lineage that surviv
   expect(extract?.element.dueAt).toBeTruthy();
   expect(Date.parse(extract?.element.dueAt ?? "")).toBeGreaterThan(Date.now());
 
+  // (b2) JUMP TO SOURCE (T022): the extract's stored location carries its source +
+  // block ids; select the extract so the inspector shows "Jump to source", click
+  // it, and the originating paragraph scrolls into view + flashes the accent ring.
+  await selectExtractInInspector(page, newExtractId as string);
+  const jumpBtn = page.getByTestId("location-jump");
+  await expect(jumpBtn).toBeVisible();
+  await jumpBtn.click();
+  await expect(page.getByText(/^Jumped to source/)).toBeVisible();
+  await expect(page.locator('.reader [data-block-id="blk_intro_p1"].jumped')).toBeVisible();
+
   // (c) RESTART: relaunch against the same data dir — the extract + lineage + mark survive.
   await app.close();
   app = await launchApp(dataDir);
@@ -201,10 +228,22 @@ test("extracting selected text creates a scheduled extract + lineage that surviv
   expect(afterRestart?.source?.id).toBe(sourceId);
   expect(afterRestart?.review).toBeNull();
   expect(afterRestart?.element.dueAt).toBeTruthy();
+  // T022 — the stored jump target (source element id + block ids + offsets) also
+  // survives the restart, so jump-back stays correct.
+  expect(afterRestart?.location?.sourceElementId).toBe(sourceId);
+  expect(afterRestart?.location?.blockIds).toContain("blk_intro_p1");
 
   // The parent still paints `.extracted` on the originating block after reopening.
   await openReader(page, sourceId);
   await expect(page.locator('.reader [data-block-id="blk_intro_p1"].extracted')).toBeVisible();
+
+  // Jump-to-source still lands on the exact paragraph after the restart (T022).
+  await selectExtractInInspector(page, newExtractId as string);
+  const jumpAfterRestart = page.getByTestId("location-jump");
+  await expect(jumpAfterRestart).toBeVisible();
+  await jumpAfterRestart.click();
+  await expect(page.getByText(/^Jumped to source/)).toBeVisible();
+  await expect(page.locator('.reader [data-block-id="blk_intro_p1"].jumped')).toBeVisible();
 
   await app.close();
 });

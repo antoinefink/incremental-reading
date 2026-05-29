@@ -33,10 +33,12 @@
 import {
   type Editor,
   jumpToReadPoint,
+  jumpToSource,
+  readerDecorationsKey,
   SourceEditor,
   setReaderDecorations,
 } from "@interleave/editor";
-import { useParams } from "@tanstack/react-router";
+import { useParams, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { requestInspectorRefresh } from "../../components/inspector/Inspector";
@@ -132,6 +134,19 @@ function SourceHeader({ data }: { data: InspectorData | null }) {
 
 export function SourceReader() {
   const { id } = useParams({ from: "/source/$id" });
+  // Jump-to-source target (T022): `?block=<stableId>&offset=<n>&n=<nonce>` set by
+  // `useNavigateToLocation` when the user clicks "Jump to source" on an extract.
+  // The source route declares no `validateSearch`, so search is loosely typed.
+  const search = useSearch({ strict: false }) as {
+    block?: string;
+    offset?: number;
+    label?: string;
+    n?: number;
+  };
+  const jumpBlock = typeof search.block === "string" ? search.block : null;
+  const jumpOffset = typeof search.offset === "number" ? search.offset : 0;
+  const jumpLabel = typeof search.label === "string" ? search.label : null;
+  const jumpNonce = search.n;
   const desktop = isDesktop();
   const { select } = useSelection();
 
@@ -315,11 +330,16 @@ export function SourceReader() {
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor || !editorReady) return;
+    // Preserve any in-flight jump-to-source flash (T022) so re-pushing the
+    // read-point/extracted/highlight inputs (e.g. on a highlight change) does not
+    // wipe the accent ring before its timer clears it.
+    const flashedBlockId = readerDecorationsKey.getState(editor.state)?.flashedBlockId ?? null;
     setReaderDecorations(editor, {
       firstUnreadBlockId: rp.firstUnreadBlockId(doc.currentDoc),
       readPointBlockId: rp.readPoint?.blockId ?? null,
       extractedBlockIds: doc.extractedBlockIds,
       highlights: hl.highlights,
+      flashedBlockId,
     });
     // Resume near the read-point exactly once per load, so reopening lands at the
     // saved block rather than the top.
@@ -336,6 +356,28 @@ export function SourceReader() {
     hl.highlights,
     editorKey,
   ]);
+
+  // Jump-to-source (T022): when arriving with a `?block=…` target (clicked "Jump
+  // to source" on an extract), scroll the originating paragraph into view and
+  // flash the kit's accent ring once the editor is ready. The editor package owns
+  // the scroll/flash (`jumpToSource`); this page only reads the param + toasts.
+  // Re-runs whenever the nonce changes so re-clicking on an already-open source
+  // re-fires the jump. Resolution is by STABLE block id (correct after edits).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: jumpNonce re-arms an intentional re-jump on an already-open source
+  useEffect(() => {
+    if (!desktop || !jumpBlock) return;
+    const editor = editorRef.current;
+    if (!editor || !editorReady) return;
+    const { result, dispose } = jumpToSource(editor, jumpBlock, { offset: jumpOffset });
+    if (result.kind === "fallback") {
+      // The originating block was edited/removed — never a dead end: the inspector
+      // still shows the stored snapshot; we just say we couldn't land precisely.
+      toast("Source location moved — showing the source");
+    } else {
+      toast(`Jumped to source${jumpLabel ? ` · ${jumpLabel}` : ""}`);
+    }
+    return dispose;
+  }, [desktop, jumpBlock, jumpOffset, jumpLabel, jumpNonce, editorReady, toast]);
 
   // Clicking a persisted highlight removes it (T020 — highlights are removable).
   // The highlight is rendered as an inline `mark.hl` ProseMirror decoration

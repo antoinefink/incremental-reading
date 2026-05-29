@@ -53,6 +53,7 @@ const BASE: ReaderDecorationState = {
   readPointBlockId: null,
   extractedBlockIds: [],
   highlights: [],
+  flashedBlockId: null,
 };
 
 /** Apply a decoration-input meta to the state (mirrors `setReaderDecorations`). */
@@ -175,5 +176,34 @@ describe("ReaderDecorations plugin", () => {
       .find()
       .filter((d) => (d as unknown as DecorationInternal).type?.attrs?.class === "hl");
     expect(inline).toHaveLength(0);
+  });
+
+  it("rings the flashed block with the `jumped` class (T022 jump-to-source)", () => {
+    const state = withInputs(buildState(DOC), { flashedBlockId: "b3" });
+    const decos = decorationsOf(state).find();
+    const jumped = decos.filter((d) =>
+      (d as unknown as DecorationInternal).type?.attrs?.class?.includes("jumped"),
+    );
+    expect(jumped).toHaveLength(1);
+    // And it carries the `data-jumped` flag for DOM-side assertions.
+    const flagged = decos.filter(
+      (d) => (d as unknown as DecorationInternal).type?.attrs?.["data-jumped"] === "true",
+    );
+    expect(flagged).toHaveLength(1);
+  });
+
+  it("clears the flash when `flashedBlockId` is reset to null", () => {
+    let state = withInputs(buildState(DOC), { flashedBlockId: "b1" });
+    expect(
+      decorationsOf(state)
+        .find()
+        .filter((d) => (d as unknown as DecorationInternal).type?.attrs?.class?.includes("jumped")),
+    ).toHaveLength(1);
+    state = withInputs(state, { flashedBlockId: null });
+    expect(
+      decorationsOf(state)
+        .find()
+        .filter((d) => (d as unknown as DecorationInternal).type?.attrs?.class?.includes("jumped")),
+    ).toHaveLength(0);
   });
 });

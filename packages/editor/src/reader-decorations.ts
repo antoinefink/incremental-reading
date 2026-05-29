@@ -65,6 +65,13 @@ export interface ReaderDecorationState {
   readonly extractedBlockIds: readonly string[];
   /** Persisted highlights to overlay as `mark.hl` inline decorations (T020). */
   readonly highlights: readonly HighlightDecoration[];
+  /**
+   * The block briefly ringed after a jump-to-source (T022). The `.jumped` node
+   * decoration draws the kit's accent ring; the host clears it after a beat via
+   * {@link flashBlock}. `null` ⇒ no flash. Rendered as a ProseMirror node
+   * decoration (not DOM mutation) so it survives the editor's own re-renders.
+   */
+  readonly flashedBlockId: string | null;
 }
 
 const EMPTY_STATE: ReaderDecorationState = {
@@ -72,6 +79,7 @@ const EMPTY_STATE: ReaderDecorationState = {
   readPointBlockId: null,
   extractedBlockIds: [],
   highlights: [],
+  flashedBlockId: null,
 };
 
 /** Plugin key carrying the latest {@link ReaderDecorationState}. */
@@ -130,13 +138,20 @@ export function createReaderDecorationsPlugin(): Plugin<ReaderDecorationState> {
           const blockId = node.attrs.blockId as string | null | undefined;
           if (typeof blockId !== "string" || blockId.length === 0) return true;
 
-          // Node decoration: extracted-span display class + read-point anchor.
+          // Node decoration: extracted-span display class + read-point anchor +
+          // the transient jump-to-source flash ring (T022).
           const classes: string[] = [];
           if (extracted.has(blockId)) classes.push("extracted");
-          const attrs: { class?: string; "data-readpoint-block"?: string } = {};
+          if (blockId === inputs.flashedBlockId) classes.push("jumped");
+          const attrs: {
+            class?: string;
+            "data-readpoint-block"?: string;
+            "data-jumped"?: string;
+          } = {};
           if (classes.length > 0) attrs.class = classes.join(" ");
           if (blockId === inputs.readPointBlockId) attrs["data-readpoint-block"] = "true";
-          if (attrs.class || attrs["data-readpoint-block"]) {
+          if (blockId === inputs.flashedBlockId) attrs["data-jumped"] = "true";
+          if (attrs.class || attrs["data-readpoint-block"] || attrs["data-jumped"]) {
             decorations.push(Decoration.node(pos, pos + node.nodeSize, attrs));
           }
 

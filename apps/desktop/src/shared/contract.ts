@@ -264,11 +264,27 @@ export interface SourceProvenance {
   readonly reasonAdded: string | null;
 }
 
-/** A precise source location (jump-to-paragraph lineage) for an extract/card. */
+/**
+ * A precise source location (jump-to-paragraph lineage) for an extract/card.
+ *
+ * Carries enough to make lineage ACTIONABLE (T022): the renderer resolves a jump
+ * target from `sourceElementId` + the ordered stable `blockIds` (+ offsets),
+ * opens that source's reader, and scrolls/flashes the originating block — no extra
+ * IPC needed (the jump target rides along on `inspector.get`). `label`/
+ * `selectedText` give the affordance a name + a never-dead-end snapshot.
+ */
 export interface LocationSummary {
   readonly label: string | null;
   readonly selectedText: string;
   readonly page: number | null;
+  /** The source element this location points INTO (the reader to open on jump). */
+  readonly sourceElementId: string;
+  /** Ordered STABLE block ids the selection spans (the scroll target is the first). */
+  readonly blockIds: readonly string[];
+  /** Char offset within the FIRST spanned block (caret target), or `null`. */
+  readonly startOffset: number | null;
+  /** Char offset within the LAST spanned block, or `null`. */
+  readonly endOffset: number | null;
 }
 
 /**

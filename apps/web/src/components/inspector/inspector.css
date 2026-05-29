@@ -327,6 +327,31 @@
   color: var(--text-3);
   font-weight: 500;
 }
+/* "Jump to source" — actionable lineage affordance (T022). */
+.insp-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--t-2xs);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border: 1px solid transparent;
+  border-radius: var(--r-full);
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease);
+}
+.insp-jump:hover {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+.insp-jump:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
 .insp-chips {
   display: flex;
   flex-wrap: wrap;
