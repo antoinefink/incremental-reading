@@ -17,6 +17,10 @@ export const IPC_CHANNELS = {
   settingsUpdateMany: "settings:updateMany",
   inspectorList: "inspector:list",
   inspectorGet: "inspector:get",
+  sourcesImportManual: "sources:importManual",
+  inboxList: "inbox:list",
+  inboxGet: "inbox:get",
+  inboxTriage: "inbox:triage",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

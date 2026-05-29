@@ -183,6 +183,79 @@ export interface InspectorGetResult {
   readonly data: InspectorData | null;
 }
 
+// ---------------------------------------------------------------------------
+// sources.importManual() / inbox.list() / inbox.get() / inbox.triage()  (T012)
+// ---------------------------------------------------------------------------
+
+/** The four coarse priority labels the UI exposes. */
+export type PriorityLabelInput = "A" | "B" | "C" | "D";
+
+/** Request to create a source in the inbox (T012; body lands with T013). */
+export interface SourcesImportManualRequest {
+  readonly title: string;
+  readonly url?: string;
+  readonly author?: string;
+  readonly publishedAt?: string;
+  readonly reasonAdded?: string;
+  readonly priority?: PriorityLabelInput;
+}
+
+/** A flat, list-row summary for one inbox source. */
+export interface InboxItemSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly status: string;
+  readonly stage: string;
+  readonly priority: number;
+  readonly title: string;
+  readonly srcType: string;
+  readonly author: string | null;
+  readonly accessedAt: string | null;
+  readonly charCount: number;
+  readonly previewSnippet: string | null;
+}
+
+export interface SourcesImportManualResult {
+  readonly id: string;
+  readonly item: InboxItemSummary;
+}
+
+export interface InboxListResult {
+  readonly items: readonly InboxItemSummary[];
+}
+
+export interface InboxGetRequest {
+  readonly id: string;
+}
+
+/** Full preview payload for one inbox item. */
+export interface InboxItemDetail {
+  readonly summary: InboxItemSummary;
+  readonly provenance: SourceProvenance;
+  readonly bodyPreview: string | null;
+}
+
+export interface InboxGetResult {
+  readonly detail: InboxItemDetail | null;
+}
+
+/** One triage action applied to an inbox source (discriminated by `kind`). */
+export type InboxTriageAction =
+  | { readonly kind: "accept" }
+  | { readonly kind: "keepForLater" }
+  | { readonly kind: "setPriority"; readonly priority: PriorityLabelInput }
+  | { readonly kind: "delete" };
+
+export interface InboxTriageRequest {
+  readonly id: string;
+  readonly action: InboxTriageAction;
+}
+
+export interface InboxTriageResult {
+  readonly item: InboxItemSummary | null;
+  readonly deleted: boolean;
+}
+
 /** The exact shape the preload exposes as `window.appApi`. */
 export interface AppApi {
   readonly app: {
@@ -200,6 +273,14 @@ export interface AppApi {
   readonly inspector: {
     list(): Promise<InspectorListResult>;
     get(request: InspectorGetRequest): Promise<InspectorGetResult>;
+  };
+  readonly sources: {
+    importManual(request: SourcesImportManualRequest): Promise<SourcesImportManualResult>;
+  };
+  readonly inbox: {
+    list(): Promise<InboxListResult>;
+    get(request: InboxGetRequest): Promise<InboxGetResult>;
+    triage(request: InboxTriageRequest): Promise<InboxTriageResult>;
   };
 }
 
@@ -261,5 +342,21 @@ export const appApi = {
   /** The full inspector payload for one element (read-only). */
   getInspectorData(request: InspectorGetRequest): Promise<InspectorGetResult> {
     return requireAppApi().inspector.get(request);
+  },
+  /** Create a source in the inbox (T012; body lands with T013). */
+  importManualSource(request: SourcesImportManualRequest): Promise<SourcesImportManualResult> {
+    return requireAppApi().sources.importManual(request);
+  },
+  /** Live inbox-status source summaries (T012). */
+  listInbox(): Promise<InboxListResult> {
+    return requireAppApi().inbox.list();
+  },
+  /** Full preview payload for one inbox item (T012). */
+  getInboxItem(request: InboxGetRequest): Promise<InboxGetResult> {
+    return requireAppApi().inbox.get(request);
+  },
+  /** Apply one triage action to an inbox source (T012). */
+  triageInboxItem(request: InboxTriageRequest): Promise<InboxTriageResult> {
+    return requireAppApi().inbox.triage(request);
   },
 } as const;

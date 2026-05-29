@@ -310,6 +310,114 @@ export interface InspectorGetResult {
 }
 
 // ---------------------------------------------------------------------------
+// sources.importManual() / inbox.list() / inbox.get() / inbox.triage()  (T012)
+// ---------------------------------------------------------------------------
+
+/**
+ * The first MUTATION surface on the bridge (T012). The renderer can create a
+ * source in the `inbox`, list/preview inbox-status sources, change their
+ * priority (A/B/C/D), accept them into active learning, keep them for later, or
+ * delete them — every action validated main-side, run in ONE transaction, and
+ * logged to `operation_log`. There is still no generic `db.query`.
+ */
+
+/** The four coarse priority labels the UI exposes (numeric mapping lives in core). */
+export const PriorityLabelSchema = z.enum(["A", "B", "C", "D"]);
+export type PriorityLabelInput = z.infer<typeof PriorityLabelSchema>;
+
+/**
+ * Create a source in the `inbox` (T012 lands title-only; T013 extends the body).
+ * `title` is required (1–512 chars); provenance fields + priority label are
+ * optional (priority defaults to `C` so new material never dominates).
+ */
+export const SourcesImportManualRequestSchema = z.object({
+  title: z.string().trim().min(1).max(512),
+  url: z.string().trim().max(2048).optional(),
+  author: z.string().trim().max(512).optional(),
+  publishedAt: z.string().trim().max(64).optional(),
+  reasonAdded: z.string().trim().max(2048).optional(),
+  /** Coarse A/B/C/D priority; mapped to a numeric value main-side. Defaults `C`. */
+  priority: PriorityLabelSchema.optional(),
+});
+export type SourcesImportManualRequest = z.infer<typeof SourcesImportManualRequestSchema>;
+
+/** A flat, list-row summary for one inbox source. */
+export interface InboxItemSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly status: string;
+  readonly stage: string;
+  /** Numeric priority `0.0`–`1.0`; the UI derives the A/B/C/D label. */
+  readonly priority: number;
+  readonly title: string;
+  /** Provenance source-type label (M2: always "Manual note"). */
+  readonly srcType: string;
+  readonly author: string | null;
+  readonly accessedAt: string | null;
+  /** Character count of the document body, if any. */
+  readonly charCount: number;
+  /** A short plain-text preview snippet (first ~160 chars), or `null`. */
+  readonly previewSnippet: string | null;
+}
+
+export interface SourcesImportManualResult {
+  /** The new source element id. */
+  readonly id: string;
+  /** The fresh inbox summary for the created source. */
+  readonly item: InboxItemSummary;
+}
+
+/** `inbox.list()` takes no arguments. */
+export const InboxListRequestSchema = z.void();
+
+export interface InboxListResult {
+  readonly items: readonly InboxItemSummary[];
+}
+
+export const InboxGetRequestSchema = z.object({
+  id: ElementIdSchema,
+});
+export type InboxGetRequest = z.infer<typeof InboxGetRequestSchema>;
+
+/** Full preview payload for one inbox item (summary + provenance + body preview). */
+export interface InboxItemDetail {
+  readonly summary: InboxItemSummary;
+  readonly provenance: SourceProvenance;
+  /** A longer plain-text body preview (first ~4000 chars), or `null`. */
+  readonly bodyPreview: string | null;
+}
+
+export interface InboxGetResult {
+  /** The inbox detail, or `null` when the id is unknown / not an inbox source. */
+  readonly detail: InboxItemDetail | null;
+}
+
+/**
+ * One triage action applied to an inbox source. A discriminated union so the
+ * main side rejects an unknown action at the boundary:
+ *  - `accept`      → status `active` (into active learning, leaves the inbox)
+ *  - `keepForLater`→ status `dismissed` (set aside, leaves the inbox)
+ *  - `setPriority` → numeric priority from the A/B/C/D label (status unchanged)
+ *  - `delete`      → soft-delete (`deletedAt` + status `deleted`)
+ */
+export const InboxTriageRequestSchema = z.object({
+  id: ElementIdSchema,
+  action: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("accept") }),
+    z.object({ kind: z.literal("keepForLater") }),
+    z.object({ kind: z.literal("setPriority"), priority: PriorityLabelSchema }),
+    z.object({ kind: z.literal("delete") }),
+  ]),
+});
+export type InboxTriageRequest = z.infer<typeof InboxTriageRequestSchema>;
+
+export interface InboxTriageResult {
+  /** The updated summary, or `{ deleted: true }` when the item was soft-deleted. */
+  readonly item: InboxItemSummary | null;
+  readonly deleted: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // The typed surface the renderer sees as `window.appApi`.
 // ---------------------------------------------------------------------------
 
@@ -342,5 +450,17 @@ export interface AppApi {
     list(): Promise<InspectorListResult>;
     /** The full inspector payload for one element (read-only). */
     get(request: InspectorGetRequest): Promise<InspectorGetResult>;
+  };
+  readonly sources: {
+    /** Create a source in the `inbox` (T012; body lands with T013). */
+    importManual(request: SourcesImportManualRequest): Promise<SourcesImportManualResult>;
+  };
+  readonly inbox: {
+    /** Inbox-status source summaries (T012). */
+    list(): Promise<InboxListResult>;
+    /** Full preview payload for one inbox item (T012). */
+    get(request: InboxGetRequest): Promise<InboxGetResult>;
+    /** Apply one triage action to a source (T012). */
+    triage(request: InboxTriageRequest): Promise<InboxTriageResult>;
   };
 }

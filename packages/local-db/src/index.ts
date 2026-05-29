@@ -33,6 +33,12 @@ export {
 } from "./element-repository";
 export { newElementId, newRowId, newSiblingGroupId, nowIso } from "./ids";
 export {
+  type InboxItemDetail,
+  type InboxItemSummary,
+  type InboxProvenance,
+  InboxQuery,
+} from "./inbox-query";
+export {
   type ElementSummary,
   type InspectorData,
   InspectorQuery,

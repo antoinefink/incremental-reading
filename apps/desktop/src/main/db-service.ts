@@ -16,12 +16,23 @@
  * through the repository seam.
  */
 
-import type { ElementId } from "@interleave/core";
+import type { ElementId, PriorityLabel } from "@interleave/core";
+import { priorityFromLabel } from "@interleave/core";
 import { type DbHandle, migrateDatabase, openDatabase } from "@interleave/db";
-import { createRepositories, InspectorQuery, type Repositories } from "@interleave/local-db";
+import {
+  createRepositories,
+  InboxQuery,
+  InspectorQuery,
+  type Repositories,
+} from "@interleave/local-db";
 import { seedDemoCollection } from "@interleave/testing";
 import type {
   DbStatus,
+  InboxGetResult,
+  InboxItemSummary,
+  InboxListResult,
+  InboxTriageRequest,
+  InboxTriageResult,
   InspectorGetResult,
   InspectorListResult,
   SettingsGetAllResult,
@@ -29,12 +40,15 @@ import type {
   SettingsUpdateManyResult,
   SettingsUpdateResult,
   SettingValue,
+  SourcesImportManualRequest,
+  SourcesImportManualResult,
 } from "../shared/contract";
 
 export class DbService {
   private handle: DbHandle | null = null;
   private repositories: Repositories | null = null;
   private inspector: InspectorQuery | null = null;
+  private inboxQuery: InboxQuery | null = null;
   private migrated = false;
 
   /** Whether the database handle is currently open. */
@@ -65,6 +79,7 @@ export class DbService {
     migrateDatabase(this.handle.db, options.migrationsDir);
     this.repositories = createRepositories(this.handle.db);
     this.inspector = new InspectorQuery(this.repositories);
+    this.inboxQuery = new InboxQuery(this.repositories);
     this.migrated = true;
   }
 
@@ -75,6 +90,7 @@ export class DbService {
     this.handle = null;
     this.repositories = null;
     this.inspector = null;
+    this.inboxQuery = null;
     this.migrated = false;
   }
 
@@ -178,6 +194,131 @@ export class DbService {
   /** The full inspector payload for one element, or `null` if unknown/deleted. */
   getInspectorData(id: string): InspectorGetResult {
     return { data: this.inspectorQuery.get(id as ElementId) };
+  }
+
+  /** Read-only inbox query layer (T012), bound to the open database. */
+  private get inbox(): InboxQuery {
+    if (!this.inboxQuery) {
+      throw new Error("DbService: database is not open");
+    }
+    return this.inboxQuery;
+  }
+
+  /**
+   * Create a source in the `inbox` (T012). The {@link SourceRepository} writes
+   * the `elements` row + the `sources` provenance row in ONE transaction and
+   * appends `create_source` + `create_element`. The A/B/C/D label maps to a
+   * numeric priority via `priorityFromLabel` (default `C`, so new material never
+   * dominates older high-value material). Returns the new id + its inbox summary.
+   */
+  importManualSource(request: SourcesImportManualRequest): SourcesImportManualResult {
+    const label: PriorityLabel = request.priority ?? "C";
+    const { element } = this.repos.sources.create({
+      title: request.title,
+      priority: priorityFromLabel(label),
+      status: "inbox",
+      stage: "raw_source",
+      url: request.url ?? null,
+      author: request.author ?? null,
+      publishedAt: request.publishedAt ?? null,
+      reasonAdded: request.reasonAdded ?? null,
+    });
+    const detail = this.inbox.get(element.id);
+    const item = detail?.summary ?? this.inbox.list().find((i) => i.id === element.id) ?? null;
+    if (!item) {
+      throw new Error("DbService.importManualSource: created source not found in inbox");
+    }
+    return { id: element.id, item };
+  }
+
+  /** Live inbox-status source summaries (T012). */
+  listInbox(): InboxListResult {
+    return { items: this.inbox.list() };
+  }
+
+  /** Full preview payload for one inbox item, or `null` (T012). */
+  getInboxItem(id: string): InboxGetResult {
+    const detail = this.inbox.get(id as ElementId);
+    if (!detail) return { detail: null };
+    return {
+      detail: {
+        summary: detail.summary,
+        provenance: {
+          elementId: detail.provenance.elementId,
+          url: detail.provenance.url,
+          author: detail.provenance.author,
+          publishedAt: detail.provenance.publishedAt,
+          accessedAt: detail.provenance.accessedAt,
+          reasonAdded: detail.provenance.reasonAdded,
+        },
+        bodyPreview: detail.bodyPreview,
+      },
+    };
+  }
+
+  /**
+   * Apply one triage action to an inbox source (T012). Each branch runs through
+   * {@link ElementRepository}, which mutates + appends the matching op in ONE
+   * transaction:
+   *  - `accept`       → `update_element` (status `active`)
+   *  - `keepForLater` → `update_element` (status `dismissed`)
+   *  - `setPriority`  → `update_element` (numeric priority from the label)
+   *  - `delete`       → `soft_delete_element` (`deletedAt` + status `deleted`)
+   */
+  triageInboxItem(request: InboxTriageRequest): InboxTriageResult {
+    const id = request.id as ElementId;
+    const { action } = request;
+    switch (action.kind) {
+      case "accept": {
+        this.repos.elements.update(id, { status: "active" });
+        break;
+      }
+      case "keepForLater": {
+        this.repos.elements.update(id, { status: "dismissed" });
+        break;
+      }
+      case "setPriority": {
+        this.repos.elements.update(id, { priority: priorityFromLabel(action.priority) });
+        break;
+      }
+      case "delete": {
+        this.repos.elements.softDelete(id);
+        return { item: null, deleted: true };
+      }
+    }
+    // After accept/keep the source leaves the inbox; after setPriority it stays.
+    // Re-read it as a fresh summary so the renderer reflects the new state.
+    const summary: InboxItemSummary | null = this.summaryForId(id);
+    return { item: summary, deleted: false };
+  }
+
+  /** A fresh inbox summary for one source id (whatever its current status), or `null`. */
+  private summaryForId(id: ElementId): InboxItemSummary | null {
+    const element = this.repos.elements.findById(id);
+    if (!element || element.deletedAt || element.type !== "source") return null;
+    const provenance = this.repos.sources.findById(id)?.source ?? null;
+    const doc = this.repos.documents.findById(id);
+    const plainText = doc?.plainText ?? "";
+    const normalized = plainText.replace(/\s+/g, " ").trim();
+    const previewSnippet =
+      normalized.length === 0
+        ? null
+        : normalized.length > 160
+          ? `${normalized.slice(0, 160).trimEnd()}…`
+          : normalized;
+    return {
+      id: element.id,
+      type: element.type,
+      status: element.status,
+      stage: element.stage,
+      priority: element.priority,
+      title: element.title,
+      srcType: "Manual note",
+      author: provenance?.author ?? null,
+      accessedAt: provenance?.accessedAt ?? null,
+      charCount: plainText.length,
+      previewSnippet,
+    };
   }
 
   /**

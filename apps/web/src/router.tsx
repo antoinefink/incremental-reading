@@ -23,6 +23,7 @@
  */
 import { createRootRoute, createRoute, createRouter, useParams } from "@tanstack/react-router";
 import { DesktopStatusPanel } from "./components/DesktopStatusPanel";
+import { InboxScreen } from "./pages/inbox/InboxScreen";
 import { Placeholder } from "./pages/Placeholder";
 import { Settings } from "./pages/Settings";
 import { Shell } from "./shell/Shell";
@@ -45,14 +46,7 @@ const indexRoute = createRoute({
 const inboxRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/inbox",
-  component: () => (
-    <Placeholder
-      routeId="inbox"
-      icon="inbox"
-      title="Inbox"
-      body="Triage freshly imported sources: keep, prioritize, accept, or discard."
-    />
-  ),
+  component: InboxScreen,
 });
 
 const queueRoute = createRoute({

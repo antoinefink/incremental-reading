@@ -17,10 +17,13 @@ import { contextBridge, ipcRenderer } from "electron";
 import { IPC_CHANNELS } from "../shared/channels";
 import type {
   AppApi,
+  InboxGetRequest,
+  InboxTriageRequest,
   InspectorGetRequest,
   SettingsGetRequest,
   SettingsUpdateManyRequest,
   SettingsUpdateRequest,
+  SourcesImportManualRequest,
 } from "../shared/contract";
 
 const appApi: AppApi = {
@@ -42,6 +45,15 @@ const appApi: AppApi = {
   inspector: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.inspectorList),
     get: (request: InspectorGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.inspectorGet, request),
+  },
+  sources: {
+    importManual: (request: SourcesImportManualRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.sourcesImportManual, request),
+  },
+  inbox: {
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.inboxList),
+    get: (request: InboxGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.inboxGet, request),
+    triage: (request: InboxTriageRequest) => ipcRenderer.invoke(IPC_CHANNELS.inboxTriage, request),
   },
 };
 

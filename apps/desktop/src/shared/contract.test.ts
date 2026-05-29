@@ -9,6 +9,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  InboxGetRequestSchema,
+  InboxTriageRequestSchema,
   InspectorGetRequestSchema,
   IPC_CHANNELS,
   SettingKeySchema,
@@ -16,10 +18,11 @@ import {
   SettingsPatchSchema,
   SettingsUpdateManyRequestSchema,
   SettingsUpdateRequestSchema,
+  SourcesImportManualRequestSchema,
 } from "./contract";
 
 describe("IPC channels", () => {
-  it("exposes exactly the M1 commands (incl. the read-only inspector + typed settings) and no generic SQL channel", () => {
+  it("exposes exactly the M1 commands plus the M2 inbox mutation surface and no generic SQL channel", () => {
     expect(Object.values(IPC_CHANNELS).sort()).toEqual(
       [
         "app:health",
@@ -30,6 +33,10 @@ describe("IPC channels", () => {
         "settings:updateMany",
         "inspector:list",
         "inspector:get",
+        "sources:importManual",
+        "inbox:list",
+        "inbox:get",
+        "inbox:triage",
       ].sort(),
     );
     expect(Object.values(IPC_CHANNELS)).not.toContain("db:query");
@@ -117,5 +124,79 @@ describe("InspectorGetRequestSchema", () => {
   it("rejects a missing or empty id", () => {
     expect(() => InspectorGetRequestSchema.parse({})).toThrow();
     expect(() => InspectorGetRequestSchema.parse({ id: "" })).toThrow();
+  });
+});
+
+describe("SourcesImportManualRequestSchema (T012)", () => {
+  it("accepts a title-only payload", () => {
+    expect(SourcesImportManualRequestSchema.parse({ title: "Hello" })).toEqual({ title: "Hello" });
+  });
+
+  it("accepts optional provenance + a priority label", () => {
+    const parsed = SourcesImportManualRequestSchema.parse({
+      title: "Article",
+      author: "Ada",
+      url: "https://example.com",
+      priority: "A",
+    });
+    expect(parsed.title).toBe("Article");
+    expect(parsed.priority).toBe("A");
+  });
+
+  it("trims the title and rejects an empty / missing one", () => {
+    expect(SourcesImportManualRequestSchema.parse({ title: "  Trimmed  " }).title).toBe("Trimmed");
+    expect(() => SourcesImportManualRequestSchema.parse({})).toThrow();
+    expect(() => SourcesImportManualRequestSchema.parse({ title: "" })).toThrow();
+    expect(() => SourcesImportManualRequestSchema.parse({ title: "   " })).toThrow();
+  });
+
+  it("rejects an over-long title and a bad priority label", () => {
+    expect(() => SourcesImportManualRequestSchema.parse({ title: "x".repeat(513) })).toThrow();
+    expect(() => SourcesImportManualRequestSchema.parse({ title: "ok", priority: "Z" })).toThrow();
+  });
+});
+
+describe("InboxGetRequestSchema (T012)", () => {
+  it("accepts a non-empty id and rejects an empty one", () => {
+    expect(InboxGetRequestSchema.parse({ id: "el_1" })).toEqual({ id: "el_1" });
+    expect(() => InboxGetRequestSchema.parse({ id: "" })).toThrow();
+  });
+});
+
+describe("InboxTriageRequestSchema (T012)", () => {
+  it("accepts each known action", () => {
+    expect(InboxTriageRequestSchema.parse({ id: "el_1", action: { kind: "accept" } })).toEqual({
+      id: "el_1",
+      action: { kind: "accept" },
+    });
+    expect(
+      InboxTriageRequestSchema.parse({ id: "el_1", action: { kind: "keepForLater" } }),
+    ).toBeTruthy();
+    expect(
+      InboxTriageRequestSchema.parse({
+        id: "el_1",
+        action: { kind: "setPriority", priority: "B" },
+      }),
+    ).toBeTruthy();
+    expect(InboxTriageRequestSchema.parse({ id: "el_1", action: { kind: "delete" } })).toBeTruthy();
+  });
+
+  it("rejects an unknown action and a bad setPriority label", () => {
+    expect(() =>
+      InboxTriageRequestSchema.parse({ id: "el_1", action: { kind: "archive" } }),
+    ).toThrow();
+    expect(() =>
+      InboxTriageRequestSchema.parse({
+        id: "el_1",
+        action: { kind: "setPriority", priority: "Z" },
+      }),
+    ).toThrow();
+    expect(() =>
+      InboxTriageRequestSchema.parse({ id: "el_1", action: { kind: "setPriority" } }),
+    ).toThrow();
+  });
+
+  it("requires an id", () => {
+    expect(() => InboxTriageRequestSchema.parse({ action: { kind: "accept" } })).toThrow();
   });
 });

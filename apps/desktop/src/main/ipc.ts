@@ -13,6 +13,9 @@ import {
   DbStatusRequestSchema,
   HealthRequestSchema,
   type HealthResult,
+  InboxGetRequestSchema,
+  InboxListRequestSchema,
+  InboxTriageRequestSchema,
   InspectorGetRequestSchema,
   InspectorListRequestSchema,
   IPC_CHANNELS,
@@ -20,6 +23,7 @@ import {
   SettingsGetRequestSchema,
   SettingsUpdateManyRequestSchema,
   SettingsUpdateRequestSchema,
+  SourcesImportManualRequestSchema,
 } from "../shared/contract";
 import type { DbService } from "./db-service";
 
@@ -74,6 +78,26 @@ export function registerIpcHandlers(dbService: DbService): () => void {
   ipcMain.handle(IPC_CHANNELS.inspectorGet, (_event, rawRequest: unknown) => {
     const request = InspectorGetRequestSchema.parse(rawRequest);
     return dbService.getInspectorData(request.id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.sourcesImportManual, (_event, rawRequest: unknown) => {
+    const request = SourcesImportManualRequestSchema.parse(rawRequest);
+    return dbService.importManualSource(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.inboxList, () => {
+    InboxListRequestSchema.parse(undefined);
+    return dbService.listInbox();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.inboxGet, (_event, rawRequest: unknown) => {
+    const request = InboxGetRequestSchema.parse(rawRequest);
+    return dbService.getInboxItem(request.id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.inboxTriage, (_event, rawRequest: unknown) => {
+    const request = InboxTriageRequestSchema.parse(rawRequest);
+    return dbService.triageInboxItem(request);
   });
 
   return () => {
