@@ -57,6 +57,11 @@ export const IPC_CHANNELS = {
   searchQuery: "search:query",
   readPointGet: "readPoint:get",
   readPointSet: "readPoint:set",
+  trashList: "trash:list",
+  trashRestore: "trash:restore",
+  trashPurge: "trash:purge",
+  trashEmpty: "trash:empty",
+  undoLast: "undo:last",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

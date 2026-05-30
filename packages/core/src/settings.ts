@@ -48,6 +48,10 @@ export type ThemePreference = (typeof THEMES)[number];
  * - `burySiblings` — when `true` (default), cards from the same extract/cloze
  *   sibling group are not shown back-to-back in a review session (read by the
  *   review session ordering, T039). Turning it off uses the natural due order.
+ * - `trashRetentionDays` — how long soft-deleted items remain recoverable in the
+ *   Trash before they can be cleaned up (T044). For M9 this is INFORMATIONAL copy
+ *   only ("recoverable for N days") + a manual "Empty trash"; auto-purge on expiry
+ *   is DEFERRED to the maintenance job (M20/T099).
  * - `keyboardLayout` — default shortcut bindings (T048).
  * - `theme` — light/dark UI preference.
  */
@@ -57,6 +61,7 @@ export interface AppSettings {
   readonly defaultTopicIntervalDays: number;
   readonly defaultSourcePriority: Priority;
   readonly burySiblings: boolean;
+  readonly trashRetentionDays: number;
   readonly keyboardLayout: KeyboardLayout;
   readonly theme: ThemePreference;
 }
@@ -71,6 +76,7 @@ export const SETTINGS_KEYS = {
   defaultTopicIntervalDays: "scheduler.defaultTopicIntervalDays",
   defaultSourcePriority: "import.defaultSourcePriority",
   burySiblings: "review.burySiblings",
+  trashRetentionDays: "trash.retentionDays",
   keyboardLayout: "ui.keyboardLayout",
   theme: "ui.theme",
 } as const satisfies Record<keyof AppSettings, string>;
@@ -86,6 +92,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   defaultTopicIntervalDays: 7,
   defaultSourcePriority: DEFAULT_PRIORITY,
   burySiblings: true,
+  trashRetentionDays: 30,
   keyboardLayout: "qwerty",
   theme: "dark",
 };
@@ -93,6 +100,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 /** Inclusive UI bounds for the daily review budget slider. */
 export const DAILY_REVIEW_BUDGET_MIN = 10;
 export const DAILY_REVIEW_BUDGET_MAX = 300;
+
+/** Inclusive bounds for the trash retention (informational for M9). */
+export const TRASH_RETENTION_DAYS_MIN = 1;
+export const TRASH_RETENTION_DAYS_MAX = 365;
 
 /** Inclusive UI bounds for desired retention (as a probability `0.0`–`1.0`). */
 export const DESIRED_RETENTION_MIN = 0.8;
@@ -153,6 +164,12 @@ export function coerceSettingValue<K extends keyof AppSettings>(
       return (isFiniteNumber(raw) ? clamp01(raw) : fallback) as AppSettings[K];
     case "burySiblings":
       return (typeof raw === "boolean" ? raw : fallback) as AppSettings[K];
+    case "trashRetentionDays":
+      return (
+        isFiniteNumber(raw) && raw > 0
+          ? clampInt(raw, TRASH_RETENTION_DAYS_MIN, TRASH_RETENTION_DAYS_MAX)
+          : fallback
+      ) as AppSettings[K];
     case "keyboardLayout":
       return (isKeyboardLayout(raw) ? raw : fallback) as AppSettings[K];
     case "theme":
@@ -186,6 +203,10 @@ export function appSettingsFromStored(stored: Readonly<Record<string, unknown>>)
       stored[SETTINGS_KEYS.defaultSourcePriority],
     ),
     burySiblings: coerceSettingValue("burySiblings", stored[SETTINGS_KEYS.burySiblings]),
+    trashRetentionDays: coerceSettingValue(
+      "trashRetentionDays",
+      stored[SETTINGS_KEYS.trashRetentionDays],
+    ),
     keyboardLayout: coerceSettingValue("keyboardLayout", stored[SETTINGS_KEYS.keyboardLayout]),
     theme: coerceSettingValue("theme", stored[SETTINGS_KEYS.theme]),
   };

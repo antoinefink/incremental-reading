@@ -81,6 +81,8 @@ export interface AppSettings {
   readonly defaultSourcePriority: number;
   /** When `true` (default), sibling cards aren't shown back-to-back in review (T039). */
   readonly burySiblings: boolean;
+  /** How long soft-deleted items remain recoverable in the Trash (informational, T044). */
+  readonly trashRetentionDays: number;
   readonly keyboardLayout: KeyboardLayout;
   readonly theme: ThemePreference;
 }
@@ -1179,6 +1181,55 @@ export interface SearchQueryResult {
   readonly results: readonly SearchResult[];
 }
 
+// ---------------------------------------------------------------------------
+// trash.* / undo.*  (T044 — deletion, trash & undo)
+// ---------------------------------------------------------------------------
+
+/** A flat trash row for the Trash view. */
+export interface TrashItemSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly title: string;
+  readonly deletedAt: string;
+  /** The status the element had BEFORE delete (what restore returns it to). */
+  readonly originStatus: string;
+  readonly sourceTitle: string | null;
+}
+
+export interface TrashListResult {
+  readonly items: readonly TrashItemSummary[];
+}
+
+export interface TrashRestoreRequest {
+  readonly id: string;
+}
+
+export interface TrashRestoreResult {
+  readonly item: ElementSummary | null;
+}
+
+export interface TrashPurgeRequest {
+  readonly id: string;
+}
+
+export interface TrashPurgeResult {
+  readonly purged: number;
+}
+
+export interface TrashEmptyResult {
+  readonly purged: number;
+}
+
+/** The outcome of `undo.last()` — the general command-level undo. */
+export interface UndoLastResult {
+  readonly undone: boolean;
+  readonly opType: string | null;
+  readonly elementId: string | null;
+  readonly label: string;
+  readonly reason?: string;
+  readonly count: number;
+}
+
 /** The exact shape the preload exposes as `window.appApi`. */
 export interface AppApi {
   readonly app: {
@@ -1266,6 +1317,15 @@ export interface AppApi {
   readonly readPoints: {
     get(request: ReadPointGetRequest): Promise<ReadPointGetResult>;
     set(request: ReadPointSetRequest): Promise<ReadPointSetResult>;
+  };
+  readonly trash: {
+    list(): Promise<TrashListResult>;
+    restore(request: TrashRestoreRequest): Promise<TrashRestoreResult>;
+    purge(request: TrashPurgeRequest): Promise<TrashPurgeResult>;
+    empty(): Promise<TrashEmptyResult>;
+  };
+  readonly undo: {
+    last(): Promise<UndoLastResult>;
   };
 }
 
@@ -1537,5 +1597,29 @@ export const appApi = {
   /** Upsert an element's read-point; logs `set_read_point` (T017). */
   setReadPoint(request: ReadPointSetRequest): Promise<ReadPointSetResult> {
     return requireAppApi().readPoints.set(request);
+  },
+  /** Every soft-deleted element with its origin context (T044). Read-only. */
+  listTrash(): Promise<TrashListResult> {
+    return requireAppApi().trash.list();
+  },
+  /** Restore a soft-deleted element to its prior status; logs `restore_element` (T044). */
+  restoreFromTrash(request: TrashRestoreRequest): Promise<TrashRestoreResult> {
+    return requireAppApi().trash.restore(request);
+  },
+  /** PERMANENTLY delete one trashed element — the only hard delete (T044). UI-confirmed. */
+  purgeFromTrash(request: TrashPurgeRequest): Promise<TrashPurgeResult> {
+    return requireAppApi().trash.purge(request);
+  },
+  /** PERMANENTLY delete every trashed element in one transaction (T044). UI-confirmed. */
+  emptyTrash(): Promise<TrashEmptyResult> {
+    return requireAppApi().trash.empty();
+  },
+  /**
+   * Reverse the MOST-RECENT operation from anywhere (T044) — delete / mark-done /
+   * suspend / bulk-postpone. The inverse runs through the existing write paths and
+   * is itself logged (no new op type).
+   */
+  undoLast(): Promise<UndoLastResult> {
+    return requireAppApi().undo.last();
   },
 } as const;

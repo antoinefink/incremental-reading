@@ -104,6 +104,11 @@ describe("IPC channels", () => {
         "search:query",
         "readPoint:get",
         "readPoint:set",
+        "trash:list",
+        "trash:restore",
+        "trash:purge",
+        "trash:empty",
+        "undo:last",
       ].sort(),
     );
     expect(Object.values(IPC_CHANNELS)).not.toContain("db:query");

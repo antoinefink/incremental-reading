@@ -38,7 +38,7 @@ import {
   SourceEditor,
   setReaderDecorations,
 } from "@interleave/editor";
-import { useParams, useSearch } from "@tanstack/react-router";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { requestInspectorRefresh } from "../../components/inspector/Inspector";
@@ -151,6 +151,20 @@ export function SourceReader() {
   const jumpNonce = search.n;
   const desktop = isDesktop();
   const { select } = useSelection();
+  const navigate = useNavigate();
+
+  /**
+   * Soft-delete this source (T044) — moves it to the Trash (recoverable). Routes
+   * through the typed `queue.act` delete path (`soft_delete_element`, recoverable),
+   * the SAME mutation the queue uses, so no new write path is invented; the renderer
+   * never touches SQLite. Accidental deletion is recoverable from `/trash` or via the
+   * shell's global ⌘Z undo. After deleting we leave the (now-trashed) reader.
+   */
+  const deleteSource = useCallback(async () => {
+    if (!isDesktop()) return;
+    await appApi.actOnQueueItem({ id, action: { kind: "delete" } });
+    void navigate({ to: "/queue" });
+  }, [id, navigate]);
 
   const doc = useDocument(id);
   const rp = useReadPoint(id);
@@ -568,10 +582,11 @@ export function SourceReader() {
           <button
             type="button"
             className="reader-btn reader-btn--danger reader-btn--icon"
-            disabled
-            title="Trash + undo land in M9 (T044)"
+            disabled={!desktop}
+            title="Delete source (recoverable from Trash · ⌘Z to undo)"
             aria-label="Delete source"
             data-testid="reader-delete"
+            onClick={() => void deleteSource()}
           >
             <Icon name="trash" size={14} />
           </button>

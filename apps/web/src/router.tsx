@@ -35,6 +35,7 @@ import { SourceReader } from "./pages/source/SourceReader";
 import { ExtractView } from "./reader/ExtractView";
 import { ReviewScreen } from "./review/ReviewScreen";
 import { Shell } from "./shell/Shell";
+import { TrashScreen } from "./trash/TrashScreen";
 
 const rootRoute = createRootRoute({ component: Shell });
 
@@ -128,6 +129,19 @@ const searchRoute = createRoute({
   component: LibraryScreen,
 });
 
+/**
+ * Trash view (T044) — soft-deleted elements collect here and can be restored (to
+ * their prior lifecycle status, lineage intact) or permanently deleted with
+ * confirmation. Reads `appApi.listTrash()` (read-only) and drives Restore / Purge /
+ * Empty + the general undo through the typed `window.appApi.trash`/`undo` surface;
+ * the renderer holds no soft-delete or restore logic (it lives in `packages/local-db`).
+ */
+const trashRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/trash",
+  component: TrashScreen,
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
@@ -163,6 +177,7 @@ const routeTree = rootRoute.addChildren([
   reviewRoute,
   leechCleanupRoute,
   searchRoute,
+  trashRoute,
   settingsRoute,
 ]);
 

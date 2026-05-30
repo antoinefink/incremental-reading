@@ -345,6 +345,7 @@ describe("DbService", () => {
       defaultTopicIntervalDays: 30,
       defaultSourcePriority: 0.875,
       burySiblings: false,
+      trashRetentionDays: 30,
       keyboardLayout: "dvorak",
       theme: "light",
     });
@@ -1731,6 +1732,80 @@ describe("DbService — source reference (T043)", () => {
     expect(ref?.sourceElementId).toBeNull();
     expect(ref?.snippet).toBeTruthy();
 
+    svc.close();
+  });
+});
+
+describe("DbService — trash & undo (T044)", () => {
+  it("lists trashed elements, restores them to the prior status, and survives reopen", () => {
+    const first = new DbService();
+    first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const { id } = first.importManualSource({ title: "Disposable note", priority: "C" });
+    // Move it to active, then delete it (origin status should be `active`).
+    first.repos.elements.update(id as never, { status: "active" });
+    first.repos.elements.softDelete(id as never);
+
+    let trash = first.listTrash();
+    expect(trash.items).toHaveLength(1);
+    expect(trash.items[0]?.id).toBe(id);
+    expect(trash.items[0]?.originStatus).toBe("active");
+    first.close();
+
+    // Reopen the SAME file — the trash list persists (the unit-level restart check).
+    const second = new DbService();
+    second.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    trash = second.listTrash();
+    expect(trash.items).toHaveLength(1);
+
+    const restored = second.restoreFromTrash({ id });
+    expect(restored.item?.status).toBe("active");
+    expect(second.listTrash().items).toHaveLength(0);
+    second.close();
+  });
+
+  it("purges and empties the trash (the only hard delete)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const a = svc.importManualSource({ title: "One" }).id;
+    const b = svc.importManualSource({ title: "Two" }).id;
+    svc.repos.elements.softDelete(a as never);
+    svc.repos.elements.softDelete(b as never);
+    expect(svc.listTrash().items).toHaveLength(2);
+
+    expect(svc.purgeFromTrash({ id: a }).purged).toBe(1);
+    expect(svc.listTrash().items).toHaveLength(1);
+    // The element is truly gone (hard delete).
+    expect(svc.repos.elements.findById(a as never)).toBeNull();
+
+    expect(svc.emptyTrash().purged).toBe(1);
+    expect(svc.listTrash().items).toHaveLength(0);
+    svc.close();
+  });
+
+  it("undoLastOperation reverses the last op (delete → restore) from anywhere", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const { id } = svc.importManualSource({ title: "Undo me", priority: "B" });
+    svc.repos.elements.update(id as never, { status: "active" });
+    svc.repos.elements.softDelete(id as never);
+    expect(svc.repos.elements.findById(id as never)?.deletedAt).not.toBeNull();
+
+    const res = svc.undoLastOperation();
+    expect(res.undone).toBe(true);
+    expect(res.opType).toBe("soft_delete_element");
+    expect(svc.repos.elements.findById(id as never)?.deletedAt).toBeNull();
+    expect(svc.repos.elements.findById(id as never)?.status).toBe("active");
+    svc.close();
+  });
+
+  it("undoLastOperation returns { undone: false } on a non-invertible last op", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    // A bare create leaves `create_element` as the last op — not inverted by the MVP.
+    svc.importManualSource({ title: "Just created" });
+    const res = svc.undoLastOperation();
+    expect(res.undone).toBe(false);
+    expect(res.reason).toBeTruthy();
     svc.close();
   });
 });

@@ -47,6 +47,7 @@ export {
   type AddRelationInput,
   type CreateElementInput,
   ElementRepository,
+  type OpContext,
   type UpdateElementInput,
 } from "./element-repository";
 export {
@@ -144,7 +145,9 @@ export {
   type SourceWithDocument,
   type SourceWithElement,
 } from "./source-repository";
+export { type TrashItem, TrashRepository } from "./trash-query";
 export type { DbClient, TransactionClient } from "./types";
+export { type UndoResult, UndoService } from "./undo-service";
 
 /**
  * A bag of all nine repositories bound to one Drizzle client. The Electron DB
@@ -161,6 +164,8 @@ export interface Repositories {
   readonly assets: import("./asset-repository").AssetRepository;
   readonly settings: import("./settings-repository").SettingsRepository;
   readonly operationLog: import("./operation-log-repository").OperationLogRepository;
+  /** The Trash view's read + terminal hard-delete (T044). */
+  readonly trash: import("./trash-query").TrashRepository;
 }
 
 import type { InterleaveDatabase } from "@interleave/db";
@@ -174,6 +179,7 @@ import { ReviewRepository } from "./review-repository";
 import { SearchRepository } from "./search-repository";
 import { SettingsRepository } from "./settings-repository";
 import { SourceRepository } from "./source-repository";
+import { TrashRepository } from "./trash-query";
 
 /**
  * Build all repositories against one Drizzle client. Called by the Electron
@@ -191,5 +197,6 @@ export function createRepositories(db: InterleaveDatabase): Repositories {
     assets: new AssetRepository(db),
     settings: new SettingsRepository(db),
     operationLog: new OperationLogRepository(db),
+    trash: new TrashRepository(db),
   };
 }

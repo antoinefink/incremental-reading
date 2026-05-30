@@ -27,6 +27,7 @@ const FALLBACK_SETTINGS: AppSettings = {
   defaultTopicIntervalDays: 7,
   defaultSourcePriority: 0.375,
   burySiblings: true,
+  trashRetentionDays: 30,
   keyboardLayout: "qwerty",
   theme: "dark",
 };

@@ -35,6 +35,7 @@ describe("AppSettings defaults", () => {
       defaultTopicIntervalDays: "scheduler.defaultTopicIntervalDays",
       defaultSourcePriority: "import.defaultSourcePriority",
       burySiblings: "review.burySiblings",
+      trashRetentionDays: "trash.retentionDays",
       keyboardLayout: "ui.keyboardLayout",
       theme: "ui.theme",
     });
@@ -95,6 +96,18 @@ describe("coerceSettingValue", () => {
     expect(coerceSettingValue("burySiblings", 0)).toBe(DEFAULT_APP_SETTINGS.burySiblings);
     expect(coerceSettingValue("burySiblings", undefined)).toBe(DEFAULT_APP_SETTINGS.burySiblings);
   });
+
+  it("clamps + rounds the trash retention days into range (T044)", () => {
+    expect(coerceSettingValue("trashRetentionDays", 30)).toBe(30);
+    expect(coerceSettingValue("trashRetentionDays", 9999)).toBe(365);
+    expect(coerceSettingValue("trashRetentionDays", 0)).toBe(
+      DEFAULT_APP_SETTINGS.trashRetentionDays,
+    );
+    expect(coerceSettingValue("trashRetentionDays", 14.6)).toBe(15);
+    expect(coerceSettingValue("trashRetentionDays", "nope")).toBe(
+      DEFAULT_APP_SETTINGS.trashRetentionDays,
+    );
+  });
 });
 
 describe("type guards", () => {
@@ -117,6 +130,7 @@ describe("stored ↔ model round-trip", () => {
       [SETTINGS_KEYS.defaultTopicIntervalDays]: 30,
       [SETTINGS_KEYS.defaultSourcePriority]: 0.625,
       [SETTINGS_KEYS.burySiblings]: false,
+      [SETTINGS_KEYS.trashRetentionDays]: 14,
       [SETTINGS_KEYS.keyboardLayout]: "dvorak",
       [SETTINGS_KEYS.theme]: "light",
     };
@@ -126,6 +140,7 @@ describe("stored ↔ model round-trip", () => {
       defaultTopicIntervalDays: 30,
       defaultSourcePriority: 0.625,
       burySiblings: false,
+      trashRetentionDays: 14,
       keyboardLayout: "dvorak",
       theme: "light",
     });
@@ -146,6 +161,7 @@ describe("stored ↔ model round-trip", () => {
       defaultTopicIntervalDays: 3,
       defaultSourcePriority: 0.375,
       burySiblings: false,
+      trashRetentionDays: 7,
       keyboardLayout: "vim" as const,
       theme: "light" as const,
     };

@@ -124,15 +124,23 @@ export class SchedulerService {
     id: ElementId,
     action: SchedulerAction,
     now: IsoTimestamp = nowIso(),
+    /**
+     * When set, recorded in the `reschedule_element` op payload so a BULK action's
+     * N rows (e.g. bulk-postpone) share one batch id and undo as one (T044). The
+     * closed op set is unchanged — this only enriches the payload.
+     */
+    batchId?: string,
   ): ScheduleResult {
     const element = this.requireAttentionElement(id);
     const priorPostpones = this.countPostpones(id);
     const decision = nextDueAt(this.toSchedulable(element, action), now);
     return this.db.transaction((tx) => {
-      const opExtras =
-        action === "postpone"
+      const opExtras = {
+        ...(action === "postpone"
           ? { postpone: true, postponeCount: priorPostpones + 1, action }
-          : { action };
+          : { action }),
+        ...(batchId ? { batchId } : {}),
+      };
       const rescheduled = this.elements.rescheduleWithin(
         tx,
         id,

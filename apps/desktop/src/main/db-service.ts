@@ -55,6 +55,7 @@ import {
   type ReviewOutcome,
   ReviewSessionService,
   resolveSourceRef,
+  UndoService,
 } from "@interleave/local-db";
 import { type IntervalPreview, SchedulerService } from "@interleave/scheduler";
 import { seedDemoCollection } from "@interleave/testing";
@@ -149,6 +150,13 @@ import type {
   TagsListResult,
   TagsRemoveRequest,
   TagsRemoveResult,
+  TrashEmptyResult,
+  TrashListResult,
+  TrashPurgeRequest,
+  TrashPurgeResult,
+  TrashRestoreRequest,
+  TrashRestoreResult,
+  UndoLastResult,
 } from "../shared/contract";
 
 export class DbService {
@@ -165,6 +173,7 @@ export class DbService {
   private cardEditService: CardEditService | null = null;
   private reviewSession: ReviewSessionService | null = null;
   private scheduler: SchedulerService | null = null;
+  private undoService: UndoService | null = null;
   private migrated = false;
 
   /** Whether the database handle is currently open. */
@@ -213,6 +222,9 @@ export class DbService {
     this.scheduler = new SchedulerService({
       desiredRetention: this.repositories.settings.getAppSettings().defaultDesiredRetention,
     });
+    // The general, command-level undo (T044): inverts the last operation_log op via
+    // the existing repository write paths. Distinct from the queue's recipe undo (T030).
+    this.undoService = new UndoService(this.handle.db);
     this.migrated = true;
   }
 
@@ -233,6 +245,7 @@ export class DbService {
     this.cardEditService = null;
     this.reviewSession = null;
     this.scheduler = null;
+    this.undoService = null;
     this.migrated = false;
   }
 
@@ -1620,6 +1633,103 @@ export class DbService {
     });
     return {
       readPoint: { blockId: saved.blockId, offset: saved.offset, updatedAt: saved.updatedAt },
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Deletion, trash & undo (T044)
+  // -------------------------------------------------------------------------
+
+  /** The general command-level undo service (T044), bound to the open database. */
+  private get undo(): UndoService {
+    if (!this.undoService) {
+      throw new Error("DbService: database is not open");
+    }
+    return this.undoService;
+  }
+
+  /**
+   * List every soft-deleted element for the Trash view (T044) via the
+   * {@link TrashRepository}: newest-deleted first, each with its type, owning-source
+   * title, deletion time, and the status it had BEFORE delete (what restore returns
+   * it to). Read-only — no mutation, no `operation_log`.
+   */
+  listTrash(): TrashListResult {
+    const items = this.repos.trash.listTrash().map((it) => ({
+      id: it.element.id,
+      type: it.element.type,
+      title: it.element.title,
+      deletedAt: it.deletedAt,
+      originStatus: it.originStatus,
+      sourceTitle: it.sourceTitle,
+    }));
+    return { items };
+  }
+
+  /**
+   * Restore a soft-deleted element to its prior lifecycle status (T044) via
+   * {@link ElementRepository.restore} (`restore_element`, one transaction, lineage
+   * intact). The prior status comes from the latest `soft_delete_element` op's
+   * pre-image. Returns the restored summary so the renderer drops the row from the
+   * trash; `null` when the id is unknown or the element is not in the trash.
+   */
+  restoreFromTrash(request: TrashRestoreRequest): TrashRestoreResult {
+    const id = request.id as ElementId;
+    const element = this.repos.elements.findById(id);
+    if (!element?.deletedAt) return { item: null };
+    // Reuse the trash read's origin-status resolution so restore returns it to where
+    // it was (the same source of truth the Trash list shows).
+    const trashItem = this.repos.trash.listTrash().find((it) => it.element.id === id);
+    const originStatus = trashItem?.originStatus ?? "active";
+    const restored = this.repos.elements.restore(id, originStatus);
+    return {
+      item: {
+        id: restored.id,
+        type: restored.type,
+        status: restored.status,
+        stage: restored.stage,
+        priority: restored.priority,
+        title: restored.title,
+        dueAt: restored.dueAt,
+      },
+    };
+  }
+
+  /**
+   * Permanently delete ONE trashed element (T044) — the only hard delete in the
+   * app, gated behind explicit UI confirmation — via {@link TrashRepository.purge}.
+   * FK cascades + the FTS5 delete trigger clean up dependents; appends no op
+   * (irreversible by design). Returns `{ purged: 1 }` or `{ purged: 0 }`.
+   */
+  purgeFromTrash(request: TrashPurgeRequest): TrashPurgeResult {
+    const purged = this.repos.trash.purge(request.id as ElementId) ? 1 : 0;
+    return { purged };
+  }
+
+  /**
+   * Permanently delete EVERY trashed element in one transaction (T044, the "Empty
+   * trash" action) via {@link TrashRepository.emptyTrash}. UI-confirmed.
+   */
+  emptyTrash(): TrashEmptyResult {
+    return this.repos.trash.emptyTrash();
+  }
+
+  /**
+   * Reverse the MOST-RECENT operation from anywhere (T044) via {@link UndoService}:
+   * delete → restore, mark-done/dismiss/suspend → prior status, postpone (incl.
+   * bulk) → prior schedule. The inverse runs through the existing repository write
+   * paths and is itself logged (no new op type). A non-invertible last op returns
+   * `{ undone: false }` and mutates nothing.
+   */
+  undoLastOperation(): UndoLastResult {
+    const result = this.undo.undoLast();
+    return {
+      undone: result.undone,
+      opType: result.opType,
+      elementId: result.elementId,
+      label: result.label,
+      ...(result.reason ? { reason: result.reason } : {}),
+      count: result.count,
     };
   }
 

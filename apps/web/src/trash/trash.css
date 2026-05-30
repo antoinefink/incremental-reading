@@ -1,0 +1,194 @@
+/**
+ * Trash view styles (T044).
+ *
+ * Rebuilt from the design kit's `TrashScreen` (`design/kit/app/screen-extra.jsx`):
+ * a centered ~760px column of dimmed result rows with Restore + permanent-delete
+ * per row, an "Empty trash" head action, and an empty state. Driven entirely by the
+ * design tokens (no hard-coded colors). UI only.
+ */
+
+.trash-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 100%;
+  overflow-y: auto;
+}
+
+.trash-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-4, 16px);
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: var(--s-6, 24px) var(--s-6, 24px) var(--s-3, 12px);
+}
+.trash-title {
+  font-size: var(--t-xl, 22px);
+  font-weight: 650;
+  color: var(--text-1);
+}
+.trash-sub {
+  margin-top: 4px;
+  font-size: var(--t-sm, 13px);
+  color: var(--text-2);
+}
+
+.trash-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-sm, 13px);
+  color: var(--text-2);
+}
+
+.trash-error {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 4px var(--s-6, 24px);
+  font-size: var(--t-sm, 13px);
+  color: var(--danger, #e5484d);
+}
+.trash-loading {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: var(--s-4, 16px) var(--s-6, 24px);
+  font-size: var(--t-sm, 13px);
+  color: var(--text-3);
+}
+
+.trash-list {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: var(--s-3, 12px) var(--s-6, 24px) var(--s-6, 24px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg, 12px);
+  background: var(--surface);
+  overflow: hidden;
+  margin-bottom: var(--s-6, 24px);
+}
+
+.trash-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3, 12px);
+  padding: 12px 4px;
+}
+.trash-row + .trash-row {
+  border-top: 1px solid var(--border-faint, var(--border));
+}
+.trash-row__icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-md, 8px);
+  border: 1px solid var(--border);
+  color: var(--text-3);
+  background: var(--surface-2, var(--surface));
+}
+.trash-row__body {
+  min-width: 0;
+  flex: 1;
+}
+.trash-row__title {
+  font-size: var(--t-md, 15px);
+  font-weight: 550;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trash-row__meta {
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: var(--t-2xs, 11px);
+  color: var(--text-3);
+}
+.trash-row__type {
+  text-transform: capitalize;
+}
+.trash-row__dot {
+  color: var(--text-4, var(--text-3));
+}
+.trash-row__actions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trash-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-sm, 13px);
+  font-weight: 500;
+  color: var(--text-1);
+  padding: 6px 10px;
+  border-radius: var(--r-md, 8px);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+}
+.trash-btn:hover:not(:disabled) {
+  background: var(--surface-2, var(--surface));
+  border-color: var(--border-strong, var(--border));
+}
+.trash-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.trash-btn--icon {
+  padding: 6px;
+}
+.trash-btn--danger {
+  color: var(--danger, #e5484d);
+  border-color: color-mix(in oklch, var(--danger, #e5484d) 40%, var(--border));
+}
+.trash-btn--danger:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--danger, #e5484d) 12%, var(--surface));
+}
+
+.trash-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  max-width: 480px;
+  margin: auto;
+  padding: var(--s-8, 48px) var(--s-6, 24px);
+}
+.trash-empty__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  color: var(--text-3);
+  background: var(--surface);
+  margin-bottom: 6px;
+}
+.trash-empty__title {
+  font-size: var(--t-lg, 18px);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.trash-empty__body {
+  font-size: var(--t-sm, 13px);
+  color: var(--text-2);
+  line-height: 1.5;
+}

@@ -58,6 +58,8 @@ import type {
   SourcesImportManualRequest,
   TagsAddRequest,
   TagsRemoveRequest,
+  TrashPurgeRequest,
+  TrashRestoreRequest,
 } from "../shared/contract";
 
 const appApi: AppApi = {
@@ -168,6 +170,16 @@ const appApi: AppApi = {
   readPoints: {
     get: (request: ReadPointGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.readPointGet, request),
     set: (request: ReadPointSetRequest) => ipcRenderer.invoke(IPC_CHANNELS.readPointSet, request),
+  },
+  trash: {
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.trashList),
+    restore: (request: TrashRestoreRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.trashRestore, request),
+    purge: (request: TrashPurgeRequest) => ipcRenderer.invoke(IPC_CHANNELS.trashPurge, request),
+    empty: () => ipcRenderer.invoke(IPC_CHANNELS.trashEmpty),
+  },
+  undo: {
+    last: () => ipcRenderer.invoke(IPC_CHANNELS.undoLast),
   },
 };
 

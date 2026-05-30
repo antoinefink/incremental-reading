@@ -60,6 +60,11 @@ import {
   TagsAddRequestSchema,
   TagsListRequestSchema,
   TagsRemoveRequestSchema,
+  TrashEmptyRequestSchema,
+  TrashListRequestSchema,
+  TrashPurgeRequestSchema,
+  TrashRestoreRequestSchema,
+  UndoLastRequestSchema,
 } from "../shared/contract";
 import type { DbService } from "./db-service";
 
@@ -314,6 +319,31 @@ export function registerIpcHandlers(dbService: DbService): () => void {
   ipcMain.handle(IPC_CHANNELS.readPointSet, (_event, rawRequest: unknown) => {
     const request = ReadPointSetRequestSchema.parse(rawRequest);
     return dbService.setReadPoint(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.trashList, () => {
+    TrashListRequestSchema.parse(undefined);
+    return dbService.listTrash();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.trashRestore, (_event, rawRequest: unknown) => {
+    const request = TrashRestoreRequestSchema.parse(rawRequest);
+    return dbService.restoreFromTrash(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.trashPurge, (_event, rawRequest: unknown) => {
+    const request = TrashPurgeRequestSchema.parse(rawRequest);
+    return dbService.purgeFromTrash(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.trashEmpty, () => {
+    TrashEmptyRequestSchema.parse(undefined);
+    return dbService.emptyTrash();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.undoLast, () => {
+    UndoLastRequestSchema.parse(undefined);
+    return dbService.undoLastOperation();
   });
 
   return () => {

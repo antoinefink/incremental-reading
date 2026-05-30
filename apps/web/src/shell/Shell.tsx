@@ -26,12 +26,13 @@ import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-route
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { Inspector } from "../components/inspector/Inspector";
+import { Snackbar } from "../components/Snackbar";
 import { appApi, isDesktop } from "../lib/appApi";
 import { toggleTheme as applyToggleTheme, getStoredTheme, type Theme } from "../theme";
 import { CheatSheet } from "./CheatSheet";
 import { CommandPalette } from "./CommandPalette";
 import { Kbd } from "./Kbd";
-import { type NavItem, PRIMARY_NAV, SECONDARY_NAV } from "./nav";
+import { type NavItem, PRIMARY_NAV, SECONDARY_NAV, UNDO_EVENT } from "./nav";
 import { SelectionProvider } from "./selection";
 import "./shell.css";
 import { useShellShortcuts } from "./useShellShortcuts";
@@ -237,9 +238,34 @@ export function Shell() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [cheatOpen, setCheatOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => getStoredTheme());
+  const [undoToast, setUndoToast] = useState<string | null>(null);
 
   const onNavigate = (to: string) => {
     void navigate({ to });
+  };
+
+  /**
+   * General command-level undo (T044) — ⌘Z reverses the LAST `operation_log` op from
+   * anywhere (delete / mark-done / suspend / bulk-postpone) through
+   * `appApi.undo.last()`. The main process applies the inverse (itself logged); we
+   * toast the result label and dispatch `UNDO_EVENT` so the active screen re-reads
+   * its data. No domain logic lives here — the inverse is computed main-side.
+   */
+  const onUndo = () => {
+    if (!isDesktop()) return;
+    void appApi
+      .undoLast()
+      .then((res) => {
+        if (res.undone) {
+          setUndoToast(res.label || "Undid last change");
+          window.dispatchEvent(new CustomEvent(UNDO_EVENT));
+        } else {
+          setUndoToast(res.reason ?? "Nothing to undo");
+        }
+      })
+      .catch((e: unknown) => {
+        setUndoToast(e instanceof Error ? e.message : "Undo failed");
+      });
   };
 
   const onToggleTheme = () => {
@@ -258,6 +284,7 @@ export function Shell() {
     toggleCommandPalette: () => setCommandOpen((o) => !o),
     toggleCheatSheet: () => setCheatOpen((o) => !o),
     onNavigate,
+    onUndo,
   });
 
   return (
@@ -286,6 +313,12 @@ export function Shell() {
           onNavigate={onNavigate}
         />
         <CheatSheet open={cheatOpen} onClose={() => setCheatOpen(false)} />
+        {/* Global undo toast (T044) — confirms the ⌘Z command-level undo. */}
+        <Snackbar
+          message={undoToast}
+          onClose={() => setUndoToast(null)}
+          testId="shell-undo-snackbar"
+        />
       </div>
     </SelectionProvider>
   );

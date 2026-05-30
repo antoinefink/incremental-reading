@@ -162,6 +162,7 @@ export const SettingsPatchSchema = z
     defaultTopicIntervalDays: z.number().int().positive(),
     defaultSourcePriority: z.number().min(0).max(1),
     burySiblings: z.boolean(),
+    trashRetentionDays: z.number().int().positive(),
     keyboardLayout: z.enum(KEYBOARD_LAYOUTS),
     theme: z.enum(THEMES),
   })
@@ -1874,6 +1875,111 @@ export interface SearchQueryResult {
 }
 
 // ---------------------------------------------------------------------------
+// trash.list() / trash.restore() / trash.purge() / trash.empty()  (T044)
+// ---------------------------------------------------------------------------
+
+/**
+ * The Trash surface (T044). Soft-delete already happens everywhere
+ * (`soft_delete_element`); these commands READ the trashed rows and RESTORE or
+ * PERMANENTLY delete them. The MAIN process runs the `TrashRepository`:
+ *
+ *  - `list`    → every soft-deleted element (newest-deleted first) with its type,
+ *    owning-source title, deletion time, and the status it had BEFORE delete.
+ *    Read-only.
+ *  - `restore` → `ElementRepository.restore(id, originStatus)` brings it back to
+ *    its prior lifecycle status with lineage intact; logs `restore_element`.
+ *  - `purge`   → the ONLY hard `DELETE` in the app (FK cascades + the FTS5 trigger
+ *    clean up dependents); appends no op (irreversible by design). UI-confirmed.
+ *  - `empty`   → purge every trashed element in one transaction. UI-confirmed.
+ *
+ * There is still no generic `db.query`.
+ */
+
+/** A flat, JSON-serializable trash row for the Trash view. */
+export interface TrashItemSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly title: string;
+  /** ISO-8601 deletion time. */
+  readonly deletedAt: string;
+  /** The status the element had BEFORE delete (what restore returns it to). */
+  readonly originStatus: string;
+  /** The owning source's title for the "from {source}" line, or `null`. */
+  readonly sourceTitle: string | null;
+}
+
+/** `trash.list()` takes no arguments. */
+export const TrashListRequestSchema = z.void();
+
+export interface TrashListResult {
+  readonly items: readonly TrashItemSummary[];
+}
+
+export const TrashRestoreRequestSchema = z.object({
+  /** The soft-deleted element id to restore. */
+  id: ElementIdSchema,
+});
+export type TrashRestoreRequest = z.infer<typeof TrashRestoreRequestSchema>;
+
+export interface TrashRestoreResult {
+  /** The restored element summary, or `null` when the id is unknown. */
+  readonly item: ElementSummary | null;
+}
+
+export const TrashPurgeRequestSchema = z.object({
+  /** The soft-deleted element id to PERMANENTLY delete (UI-confirmed). */
+  id: ElementIdSchema,
+});
+export type TrashPurgeRequest = z.infer<typeof TrashPurgeRequestSchema>;
+
+export interface TrashPurgeResult {
+  /** `1` when the element was hard-deleted, `0` when the id was unknown. */
+  readonly purged: number;
+}
+
+/** `trash.empty()` takes no arguments (UI-confirmed before calling). */
+export const TrashEmptyRequestSchema = z.void();
+
+export interface TrashEmptyResult {
+  /** How many elements were permanently deleted. */
+  readonly purged: number;
+}
+
+// ---------------------------------------------------------------------------
+// undo.last()  (T044 — the general, command-level undo)
+// ---------------------------------------------------------------------------
+
+/**
+ * The general command-level undo (T044) — distinct from the queue's removing-only
+ * recipe undo (T030). It reverses the MOST-RECENT `operation_log` op from ANYWHERE
+ * (reader, review, inspector, trash, bulk actions) by applying its inverse through
+ * the existing repository write paths in the MAIN process (`UndoService.undoLast`).
+ * It adds NO op type — the inverse is one of the closed 15 and is itself logged, so
+ * the log stays append-only. Covered set = delete / mark-done / suspend /
+ * bulk-postpone (`soft_delete_element` / `update_element` / `reschedule_element`,
+ * plus `restore_element` for redo). A non-invertible last op returns
+ * `{ undone: false }` and mutates nothing. There is still no generic `db.query`.
+ */
+
+/** `undo.last()` takes no arguments. */
+export const UndoLastRequestSchema = z.void();
+
+export interface UndoLastResult {
+  /** Whether anything was undone (`false` when the last op is non-invertible). */
+  readonly undone: boolean;
+  /** The op type that was inverted (or the un-invertible last op's type), or `null`. */
+  readonly opType: string | null;
+  /** The element the undo concerned, or `null`. */
+  readonly elementId: string | null;
+  /** A human label for the snackbar ("Restored 'Spaced repetition'"), or `""`. */
+  readonly label: string;
+  /** Why nothing was undone, when `undone` is `false`. */
+  readonly reason?: string;
+  /** How many ops were reversed (>1 for a bulk batch). */
+  readonly count: number;
+}
+
+// ---------------------------------------------------------------------------
 // The typed surface the renderer sees as `window.appApi`.
 // ---------------------------------------------------------------------------
 
@@ -2081,5 +2187,23 @@ export interface AppApi {
     get(request: ReadPointGetRequest): Promise<ReadPointGetResult>;
     /** Upsert an element's read-point; logs `set_read_point` (T017). */
     set(request: ReadPointSetRequest): Promise<ReadPointSetResult>;
+  };
+  readonly trash: {
+    /** Every soft-deleted element with its origin context (T044). Read-only. */
+    list(): Promise<TrashListResult>;
+    /** Restore a soft-deleted element to its prior status; logs `restore_element` (T044). */
+    restore(request: TrashRestoreRequest): Promise<TrashRestoreResult>;
+    /** PERMANENTLY delete one trashed element — the only hard delete (T044). UI-confirmed. */
+    purge(request: TrashPurgeRequest): Promise<TrashPurgeResult>;
+    /** PERMANENTLY delete every trashed element in one transaction (T044). UI-confirmed. */
+    empty(): Promise<TrashEmptyResult>;
+  };
+  readonly undo: {
+    /**
+     * Reverse the MOST-RECENT operation from anywhere (T044) — delete / mark-done /
+     * suspend / bulk-postpone — by applying its inverse through the existing write
+     * paths. The inverse is one of the closed 15 ops and is itself logged.
+     */
+    last(): Promise<UndoLastResult>;
   };
 }

@@ -19,6 +19,7 @@ const VALID_ROUTES = new Set([
   "/review",
   "/maintenance/leeches",
   "/search",
+  "/trash",
   "/settings",
 ]);
 
@@ -35,6 +36,7 @@ describe("shell nav config", () => {
       "Concepts",
       "Analytics",
       "Leeches",
+      "Trash",
       "Settings",
     ]);
   });

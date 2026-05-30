@@ -73,6 +73,22 @@ export interface UpdateElementInput {
   readonly dueAt?: IsoTimestamp | null;
 }
 
+/**
+ * Optional command-context extras merged into a mutation's `operation_log`
+ * payload WITHOUT growing the closed op set (T044). These enrich the existing
+ * `update_element`/`reschedule_element` payloads so command-level undo can apply
+ * an EXACT inverse, and so a bulk action's N rows can be undone as one batch:
+ *  - `batchId` groups the N rows of a single bulk action (e.g. bulk-postpone), so
+ *    `UndoService.undoLast` reverses every op that shares the most-recent op's id.
+ *
+ * `updateWithin`/`rescheduleWithin` additionally record a `prev` pre-image of the
+ * changed fields automatically — the caller never supplies it.
+ */
+export interface OpContext {
+  /** Groups the ops of one bulk action so undo reverses the whole batch. */
+  readonly batchId?: string;
+}
+
 export class ElementRepository {
   constructor(private readonly db: InterleaveDatabase) {}
 
@@ -174,8 +190,8 @@ export class ElementRepository {
   }
 
   /** Apply a patch + log `update_element`, atomically. Returns the new row. */
-  update(id: ElementId, patch: UpdateElementInput): Element {
-    return this.db.transaction((tx) => this.updateWithin(tx, id, patch));
+  update(id: ElementId, patch: UpdateElementInput, opContext?: OpContext): Element {
+    return this.db.transaction((tx) => this.updateWithin(tx, id, patch, opContext));
   }
 
   /**
@@ -195,8 +211,30 @@ export class ElementRepository {
    * SAME `tx`. The tx-composable seam {@link ExtractService} (T024) uses to move an
    * extract's stage AND reschedule it in ONE transaction (stage update +
    * reschedule + both op rows commit together).
+   *
+   * The `update_element` op payload is enriched (T044) with a `prev` PRE-IMAGE of
+   * exactly the fields being patched (read BEFORE the write), so command-level undo
+   * can re-apply the prior values for an EXACT inverse (re-applying logs another
+   * `update_element`). This is a payload enrichment within the closed op set — NOT a
+   * new op type and NOT a schema migration. `opContext.batchId` (when set) is also
+   * recorded so a bulk action's N rows undo as one batch.
    */
-  updateWithin(tx: DbClient, id: ElementId, patch: UpdateElementInput): Element {
+  updateWithin(
+    tx: DbClient,
+    id: ElementId,
+    patch: UpdateElementInput,
+    opContext?: OpContext,
+  ): Element {
+    // Read the PRE-IMAGE before mutating so undo can restore the exact prior values.
+    const before = tx.select().from(elements).where(eq(elements.id, id)).get();
+    if (!before) throw new Error(`ElementRepository.update: element ${id} not found`);
+    const prev: Record<string, unknown> = {};
+    if (patch.status !== undefined) prev.status = before.status;
+    if (patch.stage !== undefined) prev.stage = before.stage;
+    if (patch.priority !== undefined) prev.priority = before.priority;
+    if (patch.title !== undefined) prev.title = before.title;
+    if (patch.dueAt !== undefined) prev.dueAt = before.dueAt;
+
     const updatedAt = nowIso();
     const set: Record<string, unknown> = { updatedAt };
     if (patch.status !== undefined) set.status = patch.status;
@@ -211,7 +249,12 @@ export class ElementRepository {
     new OperationLogRepository(tx).append(tx, {
       opType: "update_element",
       elementId: id,
-      payload: { id, patch },
+      payload: {
+        id,
+        patch,
+        prev,
+        ...(opContext?.batchId ? { batchId: opContext.batchId } : {}),
+      },
     });
     return rowToElement(row);
   }
@@ -231,6 +274,13 @@ export class ElementRepository {
    * `pending` → `scheduled` when an extract gets its first attention due date). The
    * tx-composable seam {@link ExtractionService} (T021) uses to give a new extract
    * its initial attention `due_at` inside the single extraction transaction.
+   *
+   * The `reschedule_element` op payload is enriched (T044) with a PRE-IMAGE
+   * (`prevDueAt`/`prevStatus`, read BEFORE the write) so command-level undo can
+   * restore the prior schedule for an EXACT inverse (covers postpone, incl.
+   * bulk-postpone). Re-applying logs another `reschedule_element`. This is a payload
+   * enrichment within the closed op set — NOT a new op type. A `batchId` in
+   * `opExtras` (when set) groups a bulk action's N rows so undo reverses them as one.
    */
   rescheduleWithin(
     tx: DbClient,
@@ -245,6 +295,12 @@ export class ElementRepository {
      */
     opExtras?: Readonly<Record<string, unknown>>,
   ): Element {
+    // Read the PRE-IMAGE before mutating so undo can restore the exact prior schedule.
+    const before = tx.select().from(elements).where(eq(elements.id, id)).get();
+    if (!before) throw new Error(`ElementRepository.reschedule: element ${id} not found`);
+    const prevDueAt = before.dueAt;
+    const prevStatus = before.status;
+
     const updatedAt = nowIso();
     const set: Record<string, unknown> = { dueAt, updatedAt };
     if (status !== undefined) set.status = status;
@@ -254,7 +310,14 @@ export class ElementRepository {
     new OperationLogRepository(tx).append(tx, {
       opType: "reschedule_element",
       elementId: id,
-      payload: { id, dueAt, ...(status !== undefined ? { status } : {}), ...(opExtras ?? {}) },
+      payload: {
+        id,
+        dueAt,
+        ...(status !== undefined ? { status } : {}),
+        prevDueAt,
+        prevStatus,
+        ...(opExtras ?? {}),
+      },
     });
     return rowToElement(row);
   }
@@ -266,6 +329,11 @@ export class ElementRepository {
    */
   softDelete(id: ElementId): Element {
     return this.db.transaction((tx) => {
+      // Capture the PRE-IMAGE status so the Trash view + undo can restore the
+      // element to where it was (the op payload is the undo/origin source of truth).
+      const before = tx.select().from(elements).where(eq(elements.id, id)).get();
+      if (!before) throw new Error(`ElementRepository.softDelete: element ${id} not found`);
+      const prevStatus = before.status;
       const ts = nowIso();
       tx.update(elements)
         .set({ deletedAt: ts, status: "deleted", updatedAt: ts })
@@ -276,7 +344,7 @@ export class ElementRepository {
       new OperationLogRepository(tx).append(tx, {
         opType: "soft_delete_element",
         elementId: id,
-        payload: { id, deletedAt: ts },
+        payload: { id, deletedAt: ts, prev: { status: prevStatus } },
       });
       return rowToElement(row);
     });

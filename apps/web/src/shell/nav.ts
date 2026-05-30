@@ -45,6 +45,8 @@ export const SECONDARY_NAV: readonly NavItem[] = [
   // The leech cleanup view (T040) — maintenance for repeatedly-failing cards. Lives
   // under the "Organize" group until the full M9 analytics/maintenance screen lands.
   { id: "leeches", label: "Leeches", icon: "leech", to: "/maintenance/leeches" },
+  // The Trash view (T044) — soft-deleted elements, recoverable via Restore + undo.
+  { id: "trash", label: "Trash", icon: "trash", to: "/trash" },
   { id: "settings", label: "Settings", icon: "settings", to: "/settings" },
 ];
 
@@ -68,6 +70,13 @@ export type CommandItem = {
 
 /** CustomEvent name the inbox listens for to open its New-source modal (⌘K). */
 export const NEW_SOURCE_EVENT = "interleave:new-source";
+
+/**
+ * CustomEvent name the shell dispatches after a successful global undo (⌘Z, T044)
+ * so the active screen can re-read its data (the mutation reverted main-side). The
+ * detail is `undefined`; listeners just re-fetch.
+ */
+export const UNDO_EVENT = "interleave:undo";
 
 /**
  * ⌘K catalogue — mirrors the kit's CMDK_ITEMS. "Create"/"Session" entries land
@@ -128,6 +137,7 @@ export const CHEAT_SHEET: readonly CheatGroup[] = [
     group: "Navigation",
     rows: [
       ["Command palette", ["⌘", "K"]],
+      ["Undo last action", ["⌘", "Z"]],
       ["Go to Queue", ["G", "Q"]],
       ["Go to Review", ["G", "R"]],
       ["Go to Library", ["G", "L"]],

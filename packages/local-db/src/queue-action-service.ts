@@ -34,7 +34,7 @@ import type { InterleaveDatabase } from "@interleave/db";
 import { reviewStates } from "@interleave/db";
 import { eq } from "drizzle-orm";
 import { ElementRepository } from "./element-repository";
-import { nowIso } from "./ids";
+import { newRowId, nowIso } from "./ids";
 import { ReviewRepository } from "./review-repository";
 import { SchedulerService } from "./scheduler-service";
 
@@ -115,18 +115,45 @@ export class QueueActionService {
    * `review_states.due_at` forward (a thin M5 defer — full FSRS grading is M7); any
    * other (attention) item reschedules further out on the attention scheduler. The
    * row remains in the system (not removed) but recedes from the due set.
+   *
+   * `batchId` (when set) is recorded in the `reschedule_element` op payload so a
+   * BULK postpone's rows undo as one batch (T044).
    */
-  private postpone(element: Element, now: IsoTimestamp): QueueActionResult {
+  private postpone(element: Element, now: IsoTimestamp, batchId?: string): QueueActionResult {
     if (element.type === "card") {
-      const deferred = this.deferCard(element.id, now);
+      const deferred = this.deferCard(element.id, now, batchId);
       return { element: deferred, removed: false, undo: null };
     }
     const { element: rescheduled } = this.scheduler.rescheduleForAction(
       element.id,
       "postpone",
       now,
+      batchId,
     );
     return { element: rescheduled, removed: false, undo: null };
+  }
+
+  /**
+   * Postpone MANY due rows as ONE undoable bulk action (T044). Every row's
+   * `reschedule_element` op shares a freshly-minted `batchId`, so the general
+   * command-level undo (`UndoService.undoLast`) reverses the WHOLE batch in one
+   * call (each row's prior `dueAt`/`status` was captured in its op pre-image). Each
+   * row still postpones through the SAME per-row path (the two schedulers stay
+   * separate); a missing/deleted id is skipped. Returns the post-action elements +
+   * the shared `batchId`.
+   */
+  bulkPostpone(
+    ids: readonly ElementId[],
+    now: IsoTimestamp = nowIso(),
+  ): { readonly elements: Element[]; readonly batchId: string } {
+    const batchId = newRowId();
+    const results: Element[] = [];
+    for (const id of ids) {
+      const element = this.elements.findById(id);
+      if (!element || element.deletedAt) continue;
+      results.push(this.postpone(element, now, batchId).element);
+    }
+    return { elements: results, batchId };
   }
 
   /**
@@ -139,7 +166,7 @@ export class QueueActionService {
    *
    * TODO(T036/M7): replace this thin defer with FSRS grade-driven rescheduling.
    */
-  private deferCard(id: ElementId, now: IsoTimestamp): Element {
+  private deferCard(id: ElementId, now: IsoTimestamp, batchId?: string): Element {
     const state = this.review.findReviewState(id);
     const base = state?.dueAt ? Date.parse(state.dueAt) : Date.parse(now);
     const from = Number.isNaN(base) ? Date.parse(now) : Math.max(base, Date.parse(now));
@@ -151,6 +178,7 @@ export class QueueActionService {
       return this.elements.rescheduleWithin(tx, id, nextDue, "scheduled", {
         postpone: true,
         cardDefer: true,
+        ...(batchId ? { batchId } : {}),
       });
     });
   }
