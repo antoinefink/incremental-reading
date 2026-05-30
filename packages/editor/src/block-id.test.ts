@@ -91,7 +91,7 @@ describe("fillMissingBlockIds — strictly additive", () => {
     expect(fillMissingBlockIds(state, counterMinter())).toBeUndefined();
   });
 
-  it("assigns ids to list items (granularity) but not list containers", () => {
+  it("assigns ONE id per list row — on the listItem, NOT its inner paragraph or the container", () => {
     const json = {
       type: "doc",
       content: [
@@ -104,13 +104,62 @@ describe("fillMissingBlockIds — strictly additive", () => {
         },
       ],
     };
-    const filled = fillOnce(json) as { content: { type: string; attrs?: { blockId?: string } }[] };
-    // The container carries no blockId; its items + their paragraphs do.
+    const filled = fillOnce(json) as {
+      content: {
+        type: string;
+        attrs?: { blockId?: string | null };
+        content?: { type: string; attrs?: { blockId?: string | null }; content?: unknown }[];
+      }[];
+    };
+    // The container carries no blockId (no string id).
     expect(filled.content[0]?.type).toBe("bulletList");
-    expect(filled.content[0]?.attrs?.blockId).toBeUndefined();
+    expect(typeof filled.content[0]?.attrs?.blockId).not.toBe("string");
+    // Each list ITEM carries an id; its inner PARAGRAPH does NOT (one id per row).
+    const items = filled.content[0]?.content ?? [];
+    expect(items).toHaveLength(2);
+    for (const item of items) {
+      expect(item.type).toBe("listItem");
+      expect(typeof item.attrs?.blockId).toBe("string");
+      const innerPara = (
+        item.content as { type: string; attrs?: { blockId?: string | null } }[]
+      )?.[0];
+      expect(innerPara?.type).toBe("paragraph");
+      // The inner paragraph carries NO string id (its attr is null, never minted).
+      expect(typeof innerPara?.attrs?.blockId).not.toBe("string");
+    }
+    // The persistence transform emits exactly one block per row (the listItem),
+    // never a duplicate inner-paragraph anchor and never the container.
     const inputs = toBlockInputs(filled);
-    expect(inputs.some((b) => b.blockType === "listItem")).toBe(true);
-    expect(inputs.some((b) => b.blockType === "bulletList")).toBe(false);
+    expect(inputs.map((b) => b.blockType)).toEqual(["listItem", "listItem"]);
+  });
+
+  it("assigns ONE id to a blockquote, NOT to its inner paragraphs (one id per row)", () => {
+    const json = {
+      type: "doc",
+      content: [
+        {
+          type: "blockquote",
+          content: [PARA("first quoted line"), PARA("second quoted line")],
+        },
+      ],
+    };
+    const filled = fillOnce(json) as {
+      content: {
+        type: string;
+        attrs?: { blockId?: string | null };
+        content?: { type: string; attrs?: { blockId?: string | null } }[];
+      }[];
+    };
+    const quote = filled.content[0];
+    expect(quote?.type).toBe("blockquote");
+    expect(typeof quote?.attrs?.blockId).toBe("string");
+    // Neither inner paragraph carries a string id — the row's single id is on the quote.
+    for (const para of quote?.content ?? []) {
+      expect(para.type).toBe("paragraph");
+      expect(typeof para.attrs?.blockId).not.toBe("string");
+    }
+    // The transform emits exactly one block (the blockquote), no duplicates.
+    expect(toBlockInputs(filled).map((b) => b.blockType)).toEqual(["blockquote"]);
   });
 
   it("re-mints a same-document duplicate id but keeps the first occurrence", () => {

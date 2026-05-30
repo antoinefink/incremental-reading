@@ -27,14 +27,14 @@
  */
 
 import type { Editor } from "@tiptap/core";
-import { BLOCK_ID_DOM_ATTR, BLOCK_ID_NODE_TYPES } from "./block-id";
+import type { Node as PmModelNode } from "@tiptap/pm/model";
+import { blockOffsetToPos, shouldCarryBlockId } from "./block-id";
+import { buildBlockSelector } from "./css-selector";
 import {
   type ReaderDecorationState,
   readerDecorationsKey,
   setReaderDecorations,
 } from "./reader-decorations";
-
-const BLOCK_ID_NODE_SET = new Set<string>(BLOCK_ID_NODE_TYPES);
 
 /** How long the jump flash ring lingers before it clears (ms). */
 export const JUMP_FLASH_MS = 1800;
@@ -56,14 +56,24 @@ export type JumpToSourceResult =
   | { readonly kind: "jumped"; readonly blockId: string; readonly offset: number }
   | { readonly kind: "fallback"; readonly reason: "missing-block" };
 
-/** Locate a block by its stable id; returns its absolute position + text length, or `null`. */
-function findBlock(editor: Editor, blockId: string): { pos: number; textLen: number } | null {
-  let target: { pos: number; textLen: number } | null = null;
-  editor.state.doc.descendants((node, pos) => {
+/**
+ * Locate a block by its stable id; returns the block node + its absolute start
+ * position + its text length, or `null`. {@link scrollBlockIntoView} maps the
+ * stored TEXT-content offset back to an absolute position through `blockOffsetToPos`
+ * (the inverse of the mapping read-point/selection offsets are stored through), so
+ * an `offset` lands on the right character even inside a nested list item / quote
+ * or a block with multiple text runs.
+ */
+function findBlock(
+  editor: Editor,
+  blockId: string,
+): { node: PmModelNode; pos: number; textLen: number } | null {
+  let target: { node: PmModelNode; pos: number; textLen: number } | null = null;
+  editor.state.doc.descendants((node, pos, parent) => {
     if (target) return false;
-    if (!BLOCK_ID_NODE_SET.has(node.type.name)) return true;
+    if (!shouldCarryBlockId(node.type.name, parent?.type.name)) return true;
     if ((node.attrs.blockId as string | null) === blockId) {
-      target = { pos, textLen: node.textContent.length };
+      target = { node, pos, textLen: node.textContent.length };
       return false;
     }
     return true;
@@ -90,14 +100,16 @@ export function scrollBlockIntoView(
     return { kind: "fallback", reason: "missing-block" };
   }
 
-  const { pos, textLen } = target;
+  const { node, pos, textLen } = target;
   const clampedOffset = Math.max(0, Math.min(offset, textLen));
-  // +1 steps inside the block node to its text; add the clamped char offset.
-  editor.commands.setTextSelection(pos + 1 + clampedOffset);
+  // `blockOffsetToPos` walks the block's text runs (inserting the inter-run
+  // tokens) to map the TEXT-content offset back to the right absolute position,
+  // even inside a wrapping block or a block with multiple text runs.
+  editor.commands.setTextSelection(blockOffsetToPos(node, pos, clampedOffset));
 
   if (scroll && typeof document !== "undefined") {
     const dom = editor.view.dom as HTMLElement;
-    const el = dom.querySelector<HTMLElement>(`[${BLOCK_ID_DOM_ATTR}="${cssEscape(blockId)}"]`);
+    const el = dom.querySelector<HTMLElement>(buildBlockSelector(blockId));
     el?.scrollIntoView({ behavior: "auto", block });
   }
   return { kind: "jumped", blockId, offset: clampedOffset };
@@ -156,11 +168,4 @@ export function jumpToSource(
   // a no-op when the block isn't rendered (the node decoration simply finds no node).
   const dispose = flashBlock(editor, blockId, options.flashMs);
   return { result, dispose };
-}
-
-/** Escape a value for use inside a CSS attribute selector (ids are ULIDs, but be safe). */
-function cssEscape(value: string): string {
-  const cssApi = (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS;
-  if (cssApi?.escape) return cssApi.escape(value);
-  return value.replace(/["\\]/g, "\\$&");
 }

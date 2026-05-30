@@ -32,9 +32,7 @@ import type { Editor } from "@tiptap/core";
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import { BLOCK_ID_NODE_TYPES } from "./block-id";
-
-const BLOCK_ID_NODE_SET = new Set<string>(BLOCK_ID_NODE_TYPES);
+import { blockOffsetToPos, shouldCarryBlockId } from "./block-id";
 
 /**
  * One persisted highlight to overlay (T020): a STABLE block id + the
@@ -156,8 +154,12 @@ export function createReaderDecorationsPlugin(): Plugin<ReaderDecorationState> {
         }
         const decorations: Decoration[] = [];
 
-        editorState.doc.descendants((node, pos) => {
-          if (!BLOCK_ID_NODE_SET.has(node.type.name)) return true;
+        editorState.doc.descendants((node, pos, parent) => {
+          // Only the OUTERMOST row block carries the row's id; skip an inner
+          // paragraph of a list item / blockquote so a row's highlight / extracted
+          // / processed decoration renders exactly ONCE (never two overlapping
+          // `<mark>`s over the same text).
+          if (!shouldCarryBlockId(node.type.name, parent?.type.name)) return true;
           const blockId = node.attrs.blockId as string | null | undefined;
           if (typeof blockId !== "string" || blockId.length === 0) return true;
 
@@ -197,12 +199,16 @@ export function createReaderDecorationsPlugin(): Plugin<ReaderDecorationState> {
           }
 
           // Inline decorations: persisted highlights for this block, mapped from
-          // block-relative `[start,end]` offsets onto absolute document positions.
-          // The block's text starts at `pos + 1` (step inside the block node); we
-          // clamp to the block's text length so a stale range can never run past it.
+          // block-relative `[start,end]` TEXT-content offsets onto absolute
+          // document positions via `blockOffsetToPos` — the inverse of the
+          // `posToBlockOffset` the offsets were stored through. It walks the
+          // block's text runs and inserts the inter-run tokens, so a highlight in
+          // the SECOND paragraph of a multi-paragraph blockquote / list item lands
+          // on the right characters (a single fixed base would shift it by the
+          // inter-run token count). It clamps to the block's text length too, so a
+          // stale range can never run past the block.
           const blockHighlights = highlightsByBlock.get(blockId);
           if (blockHighlights) {
-            const textStart = pos + 1;
             const textLen = node.textContent.length;
             for (const hl of blockHighlights) {
               const start = Math.max(0, Math.min(hl.start, textLen));
@@ -210,8 +216,8 @@ export function createReaderDecorationsPlugin(): Plugin<ReaderDecorationState> {
               if (end <= start) continue;
               decorations.push(
                 Decoration.inline(
-                  textStart + start,
-                  textStart + end,
+                  blockOffsetToPos(node, pos, start),
+                  blockOffsetToPos(node, pos, end),
                   // `nodeName: "mark"` wraps the range in `<mark class="hl">`
                   // (matching the design kit) instead of the default `<span>`.
                   { nodeName: "mark", class: "hl", "data-mark-id": hl.markId },

@@ -23,6 +23,7 @@ export {
   BlockId,
   type BlockIdOptions,
   fillMissingBlockIds,
+  shouldCarryBlockId,
 } from "./block-id";
 export { type BlockIdMinter, newBlockId } from "./block-ids";
 export { blockIdsOf, type DocumentBlockInput, toBlockInputs } from "./blocks";
@@ -36,6 +37,22 @@ export {
   jumpToSource,
   scrollBlockIntoView,
 } from "./jump-to-source";
+// Mark extensions (Highlight / ProcessedSpan / Cloze) — SCHEMA-COMPLETENESS /
+// TEST-ONLY FIXTURES, *not* part of the active editor surface.
+//
+// The live app does NOT install these in `SourceEditor` or the reader: highlights
+// (T020), processed spans (T026), and cloze deletions (T034) are persisted as
+// `document_marks` rows keyed by stable block id + range (cloze: `cards.cloze`
+// numbered text), and rendered as ProseMirror *decorations* (see
+// `reader-decorations.ts`) — never as inline marks stored in the document JSON.
+// Keeping them out of the body keeps marks out of the extraction substrate and
+// lets them re-anchor by block id after a re-import. These three `Mark.create`
+// extensions + their set/toggle/unset commands exist only so the `mark.hl` /
+// `mark.dimmed` / `span.cloze` shapes are first-class, individually unit-testable
+// parts of the schema and so a future in-body command (should one ever be wanted)
+// has a real Tiptap entry point. Do not assume installing them is required for the
+// running reader/editor — it is not.
+//
 // Cloze mark (T034): the cloze-deletion span on a CARD body (`span.cloze`,
 // carrying a `clozeIndex` attr). Reuses the T020 mark surface with
 // `markType: "cloze"`; the canonical source of truth is `cards.cloze` numbered text.
@@ -44,9 +61,9 @@ export {
   CLOZE_MARK_NAME,
   Cloze,
 } from "./marks/cloze";
-// Document marks (T020 →): highlight (and, later, processed-span) Tiptap marks +
-// commands. Marks are applied through these commands, never DOM surgery; the
-// canonical persistence is a `document_marks` row keyed by stable block id + range.
+// Highlight mark (T020): renders `<mark class="hl">`. See the test-only fixture
+// note above — the canonical persistence is a `document_marks` row keyed by stable
+// block id + range, rendered as an inline decoration, not this stored body mark.
 export {
   HIGHLIGHT_MARK_CLASS,
   HIGHLIGHT_MARK_NAME,
@@ -56,6 +73,7 @@ export {
 // user can declutter a long source WITHOUT deleting content. Reversible; persisted
 // as a `processed_span` `document_marks` row (reusing the T020 mark surface), kept
 // strictly separate from highlight (`mark.hl`) and extracted-span (`mark.extracted`).
+// See the test-only fixture note above.
 export {
   PROCESSED_MARK_CLASS,
   PROCESSED_MARK_NAME,

@@ -65,6 +65,28 @@ describe("parseCloze", () => {
     expect(model.clozeCount).toBe(2);
   });
 
+  it("numbers a bare marker that PRECEDES a numbered one above the explicit index", () => {
+    // Documented, deliberate ordering caveat: explicit numbers win, so a bare
+    // marker before `c1` takes the next index above maxSeen (c2) rather than c1 —
+    // the visually-first deletion gets the HIGHER number. Pin it so the behavior
+    // is intentional, not accidental, and round-trips cleanly.
+    const model = parseCloze("{{a}} {{c1::b}}");
+    expect(model.raw).toBe("{{c2::a}} {{c1::b}}");
+    expect(model.clozeCount).toBe(2);
+    expect(model.deletions.map((d) => d.index)).toEqual([2, 1]);
+    // Round-trips to the same canonical text (idempotent re-parse).
+    expect(canonicalizeCloze(model.raw)).toBe("{{c2::a}} {{c1::b}}");
+  });
+
+  it("leaves gaps below maxSeen unused when a bare marker precedes a high explicit index", () => {
+    // `{{a}}` before `c5` becomes c6 (above maxSeen=5), leaving c1..c4 free —
+    // surprising but intentional and consistent; numbering explicitly is the fix
+    // when ordering matters.
+    const model = parseCloze("{{a}} {{c5::b}}");
+    expect(model.raw).toBe("{{c6::a}} {{c5::b}}");
+    expect(model.deletions.map((d) => d.index)).toEqual([6, 5]);
+  });
+
   it("drops malformed / empty markers", () => {
     const model = parseCloze("Empty {{}} and blank {{   }} and ok {{c1::real}}.");
     expect(model.clozeCount).toBe(1);

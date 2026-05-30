@@ -18,7 +18,7 @@
  */
 
 import type { BlockId } from "@interleave/core";
-import { BLOCK_ID_NODE_TYPES } from "./block-id";
+import { shouldCarryBlockId } from "./block-id";
 
 /** One stable block to persist — mirrors `local-db`'s `DocumentBlockInput`. */
 export interface DocumentBlockInput {
@@ -37,25 +37,29 @@ interface PmNode {
   readonly content?: readonly PmNode[];
 }
 
-const BLOCK_ID_NODE_SET = new Set<string>(BLOCK_ID_NODE_TYPES);
-
 /**
  * Derive the ordered, stable-id block list from a ProseMirror document JSON.
  *
- * Visits nodes depth-first in document order; for each block-level node that
- * carries a non-empty `blockId`, emits a descriptor with its type, sequential
- * `order`, and the existing id. Blocks without a `blockId` are skipped (the
- * editor's filler assigns ids before any real save, so this only guards against
- * a raw/un-editor-processed doc). The result feeds `DocumentRepository.upsert`.
+ * Visits nodes depth-first in document order; for each block-level node that is
+ * the OUTERMOST block of its row (see {@link shouldCarryBlockId}) and carries a
+ * non-empty `blockId`, emits a descriptor with its type, sequential `order`, and
+ * the existing id. A block nested directly inside another id-bearing block — the
+ * inner paragraph of a `listItem` / `blockquote` — is intentionally NOT emitted,
+ * so a list row / quote contributes exactly ONE block (its container), matching
+ * the minting side and keeping `document_blocks` free of duplicate row anchors
+ * even if a legacy/imported doc carried a stray inner id. Blocks without a
+ * `blockId` are skipped (the editor's filler assigns ids before any real save, so
+ * this only guards against a raw/un-editor-processed doc). The result feeds
+ * `DocumentRepository.upsert`.
  */
 export function toBlockInputs(doc: unknown): DocumentBlockInput[] {
   const out: DocumentBlockInput[] = [];
   if (!doc || typeof doc !== "object") return out;
 
   let order = 0;
-  const visit = (node: PmNode): void => {
+  const visit = (node: PmNode, parentType?: string): void => {
     const type = node.type ?? "";
-    if (BLOCK_ID_NODE_SET.has(type)) {
+    if (shouldCarryBlockId(type, parentType)) {
       const id = node.attrs?.blockId;
       if (typeof id === "string" && id.length > 0) {
         out.push({ blockType: type, order, stableBlockId: id as BlockId });
@@ -63,7 +67,7 @@ export function toBlockInputs(doc: unknown): DocumentBlockInput[] {
       }
     }
     if (node.content) {
-      for (const child of node.content) visit(child);
+      for (const child of node.content) visit(child, type);
     }
   };
 

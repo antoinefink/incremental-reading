@@ -43,7 +43,11 @@ describe("toBlockInputs", () => {
     ]);
   });
 
-  it("descends into lists, emitting list ITEMS (not containers)", () => {
+  it("emits ONE block per list row (the listItem) — not the container, not the inner paragraph", () => {
+    // Note: this fixture carries a STRAY id on the inner paragraphs (`pa`/`pb`),
+    // the legacy shape a re-imported doc could still carry. The transform must
+    // still emit exactly one block per row (the listItem), never the duplicate
+    // inner-paragraph anchor that would corrupt `document_blocks` / source lineage.
     const doc = {
       type: "doc",
       content: [
@@ -57,14 +61,28 @@ describe("toBlockInputs", () => {
       ],
     };
     const inputs = toBlockInputs(doc);
-    expect(inputs.map((b) => b.blockType)).toEqual([
-      "listItem",
-      "paragraph",
-      "listItem",
-      "paragraph",
-    ]);
+    expect(inputs.map((b) => b.blockType)).toEqual(["listItem", "listItem"]);
+    expect(inputs.map((b) => b.stableBlockId)).toEqual(["li1", "li2"]);
     expect(inputs.some((b) => b.blockType === "bulletList")).toBe(false);
-    expect(inputs.map((b) => b.order)).toEqual([0, 1, 2, 3]);
+    expect(inputs.some((b) => b.blockType === "paragraph")).toBe(false);
+    expect(inputs.map((b) => b.order)).toEqual([0, 1]);
+  });
+
+  it("emits ONE block for a multi-paragraph blockquote (the quote), not its inner paragraphs", () => {
+    const doc = {
+      type: "doc",
+      content: [
+        {
+          type: "blockquote",
+          attrs: { blockId: "bq1" },
+          // Stray inner-paragraph ids (legacy shape) must be ignored.
+          content: [PARA("first", "qa"), PARA("second", "qb")],
+        },
+      ],
+    };
+    const inputs = toBlockInputs(doc);
+    expect(inputs.map((b) => b.blockType)).toEqual(["blockquote"]);
+    expect(inputs.map((b) => b.stableBlockId)).toEqual(["bq1"]);
   });
 
   it("skips block nodes that have no blockId (un-editor-processed)", () => {

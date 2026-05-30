@@ -28,9 +28,7 @@
  */
 
 import type { EditorState } from "@tiptap/pm/state";
-import { BLOCK_ID_NODE_TYPES } from "./block-id";
-
-const BLOCK_ID_NODE_SET = new Set<string>(BLOCK_ID_NODE_TYPES);
+import { posToBlockOffset, shouldCarryBlockId } from "./block-id";
 
 /**
  * A resolved selection anchor: the ordered stable block ids the selection spans,
@@ -56,19 +54,33 @@ export interface SelectionLocation {
 
 /**
  * Find the nearest enclosing block-level node (one carrying a non-empty
- * `blockId`) at a given resolved position, returning the block id, the absolute
- * position of the block's start, and the block's text length. Returns `null` when
- * the position is not inside an id'd block (e.g. an un-id'd freshly typed block).
+ * `blockId`) at a given resolved position, returning the block id and the TRUE
+ * `node.textContent` character offset of the position within that block.
+ *
+ * The offset is computed by {@link posToBlockOffset}, which walks the block's
+ * inline text runs and skips the open/close tokens BETWEEN them — so for a block
+ * with multiple text runs (a multi-paragraph blockquote, or a list item with two
+ * paragraphs / a nested sub-list) the offset is a real index into
+ * `node.textContent`, not inflated by the nesting depth NOR by the inter-run
+ * tokens. It lines up with the reader-decoration / jump-to-source math, which use
+ * the inverse {@link blockOffsetToPos}. Returns `null` when the position is not
+ * inside an id'd block (e.g. an un-id'd freshly typed block).
  */
 function blockAt(
   $pos: ReturnType<EditorState["doc"]["resolve"]>,
-): { blockId: string; blockStart: number; textLen: number } | null {
+): { blockId: string; offset: number } | null {
   for (let depth = $pos.depth; depth >= 0; depth--) {
     const node = $pos.node(depth);
-    if (!BLOCK_ID_NODE_SET.has(node.type.name)) continue;
+    const parentType = depth > 0 ? $pos.node(depth - 1).type.name : undefined;
+    // Resolve to the OUTERMOST row block (the listItem/blockquote), not a stray id
+    // on its inner paragraph, so a single list-row endpoint maps to ONE block id.
+    if (!shouldCarryBlockId(node.type.name, parentType)) continue;
     const blockId = node.attrs.blockId as string | null | undefined;
     if (typeof blockId !== "string" || blockId.length === 0) continue;
-    return { blockId, blockStart: $pos.start(depth), textLen: node.textContent.length };
+    return {
+      blockId,
+      offset: posToBlockOffset(node, $pos.before(depth), $pos.pos),
+    };
   }
   return null;
 }
@@ -96,30 +108,80 @@ export function resolveSelectionLocation(state: EditorState): SelectionLocation 
   if (!fromBlock || !toBlock) return null;
 
   // Walk the doc once to collect, in order, every id'd block whose range overlaps
-  // [from, to]. A block "starts" at blockStart and spans textLen chars of text, so
-  // it overlaps the selection when its start is < `to` and its end is > `from`.
-  const blockIds: string[] = [];
-  state.doc.descendants((node, pos) => {
-    if (!BLOCK_ID_NODE_SET.has(node.type.name)) return true;
+  // [from, to]. We compare against the block's ABSOLUTE node span ([pos, pos +
+  // nodeSize]) rather than its text base + textContent.length: for a block with
+  // multiple text runs the text-content length undercounts the node's real extent
+  // (it omits the inter-run tokens), which would wrongly drop a trailing block
+  // from a cross-block selection. The node span is the true overlap interval.
+  //
+  // CRUCIAL for nested lists: id'd rows can NEST (an outer `listItem` whose node
+  // span CONTAINS an inner `listItem` — reachable by Tab-indenting). A naive
+  // overlap test would collect BOTH the outer and the inner row for a selection
+  // lying entirely inside the inner row, producing an internally inconsistent
+  // anchor: `blockAt` resolves the endpoints to the INNERMOST id'd row, so the
+  // offsets index the INNER text, but `blockIds[0]` would be the OUTER row — and
+  // the highlight/extract consumer (apps/web .../useHighlights) applies
+  // `startOffset..end` against `blockIds[0]`, silently writing the range over the
+  // WRONG text in the wrong block and corrupting the source-lineage anchor. So we
+  // collect only the INNERMOST id'd rows overlapping [from, to], DROPPING any
+  // ancestor row that fully contains a deeper overlapping id'd row.
+  //
+  // Gather every overlapping id'd row with its absolute node span (document order).
+  const overlaps: { blockId: string; start: number; end: number }[] = [];
+  state.doc.descendants((node, pos, parent) => {
+    // Only the OUTERMOST row block of a list item / blockquote *eligibly* contributes
+    // an id; its inner paragraph is skipped so a single non-nested row never yields
+    // TWO overlapping block ids (which would falsely report crossBlock).
+    if (!shouldCarryBlockId(node.type.name, parent?.type.name)) return true;
     const blockId = node.attrs.blockId as string | null | undefined;
     if (typeof blockId !== "string" || blockId.length === 0) return true;
-    const blockStart = pos + 1; // step inside the block node to its text
-    const blockEnd = blockStart + node.textContent.length;
+    const blockStart = pos + 1; // first inside position of the block node
+    const blockEnd = pos + node.nodeSize - 1; // last inside position
     // Overlap test (inclusive of touching the boundary so a selection ending at a
     // block's start still includes the block it starts in, not the previous one).
-    if (blockStart <= to && blockEnd >= from) blockIds.push(blockId);
+    if (blockStart <= to && blockEnd >= from) {
+      overlaps.push({ blockId, start: blockStart, end: blockEnd });
+    }
     return true;
   });
 
-  // Defensive fallback: if the overlap walk somehow missed the endpoints (e.g. an
-  // atom block), still record the resolved endpoints' blocks in order.
-  if (blockIds.length === 0) {
-    blockIds.push(fromBlock.blockId);
-    if (toBlock.blockId !== fromBlock.blockId) blockIds.push(toBlock.blockId);
-  }
+  // Keep only the INNERMOST id'd rows: drop any row whose span STRICTLY contains
+  // another overlapping row's span (it is an ancestor of a deeper id'd row the
+  // selection also touches, so its offsets/text are not what the endpoints —
+  // resolved to the innermost row — describe).
+  let blockIds: string[] = overlaps
+    .filter(
+      (block) =>
+        !overlaps.some(
+          (other) => other !== block && block.start <= other.start && block.end >= other.end,
+        ),
+    )
+    .map((block) => block.blockId);
 
-  const startOffset = Math.max(0, Math.min(from - fromBlock.blockStart, fromBlock.textLen));
-  const endOffset = Math.max(0, Math.min(to - toBlock.blockStart, toBlock.textLen));
+  // Pin the endpoints. `startOffset`/`endOffset` are offsets into `fromBlock` /
+  // `toBlock` respectively (the innermost id'd rows the caret endpoints land in),
+  // and the consumer indexes `blockIds[0]` with `startOffset` and `blockIds.at(-1)`
+  // with `endOffset` — so `blockIds` MUST begin at `fromBlock` and end at
+  // `toBlock`. The innermost-filter normally yields exactly that, but a degenerate
+  // walk (e.g. an endpoint at a row boundary, or an atom block the overlap test
+  // skipped) could drift; clamping here keeps the anchor internally consistent so
+  // a within-row selection is `[innerRow]` and a true cross-row span runs
+  // `fromBlock … toBlock`.
+  const firstIdx = blockIds.indexOf(fromBlock.blockId);
+  blockIds = firstIdx > 0 ? blockIds.slice(firstIdx) : blockIds;
+  if (blockIds[0] !== fromBlock.blockId) blockIds.unshift(fromBlock.blockId);
+  const lastIdx = blockIds.lastIndexOf(toBlock.blockId);
+  if (lastIdx >= 0) blockIds = blockIds.slice(0, lastIdx + 1);
+  else if (toBlock.blockId !== fromBlock.blockId) blockIds.push(toBlock.blockId);
+  // Collapse to a single row when both endpoints resolved to the same id'd row.
+  if (fromBlock.blockId === toBlock.blockId) blockIds = [fromBlock.blockId];
+
+  // `blockAt` already converted each endpoint to a TRUE `node.textContent` offset
+  // via `posToBlockOffset` (run-walking, inter-run tokens skipped), so these are
+  // real indices into the block text — `blockText.slice(startOffset, endOffset)`
+  // is the selected text even for a multi-text-run block.
+  const startOffset = fromBlock.offset;
+  const endOffset = toBlock.offset;
   // `textBetween` with a block separator mirrors `Node.textContent` across blocks,
   // so the snapshot reads as the user sees it (one newline between paragraphs).
   const selectedText = state.doc.textBetween(from, to, "\n", "\n");

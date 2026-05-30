@@ -28,8 +28,10 @@
  */
 
 import type { Editor } from "@tiptap/core";
+import type { Node as PmModelNode } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
-import { BLOCK_ID_DOM_ATTR, BLOCK_ID_NODE_TYPES } from "./block-id";
+import { blockOffsetToPos, posToBlockOffset, shouldCarryBlockId } from "./block-id";
+import { buildBlockSelector } from "./css-selector";
 
 /**
  * Re-export the Tiptap {@link Editor} type so consumers (the renderer's read-point
@@ -37,8 +39,6 @@ import { BLOCK_ID_DOM_ATTR, BLOCK_ID_NODE_TYPES } from "./block-id";
  * dependency — the editor package owns the Tiptap surface.
  */
 export type { Editor } from "@tiptap/core";
-
-const BLOCK_ID_NODE_SET = new Set<string>(BLOCK_ID_NODE_TYPES);
 
 /** A resolved resume position: a stable block id + a character offset within it. */
 export interface ResolvedReadPoint {
@@ -65,17 +65,24 @@ function textLengthOf(node: PmNode): number {
   return total;
 }
 
-/** The ordered block-level nodes (those carrying a non-empty `blockId`) of a doc. */
+/**
+ * The ordered ROW blocks of a doc: each OUTERMOST block-level node (see
+ * {@link shouldCarryBlockId}) carrying a non-empty `blockId`, in document order.
+ * A block nested directly inside another id-bearing block (the inner paragraph of
+ * a `listItem` / `blockquote`) is skipped, so a list row / quote counts once —
+ * keeping progress/divider/clamp math one-per-row even against a legacy doc that
+ * carried a stray inner id.
+ */
 function orderedBlocks(doc: unknown): { id: string; node: PmNode }[] {
   const out: { id: string; node: PmNode }[] = [];
   if (!doc || typeof doc !== "object") return out;
-  const visit = (node: PmNode): void => {
-    if (BLOCK_ID_NODE_SET.has(node.type ?? "")) {
+  const visit = (node: PmNode, parentType?: string): void => {
+    if (shouldCarryBlockId(node.type ?? "", parentType)) {
       const id = node.attrs?.blockId;
       if (typeof id === "string" && id.length > 0) out.push({ id, node });
     }
     if (node.content) {
-      for (const child of node.content) visit(child);
+      for (const child of node.content) visit(child, node.type);
     }
   };
   visit(doc as PmNode);
@@ -95,20 +102,28 @@ function orderedBlocks(doc: unknown): { id: string; node: PmNode }[] {
  */
 export function resolveReadPointFromState(state: EditorState): ResolvedReadPoint | null {
   const { $from } = state.selection;
-  // Walk up the ancestor chain from the selection head to the first block-level
-  // node that carries a (non-empty) blockId.
+  // Walk up the ancestor chain from the selection head to the first OUTERMOST
+  // row block that carries a (non-empty) blockId. Using `shouldCarryBlockId`
+  // (with the node's parent at each depth) means a stray id on an INNER paragraph
+  // of a list item / blockquote is ignored — we always resolve to the row's
+  // container, the single anchor the rest of the pipeline records.
   for (let depth = $from.depth; depth >= 0; depth--) {
     const node = $from.node(depth);
-    if (!BLOCK_ID_NODE_SET.has(node.type.name)) continue;
+    const parentType = depth > 0 ? $from.node(depth - 1).type.name : undefined;
+    if (!shouldCarryBlockId(node.type.name, parentType)) continue;
     const blockId = node.attrs.blockId as string | null | undefined;
     if (typeof blockId !== "string" || blockId.length === 0) continue;
-    // Offset of the caret within this block's text content. `$from.pos` is an
-    // absolute doc position; `$from.start(depth)` is the position of the block's
-    // first child — the difference, clamped, is the character offset.
-    const blockStart = $from.start(depth);
-    const rawOffset = $from.pos - blockStart;
-    const blockTextLen = node.textContent.length;
-    const offset = Math.max(0, Math.min(rawOffset, blockTextLen));
+    // Offset of the caret within this block's TEXT content. `$from.pos` is an
+    // absolute doc position; `posToBlockOffset` walks the block's inline text runs
+    // and skips the open/close tokens BETWEEN them, so for a nested block
+    // (listItem / blockquote wrapping a paragraph) AND a block with multiple text
+    // runs (a multi-paragraph blockquote, or a list item with two paragraphs / a
+    // nested sub-list) the result is a TRUE char offset within `node.textContent`
+    // — neither inflated by the nesting depth NOR by the inter-run tokens. It is
+    // measured against the same mapping `jumpToReadPoint` / the reader decorations
+    // re-anchor through (the inverse `blockOffsetToPos`), so resolve→store→jump
+    // round-trips exactly.
+    const offset = posToBlockOffset(node, $from.before(depth), $from.pos);
     return { blockId, offset };
   }
   return null;
@@ -206,13 +221,15 @@ export function jumpToReadPoint(
   const { scroll = true, block = "center" } = options;
   const { state } = editor;
 
-  // Find the block node + its absolute position by matching the stable id.
-  let target: { pos: number; textLen: number } | null = null;
-  state.doc.descendants((node, pos) => {
+  // Find the block node + its absolute position by matching the stable id, then
+  // map the stored TEXT-content offset back to an absolute position through the
+  // SAME run-walking mapping `resolveReadPointFromState` stored it from.
+  let target: { node: PmModelNode; pos: number; textLen: number } | null = null;
+  state.doc.descendants((node, pos, parent) => {
     if (target) return false;
-    if (!BLOCK_ID_NODE_SET.has(node.type.name)) return true;
+    if (!shouldCarryBlockId(node.type.name, parent?.type.name)) return true;
     if ((node.attrs.blockId as string | null) === readPoint.blockId) {
-      target = { pos, textLen: node.textContent.length };
+      target = { node, pos, textLen: node.textContent.length };
       return false;
     }
     return true;
@@ -224,17 +241,18 @@ export function jumpToReadPoint(
     return { kind: "fallback", reason: "missing-block" };
   }
 
-  const { pos, textLen } = target;
+  const { node, pos, textLen } = target;
   const clampedOffset = Math.max(0, Math.min(readPoint.offset, textLen));
-  // +1 steps inside the block node to its text; add the clamped char offset.
-  const caretPos = pos + 1 + clampedOffset;
+  // `blockOffsetToPos` walks the block's text runs and inserts the inter-run
+  // tokens, so a stored offset past the block's first run still lands on the right
+  // character (it is the inverse of the `posToBlockOffset` the offset was stored
+  // through). It clamps internally too.
+  const caretPos = blockOffsetToPos(node, pos, clampedOffset);
   editor.commands.setTextSelection(caretPos);
 
   if (scroll && typeof document !== "undefined") {
     const dom = editor.view.dom as HTMLElement;
-    const el = dom.querySelector<HTMLElement>(
-      `[${BLOCK_ID_DOM_ATTR}="${cssEscape(readPoint.blockId)}"]`,
-    );
+    const el = dom.querySelector<HTMLElement>(buildBlockSelector(readPoint.blockId));
     if (el) {
       el.scrollIntoView({ behavior: "auto", block });
     } else {
@@ -255,12 +273,4 @@ export function clampOffsetToBlock(doc: unknown, blockId: string, offset: number
   const match = blocks.find((b) => b.id === blockId);
   if (!match) return 0;
   return Math.max(0, Math.min(offset, textLengthOf(match.node)));
-}
-
-/** Escape a value for use inside a CSS attribute selector (ids are ULIDs, but be safe). */
-function cssEscape(value: string): string {
-  const cssApi = (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS;
-  if (cssApi?.escape) return cssApi.escape(value);
-  // Minimal fallback: escape quotes/backslashes for the `[attr="…"]` selector.
-  return value.replace(/["\\]/g, "\\$&");
 }

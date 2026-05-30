@@ -88,6 +88,11 @@ export function SourceEditor({
   const debounceRef = useRef(debounceMs);
   debounceRef.current = debounceMs;
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The live editor + whether a debounced change is still queued, so the unmount
+  // cleanup can FLUSH the pending change (not just clear the timer) and the
+  // payload reflects the latest document.
+  const editorRef = useRef<Editor | null>(null);
+  const pendingRef = useRef(false);
 
   // Compose the constrained schema with the optional reader-decoration plugin.
   const extensions: Extensions = useMemo(
@@ -109,7 +114,11 @@ export function SourceEditor({
       // a real document change is worth persisting.
       if (!transaction.docChanged) return;
       if (timer.current) clearTimeout(timer.current);
+      // Mark a change as queued so an unmount inside the debounce window flushes it.
+      pendingRef.current = true;
       timer.current = setTimeout(() => {
+        timer.current = null;
+        pendingRef.current = false;
         const json = instance.getJSON();
         emit({ prosemirrorJson: json, plainText: toPlainText(json) });
       }, debounceRef.current);
@@ -122,16 +131,36 @@ export function SourceEditor({
   }, [editor, editable]);
 
   // Hand the live instance to the host (read-point capture/jump) and clear it on
-  // teardown so the host never holds a stale editor.
+  // teardown so the host never holds a stale editor. Also stash it in `editorRef`
+  // so the unmount-flush cleanup can read the latest document.
   useEffect(() => {
+    editorRef.current = editor ?? null;
     onEditorReadyRef.current?.(editor ?? null);
     return () => onEditorReadyRef.current?.(null);
   }, [editor]);
 
-  // Flush any pending debounce on unmount.
+  // Flush any pending debounced change on unmount. If the user edits and navigates
+  // away within the debounce window, the trailing edit must still reach the host's
+  // `documents.save` — clearing the timer alone would silently drop the last
+  // keystrokes. So we synchronously emit the pending change from the live editor
+  // (compute getJSON() + toPlainText, the same payload the debounced callback would
+  // have) BEFORE clearing the timer. `editorRef`/`pendingRef` hold the live editor
+  // and the "a change is queued" flag without re-running this effect.
   useEffect(() => {
     return () => {
-      if (timer.current) clearTimeout(timer.current);
+      if (timer.current) {
+        clearTimeout(timer.current);
+        timer.current = null;
+        if (pendingRef.current) {
+          pendingRef.current = false;
+          const instance = editorRef.current;
+          const emit = onChangeRef.current;
+          if (instance && emit) {
+            const json = instance.getJSON();
+            emit({ prosemirrorJson: json, plainText: toPlainText(json) });
+          }
+        }
+      }
     };
   }, []);
 

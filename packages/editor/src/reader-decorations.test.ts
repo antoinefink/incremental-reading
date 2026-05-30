@@ -15,6 +15,8 @@ import { Node as PmNode } from "@tiptap/pm/model";
 import { EditorState } from "@tiptap/pm/state";
 import { DecorationSet } from "@tiptap/pm/view";
 import { describe, expect, it } from "vitest";
+import { fillMissingBlockIds } from "./block-id";
+import type { newBlockId } from "./block-ids";
 import {
   createReaderDecorationsPlugin,
   type ReaderDecorationState,
@@ -34,6 +36,36 @@ function buildState(docJson: unknown): EditorState {
     doc: PmNode.fromJSON(schema, docJson),
     plugins: [createReaderDecorationsPlugin()],
   });
+}
+
+/** A deterministic, monotonic minter so test expectations are stable. */
+function counterMinter(prefix = "id") {
+  let n = 0;
+  return () => `${prefix}_${String(n++).padStart(3, "0")}` as ReturnType<typeof newBlockId>;
+}
+
+/** Run the REAL filler over plain doc JSON → the runtime id distribution (one per row). */
+function fillOnce(json: unknown, mint = counterMinter()): unknown {
+  let state = EditorState.create({ schema, doc: PmNode.fromJSON(schema, json) });
+  const tr = fillMissingBlockIds(state, mint);
+  if (tr) state = state.apply(tr);
+  return state.doc.toJSON();
+}
+
+/** The blockId on the FIRST node of a given type in filled doc JSON. */
+function firstBlockIdOfType(json: unknown, type: string): string {
+  const doc = PmNode.fromJSON(schema, json);
+  let id: string | null = null;
+  doc.descendants((node) => {
+    if (id) return false;
+    if (node.type.name === type) {
+      id = (node.attrs.blockId as string | null) ?? null;
+      return false;
+    }
+    return true;
+  });
+  if (!id) throw new Error(`no ${type} with a blockId in fixture`);
+  return id;
 }
 
 const PARA = (text: string, blockId: string) => ({
@@ -238,5 +270,181 @@ describe("ReaderDecorations plugin", () => {
         .find()
         .filter((d) => (d as unknown as DecorationInternal).type?.attrs?.class?.includes("dimmed")),
     ).toHaveLength(0);
+  });
+
+  describe("nested rows (list item / blockquote) — one decoration per row", () => {
+    // A doc with the runtime id distribution: one id on the listItem, one on the
+    // blockquote, none on their inner paragraphs.
+    const NESTED = fillOnce({
+      type: "doc",
+      content: [
+        {
+          type: "bulletList",
+          content: [
+            {
+              type: "listItem",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "hello world" }] }],
+            },
+          ],
+        },
+        {
+          type: "blockquote",
+          content: [{ type: "paragraph", content: [{ type: "text", text: "quoted text" }] }],
+        },
+      ],
+    });
+    const LI_ID = firstBlockIdOfType(NESTED, "listItem");
+    const BQ_ID = firstBlockIdOfType(NESTED, "blockquote");
+
+    it("renders a list-row highlight as exactly ONE inline `hl` decoration (not two overlapping)", () => {
+      // The duplicate-id bug wrote two `document_marks` rows for one row and the
+      // reader drew two overlapping `<mark class="hl">` over the same text. With one
+      // id per row there is exactly ONE highlight decoration.
+      const state = withInputs(buildState(NESTED), {
+        highlights: [{ markId: "m1", blockId: LI_ID, start: 0, end: 5 }],
+      });
+      const inline = decorationsOf(state)
+        .find()
+        .filter((d) => (d as unknown as DecorationInternal).type?.attrs?.class === "hl");
+      expect(inline).toHaveLength(1);
+      expect((inline[0] as unknown as DecorationInternal).type?.attrs?.["data-mark-id"]).toBe("m1");
+    });
+
+    it("marks a list row extracted exactly ONCE (single node decoration on the row)", () => {
+      const state = withInputs(buildState(NESTED), { extractedBlockIds: [LI_ID] });
+      const extracted = decorationsOf(state)
+        .find()
+        .filter((d) =>
+          (d as unknown as DecorationInternal).type?.attrs?.class?.includes("extracted"),
+        );
+      expect(extracted).toHaveLength(1);
+    });
+
+    it("highlights a blockquote row as exactly ONE inline `hl` decoration", () => {
+      const state = withInputs(buildState(NESTED), {
+        highlights: [{ markId: "m2", blockId: BQ_ID, start: 0, end: 6 }],
+      });
+      const inline = decorationsOf(state)
+        .find()
+        .filter((d) => (d as unknown as DecorationInternal).type?.attrs?.class === "hl");
+      expect(inline).toHaveLength(1);
+    });
+  });
+
+  describe("multi-text-run rows — highlight in the 2nd run maps to the right characters", () => {
+    // Finding (major): the inline-highlight mapping anchored to the FIRST text run
+    // only, so a highlight in the 2nd paragraph of a multi-paragraph blockquote /
+    // list item rendered shifted by the inter-run token count. These assert the
+    // decoration's absolute [from,to] cover EXACTLY the stored textContent range,
+    // computed independently of the mapping under test.
+
+    /** Absolute [from,to] of a textContent range in a block, via its text nodes. */
+    function absRangeOfTextRange(
+      json: unknown,
+      blockId: string,
+      start: number,
+      end: number,
+    ): [number, number] {
+      const doc = PmNode.fromJSON(schema, json);
+      let blockNode: PmNode | null = null;
+      let blockPos = -1;
+      doc.descendants((node, pos) => {
+        if (blockNode) return false;
+        if ((node.attrs.blockId as string | null | undefined) === blockId) {
+          blockNode = node;
+          blockPos = pos;
+          return false;
+        }
+        return true;
+      });
+      if (!blockNode || blockPos < 0) throw new Error(`no block ${blockId}`);
+      const contentStart = blockPos + 1;
+      let consumed = 0;
+      let from = -1;
+      let to = -1;
+      // Anchor an offset AT a run boundary to the START of the NEXT run (strict `<`),
+      // skipping the inter-run tokens — matching `blockOffsetToPos`, so the
+      // independently-computed expectation agrees with the production mapping.
+      (blockNode as PmNode).descendants((child, relPos) => {
+        if (!child.isText || typeof child.text !== "string") return true;
+        const len = child.text.length;
+        if (from < 0 && start < consumed + len) from = contentStart + relPos + (start - consumed);
+        if (to < 0 && end < consumed + len) to = contentStart + relPos + (end - consumed);
+        consumed += len;
+        return false;
+      });
+      // An end exactly at the block text end anchors to the end of the last run.
+      if (to < 0) to = contentStart + (blockNode as PmNode).content.size;
+      if (from < 0) throw new Error("range out of block text");
+      return [from, to];
+    }
+
+    const MULTI_BQ = fillOnce({
+      type: "doc",
+      content: [
+        {
+          type: "blockquote",
+          content: [
+            { type: "paragraph", content: [{ type: "text", text: "alpha line" }] },
+            { type: "paragraph", content: [{ type: "text", text: "beta line" }] },
+          ],
+        },
+      ],
+    });
+    const MULTI_BQ_ID = firstBlockIdOfType(MULTI_BQ, "blockquote");
+
+    it("places a 2nd-paragraph blockquote highlight over the exact textContent range", () => {
+      // textContent "alpha linebeta line"; highlight "beta" = [10,14]. The old math
+      // would have shifted this by the inter-run token count and covered "ta l".
+      const state = withInputs(buildState(MULTI_BQ), {
+        highlights: [{ markId: "m1", blockId: MULTI_BQ_ID, start: 10, end: 14 }],
+      });
+      const inline = decorationsOf(state)
+        .find()
+        .filter((d) => (d as unknown as DecorationInternal).type?.attrs?.class === "hl");
+      expect(inline).toHaveLength(1);
+      const deco = inline[0];
+      if (!deco) throw new Error("expected one highlight decoration");
+      const [expectFrom, expectTo] = absRangeOfTextRange(MULTI_BQ, MULTI_BQ_ID, 10, 14);
+      expect(deco.from).toBe(expectFrom);
+      expect(deco.to).toBe(expectTo);
+      // And the covered slice of the actual document text is exactly "beta".
+      const doc = PmNode.fromJSON(schema, MULTI_BQ);
+      expect(doc.textBetween(deco.from, deco.to)).toBe("beta");
+    });
+
+    const MULTI_LI = fillOnce({
+      type: "doc",
+      content: [
+        {
+          type: "bulletList",
+          content: [
+            {
+              type: "listItem",
+              content: [
+                { type: "paragraph", content: [{ type: "text", text: "first para" }] },
+                { type: "paragraph", content: [{ type: "text", text: "second para" }] },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const MULTI_LI_ID = firstBlockIdOfType(MULTI_LI, "listItem");
+
+    it("places a 2nd-paragraph list-item highlight over the exact textContent range", () => {
+      // textContent "first parasecond para"; highlight "second" = [10,16].
+      const state = withInputs(buildState(MULTI_LI), {
+        highlights: [{ markId: "m1", blockId: MULTI_LI_ID, start: 10, end: 16 }],
+      });
+      const inline = decorationsOf(state)
+        .find()
+        .filter((d) => (d as unknown as DecorationInternal).type?.attrs?.class === "hl");
+      expect(inline).toHaveLength(1);
+      const deco = inline[0];
+      if (!deco) throw new Error("expected one highlight decoration");
+      const doc = PmNode.fromJSON(schema, MULTI_LI);
+      expect(doc.textBetween(deco.from, deco.to)).toBe("second");
+    });
   });
 });

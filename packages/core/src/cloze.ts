@@ -27,6 +27,21 @@
  *   `{{a}} {{b}}` becomes `c1`/`c2` and {@link serializeCloze} round-trips to the
  *   canonical numbered text. Numbered and bare markers may be mixed: explicit
  *   numbers are honoured; bare markers fill the next unused index.
+ *
+ * ## Mixing bare + numbered: explicit numbers win (a deliberate, ordering caveat)
+ *
+ * When bare and numbered markers are mixed, EXPLICIT numbers are authoritative and
+ * a bare marker takes the next index strictly ABOVE the highest explicit number
+ * (`maxSeen`), regardless of where it appears. This protects an explicitly-numbered
+ * deletion (and any siblings grouped under it) from being silently re-grouped by a
+ * neighbouring bare marker, and it is stable across the whole document (a later
+ * explicit `c5` still pushes earlier bare markers above it). The trade-off is that
+ * a bare marker placed BEFORE a numbered one can receive a higher index than its
+ * neighbour, e.g. `{{a}} {{c1::b}}` → `{{c2::a}} {{c1::b}}` and `{{a}} {{c5::b}}`
+ * → `{{c6::a}} {{c5::b}}` (gaps below `maxSeen` are left unused). This is
+ * intentional, internally consistent, and round-trips; pinned by the
+ * "bare marker before a numbered marker" tests. (Users authoring multi-cloze cards
+ * should number explicitly when ordering matters.)
  */
 
 /** The canonical numbered cloze marker, e.g. `{{c1::skill-acquisition efficiency}}`. */
