@@ -12,10 +12,13 @@
     }
   },
   "scripts": {
-    "dev": "echo \"@interleave/scheduler: no dev step yet (wired in T002+)\"",
-    "build": "echo \"@interleave/scheduler: no build step yet (wired in T002)\"",
-    "test": "echo \"@interleave/scheduler: no tests yet (wired in T002)\"",
-    "lint": "echo \"@interleave/scheduler: no lint yet (wired in T002)\"",
+    "dev": "echo \"@interleave/scheduler: no dev step\"",
+    "build": "echo \"@interleave/scheduler: no build step\"",
+    "test": "vitest run",
+    "lint": "echo \"@interleave/scheduler: linted from repo root via biome\"",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@interleave/core": "workspace:*"
   }
 }

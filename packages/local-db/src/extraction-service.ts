@@ -42,51 +42,23 @@
  * jump-to-source lands in the parent extract's document (where the text lives).
  */
 
-import type {
-  BlockId,
-  Element,
-  ElementId,
-  ElementLocation,
-  IsoTimestamp,
-  Priority,
-} from "@interleave/core";
-import { plainTextToProseMirrorDoc, priorityToLabel } from "@interleave/core";
+import type { BlockId, Element, ElementId, ElementLocation, Priority } from "@interleave/core";
+import { plainTextToProseMirrorDoc } from "@interleave/core";
 import type { InterleaveDatabase } from "@interleave/db";
+import { addDays, rawExtractIntervalDays } from "@interleave/scheduler";
 import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
 import { nowIso } from "./ids";
 import { deriveSourceLocationLabel, type LabelBlock } from "./source-location-label";
 import { SourceRepository } from "./source-repository";
 
+// The starter `raw_extract +1..7d` interval math now lives ONCE in
+// `@interleave/scheduler` (T028); this re-export keeps the historical symbol
+// (`@interleave/local-db`, the M4 extraction tests) working without a second copy.
+export { rawExtractIntervalDays };
+
 /** A very large per-block end so an `extracted_span` over the first block clamps to its text length. */
 const BLOCK_END = Number.MAX_SAFE_INTEGER;
-
-/**
- * The starter attention interval (DAYS) for a freshly created `raw_extract`, by
- * inherited priority band — the MVP `raw_extract +1..+7d` heuristic from
- * `scheduling-and-priority.md`. Higher-priority extracts return sooner so they are
- * not buried; T028's real scheduler will replace this formula. Kept here (not in a
- * React component) per the layering rule.
- */
-export function rawExtractIntervalDays(priority: Priority): number {
-  // priorityToLabel buckets to A/B/C/D; map onto the 1–7 day raw_extract window.
-  switch (priorityToLabel(priority)) {
-    case "A":
-      return 1;
-    case "B":
-      return 3;
-    case "C":
-      return 5;
-    case "D":
-      return 7;
-  }
-}
-
-/** Add `days` to an ISO timestamp, returning a new ISO timestamp. */
-function addDays(fromIso: IsoTimestamp, days: number): IsoTimestamp {
-  const ms = Date.parse(fromIso) + days * 86_400_000;
-  return new Date(ms).toISOString() as IsoTimestamp;
-}
 
 /** Arguments to extract a child element from selected source text. */
 export interface CreateExtractionInput {

@@ -30,88 +30,44 @@
  * axis; this service moves the stage, not the status, on an advance.
  */
 
-import type {
-  BlockId,
-  DistillationStage,
-  Element,
-  ElementId,
-  IsoTimestamp,
-  Priority,
-} from "@interleave/core";
-import { priorityToLabel } from "@interleave/core";
+import type { BlockId, Element, ElementId, Priority } from "@interleave/core";
 import type { InterleaveDatabase } from "@interleave/db";
+import {
+  addDays,
+  EXTRACT_STAGES,
+  type ExtractStage,
+  extractStageIntervalDays,
+  isExtractStage,
+  nextExtractStage,
+  postponeIntervalForPriority,
+} from "@interleave/scheduler";
 import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
 import { nowIso } from "./ids";
 import { OperationLogRepository } from "./operation-log-repository";
 
-/**
- * The ordered extract distillation chain this service walks. It is a strict
- * subset of {@link DistillationStage} — extracts only ever sit in these three
- * stages; `card_draft`+ belong to cards (M6), `raw_source`/`rough_topic` to
- * sources/topics.
- */
-export const EXTRACT_STAGES = [
-  "raw_extract",
-  "clean_extract",
-  "atomic_statement",
-] as const satisfies readonly DistillationStage[];
-
-/** An extract's distillation stage (the three steps of the chain above). */
-export type ExtractStage = (typeof EXTRACT_STAGES)[number];
-
-/** Type guard: is `value` one of the three extract distillation stages? */
-export function isExtractStage(value: unknown): value is ExtractStage {
-  return typeof value === "string" && (EXTRACT_STAGES as readonly string[]).includes(value);
-}
-
-/** The next stage in the chain, or `null` when already at `atomic_statement`. */
-export function nextExtractStage(stage: ExtractStage): ExtractStage | null {
-  const idx = EXTRACT_STAGES.indexOf(stage);
-  if (idx < 0 || idx >= EXTRACT_STAGES.length - 1) return null;
-  return EXTRACT_STAGES[idx + 1] as ExtractStage;
-}
+// The extract stage chain + interval math is the attention scheduler's concern and
+// now lives ONCE in `@interleave/scheduler` (T028). These re-exports keep the
+// historical import sites (`@interleave/local-db`, the M4 tests) working without a
+// second copy of the math — `extract-service.ts` consumes the scheduler, never
+// re-derives intervals.
+export {
+  EXTRACT_STAGES,
+  type ExtractStage,
+  extractStageIntervalDays,
+  isExtractStage,
+  nextExtractStage,
+};
 
 /**
- * The attention interval (DAYS) for an extract at a given stage + priority — the
- * MVP by-stage heuristic from `scheduling-and-priority.md`:
- *
- * ```txt
- *   raw_extract        +1..7d
- *   clean_extract      +3..14d
- *   atomic_statement   convert now, or +1d
- * ```
- *
- * Higher-priority extracts return sooner within each band so they are not buried;
- * T028's real attention scheduler will replace this formula. Kept here (not in a
- * React component) per the layering rule — same pattern as
- * {@link rawExtractIntervalDays} (T021).
+ * The base postpone interval (DAYS) for an extract by priority — pushes further out.
+ * A thin re-export of the scheduler's `postponeIntervalForPriority(priority, 0)`
+ * (the postpone-count-zero base) so the historical `postponeIntervalDays` symbol
+ * keeps its meaning; the GROWTH with postpone count is applied in
+ * {@link ExtractService.postpone} via the scheduler.
  */
-export function extractStageIntervalDays(stage: ExtractStage, priority: Priority): number {
-  const band = priorityToLabel(priority); // A/B/C/D
-  switch (stage) {
-    case "raw_extract":
-      // +1..7d
-      return { A: 1, B: 3, C: 5, D: 7 }[band];
-    case "clean_extract":
-      // +3..14d
-      return { A: 3, B: 6, C: 10, D: 14 }[band];
-    case "atomic_statement":
-      // card-ready: convert now, or come back tomorrow.
-      return 1;
-  }
-}
-
-/** The postpone interval (DAYS) for an extract by priority — pushes further out. */
 export function postponeIntervalDays(priority: Priority): number {
-  // Medium source action heuristic: +7..30d, sooner for higher priority.
-  return { A: 7, B: 14, C: 21, D: 30 }[priorityToLabel(priority)];
-}
-
-/** Add `days` to an ISO timestamp, returning a new ISO timestamp. */
-function addDays(fromIso: IsoTimestamp, days: number): IsoTimestamp {
-  const ms = Date.parse(fromIso) + days * 86_400_000;
-  return new Date(ms).toISOString() as IsoTimestamp;
+  return postponeIntervalForPriority(priority, 0);
 }
 
 /**
@@ -244,7 +200,10 @@ export class ExtractService {
     const element = this.requireExtract(id);
     const priorCount = this.countPostpones(id);
     return this.db.transaction((tx) => {
-      const dueAt = addDays(nowIso(), postponeIntervalDays(element.priority));
+      // The interval GROWS with the running postpone count (stagnation recedes):
+      // the first postpone (priorCount 0) is the base window; each further postpone
+      // pushes further out, per `@interleave/scheduler`. Single source of truth.
+      const dueAt = addDays(nowIso(), postponeIntervalForPriority(element.priority, priorCount));
       const rescheduled = this.elements.rescheduleWithin(tx, id, dueAt, "scheduled", {
         postpone: true,
         postponeCount: priorCount + 1,

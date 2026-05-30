@@ -1,13 +1,44 @@
 /**
- * @interleave/scheduler — FSRS wrapper + the topic/extract attention scheduler.
+ * @interleave/scheduler — the attention (topic/extract) scheduler.
  *
- * Two distinct mental models live here (see scheduling-and-priority.md): FSRS
- * (via ts-fsrs) answers "can the user recall this?" for cards, while the custom
- * priority scheduler answers "should the user process this again, and when?" for
- * sources/topics/extracts. The real schedulers land in T028/T036; this trivial
- * export only proves the package resolves across the workspace.
+ * Two distinct mental models live under this package (see
+ * `docs/scheduling-and-priority.md`): FSRS (via `ts-fsrs`, landing in T036/M7)
+ * answers "can the user recall this?" for CARDS, while the custom attention
+ * scheduler exported below answers "should the user process this again, and when?"
+ * for sources/topics/extracts. They must NEVER collapse into one model.
+ *
+ * T028 fills in the attention half: a set of PURE functions (no DB, no IPC, no
+ * React, no `ts-fsrs`) that compute `due_at` from priority/stage/last-seen/
+ * last-action/postpone-count and offer explicit tomorrow/next-week/next-month/manual
+ * choices. It is also the SINGLE source of truth for the extract interval math that
+ * previously lived (duplicated) inside `packages/local-db` — those services now
+ * import from here. FSRS lands in a sibling module in M7 and stays behind its own
+ * adapter boundary (no `ts-fsrs` types leak through this package).
  */
+
 export const SCHEDULER_PACKAGE = "@interleave/scheduler" as const;
 
-/** Placeholder until the schedulers are defined in T028/T036. */
-export const schedulerPlaceholder = (): string => SCHEDULER_PACKAGE;
+export {
+  basePostponeIntervalDays,
+  EXTRACT_STAGES,
+  type ExtractStage,
+  extractStageIntervalDays,
+  isExtractStage,
+  isSchedulerAction,
+  nextDueAt,
+  nextExtractStage,
+  postponeIntervalForPriority,
+  rawExtractIntervalDays,
+  SCHEDULER_ACTIONS,
+  type Schedulable,
+  type ScheduleChoice,
+  type ScheduleDecision,
+  type SchedulerAction,
+  scheduleForChoice,
+  scheduleManual,
+  scheduleNextMonth,
+  scheduleNextWeek,
+  scheduleTomorrow,
+  sourceIntervalDays,
+} from "./attention-scheduler";
+export { addDays, MS_PER_DAY } from "./date-util";

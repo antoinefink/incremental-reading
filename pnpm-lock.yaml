@@ -199,6 +199,9 @@ importers:
       '@interleave/db':
         specifier: workspace:*
         version: link:../db
+      '@interleave/scheduler':
+        specifier: workspace:*
+        version: link:../scheduler
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)
@@ -207,7 +210,11 @@ importers:
         specifier: ^12.10.0
         version: 12.10.0
 
-  packages/scheduler: {}
+  packages/scheduler:
+    dependencies:
+      '@interleave/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/testing:
     dependencies:
