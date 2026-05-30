@@ -226,6 +226,82 @@ export interface ElementsSetPriorityResult {
 }
 
 // ---------------------------------------------------------------------------
+// queue.list()  (T029 — the unified, sorted, filtered due queue)
+// ---------------------------------------------------------------------------
+
+/** Which scheduler a queue row is on — the FSRS vs attention split. */
+export type QueueScheduler = "fsrs" | "attention";
+
+/** The scheduler signals a queue row carries for its `SchedulerChip`. */
+export interface QueueSchedulerSignals {
+  readonly kind: QueueScheduler;
+  /** Card recall probability now (`0.0`–`1.0`), or `null` for new/attention rows. */
+  readonly retrievability: number | null;
+  /** FSRS memory stability in days, or `null` for attention rows. */
+  readonly stability: number | null;
+  /** Distillation stage (shown on the attention chip). */
+  readonly stage: string;
+  /** How many times an attention element has been postponed. */
+  readonly postponed: number;
+}
+
+/** How "due" a row is relative to `asOf`. */
+export type QueueDueState = "overdue" | "today" | "soon";
+
+/** A flat queue row (due card or due attention item). */
+export interface QueueItemSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly status: string;
+  readonly stage: string;
+  readonly priority: number;
+  readonly title: string;
+  /** The governing due time (FSRS `review_states.due_at` or attention `elements.due_at`). */
+  readonly dueAt: string | null;
+  readonly scheduler: QueueScheduler;
+  readonly schedulerSignals: QueueSchedulerSignals;
+  readonly sourceTitle: string | null;
+  readonly author: string | null;
+  /** A concept this row is a member of (T041 populates this; null until then). */
+  readonly concept: string | null;
+  /** Card kind (`qa`/`cloze`); null for non-cards. */
+  readonly cardType: string | null;
+  /** True for A-priority items (the `--protected` accent bar). */
+  readonly protected: boolean;
+  readonly due: QueueDueState;
+  readonly dueLabel: string;
+}
+
+/** Per-type counts over the unfiltered due set + the at-risk counts. */
+export interface QueueCounts {
+  readonly all: number;
+  readonly card: number;
+  readonly source: number;
+  readonly extract: number;
+  readonly topic: number;
+  readonly task: number;
+  readonly highPriority: number;
+  readonly overdue: number;
+  readonly protected: number;
+}
+
+/** Filters the queue read accepts (type/concept/status). */
+export interface QueueListRequest {
+  /** "Now" the due reads compare against (ISO-8601); defaults to the server clock. */
+  readonly asOf?: string;
+  readonly types?: readonly string[];
+  /** Concept filter (T041 — deferred; wired now for a stable surface). */
+  readonly concept?: string;
+  readonly statuses?: readonly string[];
+}
+
+export interface QueueListResult {
+  readonly items: readonly QueueItemSummary[];
+  readonly counts: QueueCounts;
+  readonly budget: { readonly used: number; readonly target: number };
+}
+
+// ---------------------------------------------------------------------------
 // lineage.get()  (T023 — the full navigable element hierarchy)
 // ---------------------------------------------------------------------------
 
@@ -635,6 +711,9 @@ export interface AppApi {
   readonly elements: {
     setPriority(request: ElementsSetPriorityRequest): Promise<ElementsSetPriorityResult>;
   };
+  readonly queue: {
+    list(request?: QueueListRequest): Promise<QueueListResult>;
+  };
   readonly lineage: {
     get(request: LineageGetRequest): Promise<LineageGetResult>;
   };
@@ -736,6 +815,14 @@ export const appApi = {
    */
   setElementPriority(request: ElementsSetPriorityRequest): Promise<ElementsSetPriorityResult> {
     return requireAppApi().elements.setPriority(request);
+  },
+  /**
+   * The unified, sorted, filtered due queue (T029) — due cards (FSRS) AND due
+   * attention items, sorted priority-then-due-date, with type/concept/status
+   * filters + per-type counts + the budget gauge. Read-only.
+   */
+  listQueue(request?: QueueListRequest): Promise<QueueListResult> {
+    return requireAppApi().queue.list(request);
   },
   /** The full, depth-tagged lineage tree for one element (read-only) (T023). */
   getLineage(request: LineageGetRequest): Promise<LineageGetResult> {

@@ -16,7 +16,14 @@
  * through the repository seam.
  */
 
-import type { BlockId, ElementId, MarkType, Priority, PriorityLabel } from "@interleave/core";
+import type {
+  BlockId,
+  ElementId,
+  IsoTimestamp,
+  MarkType,
+  Priority,
+  PriorityLabel,
+} from "@interleave/core";
 import {
   canonicalizeUrl,
   lowerPriority,
@@ -33,6 +40,7 @@ import {
   InboxQuery,
   InspectorQuery,
   LineageQuery,
+  QueueQuery,
   type Repositories,
 } from "@interleave/local-db";
 import { seedDemoCollection } from "@interleave/testing";
@@ -72,6 +80,8 @@ import type {
   InspectorGetResult,
   InspectorListResult,
   LineageGetResult,
+  QueueListRequest,
+  QueueListResult,
   ReadPointGetRequest,
   ReadPointGetResult,
   ReadPointSetRequest,
@@ -90,6 +100,7 @@ export class DbService {
   private repositories: Repositories | null = null;
   private inspector: InspectorQuery | null = null;
   private lineage: LineageQuery | null = null;
+  private queue: QueueQuery | null = null;
   private inboxQuery: InboxQuery | null = null;
   private extraction: ExtractionService | null = null;
   private extractReview: ExtractService | null = null;
@@ -124,6 +135,7 @@ export class DbService {
     this.repositories = createRepositories(this.handle.db);
     this.inspector = new InspectorQuery(this.repositories);
     this.lineage = new LineageQuery(this.repositories);
+    this.queue = new QueueQuery(this.repositories);
     this.inboxQuery = new InboxQuery(this.repositories);
     this.extraction = new ExtractionService(this.handle.db);
     this.extractReview = new ExtractService(this.handle.db);
@@ -138,6 +150,7 @@ export class DbService {
     this.repositories = null;
     this.inspector = null;
     this.lineage = null;
+    this.queue = null;
     this.inboxQuery = null;
     this.extraction = null;
     this.extractReview = null;
@@ -306,6 +319,35 @@ export class DbService {
    */
   getLineage(id: string): LineageGetResult {
     return { lineage: this.lineageQuery.get(id as ElementId) };
+  }
+
+  /** Read-only queue query layer (T029), bound to the open database. */
+  private get queueQuery(): QueueQuery {
+    if (!this.queue) {
+      throw new Error("DbService: database is not open");
+    }
+    return this.queue;
+  }
+
+  /**
+   * The unified, sorted, filtered due queue (T029). The {@link QueueQuery} merges
+   * the two DISTINCT due reads (due cards via the FSRS `review_states.due_at` join;
+   * due sources/topics/extracts/tasks via the attention `elements.due_at` read),
+   * decorates each row with its scheduler signals + meta, **sorts priority-then-due
+   * date**, applies the type/concept/status filters, and reads the daily review
+   * budget from {@link SettingsRepository} for the gauge. Read-only — no mutation,
+   * no `operation_log`. The two schedulers stay separate inside the read.
+   */
+  listQueue(request: QueueListRequest): QueueListResult {
+    const data = this.queueQuery.list({
+      ...(request.asOf ? { asOf: request.asOf as IsoTimestamp } : {}),
+      filters: {
+        ...(request.types ? { types: request.types } : {}),
+        ...(request.concept ? { concept: request.concept } : {}),
+        ...(request.statuses ? { statuses: request.statuses } : {}),
+      },
+    });
+    return { items: data.items, counts: data.counts, budget: data.budget };
   }
 
   /** Read-only inbox query layer (T012), bound to the open database. */

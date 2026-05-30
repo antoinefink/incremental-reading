@@ -1,0 +1,353 @@
+/**
+ * QueueQuery (T029) — the unified, sorted, filtered read behind `/queue`.
+ *
+ * The daily queue answers TWO different questions with two different schedulers,
+ * and this query keeps them distinct (the load-bearing two-scheduler invariant):
+ *  - due **cards** come from FSRS via `review_states.due_at` ("can the user
+ *    recall this?"), marked `scheduler: "fsrs"` and carrying the memory signals
+ *    (retrievability/stability) the `SchedulerChip` shows;
+ *  - due **sources/topics/extracts/tasks/synthesis notes** come from the
+ *    attention scheduler via `elements.due_at` ("should the user process this
+ *    again, and when?"), marked `scheduler: "attention"` and carrying the
+ *    stage/postpone signals.
+ *
+ * It composes {@link QueueRepository} (the two due reads) and the other
+ * repositories (provenance/lineage for the per-row meta line, the op log for the
+ * attention postpone count). The merged list is then **sorted by priority desc,
+ * then `due_at` asc** — deterministic; the 10–20% jitter the daily-queue rule
+ * asks for is a SEPARATE, seeded shuffle layer applied by the caller/renderer so
+ * re-renders never reshuffle (kept out of here so the sort stays testable).
+ *
+ * Read-only: no mutations, no `operation_log` append. The renderer reaches this
+ * only through the typed `window.appApi.queue.list` command; it never touches SQL.
+ */
+
+import type {
+  Element,
+  ElementId,
+  ElementStatus,
+  ElementType,
+  IsoTimestamp,
+} from "@interleave/core";
+import { priorityToLabel } from "@interleave/core";
+import type { Repositories } from "./index";
+
+/** Which scheduler a queue row is on — the FSRS vs attention split. */
+export type QueueScheduler = "fsrs" | "attention";
+
+/**
+ * The scheduler signals a queue row carries for its `SchedulerChip`. The shape
+ * mirrors the inspector's `SchedulerSignals` but is trimmed to what the chip + the
+ * queue row need: FSRS rows carry retrievability/stability; attention rows carry
+ * stage + postpone count.
+ */
+export interface QueueSchedulerSignals {
+  readonly kind: QueueScheduler;
+  /** Card recall probability now (`0.0`–`1.0`), or `null` for new/attention rows. */
+  readonly retrievability: number | null;
+  /** FSRS memory stability in days, or `null` for attention rows. */
+  readonly stability: number | null;
+  /** Distillation stage (shown on the attention chip). */
+  readonly stage: string;
+  /** How many times an attention element has been postponed. */
+  readonly postponed: number;
+}
+
+/** How "due" a row is relative to `asOf`. */
+export type QueueDueState = "overdue" | "today" | "soon";
+
+/** A flat, JSON-serializable queue row crossing IPC to the renderer. */
+export interface QueueItemSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly status: string;
+  readonly stage: string;
+  /** Numeric priority `0.0`–`1.0`; the UI derives the A/B/C/D label. */
+  readonly priority: number;
+  readonly title: string;
+  /** The governing due time (FSRS `review_states.due_at` or attention `elements.due_at`). */
+  readonly dueAt: string | null;
+  readonly scheduler: QueueScheduler;
+  readonly schedulerSignals: QueueSchedulerSignals;
+  /** The owning source's title (provenance), for the per-row meta line. */
+  readonly sourceTitle: string | null;
+  /** The source's author, when the row is (or belongs to) a source. */
+  readonly author: string | null;
+  /** A concept this row is a member of (T041 populates this; null until then). */
+  readonly concept: string | null;
+  /** Card kind (`qa`/`cloze`), for the card meta line; null for non-cards. */
+  readonly cardType: string | null;
+  /** True for A-priority items (the `--protected` accent bar). */
+  readonly protected: boolean;
+  /** Overdue / today / soon, relative to `asOf`. */
+  readonly due: QueueDueState;
+  /** A short human due label ("Overdue", "Due today", "in 3d"). */
+  readonly dueLabel: string;
+}
+
+/** The filters a queue read accepts. All optional; absent = no narrowing. */
+export interface QueueFilters {
+  /** Keep only these element types. */
+  readonly types?: readonly ElementType[];
+  /** Keep only rows that are a member of this concept (T041 — deferred/no-op until then). */
+  readonly concept?: string;
+  /** Keep only these lifecycle statuses. */
+  readonly statuses?: readonly ElementStatus[];
+}
+
+/** The complete queue read: rows + per-type counts + the budget gauge. */
+export interface QueueListData {
+  readonly items: readonly QueueItemSummary[];
+  /** Per-type counts over the UNFILTERED due set (so the filter chips show totals). */
+  readonly counts: {
+    readonly all: number;
+    readonly card: number;
+    readonly source: number;
+    readonly extract: number;
+    readonly topic: number;
+    readonly task: number;
+    readonly highPriority: number;
+    readonly overdue: number;
+    readonly protected: number;
+  };
+  /** The daily review budget gauge: items due today vs the configured target. */
+  readonly budget: { readonly used: number; readonly target: number };
+}
+
+/** The FSRS forgetting-curve constants (factor=19/81, decay=-0.5). */
+const FSRS_DECAY = -0.5;
+const FSRS_FACTOR = 19 / 81;
+const DAY_MS = 86_400_000;
+
+/**
+ * Approximate retrievability `R(t) = (1 + FACTOR · t / S)^DECAY` from stability
+ * `S` (days) + days since the last review. A never-reviewed card has no value.
+ * Mirrors `inspector-query.ts` so the queue + inspector agree until FSRS (T036)
+ * owns the authoritative number.
+ */
+function approximateRetrievability(
+  stability: number,
+  lastReviewedAt: string | null,
+  asOf: number,
+): number | null {
+  if (!lastReviewedAt || stability <= 0) return null;
+  const last = Date.parse(lastReviewedAt);
+  if (Number.isNaN(last)) return null;
+  const elapsedDays = Math.max(0, (asOf - last) / DAY_MS);
+  const r = (1 + (FSRS_FACTOR * elapsedDays) / stability) ** FSRS_DECAY;
+  return Math.min(1, Math.max(0, r));
+}
+
+/** Classify a due time relative to `asOf` into overdue / today / soon. */
+function dueStateFor(dueAt: string | null, asOf: number): QueueDueState {
+  if (!dueAt) return "soon";
+  const due = Date.parse(dueAt);
+  if (Number.isNaN(due)) return "soon";
+  if (due <= asOf) {
+    // Same calendar day as `asOf` reads as "today"; earlier reads as "overdue".
+    const dueDay = new Date(due).setHours(0, 0, 0, 0);
+    const nowDay = new Date(asOf).setHours(0, 0, 0, 0);
+    return dueDay < nowDay ? "overdue" : "today";
+  }
+  return "soon";
+}
+
+/** A short human label for a due time relative to `asOf`. */
+function dueLabelFor(dueAt: string | null, state: QueueDueState, asOf: number): string {
+  if (state === "overdue") return "Overdue";
+  if (state === "today") return "Due today";
+  if (!dueAt) return "Scheduled";
+  const due = Date.parse(dueAt);
+  if (Number.isNaN(due)) return "Scheduled";
+  const days = Math.max(1, Math.round((due - asOf) / DAY_MS));
+  return `in ${days}d`;
+}
+
+/**
+ * Read-only queue query layer. Constructed once per open database (alongside
+ * {@link Repositories}); the main process exposes it over validated IPC.
+ */
+export class QueueQuery {
+  constructor(private readonly repos: Repositories) {}
+
+  /**
+   * The unified, sorted, filtered due queue. Merges due cards (FSRS) and due
+   * attention items, decorates each with its scheduler signals + meta, sorts by
+   * **priority desc then `due_at` asc**, applies the type/concept/status filters,
+   * and computes the per-type counts (over the unfiltered due set) + the budget
+   * gauge. Deterministic — jitter is the caller's concern.
+   */
+  list(
+    options: { asOf?: IsoTimestamp; filters?: QueueFilters; limit?: number } = {},
+  ): QueueListData {
+    const asOfIso = options.asOf ?? (new Date().toISOString() as IsoTimestamp);
+    const asOfMs = Date.parse(asOfIso);
+    const filters = options.filters ?? {};
+
+    // The two distinct due reads (the FSRS join vs the attention `due_at` read).
+    const dueCards = this.repos.queue.dueCards(asOfIso);
+    const dueAttention = this.repos.queue.dueAttentionItems(asOfIso);
+
+    const cardRows = dueCards.map((el) => this.toCardSummary(el, asOfMs));
+    const attentionRows = dueAttention.map((el) => this.toAttentionSummary(el, asOfMs));
+    const all = [...cardRows, ...attentionRows];
+
+    // Counts over the UNFILTERED due set (so the filter chips show real totals).
+    const counts = {
+      all: all.length,
+      card: all.filter((r) => r.type === "card").length,
+      source: all.filter((r) => r.type === "source").length,
+      extract: all.filter((r) => r.type === "extract").length,
+      topic: all.filter((r) => r.type === "topic").length,
+      task: all.filter((r) => r.type === "task").length,
+      highPriority: all.filter((r) => r.protected).length,
+      overdue: all.filter((r) => r.due === "overdue").length,
+      protected: all.filter((r) => r.protected).length,
+    };
+
+    // Apply filters, then sort priority desc, then due date asc (stable).
+    let rows = all.filter((r) => this.matchesFilters(r, filters));
+    rows = this.sort(rows);
+    if (options.limit !== undefined) rows = rows.slice(0, options.limit);
+
+    const target = this.repos.settings.getAppSettings().dailyReviewBudget;
+    const used = all.length;
+
+    return { items: rows, counts, budget: { used, target } };
+  }
+
+  /** Sort by priority DESCending, then by `due_at` ASCending (nulls last). Stable. */
+  private sort(rows: readonly QueueItemSummary[]): QueueItemSummary[] {
+    return [...rows].sort((a, b) => {
+      if (a.priority !== b.priority) return b.priority - a.priority;
+      const aDue = a.dueAt ? Date.parse(a.dueAt) : Number.POSITIVE_INFINITY;
+      const bDue = b.dueAt ? Date.parse(b.dueAt) : Number.POSITIVE_INFINITY;
+      return aDue - bDue;
+    });
+  }
+
+  /** Whether a row passes the active type/concept/status filters. */
+  private matchesFilters(row: QueueItemSummary, filters: QueueFilters): boolean {
+    if (filters.types && filters.types.length > 0) {
+      if (!filters.types.includes(row.type as ElementType)) return false;
+    }
+    if (filters.statuses && filters.statuses.length > 0) {
+      if (!filters.statuses.includes(row.status as ElementStatus)) return false;
+    }
+    if (filters.concept) {
+      // Concept membership lands with T041 (M8); until concepts are populated this
+      // is a best-effort match against any membership edge already present.
+      if (row.concept !== filters.concept) return false;
+    }
+    return true;
+  }
+
+  /** Build a card (FSRS) queue row from its element + review state. */
+  private toCardSummary(element: Element, asOfMs: number): QueueItemSummary {
+    const state = this.repos.review.findReviewState(element.id);
+    const card = this.repos.review.findCardById(element.id);
+    const retrievability = state
+      ? approximateRetrievability(state.stability, state.lastReviewedAt, asOfMs)
+      : null;
+    const dueAt = state?.dueAt ?? element.dueAt;
+    const due = dueStateFor(dueAt, asOfMs);
+    const { sourceTitle, author } = this.sourceContext(element);
+    return {
+      id: element.id,
+      type: element.type,
+      status: element.status,
+      stage: element.stage,
+      priority: element.priority,
+      title: element.title,
+      dueAt,
+      scheduler: "fsrs",
+      schedulerSignals: {
+        kind: "fsrs",
+        retrievability,
+        stability: state?.stability ?? null,
+        stage: element.stage,
+        postponed: 0,
+      },
+      sourceTitle,
+      author,
+      concept: this.conceptFor(element.id),
+      cardType: card?.card.kind ?? null,
+      protected: priorityToLabel(element.priority) === "A",
+      due,
+      dueLabel: dueLabelFor(dueAt, due, asOfMs),
+    };
+  }
+
+  /** Build an attention (source/topic/extract/task/…) queue row. */
+  private toAttentionSummary(element: Element, asOfMs: number): QueueItemSummary {
+    const due = dueStateFor(element.dueAt, asOfMs);
+    const { sourceTitle, author } = this.sourceContext(element);
+    return {
+      id: element.id,
+      type: element.type,
+      status: element.status,
+      stage: element.stage,
+      priority: element.priority,
+      title: element.title,
+      dueAt: element.dueAt,
+      scheduler: "attention",
+      schedulerSignals: {
+        kind: "attention",
+        retrievability: null,
+        stability: null,
+        stage: element.stage,
+        postponed: this.countPostpones(element.id),
+      },
+      sourceTitle,
+      author,
+      concept: this.conceptFor(element.id),
+      cardType: null,
+      protected: priorityToLabel(element.priority) === "A",
+      due,
+      dueLabel: dueLabelFor(element.dueAt, due, asOfMs),
+    };
+  }
+
+  /** The owning source's title + author for the per-row meta line. */
+  private sourceContext(element: Element): { sourceTitle: string | null; author: string | null } {
+    const sourceId = element.type === "source" ? element.id : element.sourceId;
+    if (!sourceId) return { sourceTitle: null, author: null };
+    const sourceEl = element.type === "source" ? element : this.repos.elements.findById(sourceId);
+    const provenance = this.repos.sources.findById(sourceId)?.source ?? null;
+    return {
+      sourceTitle: sourceEl && !sourceEl.deletedAt ? sourceEl.title : null,
+      author: provenance?.author ?? null,
+    };
+  }
+
+  /**
+   * The first concept this element is a member of, or `null`. Concepts are
+   * populated by T041 (M8); the seed already adds `concept_membership` edges so
+   * this returns a real name for seeded rows and `null` otherwise.
+   */
+  private conceptFor(id: ElementId): string | null {
+    const membership = this.repos.elements
+      .listRelationsFrom(id)
+      .find((r) => r.relationType === "concept_membership");
+    if (!membership) return null;
+    const conceptEl = this.repos.elements.findById(membership.toElementId);
+    return conceptEl && !conceptEl.deletedAt ? conceptEl.title : null;
+  }
+
+  /**
+   * How many times an attention element has been postponed — counted from its
+   * `reschedule_element` ops carrying the `postpone` marker (the schema-churn-free
+   * counter the `SchedulerChip` shows). Mirrors `InspectorQuery.countPostpones`.
+   */
+  private countPostpones(id: ElementId): number {
+    return this.repos.operationLog
+      .listForElement(id)
+      .filter(
+        (op) =>
+          op.opType === "reschedule_element" &&
+          typeof op.payload === "object" &&
+          op.payload !== null &&
+          (op.payload as { postpone?: unknown }).postpone === true,
+      ).length;
+  }
+}

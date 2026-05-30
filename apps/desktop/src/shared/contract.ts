@@ -21,6 +21,8 @@ import {
   DAILY_REVIEW_BUDGET_MIN,
   DESIRED_RETENTION_MAX,
   DESIRED_RETENTION_MIN,
+  ELEMENT_STATUSES,
+  ELEMENT_TYPES,
   KEYBOARD_LAYOUTS,
   MARK_TYPES,
   THEMES,
@@ -385,6 +387,107 @@ export interface ElementsSetPriorityResult {
         readonly priorityLabel: PriorityLabelInput;
       })
     | null;
+}
+
+// ---------------------------------------------------------------------------
+// queue.list()  (T029 — the unified, sorted, filtered due queue)
+// ---------------------------------------------------------------------------
+
+/**
+ * The daily queue read (T029). The renderer asks for everything DUE — due cards
+ * (FSRS) AND due sources/topics/extracts/tasks (attention) — and the MAIN process
+ * composes the queue query in `packages/local-db`: it merges the two distinct due
+ * reads (the FSRS `review_states.due_at` join vs the attention `elements.due_at`
+ * read), decorates each row with its scheduler signals + meta, **sorts by priority
+ * desc then due date asc**, applies the type/concept/status filters, and returns
+ * flat `QueueItemSummary` rows + per-type counts + the daily budget gauge. The
+ * 10–20% jitter the daily-queue rule asks for is a stable, seeded shuffle the
+ * renderer applies on top — the sort here is deterministic. Read-only: no
+ * mutation, no `operation_log`. There is still no generic `db.query`.
+ *
+ * `concept` filtering is partially DEFERRED — concepts/tags land with T041 (M8).
+ * The parameter + the filter chip are wired now so the surface is stable; until
+ * concept memberships are populated it narrows on whatever membership edges exist.
+ */
+
+/** Which scheduler a queue row is on — the FSRS vs attention split. */
+export type QueueScheduler = "fsrs" | "attention";
+
+/** The scheduler signals a queue row carries for its `SchedulerChip`. */
+export interface QueueSchedulerSignals {
+  readonly kind: QueueScheduler;
+  /** Card recall probability now (`0.0`–`1.0`), or `null` for new/attention rows. */
+  readonly retrievability: number | null;
+  /** FSRS memory stability in days, or `null` for attention rows. */
+  readonly stability: number | null;
+  /** Distillation stage (shown on the attention chip). */
+  readonly stage: string;
+  /** How many times an attention element has been postponed. */
+  readonly postponed: number;
+}
+
+/** How "due" a row is relative to `asOf`. */
+export type QueueDueState = "overdue" | "today" | "soon";
+
+/** A flat, JSON-serializable queue row. */
+export interface QueueItemSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly status: string;
+  readonly stage: string;
+  /** Numeric priority `0.0`–`1.0`; the UI derives the A/B/C/D label. */
+  readonly priority: number;
+  readonly title: string;
+  /** The governing due time (FSRS `review_states.due_at` or attention `elements.due_at`). */
+  readonly dueAt: string | null;
+  readonly scheduler: QueueScheduler;
+  readonly schedulerSignals: QueueSchedulerSignals;
+  /** The owning source's title (provenance), for the per-row meta line. */
+  readonly sourceTitle: string | null;
+  /** The source's author, when the row is (or belongs to) a source. */
+  readonly author: string | null;
+  /** A concept this row is a member of (T041 populates this; null until then). */
+  readonly concept: string | null;
+  /** Card kind (`qa`/`cloze`); null for non-cards. */
+  readonly cardType: string | null;
+  /** True for A-priority items (the `--protected` accent bar). */
+  readonly protected: boolean;
+  /** Overdue / today / soon, relative to `asOf`. */
+  readonly due: QueueDueState;
+  /** A short human due label ("Overdue" / "Due today" / "in 3d"). */
+  readonly dueLabel: string;
+}
+
+/** Per-type counts over the unfiltered due set + the at-risk counts. */
+export interface QueueCounts {
+  readonly all: number;
+  readonly card: number;
+  readonly source: number;
+  readonly extract: number;
+  readonly topic: number;
+  readonly task: number;
+  readonly highPriority: number;
+  readonly overdue: number;
+  readonly protected: number;
+}
+
+export const QueueListRequestSchema = z.object({
+  /** "Now" the due reads compare against (ISO-8601); defaults to the server clock. */
+  asOf: z.string().trim().max(64).optional(),
+  /** Keep only these element types. */
+  types: z.array(z.enum(ELEMENT_TYPES)).optional(),
+  /** Keep only rows that are a member of this concept (T041 — deferred). */
+  concept: z.string().trim().max(256).optional(),
+  /** Keep only these lifecycle statuses. */
+  statuses: z.array(z.enum(ELEMENT_STATUSES)).optional(),
+});
+export type QueueListRequest = z.infer<typeof QueueListRequestSchema>;
+
+export interface QueueListResult {
+  readonly items: readonly QueueItemSummary[];
+  readonly counts: QueueCounts;
+  /** The daily review budget gauge: items due vs the configured target. */
+  readonly budget: { readonly used: number; readonly target: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -1029,6 +1132,14 @@ export interface AppApi {
      * the numeric value + logs `update_element` in one transaction.
      */
     setPriority(request: ElementsSetPriorityRequest): Promise<ElementsSetPriorityResult>;
+  };
+  readonly queue: {
+    /**
+     * The unified, sorted, filtered due queue (T029) — due cards (FSRS) AND due
+     * attention items, sorted priority-then-due-date, with type/concept/status
+     * filters + per-type counts + the budget gauge. Read-only.
+     */
+    list(request?: QueueListRequest): Promise<QueueListResult>;
   };
   readonly lineage: {
     /** The full, depth-tagged lineage tree for one element (read-only) (T023). */

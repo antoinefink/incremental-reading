@@ -26,6 +26,7 @@ import { createRootRoute, createRoute, createRouter } from "@tanstack/react-rout
 import { DesktopStatusPanel } from "./components/DesktopStatusPanel";
 import { InboxScreen } from "./pages/inbox/InboxScreen";
 import { Placeholder } from "./pages/Placeholder";
+import { QueueScreen } from "./pages/queue/QueueScreen";
 import { Settings } from "./pages/Settings";
 import { SourceReader } from "./pages/source/SourceReader";
 import { ExtractView } from "./reader/ExtractView";
@@ -55,14 +56,7 @@ const inboxRoute = createRoute({
 const queueRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/queue",
-  component: () => (
-    <Placeholder
-      routeId="queue"
-      icon="queue"
-      title="Daily Queue"
-      body="Due sources, extracts, and cards, sorted by priority then due date."
-    />
-  ),
+  component: QueueScreen,
 });
 
 const sourceRoute = createRoute({

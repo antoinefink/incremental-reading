@@ -1,0 +1,231 @@
+/**
+ * QueueQuery tests (T029).
+ *
+ * The unified due-queue read is the seam that keeps queue sorting/filtering out of
+ * React, so its behaviour is unit-tested against a temporary, fully-migrated
+ * in-memory `better-sqlite3` database. These assert the load-bearing invariants the
+ * `/queue` screen depends on:
+ *
+ *  - it returns due CARDS (FSRS `review_states.due_at`) AND due ATTENTION items
+ *    (`elements.due_at`) — the two distinct schedulers, kept separate in the read;
+ *  - each row carries the correct `scheduler` tag (`fsrs` for cards, `attention`
+ *    for the rest) + the matching signals;
+ *  - rows are sorted by PRIORITY desc, then due date asc;
+ *  - `protected` is set for band-A items (the `--protected` accent bar);
+ *  - type / status filters narrow correctly;
+ *  - the budget gauge reads the daily review budget from settings.
+ */
+
+import type { BlockId, ElementId, IsoTimestamp } from "@interleave/core";
+import { PRIORITY_LABEL_VALUE } from "@interleave/core";
+import type { DbHandle } from "@interleave/db";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createRepositories, type Repositories } from "./index";
+import { QueueQuery } from "./queue-query";
+import { createInMemoryDb } from "./test-db";
+
+let handle: DbHandle;
+let repos: Repositories;
+let queue: QueueQuery;
+
+/** A fixed "now" so due classification + sort are deterministic. */
+const NOW = "2026-05-30T12:00:00.000Z" as IsoTimestamp;
+const iso = (s: string) => s as IsoTimestamp;
+
+beforeEach(() => {
+  handle = createInMemoryDb();
+  repos = createRepositories(handle.db);
+  queue = new QueueQuery(repos);
+});
+
+afterEach(() => {
+  handle.sqlite.close();
+});
+
+/**
+ * Build a small mixed due set:
+ *  - a source (A) due yesterday (overdue, attention);
+ *  - an extract (B) due today (attention);
+ *  - a Q&A card (A) made due via a review (FSRS);
+ *  - a cloze card (C) reviewed into a FUTURE due (NOT due) — must be excluded.
+ */
+function buildDueSet(): {
+  sourceId: ElementId;
+  extractId: ElementId;
+  qaCardId: ElementId;
+  clozeCardId: ElementId;
+} {
+  const source = repos.sources.create({
+    title: "On the Measure of Intelligence",
+    priority: PRIORITY_LABEL_VALUE.A,
+    status: "active",
+    author: "François Chollet",
+  });
+  const sourceId = source.element.id;
+  // Source is due yesterday (overdue) on the attention scheduler.
+  repos.elements.reschedule(sourceId, iso("2026-05-29T08:00:00.000Z"));
+
+  const extract = repos.sources.createExtract({
+    sourceElementId: sourceId,
+    title: "Intelligence = skill-acquisition efficiency",
+    priority: PRIORITY_LABEL_VALUE.B,
+    selectedText: "We define the intelligence of a system…",
+    blockIds: ["blk_def_p1" as BlockId],
+    label: "Definition · ¶1",
+  });
+  const extractId = extract.element.id;
+  repos.elements.update(extractId, { status: "active", stage: "clean_extract" });
+  // Extract due today.
+  repos.elements.reschedule(extractId, iso("2026-05-30T06:00:00.000Z"));
+
+  const qaCard = repos.review.createCard({
+    kind: "qa",
+    title: "Chollet's definition of intelligence",
+    priority: PRIORITY_LABEL_VALUE.A,
+    prompt: "How does Chollet define intelligence?",
+    answer: "Skill-acquisition efficiency over a scope of tasks.",
+    parentId: extractId,
+    sourceId,
+    sourceLocationId: extract.location.id,
+    stage: "active_card",
+  });
+  // Review it so its FSRS due lands in the PAST (due now).
+  repos.review.recordReview(qaCard.element.id, {
+    rating: "good",
+    reviewedAt: iso("2026-05-26T08:00:00.000Z"),
+    responseMs: 3000,
+    prevState: "review",
+    nextState: "review",
+    nextStability: 9.4,
+    nextDifficulty: 5,
+    nextDueAt: iso("2026-05-29T08:00:00.000Z"),
+    elapsedDays: 3,
+    scheduledDays: 3,
+    reps: 2,
+    lapses: 0,
+  });
+
+  const clozeCard = repos.review.createCard({
+    kind: "cloze",
+    title: "Intelligence definition (cloze)",
+    priority: PRIORITY_LABEL_VALUE.C,
+    cloze: "Intelligence is {{c1::skill-acquisition efficiency}}.",
+    parentId: extractId,
+    sourceId,
+    sourceLocationId: extract.location.id,
+    stage: "card_draft",
+  });
+  // Review it into a FUTURE due — it must NOT appear in the due queue.
+  repos.review.recordReview(clozeCard.element.id, {
+    rating: "good",
+    reviewedAt: iso("2026-05-30T08:00:00.000Z"),
+    responseMs: 3000,
+    prevState: "new",
+    nextState: "review",
+    nextStability: 12,
+    nextDifficulty: 5,
+    nextDueAt: iso("2026-06-15T08:00:00.000Z"),
+    elapsedDays: 0,
+    scheduledDays: 16,
+    reps: 1,
+    lapses: 0,
+  });
+
+  return { sourceId, extractId, qaCardId: qaCard.element.id, clozeCardId: clozeCard.element.id };
+}
+
+describe("QueueQuery", () => {
+  it("returns due cards AND due attention items, each tagged with the right scheduler", () => {
+    const { sourceId, extractId, qaCardId, clozeCardId } = buildDueSet();
+    const { items } = queue.list({ asOf: NOW });
+    const ids = items.map((i) => i.id);
+
+    expect(ids).toContain(sourceId);
+    expect(ids).toContain(extractId);
+    expect(ids).toContain(qaCardId);
+    // The future-due cloze card is excluded.
+    expect(ids).not.toContain(clozeCardId);
+
+    const card = items.find((i) => i.id === qaCardId);
+    const extract = items.find((i) => i.id === extractId);
+    expect(card?.scheduler).toBe("fsrs");
+    expect(card?.schedulerSignals.kind).toBe("fsrs");
+    expect(extract?.scheduler).toBe("attention");
+    expect(extract?.schedulerSignals.kind).toBe("attention");
+  });
+
+  it("sorts by priority desc, then due date asc", () => {
+    buildDueSet();
+    const { items } = queue.list({ asOf: NOW });
+    // A (source, overdue) and A (qa card, due 05-29) are both band A; the source's
+    // due (05-29 08:00) ties the card's due (05-29 08:00) — both before the B
+    // extract (due 05-30). So both A items precede the B extract.
+    const priorities = items.map((i) => i.priority);
+    for (let i = 1; i < priorities.length; i++) {
+      const prev = priorities[i - 1] as number;
+      const cur = priorities[i] as number;
+      expect(prev).toBeGreaterThanOrEqual(cur);
+    }
+    // The B-priority extract is last among the three due items.
+    expect(items[items.length - 1]?.priority).toBe(PRIORITY_LABEL_VALUE.B);
+  });
+
+  it("marks band-A items protected (the --protected accent bar)", () => {
+    const { sourceId, extractId } = buildDueSet();
+    const { items } = queue.list({ asOf: NOW });
+    expect(items.find((i) => i.id === sourceId)?.protected).toBe(true);
+    expect(items.find((i) => i.id === extractId)?.protected).toBe(false);
+  });
+
+  it("classifies due state (overdue vs today) and a human due label", () => {
+    const { sourceId, extractId } = buildDueSet();
+    const { items } = queue.list({ asOf: NOW });
+    const source = items.find((i) => i.id === sourceId);
+    const extract = items.find((i) => i.id === extractId);
+    expect(source?.due).toBe("overdue");
+    expect(source?.dueLabel).toBe("Overdue");
+    expect(extract?.due).toBe("today");
+    expect(extract?.dueLabel).toBe("Due today");
+  });
+
+  it("filters by type (cards only)", () => {
+    const { qaCardId } = buildDueSet();
+    const { items } = queue.list({ asOf: NOW, filters: { types: ["card"] } });
+    expect(items.every((i) => i.type === "card")).toBe(true);
+    expect(items.map((i) => i.id)).toContain(qaCardId);
+  });
+
+  it("filters by status", () => {
+    const { extractId } = buildDueSet();
+    // The extract was set `active` in the fixture; narrowing to `active` keeps it.
+    const { items } = queue.list({ asOf: NOW, filters: { statuses: ["active"] } });
+    expect(items.map((i) => i.id)).toContain(extractId);
+    expect(items.every((i) => i.status === "active")).toBe(true);
+  });
+
+  it("reports per-type counts over the unfiltered due set", () => {
+    buildDueSet();
+    const { counts } = queue.list({ asOf: NOW });
+    expect(counts.all).toBe(3);
+    expect(counts.card).toBe(1);
+    expect(counts.source).toBe(1);
+    expect(counts.extract).toBe(1);
+    expect(counts.highPriority).toBe(2); // source A + qa card A
+    expect(counts.overdue).toBeGreaterThanOrEqual(1);
+    expect(counts.protected).toBe(2);
+  });
+
+  it("reads the daily review budget from settings for the gauge", () => {
+    buildDueSet();
+    repos.settings.updateAppSettings({ dailyReviewBudget: 25 });
+    const { budget } = queue.list({ asOf: NOW });
+    expect(budget.target).toBe(25);
+    expect(budget.used).toBe(3);
+  });
+
+  it("returns an empty queue with zero counts when nothing is due", () => {
+    const { items, counts } = queue.list({ asOf: NOW });
+    expect(items).toHaveLength(0);
+    expect(counts.all).toBe(0);
+  });
+});

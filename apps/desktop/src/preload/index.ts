@@ -33,6 +33,7 @@ import type {
   InboxTriageRequest,
   InspectorGetRequest,
   LineageGetRequest,
+  QueueListRequest,
   ReadPointGetRequest,
   ReadPointSetRequest,
   SettingsGetRequest,
@@ -64,6 +65,9 @@ const appApi: AppApi = {
   elements: {
     setPriority: (request: ElementsSetPriorityRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.elementsSetPriority, request),
+  },
+  queue: {
+    list: (request?: QueueListRequest) => ipcRenderer.invoke(IPC_CHANNELS.queueList, request ?? {}),
   },
   lineage: {
     get: (request: LineageGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.lineageGet, request),

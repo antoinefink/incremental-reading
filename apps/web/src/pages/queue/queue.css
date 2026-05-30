@@ -1,0 +1,372 @@
+/*
+ * Daily Queue screen styles (T029).
+ *
+ * Ported verbatim (token-for-token, no hard-coded colors) from the design kit's
+ * `design/kit/styles/app.css` for the surfaces the queue introduces that are NOT
+ * already in `inspector.css`: the `qitem` row (+ `--protected` accent bar), the
+ * `BudgetMeter`, the filter `chip`s, the `next-action` pill, the `dot-sep`, the
+ * `concept-tag`, the leech/stagnant badges, and the page/panel/session chrome.
+ * The shared primitives (`badge`, `prio`, `tico`, `sched`, `stage`, `tag`) live in
+ * `inspector.css`, which this screen also imports.
+ */
+
+/* ---------- Page chrome ---------- */
+.q-page {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+.q-pad {
+  max-width: 940px;
+  margin: 0 auto;
+  padding: var(--s-7) var(--s-6) var(--s-9);
+}
+.q-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: var(--s-5);
+  gap: var(--s-4);
+}
+.q-title {
+  font-size: var(--t-2xl, 22px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin: 0;
+}
+.q-sub {
+  font-size: var(--t-sm);
+  color: var(--text-3);
+  margin: 4px 0 0;
+}
+
+.q-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.q-panel-pad {
+  padding: var(--s-6);
+}
+
+/* the overload-management strip (BudgetMeter + at-risk metrics) */
+.q-overload {
+  display: grid;
+  grid-template-columns: 1.1fr 1px 1fr;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: var(--s-4);
+}
+.q-overload__div {
+  background: var(--border);
+  align-self: stretch;
+}
+.q-metrics {
+  display: flex;
+  gap: 16px;
+  justify-content: space-around;
+}
+.q-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.q-metric__v {
+  font-family: var(--font-mono);
+  font-size: var(--t-lg);
+  font-weight: 600;
+}
+.q-metric__v--danger {
+  color: var(--danger);
+}
+.q-metric__l {
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+}
+
+/* ---------- Budget meter ---------- */
+.budget {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.budget__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.budget__num {
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: var(--t-lg);
+  letter-spacing: -0.01em;
+}
+.budget__num span {
+  color: var(--text-3);
+  font-weight: 500;
+  font-size: var(--t-base);
+}
+.budget__bar {
+  height: 7px;
+  border-radius: var(--r-full);
+  background: var(--sunken);
+  overflow: hidden;
+  display: flex;
+}
+.budget__used {
+  background: var(--accent);
+  height: 100%;
+}
+.budget__over {
+  background: var(--danger);
+  height: 100%;
+}
+.budget__legend {
+  display: flex;
+  gap: 14px;
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+}
+.budget__legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+
+/* ---------- Session bar ---------- */
+.sessionbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  flex-wrap: wrap;
+  margin-bottom: var(--s-5);
+}
+.sessionbar__start {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 14px;
+  border: none;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.sessionbar__start:hover {
+  opacity: 0.92;
+}
+.sessionbar__note {
+  color: var(--text-3);
+  font-size: var(--t-sm);
+}
+
+/* ---------- Filter chips ---------- */
+.q-filters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.chip {
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 0 var(--s-4);
+  height: 27px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--fast) var(--ease);
+}
+.chip:hover {
+  border-color: var(--text-3);
+  color: var(--text);
+}
+.chip--active {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--canvas);
+}
+.chip__count {
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  opacity: 0.7;
+}
+
+/* ---------- Queue item card ---------- */
+.q-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.qitem {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--s-5);
+  align-items: center;
+  padding: var(--s-5) var(--s-6);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  cursor: pointer;
+  transition: all var(--fast) var(--ease);
+  position: relative;
+  text-align: left;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+}
+.qitem:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+.qitem--active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.qitem--protected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: var(--r-full);
+  background: var(--prio-a);
+}
+.qitem__main {
+  min-width: 0;
+}
+.qitem__title {
+  font-size: var(--t-md);
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.qitem__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.qitem__sub {
+  font-size: var(--t-sm);
+  color: var(--text-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.qitem__sub i {
+  font-style: italic;
+}
+.qitem__action {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.next-action {
+  font-size: var(--t-xs);
+  color: var(--text-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  border: 1px solid var(--border-faint);
+}
+.dot-sep {
+  width: 3px;
+  height: 3px;
+  border-radius: var(--r-full);
+  background: var(--text-3);
+  flex: none;
+}
+
+/* concept tag (T041 populates these) */
+.concept-tag {
+  font-size: var(--t-xs);
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: var(--r-full);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: color-mix(in oklch, var(--el-concept) 12%, transparent);
+  color: var(--el-concept);
+  border: 1px solid color-mix(in oklch, var(--el-concept) 25%, transparent);
+}
+.concept-tag::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: var(--r-full);
+  background: currentColor;
+}
+
+/* extra status badges the queue uses */
+.badge--leech {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.badge--stagnant {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+/* ---------- Empty / filtered-empty states ---------- */
+.q-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--s-3);
+  padding: var(--s-8) var(--s-6);
+}
+.q-empty__icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: var(--r-lg);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.q-empty__icon--filter {
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.q-empty__title {
+  font-size: var(--t-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  margin: 0;
+}
+.q-empty__body {
+  font-size: var(--t-sm);
+  color: var(--text-2);
+  max-width: 380px;
+  margin: 0;
+}

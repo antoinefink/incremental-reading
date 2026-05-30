@@ -78,6 +78,15 @@ export {
   type AppendOpInput,
   OperationLogRepository,
 } from "./operation-log-repository";
+export {
+  type QueueDueState,
+  type QueueFilters,
+  type QueueItemSummary,
+  type QueueListData,
+  QueueQuery,
+  type QueueScheduler,
+  type QueueSchedulerSignals,
+} from "./queue-query";
 export { QueueRepository } from "./queue-repository";
 export {
   type CardWithElement,

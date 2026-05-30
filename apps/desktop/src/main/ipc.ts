@@ -32,6 +32,7 @@ import {
   InspectorListRequestSchema,
   IPC_CHANNELS,
   LineageGetRequestSchema,
+  QueueListRequestSchema,
   ReadPointGetRequestSchema,
   ReadPointSetRequestSchema,
   SettingsGetAllRequestSchema,
@@ -98,6 +99,11 @@ export function registerIpcHandlers(dbService: DbService): () => void {
   ipcMain.handle(IPC_CHANNELS.elementsSetPriority, (_event, rawRequest: unknown) => {
     const request = ElementsSetPriorityRequestSchema.parse(rawRequest);
     return dbService.setElementPriority(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.queueList, (_event, rawRequest: unknown) => {
+    const request = QueueListRequestSchema.parse(rawRequest ?? {});
+    return dbService.listQueue(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.lineageGet, (_event, rawRequest: unknown) => {

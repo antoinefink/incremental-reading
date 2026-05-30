@@ -50,6 +50,7 @@ describe("IPC channels", () => {
         "inspector:list",
         "inspector:get",
         "elements:setPriority",
+        "queue:list",
         "lineage:get",
         "sources:importManual",
         "inbox:list",
