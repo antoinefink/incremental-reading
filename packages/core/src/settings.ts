@@ -19,6 +19,7 @@
  * surfaced as A/B/C/D via `@interleave/core`'s priority helpers.
  */
 
+import { clampFactor, DEFAULT_IMPORT_BALANCE_FACTOR } from "./balance";
 import { clamp01 } from "./numeric";
 import { DEFAULT_PRIORITY, type Priority, type PriorityLabel, priorityFromLabel } from "./priority";
 
@@ -52,6 +53,12 @@ export type ThemePreference = (typeof THEMES)[number];
  *   Trash before they can be cleaned up (T044). For M9 this is INFORMATIONAL copy
  *   only ("recoverable for N days") + a manual "Empty trash"; auto-purge on expiry
  *   is DEFERRED to the maintenance job (M20/T099).
+ * - `balanceWarnings` — when `true` (default), the import/process balance `Banner`
+ *   (T046) appears on the inbox + analytics when imports outpace processing.
+ *   Turning it off suppresses the advisory banner entirely.
+ * - `importBalanceFactor` — how lopsided imports-vs-processing must be before the
+ *   balance warning fires (T046): imports must exceed processed output by this
+ *   multiple. Higher = less sensitive. Read by the pure `judgeBalance` rule.
  * - `keyboardLayout` — default shortcut bindings (T048).
  * - `theme` — light/dark UI preference.
  */
@@ -62,6 +69,8 @@ export interface AppSettings {
   readonly defaultSourcePriority: Priority;
   readonly burySiblings: boolean;
   readonly trashRetentionDays: number;
+  readonly balanceWarnings: boolean;
+  readonly importBalanceFactor: number;
   readonly keyboardLayout: KeyboardLayout;
   readonly theme: ThemePreference;
 }
@@ -77,6 +86,8 @@ export const SETTINGS_KEYS = {
   defaultSourcePriority: "import.defaultSourcePriority",
   burySiblings: "review.burySiblings",
   trashRetentionDays: "trash.retentionDays",
+  balanceWarnings: "balance.warnings",
+  importBalanceFactor: "balance.importFactor",
   keyboardLayout: "ui.keyboardLayout",
   theme: "ui.theme",
 } as const satisfies Record<keyof AppSettings, string>;
@@ -93,6 +104,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   defaultSourcePriority: DEFAULT_PRIORITY,
   burySiblings: true,
   trashRetentionDays: 30,
+  balanceWarnings: true,
+  importBalanceFactor: DEFAULT_IMPORT_BALANCE_FACTOR,
   keyboardLayout: "qwerty",
   theme: "dark",
 };
@@ -104,6 +117,13 @@ export const DAILY_REVIEW_BUDGET_MAX = 300;
 /** Inclusive bounds for the trash retention (informational for M9). */
 export const TRASH_RETENTION_DAYS_MIN = 1;
 export const TRASH_RETENTION_DAYS_MAX = 365;
+
+/**
+ * Inclusive bounds for the import-balance factor (T046). Re-exported from
+ * `./balance` so the IPC contract + the settings UI bound the slider/patch
+ * against the SAME numbers the pure `judgeBalance` rule clamps to.
+ */
+export { IMPORT_BALANCE_FACTOR_MAX, IMPORT_BALANCE_FACTOR_MIN } from "./balance";
 
 /** Inclusive UI bounds for desired retention (as a probability `0.0`–`1.0`). */
 export const DESIRED_RETENTION_MIN = 0.8;
@@ -164,6 +184,10 @@ export function coerceSettingValue<K extends keyof AppSettings>(
       return (isFiniteNumber(raw) ? clamp01(raw) : fallback) as AppSettings[K];
     case "burySiblings":
       return (typeof raw === "boolean" ? raw : fallback) as AppSettings[K];
+    case "balanceWarnings":
+      return (typeof raw === "boolean" ? raw : fallback) as AppSettings[K];
+    case "importBalanceFactor":
+      return (isFiniteNumber(raw) ? clampFactor(raw) : fallback) as AppSettings[K];
     case "trashRetentionDays":
       return (
         isFiniteNumber(raw) && raw > 0
@@ -206,6 +230,11 @@ export function appSettingsFromStored(stored: Readonly<Record<string, unknown>>)
     trashRetentionDays: coerceSettingValue(
       "trashRetentionDays",
       stored[SETTINGS_KEYS.trashRetentionDays],
+    ),
+    balanceWarnings: coerceSettingValue("balanceWarnings", stored[SETTINGS_KEYS.balanceWarnings]),
+    importBalanceFactor: coerceSettingValue(
+      "importBalanceFactor",
+      stored[SETTINGS_KEYS.importBalanceFactor],
     ),
     keyboardLayout: coerceSettingValue("keyboardLayout", stored[SETTINGS_KEYS.keyboardLayout]),
     theme: coerceSettingValue("theme", stored[SETTINGS_KEYS.theme]),

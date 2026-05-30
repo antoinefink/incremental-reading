@@ -36,6 +36,8 @@ describe("AppSettings defaults", () => {
       defaultSourcePriority: "import.defaultSourcePriority",
       burySiblings: "review.burySiblings",
       trashRetentionDays: "trash.retentionDays",
+      balanceWarnings: "balance.warnings",
+      importBalanceFactor: "balance.importFactor",
       keyboardLayout: "ui.keyboardLayout",
       theme: "ui.theme",
     });
@@ -131,6 +133,8 @@ describe("stored ↔ model round-trip", () => {
       [SETTINGS_KEYS.defaultSourcePriority]: 0.625,
       [SETTINGS_KEYS.burySiblings]: false,
       [SETTINGS_KEYS.trashRetentionDays]: 14,
+      [SETTINGS_KEYS.balanceWarnings]: false,
+      [SETTINGS_KEYS.importBalanceFactor]: 2.5,
       [SETTINGS_KEYS.keyboardLayout]: "dvorak",
       [SETTINGS_KEYS.theme]: "light",
     };
@@ -141,6 +145,8 @@ describe("stored ↔ model round-trip", () => {
       defaultSourcePriority: 0.625,
       burySiblings: false,
       trashRetentionDays: 14,
+      balanceWarnings: false,
+      importBalanceFactor: 2.5,
       keyboardLayout: "dvorak",
       theme: "light",
     });
@@ -162,6 +168,8 @@ describe("stored ↔ model round-trip", () => {
       defaultSourcePriority: 0.375,
       burySiblings: false,
       trashRetentionDays: 7,
+      balanceWarnings: false,
+      importBalanceFactor: 2,
       keyboardLayout: "vim" as const,
       theme: "light" as const,
     };

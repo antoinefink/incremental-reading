@@ -63,6 +63,8 @@ import { seedDemoCollection } from "@interleave/testing";
 import type {
   AnalyticsGetRequest,
   AnalyticsGetResult,
+  BalanceGetRequest,
+  BalanceGetResult,
   CardEditSummary,
   CardsCreateRequest,
   CardsCreateResult,
@@ -1763,6 +1765,37 @@ export class DbService {
       deletions: summary.deletions,
       leeches: summary.leeches,
       dayStreak: summary.dayStreak,
+    };
+  }
+
+  /**
+   * The import/process balance snapshot (T046) via
+   * {@link AnalyticsService.computeBalance} (in `packages/local-db`): the week's
+   * sources imported / extracts created / cards created / reviews due, plus the
+   * imbalance judgment (the pure `@interleave/core` `judgeBalance` rule, tuned by
+   * the user's `importBalanceFactor` setting). REUSES the analytics aggregation so
+   * the inbox banner + analytics view can't disagree. Read-only — no mutation, no
+   * `operation_log`, no schedule changes. `asOf` defaults to "now", `windowDays`
+   * to 7. The `balanceWarnings` on/off setting is honoured in the RENDERER (it
+   * controls whether the banner shows); the snapshot is always computed so the
+   * analytics view can surface the numbers regardless.
+   */
+  getBalance(request?: BalanceGetRequest): BalanceGetResult {
+    const asOf = (request?.asOf ?? nowIso()) as IsoTimestamp;
+    const factor = this.repos.settings.getAppSettings().importBalanceFactor;
+    const summary = this.repos.analytics.computeBalance(asOf, {
+      factor,
+      ...(request?.windowDays !== undefined ? { windowDays: request.windowDays } : {}),
+    });
+    return {
+      asOf: summary.asOf,
+      windowDays: summary.windowDays,
+      sourcesImported: summary.sourcesImported,
+      extractsCreated: summary.extractsCreated,
+      cardsCreated: summary.cardsCreated,
+      reviewsDueThisWeek: summary.reviewsDueThisWeek,
+      imbalanced: summary.imbalanced,
+      severity: summary.severity,
     };
   }
 

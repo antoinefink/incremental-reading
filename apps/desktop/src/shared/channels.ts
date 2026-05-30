@@ -63,6 +63,7 @@ export const IPC_CHANNELS = {
   trashEmpty: "trash:empty",
   undoLast: "undo:last",
   analyticsGet: "analytics:get",
+  balanceGet: "balance:get",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

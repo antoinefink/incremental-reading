@@ -47,7 +47,13 @@
  *   soft-deleted / suspended / done / dismissed rows (the queue's own filter).
  */
 
-import type { IsoTimestamp } from "@interleave/core";
+import {
+  type BalanceJudgment,
+  type BalanceSeverity,
+  DEFAULT_IMPORT_BALANCE_FACTOR,
+  type IsoTimestamp,
+  judgeBalance,
+} from "@interleave/core";
 import { elements, type InterleaveDatabase, reviewLogs } from "@interleave/db";
 import { and, eq, gte, isNotNull, lte } from "drizzle-orm";
 import { QueueRepository } from "./queue-repository";
@@ -55,6 +61,9 @@ import { ReviewRepository } from "./review-repository";
 
 /** Default analytics window — the kit's "last 30 days". */
 export const DEFAULT_ANALYTICS_WINDOW_DAYS = 30;
+
+/** Default import/process balance window — "this week". */
+export const DEFAULT_BALANCE_WINDOW_DAYS = 7;
 
 /** One calendar day's review count (the `Spark` series). `date` is `YYYY-MM-DD` (local). */
 export interface ReviewsByDay {
@@ -103,6 +112,47 @@ export interface AnalyticsSummary {
 export interface AnalyticsOptions {
   /** Window length in calendar days (default {@link DEFAULT_ANALYTICS_WINDOW_DAYS}). */
   readonly windowDays?: number;
+}
+
+/** Options for {@link AnalyticsService.computeBalance}. */
+export interface BalanceOptions {
+  /** Window length in calendar days (default {@link DEFAULT_BALANCE_WINDOW_DAYS}). */
+  readonly windowDays?: number;
+  /**
+   * The imbalance factor (how lopsided imports vs processing must be before the
+   * warning fires). Defaults to `@interleave/core`'s {@link DEFAULT_IMPORT_BALANCE_FACTOR};
+   * the main side passes the user's `importBalanceFactor` setting. Clamped by the
+   * pure rule, so a malformed value can never disable the warning.
+   */
+  readonly factor?: number;
+}
+
+/**
+ * The import/process balance snapshot (T046) — the four weekly headline numbers
+ * plus the imbalance judgment. Reuses the T045 windowed aggregation (the SAME
+ * `createdAt`-in-window counting), only with a 7-day window and the
+ * import-vs-output framing, so the inbox banner + the analytics view can never
+ * disagree. The judgment is the pure `@interleave/core` `judgeBalance` rule.
+ *
+ * Advisory only — it NEVER mutates a schedule (auto-postpone is M16/T077).
+ */
+export interface BalanceSummary {
+  /** The `asOf` instant the snapshot was computed for (ISO-8601). */
+  readonly asOf: IsoTimestamp;
+  /** The window length in calendar days (default 7). */
+  readonly windowDays: number;
+  /** `source` elements imported (created) in the window. */
+  readonly sourcesImported: number;
+  /** `extract` elements created in the window. */
+  readonly extractsCreated: number;
+  /** `card` elements created in the window. */
+  readonly cardsCreated: number;
+  /** Cards due for FSRS review within the next `windowDays` days (forward-looking). */
+  readonly reviewsDueThisWeek: number;
+  /** True when imports outpace processing (`severity !== "ok"`). */
+  readonly imbalanced: boolean;
+  /** The severity bucket driving the banner variant (`ok`/`warn`/`danger`). */
+  readonly severity: BalanceSeverity;
 }
 
 /** The local-day key (`YYYY-MM-DD`) for an ISO timestamp, in the machine timezone. */
@@ -227,8 +277,59 @@ export class AnalyticsService {
     };
   }
 
+  /**
+   * Compute the import/process {@link BalanceSummary} for `asOf` over `windowDays`
+   * (default 7). REUSES the T045 windowed aggregation — the same
+   * `createdAt`-in-window counting — so the inbox banner and the analytics view
+   * read the SAME numbers and can never disagree. The imbalance judgment is the
+   * pure `@interleave/core` `judgeBalance` rule (the single tunable place).
+   * Read-only — no mutation, no `operation_log`, no schedule changes.
+   */
+  computeBalance(asOf: IsoTimestamp, options: BalanceOptions = {}): BalanceSummary {
+    const windowDays = options.windowDays ?? DEFAULT_BALANCE_WINDOW_DAYS;
+    const factor = options.factor ?? DEFAULT_IMPORT_BALANCE_FACTOR;
+    const asOfDate = new Date(asOf);
+
+    // The same local-day window the analytics snapshot uses, just 7 days wide.
+    const windowStartDay = startOfLocalDay(asOfDate);
+    windowStartDay.setDate(windowStartDay.getDate() - (windowDays - 1));
+    const windowStartIso = windowStartDay.toISOString();
+
+    const sourcesImported = this.countCreatedInWindow("source", windowStartIso, asOf);
+    const extractsCreated = this.countCreatedInWindow("extract", windowStartIso, asOf);
+    const cardsCreated = this.countCreatedInWindow("card", windowStartIso, asOf);
+
+    // "Reviews due this week" looks FORWARD: cards due within the next `windowDays`.
+    const windowEnd = new Date(asOfDate);
+    windowEnd.setDate(windowEnd.getDate() + windowDays);
+    const reviewsDueThisWeek = this.queue.dueCardsBetween(
+      asOf,
+      windowEnd.toISOString() as IsoTimestamp,
+    );
+
+    const judgment: BalanceJudgment = judgeBalance(
+      { sourcesImported, extractsCreated, cardsCreated },
+      factor,
+    );
+
+    return {
+      asOf,
+      windowDays,
+      sourcesImported,
+      extractsCreated,
+      cardsCreated,
+      reviewsDueThisWeek,
+      imbalanced: judgment.imbalanced,
+      severity: judgment.severity,
+    };
+  }
+
   /** Count elements of `type` whose `createdAt` is within `[start, end]` (inclusive). */
-  private countCreatedInWindow(type: "card" | "extract", start: string, end: string): number {
+  private countCreatedInWindow(
+    type: "card" | "extract" | "source",
+    start: string,
+    end: string,
+  ): number {
     return this.db
       .select({ id: elements.id })
       .from(elements)

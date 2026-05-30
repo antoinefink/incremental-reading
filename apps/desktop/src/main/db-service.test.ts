@@ -346,6 +346,8 @@ describe("DbService", () => {
       defaultSourcePriority: 0.875,
       burySiblings: false,
       trashRetentionDays: 30,
+      balanceWarnings: true,
+      importBalanceFactor: 1.5,
       keyboardLayout: "dvorak",
       theme: "light",
     });
@@ -1862,5 +1864,67 @@ describe("DbService — analytics (T045)", () => {
     const persisted = second.getAnalytics({ asOf: ASOF });
     expect(persisted.reviewsTotal).toBe(after.reviewsTotal);
     second.close();
+  });
+});
+
+describe("DbService — balance (T046)", () => {
+  /** A future clock so the seeded forward-due cards register as due-this-week. */
+  const ASOF = "2027-06-01T12:00:00.000Z";
+
+  it("getBalance returns the four weekly counts + the imbalance judgment", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    const balance = svc.getBalance({ asOf: ASOF, windowDays: 7 });
+    expect(balance.windowDays).toBe(7);
+    // The four headline numbers are present and non-negative.
+    expect(balance.sourcesImported).toBeGreaterThanOrEqual(0);
+    expect(balance.extractsCreated).toBeGreaterThanOrEqual(0);
+    expect(balance.cardsCreated).toBeGreaterThanOrEqual(0);
+    expect(balance.reviewsDueThisWeek).toBeGreaterThanOrEqual(0);
+    expect(["ok", "warn", "danger"]).toContain(balance.severity);
+    expect(balance.imbalanced).toBe(balance.severity !== "ok");
+
+    // Defaults apply when called bare (7-day window).
+    expect(svc.getBalance().windowDays).toBe(7);
+    svc.close();
+  });
+
+  it("flags an imbalanced week of many imports with no processed output (advisory only)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+
+    // Import 10 sources with NO extracts/cards in the window — a zero-output week
+    // at 2× the import floor escalates to `danger` per the documented rule.
+    for (let i = 0; i < 10; i++) {
+      svc.importManualSource({ title: `Imported ${i}`, priority: "C" });
+    }
+    const now = new Date().toISOString();
+    const balance = svc.getBalance({ asOf: now, windowDays: 7 });
+    expect(balance.sourcesImported).toBeGreaterThanOrEqual(10);
+    expect(balance.extractsCreated).toBe(0);
+    expect(balance.cardsCreated).toBe(0);
+    expect(balance.imbalanced).toBe(true);
+    expect(balance.severity).toBe("danger");
+    svc.close();
+  });
+
+  it("reads the importBalanceFactor setting and round-trips it (it gates the rule)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+
+    // 6 imports (just over the floor) with no output → at least a warn.
+    for (let i = 0; i < 6; i++) svc.importManualSource({ title: `Src ${i}`, priority: "C" });
+    const now = new Date().toISOString();
+    expect(svc.getBalance({ asOf: now }).imbalanced).toBe(true);
+
+    // The factor setting round-trips through the typed settings surface and is the
+    // value getBalance reads (a zero-output week still alarms because the floor +
+    // zero-output rule dominate — the factor only tunes the non-zero-output ratio).
+    svc.updateAppSettings({ importBalanceFactor: 5 });
+    expect(svc.getAppSettings().settings.importBalanceFactor).toBe(5);
+    expect(svc.getBalance({ asOf: now }).imbalanced).toBe(true);
+    svc.close();
   });
 });

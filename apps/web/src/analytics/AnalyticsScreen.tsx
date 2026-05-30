@@ -19,6 +19,7 @@
 
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
+import { BalanceBanner } from "../components/BalanceBanner";
 import { Icon } from "../components/Icon";
 import { type AnalyticsGetResult, appApi, isDesktop } from "../lib/appApi";
 import { UNDO_EVENT } from "../shell/nav";
@@ -113,6 +114,9 @@ export function AnalyticsScreen() {
         </p>
       ) : data ? (
         <div className="an-body" data-testid="analytics-body">
+          {/* Import/process balance warning (T046) — advisory; hidden when balanced. */}
+          <BalanceBanner asOf={data.asOf} />
+
           {/* Top metric row */}
           <div className="an-metrics">
             <div className="an-metric" data-testid="metric-retention">

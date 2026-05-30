@@ -24,6 +24,8 @@ import {
   DESIRED_RETENTION_MIN,
   ELEMENT_STATUSES,
   ELEMENT_TYPES,
+  IMPORT_BALANCE_FACTOR_MAX,
+  IMPORT_BALANCE_FACTOR_MIN,
   KEYBOARD_LAYOUTS,
   MARK_TYPES,
   REVIEW_RATINGS,
@@ -163,6 +165,8 @@ export const SettingsPatchSchema = z
     defaultSourcePriority: z.number().min(0).max(1),
     burySiblings: z.boolean(),
     trashRetentionDays: z.number().int().positive(),
+    balanceWarnings: z.boolean(),
+    importBalanceFactor: z.number().min(IMPORT_BALANCE_FACTOR_MIN).max(IMPORT_BALANCE_FACTOR_MAX),
     keyboardLayout: z.enum(KEYBOARD_LAYOUTS),
     theme: z.enum(THEMES),
   })
@@ -2054,6 +2058,58 @@ export interface AnalyticsGetResult {
 }
 
 // ---------------------------------------------------------------------------
+// balance.get()  (T046 — the import/process balance warning)
+// ---------------------------------------------------------------------------
+
+/**
+ * The import/process balance surface (T046) — a read-only extension of the T045
+ * aggregation that catches the "importing faster than processing" failure mode.
+ * The MAIN process runs `AnalyticsService.computeBalance` (the SAME windowed
+ * counting as analytics, just a 7-day window + the import-vs-output framing) and
+ * the pure `@interleave/core` `judgeBalance` rule (tunable via the user's
+ * `importBalanceFactor` setting). It returns the four weekly headline numbers —
+ * sources imported / extracts created / cards created / reviews due this week —
+ * plus the `imbalanced` / `severity` judgment that drives the advisory `Banner`.
+ *
+ * ADVISORY only: it NEVER mutates a schedule (auto-postpone is M16/T077). Reusing
+ * the analytics aggregation guarantees the inbox banner + the analytics view show
+ * the SAME numbers. Read-only: NO mutation, NO `operation_log`, no generic
+ * `db.query`.
+ */
+export const BalanceGetRequestSchema = z
+  .object({
+    /** The instant to compute the balance for (ISO-8601); defaults to now. */
+    asOf: z.string().min(1).optional(),
+    /** Window length in calendar days (1–365); defaults to 7. */
+    windowDays: z.number().int().min(1).max(365).optional(),
+  })
+  .optional();
+export type BalanceGetRequest = z.infer<typeof BalanceGetRequestSchema>;
+
+/** Coarse imbalance severity: `ok` hides the banner, `warn`/`danger` show it. */
+export type BalanceSeverity = "ok" | "warn" | "danger";
+
+/** The flat, JSON-serializable balance snapshot the renderer reads. */
+export interface BalanceGetResult {
+  /** The instant the snapshot was computed for (ISO-8601). */
+  readonly asOf: string;
+  /** The window length in calendar days (default 7). */
+  readonly windowDays: number;
+  /** `source` elements imported (created) in the window. */
+  readonly sourcesImported: number;
+  /** `extract` elements created in the window. */
+  readonly extractsCreated: number;
+  /** `card` elements created in the window. */
+  readonly cardsCreated: number;
+  /** Cards due for FSRS review within the next `windowDays` days (forward-looking). */
+  readonly reviewsDueThisWeek: number;
+  /** True when imports outpace processing (`severity !== "ok"`). */
+  readonly imbalanced: boolean;
+  /** The severity bucket driving the banner variant. */
+  readonly severity: BalanceSeverity;
+}
+
+// ---------------------------------------------------------------------------
 // The typed surface the renderer sees as `window.appApi`.
 // ---------------------------------------------------------------------------
 
@@ -2287,5 +2343,14 @@ export interface AppApi {
      * the durable tables. Read-only (no mutation, no `operation_log`).
      */
     get(request?: AnalyticsGetRequest): Promise<AnalyticsGetResult>;
+  };
+  readonly balance: {
+    /**
+     * The import/process balance snapshot (T046) — the week's sources imported /
+     * extracts created / cards created / reviews due, plus the imbalance judgment.
+     * Reuses the analytics aggregation; advisory only (no schedule mutation).
+     * Read-only.
+     */
+    get(request?: BalanceGetRequest): Promise<BalanceGetResult>;
   };
 }

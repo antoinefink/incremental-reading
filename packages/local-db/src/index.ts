@@ -22,7 +22,10 @@ export {
   type AnalyticsOptions,
   AnalyticsService,
   type AnalyticsSummary,
+  type BalanceOptions,
+  type BalanceSummary,
   DEFAULT_ANALYTICS_WINDOW_DAYS,
+  DEFAULT_BALANCE_WINDOW_DAYS,
   type ReviewsByDay,
 } from "./analytics-query";
 export { AssetRepository, type CreateAssetInput } from "./asset-repository";

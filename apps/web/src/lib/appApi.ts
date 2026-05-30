@@ -83,6 +83,10 @@ export interface AppSettings {
   readonly burySiblings: boolean;
   /** How long soft-deleted items remain recoverable in the Trash (informational, T044). */
   readonly trashRetentionDays: number;
+  /** When `true` (default), show the import/process balance banner (T046). */
+  readonly balanceWarnings: boolean;
+  /** How lopsided imports-vs-processing must be before the balance warning fires (T046). */
+  readonly importBalanceFactor: number;
   readonly keyboardLayout: KeyboardLayout;
   readonly theme: ThemePreference;
 }
@@ -1264,6 +1268,31 @@ export interface AnalyticsGetResult {
   readonly dayStreak: number;
 }
 
+// ---------------------------------------------------------------------------
+// balance.*  (T046 — the import/process balance warning)
+// ---------------------------------------------------------------------------
+
+/** `balance.get()` request — both fields optional (defaults applied main-side). */
+export interface BalanceGetRequest {
+  readonly asOf?: string;
+  readonly windowDays?: number;
+}
+
+/** Coarse imbalance severity: `ok` hides the banner; `warn`/`danger` show it. */
+export type BalanceSeverity = "ok" | "warn" | "danger";
+
+/** The flat import/process balance snapshot the inbox + analytics banner read. */
+export interface BalanceGetResult {
+  readonly asOf: string;
+  readonly windowDays: number;
+  readonly sourcesImported: number;
+  readonly extractsCreated: number;
+  readonly cardsCreated: number;
+  readonly reviewsDueThisWeek: number;
+  readonly imbalanced: boolean;
+  readonly severity: BalanceSeverity;
+}
+
 /** The exact shape the preload exposes as `window.appApi`. */
 export interface AppApi {
   readonly app: {
@@ -1363,6 +1392,9 @@ export interface AppApi {
   };
   readonly analytics: {
     get(request?: AnalyticsGetRequest): Promise<AnalyticsGetResult>;
+  };
+  readonly balance: {
+    get(request?: BalanceGetRequest): Promise<BalanceGetResult>;
   };
 }
 
@@ -1666,5 +1698,13 @@ export const appApi = {
    */
   getAnalytics(request?: AnalyticsGetRequest): Promise<AnalyticsGetResult> {
     return requireAppApi().analytics.get(request);
+  },
+  /**
+   * The import/process balance snapshot (T046) — the week's sources imported /
+   * extracts created / cards created / reviews due, plus the imbalance judgment
+   * that drives the advisory banner on the inbox + analytics. Read-only.
+   */
+  getBalance(request?: BalanceGetRequest): Promise<BalanceGetResult> {
+    return requireAppApi().balance.get(request);
   },
 } as const;

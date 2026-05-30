@@ -23,7 +23,7 @@ import type {
   IsoTimestamp,
 } from "@interleave/core";
 import { elements, type InterleaveDatabase, reviewStates } from "@interleave/db";
-import { and, asc, eq, isNotNull, isNull, lte, notInArray } from "drizzle-orm";
+import { and, asc, eq, gte, isNotNull, isNull, lte, notInArray } from "drizzle-orm";
 import { rowToElement } from "./mappers";
 
 /**
@@ -103,6 +103,31 @@ export class QueueRepository {
   /** Count of cards due at or before `asOf` (cheap badge query). */
   dueCardCount(asOf: IsoTimestamp): number {
     return this.dueCards(asOf).length;
+  }
+
+  /**
+   * Cards whose FSRS `review_states.due_at` falls within `[from, to]` — the
+   * FORWARD-looking "reviews due this week" count (T046). Unlike {@link dueCards}
+   * (which counts only what is due NOW, `due_at <= asOf`), this counts upcoming
+   * reviews in a window, so the balance banner can say "K reviews due this week".
+   * Excludes soft-deleted / done / dismissed / suspended cards (same queue filter).
+   */
+  dueCardsBetween(from: IsoTimestamp, to: IsoTimestamp): number {
+    return this.db
+      .select({ id: elements.id })
+      .from(reviewStates)
+      .innerJoin(elements, eq(elements.id, reviewStates.elementId))
+      .where(
+        and(
+          eq(elements.type, "card"),
+          isNull(elements.deletedAt),
+          notInArray(elements.status, QUEUE_EXCLUDED_STATUSES as ElementStatus[]),
+          isNotNull(reviewStates.dueAt),
+          gte(reviewStates.dueAt, from),
+          lte(reviewStates.dueAt, to),
+        ),
+      )
+      .all().length;
   }
 
   /** The single next due card (soonest FSRS due time), or `null`. */

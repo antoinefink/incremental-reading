@@ -10,6 +10,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AnalyticsGetRequestSchema,
+  BalanceGetRequestSchema,
   CardsCreateRequestSchema,
   CardsDeleteRequestSchema,
   CardsFlagRequestSchema,
@@ -111,6 +112,7 @@ describe("IPC channels", () => {
         "trash:empty",
         "undo:last",
         "analytics:get",
+        "balance:get",
       ].sort(),
     );
     expect(Object.values(IPC_CHANNELS)).not.toContain("db:query");
@@ -1034,5 +1036,21 @@ describe("AnalyticsGetRequestSchema (T045)", () => {
     expect(() => AnalyticsGetRequestSchema.parse({ windowDays: 400 })).toThrow();
     expect(() => AnalyticsGetRequestSchema.parse({ windowDays: 1.5 })).toThrow();
     expect(() => AnalyticsGetRequestSchema.parse({ asOf: "" })).toThrow();
+  });
+});
+
+describe("BalanceGetRequestSchema (T046)", () => {
+  it("accepts an empty/absent request (defaults applied main-side)", () => {
+    expect(BalanceGetRequestSchema.parse(undefined)).toBeUndefined();
+    expect(BalanceGetRequestSchema.parse({})).toEqual({});
+  });
+
+  it("accepts an explicit asOf + windowDays and rejects out-of-range values", () => {
+    expect(
+      BalanceGetRequestSchema.parse({ asOf: "2026-05-30T00:00:00.000Z", windowDays: 7 }),
+    ).toEqual({ asOf: "2026-05-30T00:00:00.000Z", windowDays: 7 });
+    expect(() => BalanceGetRequestSchema.parse({ windowDays: 0 })).toThrow();
+    expect(() => BalanceGetRequestSchema.parse({ windowDays: 400 })).toThrow();
+    expect(() => BalanceGetRequestSchema.parse({ asOf: "" })).toThrow();
   });
 });

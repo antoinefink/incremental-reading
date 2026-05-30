@@ -18,6 +18,7 @@ import { IPC_CHANNELS } from "../shared/channels";
 import type {
   AnalyticsGetRequest,
   AppApi,
+  BalanceGetRequest,
   CardsCreateRequest,
   CardsDeleteRequest,
   CardsFlagRequest,
@@ -184,6 +185,9 @@ const appApi: AppApi = {
   },
   analytics: {
     get: (request?: AnalyticsGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.analyticsGet, request),
+  },
+  balance: {
+    get: (request?: BalanceGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.balanceGet, request),
   },
 };
 

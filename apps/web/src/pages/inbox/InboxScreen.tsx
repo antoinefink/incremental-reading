@@ -19,6 +19,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { BalanceBanner } from "../../components/BalanceBanner";
 import { Icon, type IconName } from "../../components/Icon";
 import { Prio, Status, TypeIcon } from "../../components/inspector/primitives";
 import {
@@ -322,6 +323,9 @@ export function InboxScreen() {
   const [modalOpen, setModalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped after any list change (import / triage) so the balance banner re-reads
+  // the week's counts without a full remount.
+  const [balanceRefresh, setBalanceRefresh] = useState(0);
 
   /** Reload the list; keep/repair the current selection. */
   const refresh = useCallback(async (preferId?: string | null) => {
@@ -329,6 +333,7 @@ export function InboxScreen() {
     try {
       const { items: next } = await appApi.listInbox();
       setItems(next);
+      setBalanceRefresh((n) => n + 1);
       setError(null);
       setSelId((prev) => {
         const wanted = preferId ?? prev;
@@ -488,6 +493,11 @@ export function InboxScreen() {
             );
           })}
         </div>
+      </div>
+
+      {/* Import/process balance warning (T046) — advisory; hidden when balanced. */}
+      <div className="px-6 pt-4 empty:hidden">
+        <BalanceBanner refreshKey={balanceRefresh} />
       </div>
 
       {error ? (

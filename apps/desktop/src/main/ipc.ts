@@ -11,6 +11,7 @@
 import { app, ipcMain } from "electron";
 import {
   AnalyticsGetRequestSchema,
+  BalanceGetRequestSchema,
   CardsCreateRequestSchema,
   CardsDeleteRequestSchema,
   CardsFlagRequestSchema,
@@ -350,6 +351,11 @@ export function registerIpcHandlers(dbService: DbService): () => void {
   ipcMain.handle(IPC_CHANNELS.analyticsGet, (_event, rawRequest: unknown) => {
     const request = AnalyticsGetRequestSchema.parse(rawRequest);
     return dbService.getAnalytics(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.balanceGet, (_event, rawRequest: unknown) => {
+    const request = BalanceGetRequestSchema.parse(rawRequest);
+    return dbService.getBalance(request);
   });
 
   return () => {

@@ -28,6 +28,8 @@ const FALLBACK_SETTINGS: AppSettings = {
   defaultSourcePriority: 0.375,
   burySiblings: true,
   trashRetentionDays: 30,
+  balanceWarnings: true,
+  importBalanceFactor: 1.5,
   keyboardLayout: "qwerty",
   theme: "dark",
 };
@@ -345,6 +347,17 @@ export function Settings() {
             name="setting-bury-siblings"
             checked={s.burySiblings}
             onChange={(value) => void patch({ burySiblings: value })}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label="Import / process balance warnings"
+          hint="Warn on the inbox and analytics when you import faster than you process."
+        >
+          <Toggle
+            name="setting-balance-warnings"
+            checked={s.balanceWarnings}
+            onChange={(value) => void patch({ balanceWarnings: value })}
           />
         </SettingRow>
       </SectionPanel>

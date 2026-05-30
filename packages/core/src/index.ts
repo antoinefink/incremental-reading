@@ -22,6 +22,17 @@ export const CORE_PACKAGE = "@interleave/core" as const;
 // before value exports and alphabetizes by module, so per-block comments are
 // kept minimal; the authoritative docs live on each declaration in its module.
 
+// Import/process balance rule — the pure imbalance judgment (./balance).
+export type { BalanceCounts, BalanceJudgment, BalanceSeverity } from "./balance";
+export {
+  clampFactor,
+  DANGER_MULTIPLIER,
+  DEFAULT_IMPORT_BALANCE_FACTOR,
+  IMPORT_BALANCE_FACTOR_MAX,
+  IMPORT_BALANCE_FACTOR_MIN,
+  IMPORT_BALANCE_FLOOR,
+  judgeBalance,
+} from "./balance";
 // Card-quality heuristics — pure domain checks for the `qc` checklist (./card-quality).
 export type {
   CardQualityCheck,
