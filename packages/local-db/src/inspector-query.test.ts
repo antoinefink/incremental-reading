@@ -90,6 +90,7 @@ function buildChain() {
     scheduledDays: 9,
     reps: 1,
     lapses: 0,
+    nextLearningSteps: 0,
   });
   return { sourceId, extractId, cardId, locationId: extract.location.id };
 }

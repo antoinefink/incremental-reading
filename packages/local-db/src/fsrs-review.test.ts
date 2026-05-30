@@ -148,6 +148,39 @@ describe("FSRS grade path: SchedulerService → ReviewRepository.recordReview", 
     expect(logs).toHaveLength(2);
   });
 
+  it("graduates a card from learning to review across repeated Good grades (learning-step cursor persists)", () => {
+    const { cardId } = seedCard();
+    const review = new ReviewRepository(handle.db);
+    const scheduler = new SchedulerService({ desiredRetention: 0.9, enableFuzz: false });
+
+    // Drive the real recordReview loop: read state, grade Good, persist, advance the
+    // clock to the new due time, repeat. Regression guard for the learning-step reset
+    // bug — without the persisted `learning_steps` cursor the card would stay in
+    // `learning` and be rescheduled in minutes forever, never reaching `review`.
+    let now = NOW;
+    const states: { fsrsState: string; intervalDays: number }[] = [];
+    for (let i = 0; i < 5; i++) {
+      const state = review.findReviewState(cardId);
+      if (!state) throw new Error("review state missing");
+      const outcome = scheduler.gradeCard(state, "good", now as never, 1200);
+      review.recordReview(cardId, outcome);
+      const after = review.findReviewState(cardId);
+      if (!after?.dueAt) throw new Error("due missing");
+      const intervalDays = (Date.parse(after.dueAt) - Date.parse(now)) / 86_400_000;
+      states.push({ fsrsState: after.fsrsState, intervalDays });
+      now = after.dueAt;
+    }
+
+    const final = review.findReviewState(cardId);
+    // The card MUST graduate out of learning into review with a multi-day interval.
+    expect(final?.fsrsState).toBe("review");
+    expect(final?.reps).toBe(5);
+    expect(final?.learningSteps).toBe(0); // back to step 0 once it has graduated
+    expect(states.at(-1)?.intervalDays).toBeGreaterThanOrEqual(1);
+    // It does not loop in `learning` on every grade.
+    expect(states.filter((s) => s.fsrsState === "learning").length).toBeLessThanOrEqual(1);
+  });
+
   it("FSRS is cards-only: the card has a review_states row but its extract never does", () => {
     const { cardId, extractId } = seedCard();
     const cardState = handle.db

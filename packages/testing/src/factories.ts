@@ -131,6 +131,7 @@ export const DEMO_FIXTURES = {
       scheduledDays: 0,
       reps: 1,
       lapses: 1,
+      nextLearningSteps: 0,
     },
     {
       rating: "again" as const,
@@ -145,6 +146,7 @@ export const DEMO_FIXTURES = {
       scheduledDays: 0,
       reps: 2,
       lapses: 2,
+      nextLearningSteps: 0,
     },
     {
       rating: "again" as const,
@@ -159,6 +161,7 @@ export const DEMO_FIXTURES = {
       scheduledDays: 0,
       reps: 3,
       lapses: 3,
+      nextLearningSteps: 0,
     },
     {
       rating: "again" as const,
@@ -179,6 +182,7 @@ export const DEMO_FIXTURES = {
       scheduledDays: 0,
       reps: 4,
       lapses: 4,
+      nextLearningSteps: 0,
     },
   ],
   /** Two reviews recorded against the Q&A card (so review_logs is non-empty). */
@@ -196,6 +200,7 @@ export const DEMO_FIXTURES = {
       scheduledDays: 3,
       reps: 1,
       lapses: 0,
+      nextLearningSteps: 1,
     },
     {
       rating: "good" as const,
@@ -210,6 +215,7 @@ export const DEMO_FIXTURES = {
       scheduledDays: 9,
       reps: 2,
       lapses: 0,
+      nextLearningSteps: 0,
     },
   ],
   /** Tag names attached to the extract (created on demand by the repository). */

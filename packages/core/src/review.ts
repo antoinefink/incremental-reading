@@ -38,6 +38,15 @@ export interface ReviewState {
   lapses: number;
   /** Current FSRS phase. */
   fsrsState: FsrsState;
+  /**
+   * The FSRS short-term (re)learning-step cursor — which step of the configured
+   * `learning_steps` / `relearning_steps` sequence the card is on. MUST be persisted
+   * and round-tripped losslessly: FSRS uses it to decide when a card graduates out of
+   * the learning/relearning phase. If it is reset to `0` on every grade, a card stuck
+   * on a sub-day learning step (e.g. `10m`) can never advance to a multi-day `review`
+   * interval. `0` for a brand-new card (and whenever a card is not mid-step).
+   */
+  learningSteps: number;
   /** When this card was last reviewed; `null` for a brand-new card. */
   lastReviewedAt: IsoTimestamp | null;
 }

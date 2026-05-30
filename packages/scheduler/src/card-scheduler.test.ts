@@ -47,6 +47,7 @@ function reviewStateCard(): ReviewState {
     reps: 5,
     lapses: 0,
     fsrsState: "review",
+    learningSteps: 0,
     lastReviewedAt: "2026-06-05T00:00:00.000Z" as IsoTimestamp,
   };
 }
@@ -92,6 +93,77 @@ describe("SchedulerService.gradeCard — new card", () => {
     // Again on a new card stays in a learning phase and schedules very soon.
     expect(again.nextState).not.toBe("new");
     expect(Date.parse(again.nextDueAt)).toBeGreaterThanOrEqual(Date.parse(NOW));
+  });
+});
+
+describe("SchedulerService.gradeCard — graduation across the persistence round-trip", () => {
+  // This drives the SAME path the repository uses between grades: each grade's
+  // ReviewOutcome is folded back into a fresh ReviewState (carrying `learningSteps`,
+  // mirroring `fromFsrsCard(toFsrsCard(...))`), then re-graded. Regression guard for
+  // the learning-step-cursor reset bug: if the cursor is dropped, a card stays in
+  // `learning` and is rescheduled in minutes forever, never reaching `review`.
+  function applyOutcome(
+    prev: ReviewState,
+    outcome: ReturnType<SchedulerService["gradeCard"]>,
+  ): ReviewState {
+    return {
+      ...prev,
+      dueAt: outcome.nextDueAt,
+      stability: outcome.nextStability,
+      difficulty: outcome.nextDifficulty,
+      elapsedDays: outcome.elapsedDays,
+      scheduledDays: outcome.scheduledDays,
+      reps: outcome.reps,
+      lapses: outcome.lapses,
+      fsrsState: outcome.nextState,
+      learningSteps: outcome.nextLearningSteps,
+      lastReviewedAt: outcome.reviewedAt,
+    };
+  }
+
+  it("graduates a card from learning to review with a multi-day interval after repeated Good grades", () => {
+    const svc = service();
+    let state = svc.newCardState(CARD_ID);
+    let now = NOW;
+    const trail: { from: FsrsState; to: FsrsState; days: number }[] = [];
+
+    // Grade Good five times, reloading state each time the way recordReview does.
+    for (let i = 0; i < 5; i++) {
+      const outcome = svc.gradeCard(state, "good", now, 1500);
+      trail.push({
+        from: state.fsrsState,
+        to: outcome.nextState,
+        days: intervalDays(now, outcome.nextDueAt),
+      });
+      state = applyOutcome(state, outcome);
+      now = outcome.nextDueAt; // advance the clock to the moment the card is next due
+    }
+
+    // First Good: new -> learning (a sub-day learning step).
+    expect(trail[0]?.from).toBe<FsrsState>("new");
+    expect(trail[0]?.to).toBe<FsrsState>("learning");
+    expect(trail[0]?.days).toBeLessThan(1);
+
+    // The card must GRADUATE — without the persisted learning-step cursor it would be
+    // stuck in `learning` with a minutes-long interval on every grade.
+    expect(state.fsrsState).toBe<FsrsState>("review");
+    expect(state.reps).toBe(5);
+    // By the end it is spaced in days, not minutes (the last interval is multi-day).
+    expect(trail.at(-1)?.days).toBeGreaterThanOrEqual(1);
+    // It reaches `review` by the 2nd Good (the graduating grade), not stuck looping.
+    expect(trail.filter((t) => t.to === "review").length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("does not get stuck rescheduling a Good-graded card in minutes (no learning loop)", () => {
+    const svc = service();
+    let state = svc.newCardState(CARD_ID);
+    let now = NOW;
+    // After two Good grades the card should already be a multi-day `review` item.
+    state = applyOutcome(state, svc.gradeCard(state, "good", now, 1000));
+    now = state.dueAt as IsoTimestamp;
+    const second = svc.gradeCard(state, "good", now, 1000);
+    expect(second.nextState).toBe<FsrsState>("review");
+    expect(intervalDays(now, second.nextDueAt)).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -176,6 +248,7 @@ describe("SchedulerService adapter round-trip", () => {
     expect(round.scheduledDays).toBeCloseTo(card.scheduledDays, 6);
     expect(round.reps).toBe(card.reps);
     expect(round.lapses).toBe(card.lapses);
+    expect(round.learningSteps).toBe(card.learningSteps);
     expect(round.dueAt).toBe(card.dueAt);
     expect(round.lastReviewedAt).toBe(card.lastReviewedAt);
   });

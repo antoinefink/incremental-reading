@@ -23,6 +23,7 @@ function stateWithLapses(lapses: number): ReviewState {
     reps: lapses + 2,
     lapses,
     fsrsState: "relearning",
+    learningSteps: 0,
     lastReviewedAt: "2026-06-09T00:00:00.000Z" as IsoTimestamp,
   };
 }

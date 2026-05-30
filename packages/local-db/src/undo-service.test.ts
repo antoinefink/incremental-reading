@@ -78,6 +78,7 @@ function leechOutcome(): ReviewOutcome {
     scheduledDays: 1,
     reps: 9,
     lapses: 4,
+    nextLearningSteps: 0,
   };
 }
 

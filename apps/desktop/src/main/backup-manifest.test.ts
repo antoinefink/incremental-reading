@@ -91,9 +91,10 @@ describe("sha256 / sha256File (T047)", () => {
 
 describe("resolveSchemaVersion (T047)", () => {
   it("maps the applied-migration count to the latest tag via the real journal", () => {
-    // The packaged journal currently has 4 entries (0000/0001/0002/0003). With
-    // all applied, the latest tag is the concepts-FK migration; fewer applied
+    // The packaged journal currently has 5 entries (0000…0004). With all applied,
+    // the latest tag is the review-state learning_steps migration; fewer applied
     // resolve to the prior tags.
+    expect(resolveSchemaVersion(MIGRATIONS_DIR, 5)).toBe("0004_lovely_captain_midlands");
     expect(resolveSchemaVersion(MIGRATIONS_DIR, 4)).toBe("0003_overrated_thundra");
     expect(resolveSchemaVersion(MIGRATIONS_DIR, 3)).toBe("0002_search_fts5");
     expect(resolveSchemaVersion(MIGRATIONS_DIR, 2)).toBe("0001_clever_rictor");

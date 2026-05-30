@@ -94,6 +94,7 @@ export function rowToReviewState(row: ReviewStateRow): ReviewState {
     reps: row.reps,
     lapses: row.lapses,
     fsrsState: row.fsrsState as ReviewState["fsrsState"],
+    learningSteps: row.learningSteps,
     lastReviewedAt: row.lastReviewedAt,
   };
 }

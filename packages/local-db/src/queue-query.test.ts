@@ -103,6 +103,7 @@ function buildDueSet(): {
     scheduledDays: 3,
     reps: 2,
     lapses: 0,
+    nextLearningSteps: 0,
   });
 
   const clozeCard = repos.review.createCard({
@@ -129,6 +130,7 @@ function buildDueSet(): {
     scheduledDays: 16,
     reps: 1,
     lapses: 0,
+    nextLearningSteps: 0,
   });
 
   return { sourceId, extractId, qaCardId: qaCard.element.id, clozeCardId: clozeCard.element.id };

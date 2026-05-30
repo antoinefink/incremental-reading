@@ -812,6 +812,7 @@ describe("ReviewRepository — FSRS state/logs", () => {
       scheduledDays: 1,
       reps: 1,
       lapses: 0,
+      nextLearningSteps: 1,
     });
 
     expect(log.rating).toBe("good");
@@ -856,6 +857,7 @@ describe("QueueRepository", () => {
       scheduledDays: 0,
       reps: 1,
       lapses: 1,
+      nextLearningSteps: 0,
     });
 
     // A due attention item (extract with elements.dueAt in the past).

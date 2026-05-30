@@ -13,7 +13,12 @@
  * choices. It is also the SINGLE source of truth for the extract interval math that
  * previously lived (duplicated) inside `packages/local-db` — those services now
  * import from here. FSRS lands in a sibling module in M7 and stays behind its own
- * adapter boundary (no `ts-fsrs` types leak through this package).
+ * adapter boundary: the `ts-fsrs` `State`/`Rating`/`Card` runtime vocabulary is
+ * mapped to our own and never leaks. The ONE deliberate exception is the optional,
+ * compile-time-only `SchedulerServiceOptions.params: Partial<FSRSParameters>` — a
+ * documented escape hatch for the T080 FSRS-parameter optimization. It is a typed
+ * seam, not a runtime enum leak; callers that do not optimize parameters never touch
+ * a `ts-fsrs` type.
  */
 
 export const SCHEDULER_PACKAGE = "@interleave/scheduler" as const;

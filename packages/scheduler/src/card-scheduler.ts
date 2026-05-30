@@ -62,6 +62,12 @@ export interface ReviewOutcome {
   readonly scheduledDays: number;
   readonly reps: number;
   readonly lapses: number;
+  /**
+   * The FSRS short-term (re)learning-step cursor AFTER this review. Persisted on
+   * `review_states` and fed back into the next grade so cards graduate out of the
+   * learning phase correctly (see {@link ReviewState.learningSteps}).
+   */
+  readonly nextLearningSteps: number;
 }
 
 /** One previewed grade outcome: the resulting due time + interval (days) + a human label. */
@@ -180,9 +186,11 @@ export class SchedulerService {
   /**
    * Adapt our persisted {@link ReviewState} → a `ts-fsrs` `Card` at time `now`.
    * `due`/`last_review` become `Date`s; the lowercase state becomes the numeric
-   * enum. `learning_steps` is not persisted on `review_states` (it is an internal
-   * `ts-fsrs` learning-step cursor) — a fresh card starts at step 0, which is
-   * correct for the MVP (no resumed mid-learning-step state across restarts).
+   * enum. The FSRS short-term `learning_steps` cursor is read FROM our persisted
+   * `state.learningSteps` (NOT hard-coded to `0`): FSRS uses it to decide when a
+   * card graduates out of the (re)learning phase, so it must round-trip losslessly.
+   * Resetting it to `0` on every grade would freeze a card on a sub-day learning
+   * step forever (it could never reach a multi-day `review` interval).
    */
   toFsrsCard(state: ReviewState, now: IsoTimestamp): FsrsCard {
     return {
@@ -193,7 +201,7 @@ export class SchedulerService {
       scheduled_days: state.scheduledDays,
       reps: state.reps,
       lapses: state.lapses,
-      learning_steps: 0,
+      learning_steps: state.learningSteps,
       state: toFsrsStateEnum(state.fsrsState),
       ...(state.lastReviewedAt ? { last_review: new Date(state.lastReviewedAt) } : {}),
     };
@@ -222,6 +230,7 @@ export class SchedulerService {
       reps: card.reps,
       lapses: card.lapses,
       fsrsState: fromFsrsStateEnum(card.state),
+      learningSteps: card.learning_steps,
       lastReviewedAt,
     };
   }
@@ -281,6 +290,7 @@ export class SchedulerService {
       scheduledDays: next.scheduled_days,
       reps: next.reps,
       lapses: next.lapses,
+      nextLearningSteps: next.learning_steps,
     };
   }
 }

@@ -80,6 +80,13 @@ export const reviewStates = sqliteTable(
     lapses: integer("lapses").notNull().default(0),
     /** Current FSRS phase — one of the canonical `FsrsState` values. */
     fsrsState: text("fsrs_state").notNull().default("new"),
+    /**
+     * FSRS short-term (re)learning-step cursor — which configured learning/relearning
+     * step the card is on. Persisted so the step survives every grade round-trip (and
+     * app restart); without it a card stuck on a sub-day learning step can never
+     * graduate to a multi-day `review` interval. `0` for a brand-new card.
+     */
+    learningSteps: integer("learning_steps").notNull().default(0),
     /** When this card was last reviewed; `null` for a brand-new card. */
     lastReviewedAt: text("last_reviewed_at"),
   },

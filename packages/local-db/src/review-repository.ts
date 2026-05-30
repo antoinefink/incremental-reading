@@ -81,6 +81,12 @@ export interface ReviewOutcome {
   readonly scheduledDays: number;
   readonly reps: number;
   readonly lapses: number;
+  /**
+   * The FSRS short-term (re)learning-step cursor AFTER this review — persisted on
+   * `review_states` so it round-trips losslessly into the next grade (without it a
+   * card never graduates out of the learning phase).
+   */
+  readonly nextLearningSteps: number;
 }
 
 export class ReviewRepository {
@@ -225,6 +231,7 @@ export class ReviewRepository {
           reps: outcome.reps,
           lapses: outcome.lapses,
           fsrsState: outcome.nextState,
+          learningSteps: outcome.nextLearningSteps,
           lastReviewedAt: outcome.reviewedAt,
         })
         .where(eq(reviewStates.elementId, cardElementId))
