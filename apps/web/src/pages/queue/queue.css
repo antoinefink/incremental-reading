@@ -221,14 +221,13 @@
 }
 .qitem {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr auto auto;
   gap: var(--s-5);
   align-items: center;
   padding: var(--s-5) var(--s-6);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  cursor: pointer;
   transition: all var(--fast) var(--ease);
   position: relative;
   text-align: left;
@@ -369,4 +368,105 @@
   color: var(--text-2);
   max-width: 380px;
   margin: 0;
+}
+
+/* ---------- T030 — per-row queue actions + undo snackbar ---------- */
+
+/* The clickable "open" zone of a row (the kit's `qitem` body click target). The
+   row itself is no longer a single <button> so the action cluster can host real
+   buttons without nesting interactive elements. */
+.qitem__open {
+  display: contents;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Per-row action buttons (postpone / raise / lower / done / dismiss / delete). The
+   cluster sits in `qitem__action`; clicks here never reach the row's open handler. */
+.qitem__acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.qitem__act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all var(--fast) var(--ease);
+}
+.qitem__act:hover {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+.qitem__act--danger:hover {
+  color: var(--danger);
+  border-color: color-mix(in oklch, var(--danger) 35%, transparent);
+}
+.qitem__act:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---------- Undo snackbar (ported from the kit) ---------- */
+.snackbar {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px 10px 16px;
+  background: var(--text);
+  color: var(--canvas);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--t-sm);
+  font-weight: 500;
+}
+.snackbar__undo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--canvas);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+}
+.snackbar__undo:hover {
+  background: oklch(1 0 0 / 0.12);
+}
+
+@keyframes qFadeUp {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+.snackbar.fade-up {
+  animation: qFadeUp var(--fast) var(--ease);
 }

@@ -38,7 +38,7 @@ import {
 } from "./contract";
 
 describe("IPC channels", () => {
-  it("exposes exactly the M1 commands plus the M2 inbox mutation + M3 document/read-point + M4 marks/extraction/lineage/extract-review + M5 priority surface and no generic SQL channel", () => {
+  it("exposes exactly the M1 commands plus the M2 inbox mutation + M3 document/read-point + M4 marks/extraction/lineage/extract-review + M5 priority/queue surface and no generic SQL channel", () => {
     expect(Object.values(IPC_CHANNELS).sort()).toEqual(
       [
         "app:health",
@@ -51,6 +51,8 @@ describe("IPC channels", () => {
         "inspector:get",
         "elements:setPriority",
         "queue:list",
+        "queue:act",
+        "queue:undo",
         "lineage:get",
         "sources:importManual",
         "inbox:list",

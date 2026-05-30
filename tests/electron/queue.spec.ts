@@ -173,6 +173,194 @@ test("a filter chip narrows the due list to one type", async () => {
   await app.close();
 });
 
+test("postpone removes an item from the due list in place (no navigation) (T030)", async () => {
+  const app = await launchApp(dataDir, { seedOnEmpty: true });
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  // Self-clock: read the extract's CURRENT due via the bridge and drive the screen
+  // with that exact clock, so the seeded extract reads as due "today" — then a
+  // postpone (which pushes it strictly later) reliably drops it from THIS view,
+  // regardless of how the postpone interval grows.
+  const extractId = await findExtractId(page);
+  const currentDue = await page.evaluate(async (id) => {
+    const api = window.appApi as unknown as {
+      inspector: {
+        get(req: { id: string }): Promise<{ data: { element: { dueAt: string | null } } | null }>;
+      };
+    };
+    const res = await api.inspector.get({ id });
+    return res.data?.element.dueAt ?? null;
+  }, extractId);
+  if (!currentDue)
+    throw new Error("seeded extract has no due_at (it should after the postpone above)");
+
+  await openQueue(page, currentDue);
+  const row = page.locator(`[data-testid="queue-item"][data-element-id="${extractId}"]`);
+  await expect(row).toBeVisible();
+
+  // Postpone it via its in-place action button — it leaves the DUE list (the URL
+  // never changes: no navigation happens on an action).
+  await row.getByTestId("queue-action-postpone").click();
+  await expect(row).toHaveCount(0);
+  expect(new URL(page.url()).pathname).toBe("/queue");
+
+  await app.close();
+});
+
+test("raise priority changes a row's Prio badge in place (T030)", async () => {
+  const app = await launchApp(dataDir, { seedOnEmpty: true });
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  await openQueue(page, AS_OF);
+  // Pick a due card row (cards persist as due via the seed) that is not already A.
+  const cardRow = page.locator('[data-testid="queue-item"][data-element-type="card"]').first();
+  await expect(cardRow).toBeVisible();
+  const before = (await cardRow.locator(".prio").first().textContent())?.trim();
+
+  await cardRow.getByTestId("queue-action-raise").click();
+  // The row stays (raise does not remove it); its Prio badge reflects the new band.
+  await expect(cardRow).toBeVisible();
+  await expect(cardRow.locator(".prio").first()).toBeVisible();
+  if (before && before !== "A") {
+    await expect
+      .poll(async () => (await cardRow.locator(".prio").first().textContent())?.trim())
+      .not.toBe(before);
+  }
+  expect(new URL(page.url()).pathname).toBe("/queue");
+
+  await app.close();
+});
+
+test("delete removes a row + an undo snackbar restores it (T030)", async () => {
+  const app = await launchApp(dataDir, { seedOnEmpty: true });
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  await openQueue(page, AS_OF);
+  const cardRow = page.locator('[data-testid="queue-item"][data-element-type="card"]').first();
+  await expect(cardRow).toBeVisible();
+  const cardId = await cardRow.getAttribute("data-element-id");
+  if (!cardId) throw new Error("card row has no element id");
+
+  // Delete it → the row is removed and an undo snackbar appears.
+  await cardRow.getByTestId("queue-action-delete").click();
+  await expect(page.locator(`[data-testid="queue-item"][data-element-id="${cardId}"]`)).toHaveCount(
+    0,
+  );
+  await expect(page.getByTestId("queue-snackbar")).toBeVisible();
+
+  // The delete is SOFT — the element still exists with deletedAt set (queried via
+  // the bridge, not raw SQL).
+  const deletedState = await page.evaluate(async (id) => {
+    const api = window.appApi as unknown as {
+      inspector: {
+        get(req: { id: string }): Promise<{ data: { element: { id: string } } | null }>;
+      };
+    };
+    return api.inspector.get({ id });
+  }, cardId);
+  expect(deletedState.data).toBeNull(); // soft-deleted → not inspectable as a live element
+
+  // Undo restores the row.
+  await page.getByTestId("queue-snackbar-undo").click();
+  await expect(
+    page.locator(`[data-testid="queue-item"][data-element-id="${cardId}"]`),
+  ).toBeVisible();
+
+  await app.close();
+});
+
+test("markDone and dismiss remove a row and it stays gone on a re-read (T030)", async () => {
+  const app = await launchApp(dataDir, { seedOnEmpty: true });
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  await openQueue(page, AS_OF);
+  const rows = page.getByTestId("queue-item");
+  await expect(rows.first()).toBeVisible();
+
+  // Capture two DISTINCT due rows up front (any type) with their CURRENT status —
+  // markDone one, dismiss the other. Using ids (not positional `.first()`) keeps this
+  // stable across the re-sort each refresh triggers; the statuses let us RESTORE both
+  // rows at the end so this serial spec leaves the shared due set untouched for the
+  // restart test that follows.
+  const due = await page.evaluate(async (asOf) => {
+    const api = window.appApi as unknown as {
+      queue: {
+        list(req: { asOf: string }): Promise<{ items: { id: string; status: string }[] }>;
+      };
+    };
+    const res = await api.queue.list({ asOf });
+    return res.items.map((i) => ({ id: i.id, status: i.status }));
+  }, AS_OF);
+  expect(due.length).toBeGreaterThanOrEqual(2);
+  const doneRow = due[0];
+  const dismissRowMeta = due[1];
+
+  // markDone → the row leaves the list in place (no navigation).
+  await page
+    .locator(`[data-testid="queue-item"][data-element-id="${doneRow.id}"]`)
+    .getByTestId("queue-action-markDone")
+    .click();
+  await expect(
+    page.locator(`[data-testid="queue-item"][data-element-id="${doneRow.id}"]`),
+  ).toHaveCount(0);
+  expect(new URL(page.url()).pathname).toBe("/queue");
+
+  // dismiss the second, still-present row → it too leaves the list.
+  const dismissRow = page.locator(
+    `[data-testid="queue-item"][data-element-id="${dismissRowMeta.id}"]`,
+  );
+  await expect(dismissRow).toBeVisible();
+  await dismissRow.getByTestId("queue-action-dismiss").click();
+  await expect(dismissRow).toHaveCount(0);
+
+  // The READ-side guarantee: a fresh queue.list at the SAME clock must not contain
+  // either id — the done/dismissed rows no longer satisfy the due query (this is the
+  // regression: they used to reappear because the due read ignored status).
+  const stillDue = await page.evaluate(async (asOf) => {
+    const api = window.appApi as unknown as {
+      queue: { list(req: { asOf: string }): Promise<{ items: { id: string }[] }> };
+    };
+    const res = await api.queue.list({ asOf });
+    return res.items.map((i) => i.id);
+  }, AS_OF);
+  expect(stillDue).not.toContain(doneRow.id);
+  expect(stillDue).not.toContain(dismissRowMeta.id);
+
+  // RESTORE both rows (re-set their prior status via the typed undo command) so the
+  // shared, serially-reused data dir is unchanged for the restart test below.
+  await page.evaluate(
+    async (rowsToRestore) => {
+      const api = window.appApi as unknown as {
+        queue: {
+          undo(req: {
+            id: string;
+            undo: { kind: "restore" | "status"; previousStatus: string };
+          }): Promise<unknown>;
+        };
+      };
+      for (const r of rowsToRestore) {
+        await api.queue.undo({ id: r.id, undo: { kind: "status", previousStatus: r.status } });
+      }
+    },
+    [doneRow, dismissRowMeta],
+  );
+  const restored = await page.evaluate(async (asOf) => {
+    const api = window.appApi as unknown as {
+      queue: { list(req: { asOf: string }): Promise<{ items: { id: string }[] }> };
+    };
+    const res = await api.queue.list({ asOf });
+    return res.items.map((i) => i.id);
+  }, AS_OF);
+  expect(restored).toContain(doneRow.id);
+  expect(restored).toContain(dismissRowMeta.id);
+
+  await app.close();
+});
+
 test("the due queue survives an app restart (items still scheduled)", async () => {
   // Re-launch against the SAME data dir — the restart analogue. The extract's
   // due_at (set earlier) + the seeded card due are persisted to SQLite.

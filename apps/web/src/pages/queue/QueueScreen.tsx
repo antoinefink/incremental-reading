@@ -28,10 +28,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon, type IconName } from "../../components/Icon";
 import { Prio, SchedulerChip, Stage, TypeIcon } from "../../components/inspector/primitives";
 import { BudgetMeter } from "../../components/queue/BudgetMeter";
+import { QueueSnackbar } from "../../components/queue/QueueSnackbar";
 import "../../components/inspector/inspector.css";
 import {
   appApi,
   isDesktop,
+  type QueueActAction,
   type QueueItemSummary,
   type QueueListResult,
   type SchedulerSignals,
@@ -39,6 +41,22 @@ import {
 import { useSelection } from "../../shell/selection";
 import "./queue.css";
 import { jitterOrder } from "./jitter";
+
+/** The non-open queue actions a row exposes, with their icon + label (T030). */
+type RowActionKind = QueueActAction["kind"];
+const ROW_ACTIONS: readonly {
+  kind: RowActionKind;
+  icon: IconName;
+  label: string;
+  danger?: boolean;
+}[] = [
+  { kind: "postpone", icon: "postpone", label: "Postpone" },
+  { kind: "raise", icon: "arrowUp", label: "Raise priority" },
+  { kind: "lower", icon: "arrowDown", label: "Lower priority" },
+  { kind: "markDone", icon: "check", label: "Mark done" },
+  { kind: "dismiss", icon: "x", label: "Dismiss" },
+  { kind: "delete", icon: "trash", label: "Delete", danger: true },
+];
 
 /** The filter chips, in kit order. `type` narrows by element type; `high` by band A. */
 type FilterId = "all" | "card" | "source" | "extract" | "task" | "high";
@@ -85,13 +103,18 @@ function actionFor(item: QueueItemSummary): { icon: IconName; label: string } {
 function QueueItem({
   item,
   active,
+  busy,
   onSelect,
   onOpen,
+  onAction,
 }: {
   item: QueueItemSummary;
   active: boolean;
+  /** Whether an action on this row is in flight (its buttons are disabled). */
+  busy: boolean;
   onSelect: (item: QueueItemSummary) => void;
   onOpen: (item: QueueItemSummary) => void;
+  onAction: (item: QueueItemSummary, kind: RowActionKind) => void;
 }) {
   const action = actionFor(item);
   // The chip reads the queue's trimmed signals as the inspector's wider shape.
@@ -107,58 +130,81 @@ function QueueItem({
     postponed: item.schedulerSignals.postponed,
     lastProcessedAt: null,
   };
-  // The whole row is ONE real button (the kit's `qitem`): clicking it selects the
-  // element in the shell inspector AND opens it (source → reader, extract → review,
-  // card → review). The `next-action` pill is a non-interactive visual affordance —
-  // its click bubbles to the row button, so there is no nested interactive element.
+  // The row is a <div> hosting TWO independent zones (so real action buttons can
+  // live in the row without nesting interactive elements, which is invalid HTML):
+  //  - `qitem__open` is the click target that selects + OPENS the element (source →
+  //    reader, extract → review, card → review). It is the only navigation path.
+  //  - `qitem__acts` holds the in-place actions (postpone / raise / lower / done /
+  //    dismiss / delete). Each is a real button whose click does NOT open the row.
   return (
-    <button
-      type="button"
+    <div
       data-testid="queue-item"
       data-element-id={item.id}
       data-element-type={item.type}
       data-scheduler={item.scheduler}
       aria-current={active ? "true" : undefined}
-      onClick={() => {
-        onSelect(item);
-        onOpen(item);
-      }}
       className={`qitem${item.protected ? " qitem--protected" : ""}${active ? " qitem--active" : ""}`}
     >
-      <TypeIcon type={item.type} />
-      <span className="qitem__main">
-        <span className="qitem__title truncate">{titleFor(item)}</span>
-        <span className="qitem__meta">
-          {item.type === "source" && item.author ? (
-            <span className="qitem__sub">
-              <Icon name="globe" size={13} /> {item.author}
-            </span>
-          ) : null}
-          {item.type === "card" && item.sourceTitle ? (
-            <span className="qitem__sub">
-              from <i>{item.sourceTitle}</i>
-            </span>
-          ) : null}
-          {item.type === "extract" ? <Stage stage={item.stage} /> : null}
-          {item.concept ? (
-            <>
-              <span className="dot-sep" />
-              <span className="concept-tag">{item.concept}</span>
-            </>
-          ) : null}
-          <span className="dot-sep" />
-          <SchedulerChip scheduler={chip} />
+      <button
+        type="button"
+        className="qitem__open"
+        data-testid="queue-open"
+        onClick={() => {
+          onSelect(item);
+          onOpen(item);
+        }}
+      >
+        <TypeIcon type={item.type} />
+        <span className="qitem__main">
+          <span className="qitem__title truncate">{titleFor(item)}</span>
+          <span className="qitem__meta">
+            {item.type === "source" && item.author ? (
+              <span className="qitem__sub">
+                <Icon name="globe" size={13} /> {item.author}
+              </span>
+            ) : null}
+            {item.type === "card" && item.sourceTitle ? (
+              <span className="qitem__sub">
+                from <i>{item.sourceTitle}</i>
+              </span>
+            ) : null}
+            {item.type === "extract" ? <Stage stage={item.stage} /> : null}
+            {item.concept ? (
+              <>
+                <span className="dot-sep" />
+                <span className="concept-tag">{item.concept}</span>
+              </>
+            ) : null}
+            <span className="dot-sep" />
+            <SchedulerChip scheduler={chip} />
+          </span>
         </span>
-      </span>
-      <span className="qitem__action">
-        <Prio priority={item.priority} />
-        <DueBadge item={item} />
-        <span className="next-action" data-testid="queue-open">
-          <Icon name={action.icon} size={12} />
-          {action.label}
+        <span className="qitem__action">
+          <Prio priority={item.priority} />
+          <DueBadge item={item} />
+          <span className="next-action">
+            <Icon name={action.icon} size={12} />
+            {action.label}
+          </span>
         </span>
+      </button>
+      <span className="qitem__acts" data-testid="queue-actions">
+        {ROW_ACTIONS.map((a) => (
+          <button
+            key={a.kind}
+            type="button"
+            disabled={busy}
+            title={a.label}
+            aria-label={a.label}
+            data-testid={`queue-action-${a.kind}`}
+            className={`qitem__act${a.danger ? " qitem__act--danger" : ""}`}
+            onClick={() => onAction(item, a.kind)}
+          >
+            <Icon name={a.icon} size={14} />
+          </button>
+        ))}
       </span>
-    </button>
+    </div>
   );
 }
 
@@ -174,6 +220,14 @@ export function QueueScreen() {
   const [data, setData] = useState<QueueListResult | null>(null);
   const [filter, setFilter] = useState<FilterId>("all");
   const [error, setError] = useState<string | null>(null);
+  /** The id of the row whose action is currently in flight (its buttons disable). */
+  const [busyId, setBusyId] = useState<string | null>(null);
+  /** The pending undo (for done/dismiss/delete) shown in the snackbar. */
+  const [undoState, setUndoState] = useState<{
+    id: string;
+    message: string;
+    undo: { kind: "restore" | "status"; previousStatus: string } | null;
+  } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!isDesktop()) return;
@@ -237,6 +291,59 @@ export function QueueScreen() {
     // until then "Start session" routes to the review placeholder.
     void navigate({ to: "/review" });
   }, [navigate]);
+
+  /** Human label for the snackbar after a removing action (T030). */
+  const removedMessage = useCallback((item: QueueItemSummary, kind: RowActionKind): string => {
+    const noun = item.type === "card" ? "Card" : item.type === "extract" ? "Extract" : "Item";
+    if (kind === "delete") return `${noun} deleted`;
+    if (kind === "markDone") return `${noun} marked done`;
+    return `${noun} dismissed`;
+  }, []);
+
+  /**
+   * Apply one in-place queue action through the SAME typed `appApi` mutation path
+   * (T030). postpone / raise / lower update the row in place (the read re-sorts);
+   * markDone / dismiss / delete remove it and raise an undo snackbar. No navigation
+   * happens — only the explicit "open" navigates. The whole queue is re-read after
+   * the mutation so the sort + counts + budget stay authoritative.
+   */
+  const onAction = useCallback(
+    async (item: QueueItemSummary, kind: RowActionKind) => {
+      if (!isDesktop() || busyId) return;
+      setBusyId(item.id);
+      try {
+        const res = await appApi.actOnQueueItem({ id: item.id, action: { kind } });
+        // A removing/postponing action drops the row from the due list; show an undo
+        // snackbar for the recoverable lifecycle changes (done/dismiss/delete).
+        if (res.removed) {
+          setUndoState({ id: item.id, message: removedMessage(item, kind), undo: res.undo });
+        }
+        await refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [busyId, refresh, removedMessage],
+  );
+
+  /**
+   * Undo the last removing action — restore a soft-deleted row or re-set the prior
+   * status (done/dismiss) — through the typed `queue.undo` surface, then re-read the
+   * queue so the row reappears. The kit's 5s snackbar window gates this.
+   */
+  const onUndo = useCallback(async () => {
+    const pending = undoState;
+    setUndoState(null);
+    if (!pending?.undo || !isDesktop()) return;
+    try {
+      await appApi.undoQueueAction({ id: pending.id, undo: pending.undo });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [undoState, refresh]);
 
   if (!desktop) {
     return (
@@ -350,8 +457,10 @@ export function QueueScreen() {
                 key={item.id}
                 item={item}
                 active={false}
+                busy={busyId === item.id}
                 onSelect={onSelect}
                 onOpen={onOpen}
+                onAction={onAction}
               />
             ))}
           </div>
@@ -392,6 +501,13 @@ export function QueueScreen() {
           </div>
         )}
       </div>
+
+      {/* Undo snackbar for the recoverable removing actions (done/dismiss/delete). */}
+      <QueueSnackbar
+        message={undoState?.message ?? null}
+        onUndo={undoState?.undo ? onUndo : undefined}
+        onClose={() => setUndoState(null)}
+      />
     </div>
   );
 }

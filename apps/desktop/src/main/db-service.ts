@@ -19,6 +19,7 @@
 import type {
   BlockId,
   ElementId,
+  ElementStatus,
   IsoTimestamp,
   MarkType,
   Priority,
@@ -40,6 +41,7 @@ import {
   InboxQuery,
   InspectorQuery,
   LineageQuery,
+  QueueActionService,
   QueueQuery,
   type Repositories,
 } from "@interleave/local-db";
@@ -80,8 +82,12 @@ import type {
   InspectorGetResult,
   InspectorListResult,
   LineageGetResult,
+  QueueActRequest,
+  QueueActResult,
   QueueListRequest,
   QueueListResult,
+  QueueUndoRequest,
+  QueueUndoResult,
   ReadPointGetRequest,
   ReadPointGetResult,
   ReadPointSetRequest,
@@ -102,6 +108,7 @@ export class DbService {
   private lineage: LineageQuery | null = null;
   private queue: QueueQuery | null = null;
   private inboxQuery: InboxQuery | null = null;
+  private queueAction: QueueActionService | null = null;
   private extraction: ExtractionService | null = null;
   private extractReview: ExtractService | null = null;
   private migrated = false;
@@ -136,6 +143,7 @@ export class DbService {
     this.inspector = new InspectorQuery(this.repositories);
     this.lineage = new LineageQuery(this.repositories);
     this.queue = new QueueQuery(this.repositories);
+    this.queueAction = new QueueActionService(this.handle.db);
     this.inboxQuery = new InboxQuery(this.repositories);
     this.extraction = new ExtractionService(this.handle.db);
     this.extractReview = new ExtractService(this.handle.db);
@@ -151,6 +159,7 @@ export class DbService {
     this.inspector = null;
     this.lineage = null;
     this.queue = null;
+    this.queueAction = null;
     this.inboxQuery = null;
     this.extraction = null;
     this.extractReview = null;
@@ -348,6 +357,61 @@ export class DbService {
       },
     });
     return { items: data.items, counts: data.counts, budget: data.budget };
+  }
+
+  /** The per-row queue ACT seam (T030), bound to the open database. */
+  private get queueActionService(): QueueActionService {
+    if (!this.queueAction) {
+      throw new Error("DbService: database is not open");
+    }
+    return this.queueAction;
+  }
+
+  /**
+   * Apply one in-place queue action (T030) — postpone / raise / lower / done /
+   * dismiss / delete — through the {@link QueueActionService}, a thin DISPATCHER over
+   * the already-built mutation paths. Each path runs in ONE transaction and appends
+   * the correct EXISTING op (no new op types): postpone routes an ATTENTION item
+   * through the attention scheduler (`reschedule_element`) and a CARD through a thin
+   * FSRS `review_states.due_at` defer (the two schedulers stay separate); raise/lower
+   * → `update_element`; done/dismiss → `update_element` status; delete →
+   * `soft_delete_element` (soft + undoable). Returns the REFRESHED queue row (so the
+   * renderer updates + re-sorts it in place), whether the row LEAVES the due list,
+   * and the undo recipe for the snackbar. The renderer reaches this only over
+   * validated IPC — there is no generic `db.query`.
+   */
+  actOnQueueItem(request: QueueActRequest): QueueActResult {
+    const id = request.id as ElementId;
+    const result = this.queueActionService.act(id, request.action.kind);
+    // A removing action (done/dismiss/delete) drops the row from the list; a
+    // postpone recedes it from the DUE set (so it has no due row either). Only an
+    // in-place change (raise/lower) returns a refreshed, still-due summary.
+    const item =
+      result.removed || request.action.kind === "postpone" ? null : this.queueQuery.summaryFor(id);
+    return {
+      item,
+      removed: result.removed,
+      undo: result.undo
+        ? { kind: result.undo.kind, previousStatus: result.undo.previousStatus }
+        : null,
+    };
+  }
+
+  /**
+   * Undo a removing queue action (T030) — the snackbar's "Undo" — through the
+   * {@link QueueActionService}. `restore` brings a soft-deleted row back via
+   * {@link ElementRepository.restore} (`restore_element`); `status` re-sets the prior
+   * lifecycle status via {@link ElementRepository.update} (`update_element`). One
+   * transaction + the correct existing op (no new op types). Returns the restored
+   * queue-row summary so the renderer re-inserts it; `null` when the id is unknown.
+   */
+  undoQueueAction(request: QueueUndoRequest): QueueUndoResult {
+    const id = request.id as ElementId;
+    this.queueActionService.undo(id, {
+      kind: request.undo.kind,
+      previousStatus: request.undo.previousStatus as ElementStatus,
+    });
+    return { item: this.queueQuery.summaryFor(id) };
   }
 
   /** Read-only inbox query layer (T012), bound to the open database. */

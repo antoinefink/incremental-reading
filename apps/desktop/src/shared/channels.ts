@@ -19,6 +19,8 @@ export const IPC_CHANNELS = {
   inspectorGet: "inspector:get",
   elementsSetPriority: "elements:setPriority",
   queueList: "queue:list",
+  queueAct: "queue:act",
+  queueUndo: "queue:undo",
   lineageGet: "lineage:get",
   sourcesImportManual: "sources:importManual",
   inboxList: "inbox:list",

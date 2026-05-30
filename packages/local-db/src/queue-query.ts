@@ -216,6 +216,22 @@ export class QueueQuery {
     return { items: rows, counts, budget: { used, target } };
   }
 
+  /**
+   * Build the queue-row summary for ONE live element (regardless of whether it is
+   * currently due) — the refreshed row a queue action (T030) returns so the renderer
+   * can update + re-sort it in place. Returns `null` when the id is unknown or
+   * soft-deleted. Routes a `card` through the FSRS-side summary and everything else
+   * through the attention-side summary, keeping the two-scheduler split intact.
+   */
+  summaryFor(id: ElementId, asOf?: IsoTimestamp): QueueItemSummary | null {
+    const element = this.repos.elements.findById(id);
+    if (!element || element.deletedAt) return null;
+    const asOfMs = Date.parse(asOf ?? (new Date().toISOString() as IsoTimestamp));
+    return element.type === "card"
+      ? this.toCardSummary(element, asOfMs)
+      : this.toAttentionSummary(element, asOfMs);
+  }
+
   /** Sort by priority DESCending, then by `due_at` ASCending (nulls last). Stable. */
   private sort(rows: readonly QueueItemSummary[]): QueueItemSummary[] {
     return [...rows].sort((a, b) => {

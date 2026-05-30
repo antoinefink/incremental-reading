@@ -302,6 +302,60 @@ export interface QueueListResult {
 }
 
 // ---------------------------------------------------------------------------
+// queue.act()  (T030 — per-row, in-place queue actions)
+// ---------------------------------------------------------------------------
+
+/**
+ * One in-place queue action (discriminated by `kind`). Open is renderer-only
+ * navigation and is NOT sent over IPC. Postpone reschedules (attention) / defers
+ * (card); raise/lower change priority; markDone/dismiss set status; delete soft-deletes.
+ */
+export type QueueActAction =
+  | { readonly kind: "postpone" }
+  | { readonly kind: "raise" }
+  | { readonly kind: "lower" }
+  | { readonly kind: "markDone" }
+  | { readonly kind: "dismiss" }
+  | { readonly kind: "delete" };
+
+export interface QueueActRequest {
+  readonly id: string;
+  readonly action: QueueActAction;
+}
+
+/** The undo recipe a removing action hands back for the snackbar. */
+export interface QueueActUndo {
+  /** `restore` → restore a soft-deleted row; `status` → re-set the prior status. */
+  readonly kind: "restore" | "status";
+  /** The status the row had BEFORE the action (the target the undo restores). */
+  readonly previousStatus: string;
+}
+
+export interface QueueActResult {
+  /**
+   * The REFRESHED queue row after the action (so the renderer updates + re-sorts it
+   * in place); `null` when the row left the due set (postpone / done / dismiss /
+   * delete) or the id was unknown.
+   */
+  readonly item: QueueItemSummary | null;
+  /** Whether the row LEAVES the due list (done / dismiss / delete). */
+  readonly removed: boolean;
+  /** The undo recipe for the snackbar, when the action is undoable. */
+  readonly undo: QueueActUndo | null;
+}
+
+/** Undo a removing queue action (the snackbar's "Undo") — echoes back the recipe. */
+export interface QueueUndoRequest {
+  readonly id: string;
+  readonly undo: QueueActUndo;
+}
+
+export interface QueueUndoResult {
+  /** The restored queue row summary, or `null` when the id is unknown. */
+  readonly item: QueueItemSummary | null;
+}
+
+// ---------------------------------------------------------------------------
 // lineage.get()  (T023 — the full navigable element hierarchy)
 // ---------------------------------------------------------------------------
 
@@ -713,6 +767,8 @@ export interface AppApi {
   };
   readonly queue: {
     list(request?: QueueListRequest): Promise<QueueListResult>;
+    act(request: QueueActRequest): Promise<QueueActResult>;
+    undo(request: QueueUndoRequest): Promise<QueueUndoResult>;
   };
   readonly lineage: {
     get(request: LineageGetRequest): Promise<LineageGetResult>;
@@ -823,6 +879,21 @@ export const appApi = {
    */
   listQueue(request?: QueueListRequest): Promise<QueueListResult> {
     return requireAppApi().queue.list(request);
+  },
+  /**
+   * Apply one in-place queue action (T030) — postpone / raise / lower / done /
+   * dismiss / delete. One transaction + the correct existing op; attention items
+   * postpone on the attention scheduler, cards defer on FSRS; delete is soft + undoable.
+   */
+  actOnQueueItem(request: QueueActRequest): Promise<QueueActResult> {
+    return requireAppApi().queue.act(request);
+  },
+  /**
+   * Undo a removing queue action (T030) — restore a soft-deleted row or re-set the
+   * prior status (done/dismiss). Reuses the typed surface; appends the right op.
+   */
+  undoQueueAction(request: QueueUndoRequest): Promise<QueueUndoResult> {
+    return requireAppApi().queue.undo(request);
   },
   /** The full, depth-tagged lineage tree for one element (read-only) (T023). */
   getLineage(request: LineageGetRequest): Promise<LineageGetResult> {

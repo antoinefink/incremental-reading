@@ -491,6 +491,96 @@ export interface QueueListResult {
 }
 
 // ---------------------------------------------------------------------------
+// queue.act()  (T030 — per-row, in-place queue actions)
+// ---------------------------------------------------------------------------
+
+/**
+ * The in-place queue ACT surface (T030). Every `qitem` row in `/queue` acts WITHOUT
+ * leaving the list: postpone / raise / lower / done / dismiss / delete. (Open is
+ * renderer-only navigation — it is NOT an IPC call.) The renderer sends an intent
+ * only; the MAIN process dispatches it through the `QueueActionService` (a thin
+ * DISPATCHER over the already-built mutation paths — it invents no new scheduling or
+ * priority math):
+ *
+ *  - `postpone` → an ATTENTION item reschedules further out on the attention
+ *    scheduler (`reschedule_element` + the postpone marker/count in the op payload);
+ *    a CARD defers its FSRS `review_states.due_at` forward (a deliberate THIN defer
+ *    for M5 — full FSRS grade-driven rescheduling is M7). The two schedulers stay
+ *    SEPARATE — a card is never put on the attention heuristic.
+ *  - `raise` / `lower` → the `@interleave/core` band helpers + `update_element`.
+ *  - `markDone` → status `done` (`update_element`); `dismiss` → status `dismissed`
+ *    (`update_element`); `delete` → SOFT delete (`soft_delete_element`), recoverable.
+ *
+ * Each path is validated main-side, runs in ONE transaction, and appends exactly
+ * the correct EXISTING op (NO new op types — the closed 15-op set is unchanged).
+ * The result carries the REFRESHED row summary (so the renderer updates/re-sorts it
+ * in place), whether the row LEAVES the list, and the undo recipe for the snackbar.
+ * There is still no generic `db.query`.
+ *
+ * `action` is a discriminated union so the main side rejects an unknown intent at
+ * the boundary.
+ */
+export const QueueActRequestSchema = z.object({
+  /** The due element id to act on (any queue type). */
+  id: ElementIdSchema,
+  action: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("postpone") }),
+    z.object({ kind: z.literal("raise") }),
+    z.object({ kind: z.literal("lower") }),
+    z.object({ kind: z.literal("markDone") }),
+    z.object({ kind: z.literal("dismiss") }),
+    z.object({ kind: z.literal("delete") }),
+  ]),
+});
+export type QueueActRequest = z.infer<typeof QueueActRequestSchema>;
+
+/** The undo recipe a removing action hands back for the snackbar. */
+export interface QueueActUndo {
+  /** `restore` → `ElementRepository.restore`; `status` → re-set the prior status. */
+  readonly kind: "restore" | "status";
+  /** The status the row had BEFORE the action (the target the undo restores). */
+  readonly previousStatus: string;
+}
+
+export interface QueueActResult {
+  /**
+   * The REFRESHED queue row after the action, so the renderer can update + re-sort
+   * it in place; `null` when the row left the due set (done / dismiss / delete) or
+   * the id was unknown.
+   */
+  readonly item: QueueItemSummary | null;
+  /** Whether the row LEAVES the due list (done / dismiss / delete). */
+  readonly removed: boolean;
+  /** The undo recipe for the snackbar, when the action is undoable. */
+  readonly undo: QueueActUndo | null;
+}
+
+/**
+ * Undo a removing queue action (T030) — the snackbar's "Undo". The renderer echoes
+ * back the {@link QueueActUndo} recipe the prior {@link QueueActResult} handed it; the
+ * MAIN process applies the inverse through the `QueueActionService`: `restore` →
+ * {@link ElementRepository.restore} (`restore_element`) for a soft-deleted row;
+ * `status` → {@link ElementRepository.update} re-setting the prior status
+ * (`update_element`) for a done/dismiss. One transaction + the correct existing op;
+ * no new op types. There is still no generic `db.query`.
+ */
+export const QueueUndoRequestSchema = z.object({
+  /** The element id to restore. */
+  id: ElementIdSchema,
+  undo: z.object({
+    kind: z.enum(["restore", "status"]),
+    /** The status the row had BEFORE the action (the target to restore to). */
+    previousStatus: z.enum(ELEMENT_STATUSES),
+  }),
+});
+export type QueueUndoRequest = z.infer<typeof QueueUndoRequestSchema>;
+
+export interface QueueUndoResult {
+  /** The restored queue row summary, or `null` when the id is unknown. */
+  readonly item: QueueItemSummary | null;
+}
+
+// ---------------------------------------------------------------------------
 // lineage.get()  (T023 — the full navigable element hierarchy)
 // ---------------------------------------------------------------------------
 
@@ -1140,6 +1230,18 @@ export interface AppApi {
      * filters + per-type counts + the budget gauge. Read-only.
      */
     list(request?: QueueListRequest): Promise<QueueListResult>;
+    /**
+     * Apply one in-place queue action (T030) — postpone / raise / lower / done /
+     * dismiss / delete — without leaving the list. One transaction + the correct
+     * existing op; attention items postpone on the attention scheduler, cards defer
+     * on FSRS; delete is soft + undoable.
+     */
+    act(request: QueueActRequest): Promise<QueueActResult>;
+    /**
+     * Undo a removing queue action (T030) — restore a soft-deleted row or re-set the
+     * prior status (done/dismiss). One transaction + the correct existing op.
+     */
+    undo(request: QueueUndoRequest): Promise<QueueUndoResult>;
   };
   readonly lineage: {
     /** The full, depth-tagged lineage tree for one element (read-only) (T023). */

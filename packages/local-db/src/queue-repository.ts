@@ -10,13 +10,37 @@
  * {@link ElementRepository}. The real scheduling math lands later (T028/T036);
  * here we expose the due-now reads the queue UI needs.
  *
- * Soft-deleted elements are excluded from every query.
+ * Soft-deleted elements are excluded from every query, and the two DUE reads
+ * additionally exclude rows whose lifecycle status has taken them out of the queue
+ * (`done` / `dismissed` / `suspended` / `deleted`) — see {@link QUEUE_EXCLUDED_STATUSES}.
  */
 
-import type { Element, ElementId, ElementType, IsoTimestamp } from "@interleave/core";
+import type {
+  Element,
+  ElementId,
+  ElementStatus,
+  ElementType,
+  IsoTimestamp,
+} from "@interleave/core";
 import { elements, type InterleaveDatabase, reviewStates } from "@interleave/db";
-import { and, asc, eq, isNotNull, isNull, lte, ne } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, lte, notInArray } from "drizzle-orm";
 import { rowToElement } from "./mappers";
+
+/**
+ * Lifecycle statuses that take a row OUT of the due queue, regardless of its
+ * `due_at`. A `done`/`dismissed`/`suspended`/`deleted` row is no longer due —
+ * excluding them here is what lets a queue action (T030) actually remove the row
+ * from the list: `markDone`/`dismiss` flip the status (leaving `due_at` in the
+ * past), so without this filter the row would still satisfy `due_at <= asOf` and
+ * reappear on the next read. (`deleted` is redundant with the `deletedAt` guard
+ * but listed for intent.)
+ */
+const QUEUE_EXCLUDED_STATUSES: readonly ElementStatus[] = [
+  "done",
+  "dismissed",
+  "suspended",
+  "deleted",
+];
 
 export class QueueRepository {
   constructor(private readonly db: InterleaveDatabase) {}
@@ -34,7 +58,7 @@ export class QueueRepository {
         and(
           eq(elements.type, "card"),
           isNull(elements.deletedAt),
-          ne(elements.status, "suspended"),
+          notInArray(elements.status, QUEUE_EXCLUDED_STATUSES as ElementStatus[]),
           isNotNull(reviewStates.dueAt),
           lte(reviewStates.dueAt, asOf),
         ),
@@ -54,9 +78,9 @@ export class QueueRepository {
       .from(elements)
       .where(
         and(
-          ne(elements.type, "card"),
+          notInArray(elements.type, ["card"]),
           isNull(elements.deletedAt),
-          ne(elements.status, "suspended"),
+          notInArray(elements.status, QUEUE_EXCLUDED_STATUSES as ElementStatus[]),
           isNotNull(elements.dueAt),
           lte(elements.dueAt, asOf),
         ),

@@ -500,4 +500,113 @@ describe("DbService", () => {
     expect(second.repos.elements.findById(el.id)?.priority).toBe(0.875);
     second.close();
   });
+
+  // -------------------------------------------------------------------------
+  // queue.act / queue.undo (T030) — in-place per-row queue actions.
+  // -------------------------------------------------------------------------
+
+  it("actOnQueueItem raise/lower returns the refreshed in-place row (T030)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+
+    const extract = svc.repos.elements.create({
+      type: "extract",
+      status: "scheduled",
+      stage: "raw_extract",
+      priority: 0.375, // C
+      title: "An extract",
+      dueAt: "2020-01-01T00:00:00.000Z", // already due
+    });
+
+    const res = svc.actOnQueueItem({ id: extract.id, action: { kind: "raise" } });
+    expect(res.removed).toBe(false);
+    expect(res.undo).toBeNull();
+    // The row stays in place with its NEW priority band (C → B = 0.625).
+    expect(res.item?.priority).toBe(0.625);
+    expect(svc.repos.elements.findById(extract.id)?.priority).toBe(0.625);
+
+    svc.close();
+  });
+
+  it("actOnQueueItem markDone/dismiss removes the row + carries an undo recipe (T030)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+
+    const extract = svc.repos.elements.create({
+      type: "extract",
+      status: "active",
+      stage: "raw_extract",
+      priority: 0.625,
+      title: "Doomed extract",
+    });
+
+    const done = svc.actOnQueueItem({ id: extract.id, action: { kind: "markDone" } });
+    expect(done.removed).toBe(true);
+    expect(done.item).toBeNull();
+    expect(done.undo).toEqual({ kind: "status", previousStatus: "active" });
+    expect(svc.repos.elements.findById(extract.id)?.status).toBe("done");
+
+    // Undo re-sets the prior status; the restored summary comes back.
+    const undone = svc.undoQueueAction({ id: extract.id, undo: done.undo as never });
+    expect(svc.repos.elements.findById(extract.id)?.status).toBe("active");
+    expect(undone.item?.id).toBe(extract.id);
+
+    svc.close();
+  });
+
+  it("actOnQueueItem delete is SOFT + undoable through queue.undo (T030)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+
+    const extract = svc.repos.elements.create({
+      type: "extract",
+      status: "scheduled",
+      stage: "raw_extract",
+      priority: 0.625,
+      title: "Soft-deletable extract",
+    });
+
+    const del = svc.actOnQueueItem({ id: extract.id, action: { kind: "delete" } });
+    expect(del.removed).toBe(true);
+    expect(del.undo).toEqual({ kind: "restore", previousStatus: "scheduled" });
+    // SOFT: the row is still present with deletedAt set (never hard-deleted).
+    const deleted = svc.repos.elements.findById(extract.id);
+    expect(deleted?.deletedAt).toBeTruthy();
+    expect(deleted?.status).toBe("deleted");
+
+    // Undo restores it to its prior status.
+    svc.undoQueueAction({ id: extract.id, undo: del.undo as never });
+    const restored = svc.repos.elements.findById(extract.id);
+    expect(restored?.deletedAt).toBeNull();
+    expect(restored?.status).toBe("scheduled");
+
+    svc.close();
+  });
+
+  it("a postponed item survives a full close + reopen (T030 restart analogue)", () => {
+    const first = new DbService();
+    first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const extract = first.repos.elements.create({
+      type: "extract",
+      status: "active",
+      stage: "raw_extract",
+      priority: 0.625,
+      title: "Durably postponed",
+      dueAt: "2020-01-01T00:00:00.000Z",
+    });
+    first.actOnQueueItem({ id: extract.id, action: { kind: "postpone" } });
+    const postponedDue = first.repos.elements.findById(extract.id)?.dueAt;
+    expect(postponedDue).toBeTruthy();
+    expect(Date.parse(postponedDue as string)).toBeGreaterThan(Date.parse("2020-01-01"));
+    first.close();
+
+    // A brand-new service opening the SAME file must see the postponed schedule —
+    // the item is still scheduled (not lost) after the restart.
+    const second = new DbService();
+    second.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const reopened = second.repos.elements.findById(extract.id);
+    expect(reopened?.status).toBe("scheduled");
+    expect(reopened?.dueAt).toBe(postponedDue);
+    second.close();
+  });
 });

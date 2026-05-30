@@ -110,6 +110,9 @@ const h = vi.hoisted(() => {
     navigateSpy: vi.fn(),
     selectSpy: vi.fn(),
     listQueue: vi.fn().mockResolvedValue(result),
+    actOnQueueItem: vi.fn(),
+    undoQueueAction: vi.fn().mockResolvedValue({ item: extractRow }),
+    extractRow,
   };
 });
 
@@ -118,7 +121,11 @@ vi.mock("../../lib/appApi", async () => {
   return {
     ...actual,
     isDesktop: () => true,
-    appApi: { listQueue: h.listQueue },
+    appApi: {
+      listQueue: h.listQueue,
+      actOnQueueItem: h.actOnQueueItem,
+      undoQueueAction: h.undoQueueAction,
+    },
   };
 });
 
@@ -187,13 +194,16 @@ describe("QueueScreen", () => {
     await screen.findByTestId("queue-empty-filtered");
   });
 
-  it("selects a row in the shell inspector when clicked", async () => {
+  it("selects a row in the shell inspector when its open zone is clicked", async () => {
     render(<QueueScreen />);
     await screen.findAllByTestId("queue-item");
     const extract = screen
       .getAllByTestId("queue-item")
       .find((el) => el.getAttribute("data-element-id") === "extract-1");
-    if (extract) fireEvent.click(extract);
+    // The open click target is the inner `qitem__open` button (the action buttons
+    // live in a separate cluster so they don't trigger navigation).
+    const open = extract?.querySelector('[data-testid="queue-open"]') as HTMLElement;
+    fireEvent.click(open);
     expect(h.selectSpy).toHaveBeenCalledWith("extract-1");
   });
 
@@ -216,5 +226,103 @@ describe("QueueScreen", () => {
     await screen.findByTestId("budget-meter");
     expect(screen.getByTestId("budget-meter")).toHaveTextContent("3");
     expect(screen.getByTestId("budget-meter")).toHaveTextContent("30 today");
+  });
+
+  // -------------------------------------------------------------------------
+  // T030 — in-place per-row actions + undo snackbar.
+  // -------------------------------------------------------------------------
+
+  it("exposes the in-place action buttons on every row", async () => {
+    render(<QueueScreen />);
+    const rows = await screen.findAllByTestId("queue-item");
+    const extract = rows.find((el) => el.getAttribute("data-element-id") === "extract-1");
+    for (const kind of ["postpone", "raise", "lower", "markDone", "dismiss", "delete"]) {
+      expect(extract?.querySelector(`[data-testid="queue-action-${kind}"]`)).not.toBeNull();
+    }
+  });
+
+  it("postpone calls queue.act and re-reads the list (no navigation)", async () => {
+    render(<QueueScreen />);
+    const rows = await screen.findAllByTestId("queue-item");
+    const extract = rows.find((el) => el.getAttribute("data-element-id") === "extract-1");
+    const postpone = extract?.querySelector('[data-testid="queue-action-postpone"]') as HTMLElement;
+
+    // Queue the action result + the post-action re-read AFTER the initial load.
+    h.actOnQueueItem.mockResolvedValueOnce({ item: null, removed: false, undo: null });
+
+    fireEvent.click(postpone);
+    await waitFor(() =>
+      expect(h.actOnQueueItem).toHaveBeenCalledWith({
+        id: "extract-1",
+        action: { kind: "postpone" },
+      }),
+    );
+    // No navigation happens on an action.
+    expect(h.navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("raise priority calls queue.act with the raise intent (badge updates in place)", async () => {
+    render(<QueueScreen />);
+    const rows = await screen.findAllByTestId("queue-item");
+    const extract = rows.find((el) => el.getAttribute("data-element-id") === "extract-1");
+    const raise = extract?.querySelector('[data-testid="queue-action-raise"]') as HTMLElement;
+
+    h.actOnQueueItem.mockResolvedValueOnce({
+      item: { ...h.extractRow, priority: 0.875 },
+      removed: false,
+      undo: null,
+    });
+
+    fireEvent.click(raise);
+    await waitFor(() =>
+      expect(h.actOnQueueItem).toHaveBeenCalledWith({
+        id: "extract-1",
+        action: { kind: "raise" },
+      }),
+    );
+  });
+
+  it("delete removes the row and shows an undo snackbar that restores it", async () => {
+    render(<QueueScreen />);
+    const rows = await screen.findAllByTestId("queue-item");
+    const extract = rows.find((el) => el.getAttribute("data-element-id") === "extract-1");
+    const del = extract?.querySelector('[data-testid="queue-action-delete"]') as HTMLElement;
+
+    // Queue the action result + the post-delete re-read AFTER the initial load, so
+    // the once-mocks are consumed by the action, not the first render.
+    h.actOnQueueItem.mockResolvedValueOnce({
+      item: null,
+      removed: true,
+      undo: { kind: "restore", previousStatus: "scheduled" },
+    });
+    h.listQueue.mockResolvedValueOnce({
+      items: [],
+      counts: {
+        all: 0,
+        card: 0,
+        source: 0,
+        extract: 0,
+        topic: 0,
+        task: 0,
+        highPriority: 0,
+        overdue: 0,
+        protected: 0,
+      },
+      budget: { used: 0, target: 30 },
+    });
+
+    fireEvent.click(del);
+    // The undo snackbar appears.
+    await screen.findByTestId("queue-snackbar");
+    expect(screen.getByTestId("queue-snackbar")).toHaveTextContent(/deleted/i);
+
+    // Undo calls the typed undo surface with the recipe.
+    fireEvent.click(screen.getByTestId("queue-snackbar-undo"));
+    await waitFor(() =>
+      expect(h.undoQueueAction).toHaveBeenCalledWith({
+        id: "extract-1",
+        undo: { kind: "restore", previousStatus: "scheduled" },
+      }),
+    );
   });
 });

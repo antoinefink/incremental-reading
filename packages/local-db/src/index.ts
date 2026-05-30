@@ -79,6 +79,13 @@ export {
   OperationLogRepository,
 } from "./operation-log-repository";
 export {
+  CARD_DEFER_DAYS,
+  type QueueActionKind,
+  type QueueActionResult,
+  QueueActionService,
+  type QueueActionUndo,
+} from "./queue-action-service";
+export {
   type QueueDueState,
   type QueueFilters,
   type QueueItemSummary,
