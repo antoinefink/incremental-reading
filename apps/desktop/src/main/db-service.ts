@@ -1269,14 +1269,13 @@ export class DbService {
     };
   }
 
-  /** The first concept this element is a member of, or `null` (mirrors QueueQuery). */
+  /**
+   * The first concept this element is a member of, or `null` — delegates to the
+   * ONE shared {@link ConceptRepository.firstConceptName} (also used by the queue
+   * + review meta lines) so every surface agrees on the displayed concept.
+   */
   private conceptForElement(id: ElementId): string | null {
-    const membership = this.repos.elements
-      .listRelationsFrom(id)
-      .find((r) => r.relationType === "concept_membership");
-    if (!membership) return null;
-    const conceptEl = this.repos.elements.findById(membership.toElementId);
-    return conceptEl && !conceptEl.deletedAt ? conceptEl.title : null;
+    return this.repos.concepts.firstConceptName(id);
   }
 
   /**
@@ -1600,6 +1599,27 @@ export class DbService {
       // and the card's/extract's source-location anchor.
       const { sourceTitle, sourceLocationLabel } = this.refMetaForElement(element.id, hit.type);
 
+      // Scheduler chip + due badge for the selection detail (kit parity). Reuse the
+      // SAME builders the inspector + queue use so the chip/due read identically:
+      // the inspector resolves the full FSRS/attention `SchedulerSignals`, and the
+      // queue summary classifies the due state/label — no duplicated scheduling math.
+      // Both are best-effort: a row that vanished between the FTS hit and this read
+      // degrades to a calm attention/"Scheduled" default rather than dropping.
+      const inspectorData = this.inspectorQuery.get(element.id);
+      const summary = this.queueQuery.summaryFor(element.id);
+      const scheduler = inspectorData?.scheduler ?? {
+        kind: "attention" as const,
+        retrievability: null,
+        stability: null,
+        difficulty: null,
+        reps: null,
+        lapses: null,
+        fsrsState: null,
+        stage: element.stage,
+        postponed: 0,
+        lastProcessedAt: element.updatedAt ?? null,
+      };
+
       results.push({
         id: element.id,
         type: hit.type,
@@ -1611,40 +1631,33 @@ export class DbService {
         concept: this.conceptForElement(element.id),
         sourceTitle,
         sourceLocationLabel,
-        dueAt: element.dueAt ?? null,
+        dueAt: summary?.dueAt ?? element.dueAt ?? null,
+        scheduler,
+        due: summary?.due ?? "soon",
+        dueLabel: summary?.dueLabel ?? "Scheduled",
       });
     }
     return { results };
   }
 
   /**
-   * Resolve the source title + location label for a search row's refblock,
-   * reusing the existing lineage reads. A `source` hit references itself; an
-   * `extract`/`card` references its owning source element + its source-location
-   * anchor. Soft-deleted sources degrade to `null` (a calm "no source"), never a
-   * broken reference (T043 enriches this with URL/author/date later).
+   * Resolve the source title + location label for a search row's refblock through
+   * the ONE shared {@link resolveSourceRef} (the same T043 resolver the inspector,
+   * review face, and extract view use), so the library row reads a reference
+   * identically. A `source` hit references itself; an `extract`/`card` references
+   * its owning source element + its source-location anchor (a card additionally
+   * falls back to its `cards.source_location_id`). A soft-deleted/missing source
+   * degrades to `null` (a calm "no source"), never a broken reference.
    */
   private refMetaForElement(
     id: ElementId,
-    type: "source" | "extract" | "card",
+    _type: "source" | "extract" | "card",
   ): { sourceTitle: string | null; sourceLocationLabel: string | null } {
-    if (type === "source") {
-      const el = this.repos.elements.findById(id);
-      return {
-        sourceTitle: el && !el.deletedAt ? el.title : null,
-        sourceLocationLabel: null,
-      };
-    }
-    const el = this.repos.elements.findById(id);
-    const sourceId = el?.sourceId ?? null;
-    const sourceEl = sourceId ? this.repos.elements.findById(sourceId) : null;
-    const sourceTitle = sourceEl && !sourceEl.deletedAt ? sourceEl.title : null;
-
-    // The element's own source-location anchor (extracts and cards both carry one).
-    let sourceLocationLabel: string | null = null;
-    const location = this.repos.sources.findLocationForElement(id);
-    if (location) sourceLocationLabel = location.label ?? null;
-    return { sourceTitle, sourceLocationLabel };
+    const ref = resolveSourceRef(this.repos, id);
+    return {
+      sourceTitle: ref?.sourceTitle ?? null,
+      sourceLocationLabel: ref?.locationLabel ?? null,
+    };
   }
 
   /** The element's organize state (concepts + tags), or `null` when soft-deleted/unknown. */

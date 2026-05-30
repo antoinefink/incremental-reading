@@ -418,7 +418,7 @@
   cursor: pointer;
   border: 1px solid var(--accent);
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   width: 100%;
 }
 .lib-btn:hover {

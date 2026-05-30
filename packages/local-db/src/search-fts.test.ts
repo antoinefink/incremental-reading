@@ -65,6 +65,35 @@ describe("SearchRepository (FTS5, T042)", () => {
     expect(ids.indexOf(titled.id)).toBeLessThan(ids.indexOf(src2.id));
   });
 
+  it("ranks title-weighted within the same tier (bm25 weights, not just the tier)", () => {
+    // Both sources mention the term in BOTH title and body, so both land in the
+    // headline tier (tier 0); ordering is then the bm25 tiebreaker. With the
+    // weights positional over ALL columns (element_id, title, body, tags), a
+    // STRONGER title match must still outrank a weaker-title/stronger-body match.
+    // Off-by-one weights (title landing on the UNINDEXED element_id) would invert
+    // this, so the test pins the within-tier order, not just the coarse tier.
+    const { element: strongTitle } = sources.create({
+      title: "Memory memory memory",
+      priority: 0.5,
+    });
+    documents.upsert({
+      elementId: strongTitle.id,
+      prosemirrorJson: { type: "doc", content: [] },
+      plainText: "memory mentioned once in the body here",
+    });
+    const { element: strongBody } = sources.create({ title: "Memory once", priority: 0.5 });
+    documents.upsert({
+      elementId: strongBody.id,
+      prosemirrorJson: { type: "doc", content: [] },
+      plainText: "memory memory memory memory saturates this body text",
+    });
+    const ids = search.search("memory").map((h) => h.id);
+    expect(ids).toContain(strongTitle.id);
+    expect(ids).toContain(strongBody.id);
+    // The title-heavy source must rank ahead of the body-heavy one.
+    expect(ids.indexOf(strongTitle.id)).toBeLessThan(ids.indexOf(strongBody.id));
+  });
+
   it("returns a card whose prompt matches a card query", () => {
     const { element: src } = sources.create({ title: "Host source", priority: 0.5 });
     documents.upsert({
@@ -83,6 +112,39 @@ describe("SearchRepository (FTS5, T042)", () => {
     const hits = search.search("photosynthesis");
     expect(hits.map((h) => h.id)).toContain(card.element.id);
     expect(hits.find((h) => h.id === card.element.id)?.type).toBe("card");
+  });
+
+  it("a card hit's snippet is the prompt/answer text, NOT the element id", () => {
+    // Regression: `snippet(card_fts, 0, …)` returns column 0 (element_id
+    // UNINDEXED) — i.e. the ULID — instead of an excerpt of the matched field.
+    // `snippet(card_fts, -1, …)` uses the best-matching column, so a prompt hit
+    // excerpts the prompt and an answer-only hit excerpts the answer.
+    const { element: src } = sources.create({ title: "Snippet host", priority: 0.5 });
+    documents.upsert({
+      elementId: src.id,
+      prosemirrorJson: { type: "doc", content: [] },
+      plainText: "host body",
+    });
+    const card = review.createCard({
+      sourceId: src.id,
+      title: "snippet card",
+      kind: "qa",
+      prompt: "What is photosynthesis in plants?",
+      answer: "Chloroplasts convert sunlight into chemical energy.",
+      priority: 0.5,
+    });
+
+    // A prompt hit excerpts the prompt — and must NEVER be the element id.
+    const promptHit = search.search("photosynthesis").find((h) => h.id === card.element.id);
+    expect(promptHit).toBeDefined();
+    expect(promptHit?.snippet).not.toBe(card.element.id);
+    expect(promptHit?.snippet.toLowerCase()).toContain("photosynthesis");
+
+    // An answer-only hit excerpts the answer (still not the id).
+    const answerHit = search.search("chloroplasts").find((h) => h.id === card.element.id);
+    expect(answerHit).toBeDefined();
+    expect(answerHit?.snippet).not.toBe(card.element.id);
+    expect(answerHit?.snippet.toLowerCase()).toContain("chloroplast");
   });
 
   it("finds a tag-only match (the term appears only as a tag)", () => {
@@ -107,6 +169,37 @@ describe("SearchRepository (FTS5, T042)", () => {
     expect(search.search("ephemeral").map((h) => h.id)).toContain(src.id);
     elementsRepo.softDelete(src.id);
     expect(search.search("ephemeral").map((h) => h.id)).not.toContain(src.id);
+  });
+
+  it("drops a soft-deleted CARD from search and clears its card_fts row", () => {
+    // Regression: the `elements_fts_au` trigger rebuilt source_fts/extract_fts on
+    // soft-delete but left card_fts untouched, so a soft-deleted card kept a stale
+    // index row (masked only by the query join). Migration 0005 fixes the trigger.
+    const { element: src } = sources.create({ title: "Card host", priority: 0.5 });
+    documents.upsert({
+      elementId: src.id,
+      prosemirrorJson: { type: "doc", content: [] },
+      plainText: "host body",
+    });
+    const card = review.createCard({
+      sourceId: src.id,
+      title: "ephemeral card",
+      kind: "qa",
+      prompt: "What is mitochondria?",
+      answer: "The powerhouse of the cell.",
+      priority: 0.5,
+    });
+    expect(search.search("mitochondria").map((h) => h.id)).toContain(card.element.id);
+
+    elementsRepo.softDelete(card.element.id);
+
+    // It leaves the search results entirely.
+    expect(search.search("mitochondria").map((h) => h.id)).not.toContain(card.element.id);
+    // And the trigger physically removed the card_fts row (no index drift).
+    const remaining = handle.sqlite
+      .prepare("SELECT element_id FROM card_fts WHERE element_id = ?")
+      .all(card.element.id);
+    expect(remaining).toHaveLength(0);
   });
 
   it("returns [] for an empty or whitespace-only query", () => {

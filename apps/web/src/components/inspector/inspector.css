@@ -374,6 +374,33 @@
   align-items: center;
   gap: 2px;
 }
+/* Create-a-new-concept affordance (T041): a calm text trigger + an inline form. */
+.insp-organize__new {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  font-weight: 500;
+  color: var(--text-3);
+  background: none;
+  border: none;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.insp-organize__new:hover:not(:disabled) {
+  color: var(--accent);
+}
+.insp-organize__new:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.insp-organize__create {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .insp-chip-del {
   margin-left: 2px;
   display: inline-flex;

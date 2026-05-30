@@ -86,6 +86,20 @@ test("typing a seeded term returns the source, extract, and card grouped + highl
   await sourceRow.click();
   await expect(page.getByTestId("library-detail")).toBeVisible();
   await expect(page.getByTestId("library-detail-ref")).toContainText(SOURCE_TITLE);
+  // The detail surfaces the load-bearing scheduler chip (kit parity) — a source is
+  // on the attention scheduler.
+  const detail = page.getByTestId("library-detail");
+  await expect(detail.getByTestId("scheduler-chip")).toHaveAttribute("data-scheduler", "attention");
+
+  // A card hit's snippet is matched prompt/answer text, never the element ULID.
+  const cardRow = page.getByTestId("library-group-card").getByTestId("library-result").first();
+  const cardId = await cardRow.getAttribute("data-result-id");
+  await cardRow.click();
+  const cardSnippet = page.getByTestId("library-detail-snippet");
+  await expect(cardSnippet).toBeVisible();
+  await expect(cardSnippet).not.toHaveText(cardId ?? "");
+  // The card detail shows the FSRS scheduler chip (the other side of the split).
+  await expect(detail.getByTestId("scheduler-chip")).toHaveAttribute("data-scheduler", "fsrs");
 
   await app.close();
 });

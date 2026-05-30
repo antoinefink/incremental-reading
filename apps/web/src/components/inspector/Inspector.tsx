@@ -224,6 +224,11 @@ function OrganizeSection({
   const [tagDraft, setTagDraft] = useState("");
   const [conceptDraft, setConceptDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  // Inline "create a new concept" affordance (T041): a name + optional parent,
+  // toggled open so the common (assign-existing) path stays one click.
+  const [creating, setCreating] = useState(false);
+  const [newConceptName, setNewConceptName] = useState("");
+  const [newConceptParent, setNewConceptParent] = useState("");
 
   const assignedIds = new Set(concepts.map((c) => c.id));
   const assignable = allConcepts.filter((c) => !assignedIds.has(c.id));
@@ -256,6 +261,25 @@ function OrganizeSection({
     void run(async () => {
       await appApi.assignConcept({ elementId, conceptId: conceptDraft });
       setConceptDraft("");
+    });
+  };
+
+  // Create a new concept (optionally under a parent) AND assign it to this
+  // element in one flow, so a fresh DB with no concepts has a real path to make
+  // one. Both calls go through the typed bridge (`concepts.create` logs
+  // `create_element`; `concepts.assign` logs `add_relation`).
+  const onCreateConcept = () => {
+    const name = newConceptName.trim();
+    if (!name) return;
+    void run(async () => {
+      const res = await appApi.createConcept({
+        name,
+        ...(newConceptParent ? { parentConceptId: newConceptParent } : {}),
+      });
+      await appApi.assignConcept({ elementId, conceptId: res.concept.id });
+      setNewConceptName("");
+      setNewConceptParent("");
+      setCreating(false);
     });
   };
 
@@ -320,6 +344,79 @@ function OrganizeSection({
                 Assign
               </button>
             </div>
+          )}
+
+          {/* Create a brand-new concept (T041) — the only path to make one on a
+              fresh DB, so the assign picker is never a dead end. Optional parent
+              builds the hierarchy. */}
+          {creating ? (
+            <div className="insp-organize__create" data-testid="concept-create">
+              <div className="insp-add">
+                <input
+                  className="insp-add__input"
+                  data-testid="concept-create-name"
+                  // biome-ignore lint/a11y/noAutofocus: opening the create form is an explicit user action
+                  autoFocus
+                  placeholder="New concept name…"
+                  value={newConceptName}
+                  disabled={busy}
+                  onChange={(e) => setNewConceptName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      onCreateConcept();
+                    } else if (e.key === "Escape") {
+                      setCreating(false);
+                    }
+                  }}
+                />
+              </div>
+              <div className="insp-add">
+                <select
+                  className="insp-add__select"
+                  data-testid="concept-create-parent"
+                  aria-label="Parent concept (optional)"
+                  value={newConceptParent}
+                  disabled={busy}
+                  onChange={(e) => setNewConceptParent(e.target.value)}
+                >
+                  <option value="">No parent (root)</option>
+                  {allConcepts.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.parentConceptId ? `↳ ${c.name}` : c.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="insp-add__btn"
+                  data-testid="concept-create-submit"
+                  disabled={busy || newConceptName.trim().length === 0}
+                  onClick={onCreateConcept}
+                >
+                  Create
+                </button>
+                <button
+                  type="button"
+                  className="insp-add__btn"
+                  data-testid="concept-create-cancel"
+                  disabled={busy}
+                  onClick={() => setCreating(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="insp-organize__new"
+              data-testid="concept-new"
+              disabled={busy}
+              onClick={() => setCreating(true)}
+            >
+              <Icon name="plus" size={12} /> New concept…
+            </button>
           )}
         </div>
       </div>

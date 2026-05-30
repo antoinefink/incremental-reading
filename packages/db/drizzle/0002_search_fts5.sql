@@ -118,6 +118,12 @@ END;
 -- and a soft-deleted element drops out of the index. The body is re-derived
 -- from the type-appropriate source (documents for sources, the source-location
 -- selected text for extracts). Cards carry no title in FTS.
+--
+-- NOTE (fixed in migration 0005): this ORIGINAL version did NOT touch card_fts,
+-- so a soft-deleted card left a stale card_fts row (index drift, masked only by
+-- the query-time deleted_at join). Migration 0005 drops + recreates this trigger
+-- to also maintain card_fts. It is left here verbatim so already-migrated DBs
+-- replay identically before 0005 applies the fix.
 -- ---------------------------------------------------------------------------
 
 CREATE TRIGGER `elements_fts_au` AFTER UPDATE ON `elements` BEGIN

@@ -1775,6 +1775,42 @@ describe("DbService — review session (T037)", () => {
 
     second.close();
   });
+
+  it("a card search row's snippet is matched prompt/answer text, not the element ULID (T042)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    const cardRow = svc.search({ q: "intelligence", type: "card" }).results[0];
+    expect(cardRow).toBeDefined();
+    // Regression: column-0 `snippet` returned the UNINDEXED element_id (the ULID).
+    expect(cardRow?.snippet).not.toBe(cardRow?.id);
+    expect((cardRow?.snippet ?? "").length).toBeGreaterThan(0);
+    // The excerpt actually contains the matched term from the prompt/answer.
+    expect((cardRow?.snippet ?? "").toLowerCase()).toContain("intelligence");
+
+    svc.close();
+  });
+
+  it("soft-deleting a CARD removes it from search results (T042, card_fts trigger)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    const cardId = svc.search({ q: "intelligence", type: "card" }).results[0]?.id ?? "";
+    expect(cardId).not.toBe("");
+    svc.repos.elements.softDelete(cardId as never);
+
+    const afterCards = svc.search({ q: "intelligence", type: "card" }).results.map((r) => r.id);
+    expect(afterCards).not.toContain(cardId);
+    // And the underlying card_fts row was physically dropped (no index drift).
+    const remaining = svc.raw.sqlite
+      .prepare("SELECT element_id FROM card_fts WHERE element_id = ?")
+      .all(cardId) as unknown[];
+    expect(remaining).toHaveLength(0);
+
+    svc.close();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2136,7 +2172,7 @@ describe("DbService — backup support (T047)", () => {
   it("getSchemaVersion returns the latest applied Drizzle migration tag", () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
-    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe("0004_lovely_captain_midlands");
+    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe("0005_card_fts_softdelete");
     svc.close();
   });
 

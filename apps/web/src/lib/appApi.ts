@@ -1197,6 +1197,12 @@ export interface SearchResult {
   readonly sourceTitle: string | null;
   readonly sourceLocationLabel: string | null;
   readonly dueAt: string | null;
+  /** The element's scheduler signals (FSRS vs attention) for the detail chip. */
+  readonly scheduler: SchedulerSignals;
+  /** How due the element is now (overdue / today / soon), for the detail badge. */
+  readonly due: QueueDueState;
+  /** A short human due label ("Overdue", "Due today", "in 3d", "Scheduled"). */
+  readonly dueLabel: string;
 }
 
 export interface SearchQueryRequest {

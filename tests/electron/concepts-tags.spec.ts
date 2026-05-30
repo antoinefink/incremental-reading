@@ -8,8 +8,9 @@
  *
  *   1. the `concepts.*` + `tags.*` bridge commands exist (no raw SQL channel);
  *   2. on a seeded element (the Q&A card, which the seed leaves UN-organized) it
- *      ASSIGNS a concept (via the inspector picker) and ADDS a tag (via the tag
- *      input) → both pills appear in the inspector;
+ *      CREATES a new concept (via the inspector "New concept…" affordance, which
+ *      also assigns it) and ADDS a tag (via the tag input) → both pills appear in
+ *      the inspector;
  *   3. filtering the queue by that concept INCLUDES the element and EXCLUDES an
  *      unrelated one; the same for the tag filter (asserted at the bridge);
  *   4. it SURVIVES AN APP RESTART — the concept membership + tag persist (read
@@ -84,19 +85,10 @@ test("the concepts.* + tags.* bridge commands exist (no raw SQL)", async () => {
   await app.close();
 });
 
-test("assign a concept + add a tag on a card via the inspector → both pills appear", async () => {
+test("create a concept + add a tag on a card via the inspector → both pills appear", async () => {
   const app = await launchApp(dataDir, { seedOnEmpty: true });
   const page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");
-
-  // Create a fresh concept through the bridge (the management UI is T042+; the
-  // inspector picker assigns an EXISTING concept). This proves `concepts.create`.
-  await page.evaluate(async (name) => {
-    const api = window.appApi as unknown as {
-      concepts: { create(r: { name: string }): Promise<unknown> };
-    };
-    await api.concepts.create({ name });
-  }, CONCEPT_NAME);
 
   await selectByTitle(page, CARD_TITLE);
 
@@ -105,9 +97,12 @@ test("assign a concept + add a tag on a card via the inspector → both pills ap
   await page.getByTestId("tag-add").click();
   await expect(page.getByTestId("tag-pill").filter({ hasText: TAG_NAME })).toBeVisible();
 
-  // Assign the concept via the inspector picker.
-  await page.getByTestId("concept-picker").selectOption({ label: CONCEPT_NAME });
-  await page.getByTestId("concept-assign").click();
+  // CREATE a brand-new concept through the inspector UI (T041 fix — a human path
+  // to make a concept, not just assign an existing one). The create flow makes the
+  // `concept` element AND assigns it to this card in one step, so the pill appears.
+  await page.getByTestId("concept-new").click();
+  await page.getByTestId("concept-create-name").fill(CONCEPT_NAME);
+  await page.getByTestId("concept-create-submit").click();
   await expect(page.getByTestId("concept-pill").filter({ hasText: CONCEPT_NAME })).toBeVisible();
 
   await app.close();

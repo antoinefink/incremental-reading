@@ -17,6 +17,30 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConceptNode, SearchResult } from "../lib/appApi";
 
 const h = vi.hoisted(() => {
+  const attentionScheduler: SearchResult["scheduler"] = {
+    kind: "attention",
+    retrievability: null,
+    stability: null,
+    difficulty: null,
+    reps: null,
+    lapses: null,
+    fsrsState: null,
+    stage: "raw_source",
+    postponed: 0,
+    lastProcessedAt: null,
+  };
+  const fsrsScheduler: SearchResult["scheduler"] = {
+    kind: "fsrs",
+    retrievability: 0.92,
+    stability: 12,
+    difficulty: 5,
+    reps: 3,
+    lapses: 0,
+    fsrsState: "review",
+    stage: "active_card",
+    postponed: 0,
+    lastProcessedAt: "2026-05-01T00:00:00.000Z",
+  };
   const sourceHit: SearchResult = {
     id: "src-1",
     type: "source",
@@ -29,6 +53,9 @@ const h = vi.hoisted(() => {
     sourceTitle: "On the Measure of Intelligence",
     sourceLocationLabel: null,
     dueAt: null,
+    scheduler: attentionScheduler,
+    due: "soon",
+    dueLabel: "Scheduled",
   };
   const cardHit: SearchResult = {
     id: "card-1",
@@ -41,7 +68,10 @@ const h = vi.hoisted(() => {
     concept: "Intelligence",
     sourceTitle: "On the Measure of Intelligence",
     sourceLocationLabel: "Definition · ¶1",
-    dueAt: null,
+    dueAt: "2026-06-01T00:00:00.000Z",
+    scheduler: fsrsScheduler,
+    due: "today",
+    dueLabel: "Due today",
   };
   const concept: ConceptNode = {
     id: "concept-1",
@@ -168,5 +198,22 @@ describe("LibraryScreen", () => {
     // The detail panel shows; clicking Open navigates to the source reader.
     fireEvent.click(await screen.findByTestId("library-detail-open"));
     expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/source/$id", params: { id: "src-1" } });
+  });
+
+  it("shows the scheduler chip + due badge in the selection detail (kit parity)", async () => {
+    render(<LibraryScreen />);
+    fireEvent.change(screen.getByTestId("library-search-input"), {
+      target: { value: "intelligence" },
+    });
+    // Select the card hit (FSRS scheduler + a due date).
+    const cardGroup = await screen.findByTestId("library-group-card");
+    fireEvent.click(within(cardGroup).getByTestId("library-result"));
+
+    const detail = await screen.findByTestId("library-detail");
+    // The load-bearing scheduler split is surfaced (FSRS chip for the card).
+    const chip = within(detail).getByTestId("scheduler-chip");
+    expect(chip.getAttribute("data-scheduler")).toBe("fsrs");
+    // And the due badge reflects the result's dueLabel.
+    expect(within(detail).getByTestId("library-detail-due").textContent).toContain("Due today");
   });
 });

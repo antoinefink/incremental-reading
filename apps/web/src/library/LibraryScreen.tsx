@@ -17,7 +17,13 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
-import { ConceptTag, Prio, TypeIcon, typeLabel } from "../components/inspector/primitives";
+import {
+  ConceptTag,
+  Prio,
+  SchedulerChip,
+  TypeIcon,
+  typeLabel,
+} from "../components/inspector/primitives";
 import { RefBlock } from "../components/RefBlock";
 import "../components/inspector/inspector.css";
 import {
@@ -40,6 +46,21 @@ const TYPE_GROUPS: readonly { type: SearchableType; title: string }[] = [
 
 const PRIORITIES = ["A", "B", "C", "D"] as const;
 type PriorityLetter = (typeof PRIORITIES)[number];
+
+/** A due-state badge (overdue / today / soon) — matches the queue's `DueBadge`. */
+function DueBadge({ result }: { result: SearchResult }) {
+  const cls =
+    result.due === "overdue"
+      ? "badge--overdue"
+      : result.due === "today"
+        ? "badge--due"
+        : "badge--soft";
+  return (
+    <span className={`badge ${cls}`} data-testid="library-detail-due">
+      {result.dueLabel}
+    </span>
+  );
+}
 
 /** Render `text` with the first case-insensitive occurrence of `q` wrapped in <em>. */
 function highlight(text: string, q: string): React.ReactNode {
@@ -207,6 +228,14 @@ export function LibraryScreen() {
     if (!isDesktop()) return;
     const q = debouncedQuery.trim();
     if (q.length === 0) {
+      // DEFERRED (vs the kit's "show all when no query"): the M8 spec scopes
+      // `search.query` to KEYWORD search over the FTS5 index and explicitly
+      // returns [] for an empty query — so an empty-query "browse by concept /
+      // type / priority facet" is intentionally not wired here. A future
+      // browse-by-facet path (so a map-node click populates Results without a
+      // keyword) would add a member-listing bridge surface backed by the existing
+      // `ConceptRepository.elementsForConcept` / the queue concept filter — out of
+      // scope for the keyword-search milestone, tracked as a follow-up.
       setResults([]);
       setLoading(false);
       return;
@@ -489,6 +518,10 @@ export function LibraryScreen() {
                 <div className="lib-detail__row">
                   <Prio priority={selected.priority} />
                   {selected.concept ? <ConceptTag name={selected.concept} /> : null}
+                  {/* The load-bearing scheduler split + due status, matching the
+                      kit's detail panel (Prio / ConceptTag / SchedulerChip / Status). */}
+                  <SchedulerChip scheduler={selected.scheduler} />
+                  {selected.dueAt ? <DueBadge result={selected} /> : null}
                 </div>
                 {selected.snippet ? (
                   <div className="refblock" data-testid="library-detail-snippet">

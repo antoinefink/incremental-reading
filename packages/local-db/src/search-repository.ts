@@ -14,10 +14,13 @@
  *  - extracts: title + body + tags;
  *  - cards: `cards.prompt`/`cloze` (folded together) + `answer` + tags.
  *
- * Ranking is "simple" per the MVP: FTS5 `bm25()` with title/prompt weighted over
- * body, and a light boost on tag hits, so the best matches sort first. Recency /
- * priority-weighted ranking, fuzzy/typo tolerance, and semantic search are
- * explicitly later (semantic is M18/T087).
+ * Ranking is "simple" per the MVP: a coarse, deterministic `tier` (headline hit
+ * vs body-only) sorts first, with FTS5 `bm25()` as the within-tier tiebreaker —
+ * title/prompt weighted over body, tags a light boost — so the best matches sort
+ * first. The `bm25()` weights are positional over ALL columns INCLUDING the
+ * leading UNINDEXED `element_id`, so the first weight is always `0.0` for it.
+ * Recency / priority-weighted ranking, fuzzy/typo tolerance, and semantic search
+ * are explicitly later (semantic is M18/T087).
  *
  * It is READ-ONLY (search appends nothing to the operation log) and excludes
  * soft-deleted elements (the triggers never index a `deleted_at IS NOT NULL`
@@ -139,6 +142,14 @@ export class SearchRepository {
     // a title/prompt match always outranks a body-only match. The column order:
     //   source/extract_fts(element_id UNINDEXED, title, body, tags)
     //   card_fts(element_id UNINDEXED, prompt, answer, tags)
+    //
+    // CRITICAL: `bm25()`'s weight arguments are positional over ALL columns —
+    // including the leading `element_id UNINDEXED`. So the first weight must be
+    // for `element_id` (0.0 — it is never matched), then title/body/tags. The
+    // weights here keep title > tags > body so the within-tier tiebreaker agrees
+    // with the documented "weight title > body". And `snippet(table, -1, …)`
+    // uses the FTS5 "best matching column" sentinel so the excerpt comes from the
+    // column the term actually hit — never the UNINDEXED `element_id` (column 0).
     const titleMatch = `{title} : ${match}`;
     const promptMatch = `{prompt} : ${match}`;
 
@@ -149,8 +160,8 @@ export class SearchRepository {
           CASE WHEN element_id IN (
             SELECT element_id FROM source_fts WHERE source_fts MATCH ${titleMatch}
           ) THEN 0 ELSE 1 END AS tier,
-          bm25(source_fts, 10.0, 1.0, 4.0) AS score,
-          snippet(source_fts, 2, '', '', '…', 12) AS snippet
+          bm25(source_fts, 0.0, 10.0, 1.0, 4.0) AS score,
+          snippet(source_fts, -1, '', '', '…', 12) AS snippet
         FROM source_fts WHERE source_fts MATCH ${match}
       `);
     }
@@ -160,8 +171,8 @@ export class SearchRepository {
           CASE WHEN element_id IN (
             SELECT element_id FROM extract_fts WHERE extract_fts MATCH ${titleMatch}
           ) THEN 0 ELSE 1 END AS tier,
-          bm25(extract_fts, 8.0, 1.0, 4.0) AS score,
-          snippet(extract_fts, 2, '', '', '…', 12) AS snippet
+          bm25(extract_fts, 0.0, 8.0, 1.0, 4.0) AS score,
+          snippet(extract_fts, -1, '', '', '…', 12) AS snippet
         FROM extract_fts WHERE extract_fts MATCH ${match}
       `);
     }
@@ -171,8 +182,8 @@ export class SearchRepository {
           CASE WHEN element_id IN (
             SELECT element_id FROM card_fts WHERE card_fts MATCH ${promptMatch}
           ) THEN 0 ELSE 1 END AS tier,
-          bm25(card_fts, 10.0, 6.0, 4.0) AS score,
-          snippet(card_fts, 0, '', '', '…', 12) AS snippet
+          bm25(card_fts, 0.0, 10.0, 6.0, 4.0) AS score,
+          snippet(card_fts, -1, '', '', '…', 12) AS snippet
         FROM card_fts WHERE card_fts MATCH ${match}
       `);
     }

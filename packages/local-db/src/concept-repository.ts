@@ -238,6 +238,21 @@ export class ConceptRepository {
   }
 
   /**
+   * The NAME of the first LIVE concept an element is a member of (for the per-row
+   * meta line on the queue / search rows / review face), or `null`. The ONE shared
+   * "first membership walk" — skips a membership whose concept element was
+   * soft-deleted, so a deleted concept never shows on a row.
+   */
+  firstConceptName(elementId: ElementId): string | null {
+    const membership = this.elementRepo
+      .listRelationsFrom(elementId)
+      .find((r) => r.relationType === "concept_membership");
+    if (!membership) return null;
+    const conceptEl = this.elementRepo.findById(membership.toElementId as ElementId);
+    return conceptEl && !conceptEl.deletedAt ? conceptEl.title : null;
+  }
+
+  /**
    * The LIVE element ids that are members of a concept (feeds concept filtering +
    * counts). Reads the `concept_membership` edges (`to = concept`) and keeps only
    * members whose element is not soft-deleted.

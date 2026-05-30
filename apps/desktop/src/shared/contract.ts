@@ -1910,6 +1910,17 @@ export interface SearchResult {
   readonly sourceLocationLabel: string | null;
   /** Next-attention time (ISO), for the row's scheduler chip; `null` when none. */
   readonly dueAt: string | null;
+  /**
+   * The element's scheduler signals (the load-bearing FSRS-vs-attention split),
+   * so the library selection detail renders the same `SchedulerChip` the
+   * queue/inspector/review do. Cards carry the FSRS readout; everything else the
+   * attention stage/postpone readout.
+   */
+  readonly scheduler: SchedulerSignals;
+  /** How due the element is now (overdue / today / soon), for the detail badge. */
+  readonly due: QueueDueState;
+  /** A short human due label ("Overdue", "Due today", "in 3d", "Scheduled"). */
+  readonly dueLabel: string;
 }
 
 export const SearchQueryRequestSchema = z.object({

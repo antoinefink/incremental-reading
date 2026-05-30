@@ -346,17 +346,13 @@ export class QueueQuery {
 
   /**
    * The first concept this element is a member of (for the per-row meta line), or
-   * `null` (T041). The `concept_membership` edges are written by the
-   * `ConceptRepository`; this surfaces the first one for display (filtering matches
-   * against ALL memberships — see {@link matchesFilters}).
+   * `null` (T041) — delegates to the ONE shared {@link ConceptRepository.firstConceptName}
+   * (the canonical first-membership walk, also used by the search-result + review
+   * meta lines, so every surface shows the same concept). Filtering still matches
+   * against ALL memberships — see {@link matchesFilters}.
    */
   private conceptFor(id: ElementId): string | null {
-    const membership = this.repos.elements
-      .listRelationsFrom(id)
-      .find((r) => r.relationType === "concept_membership");
-    if (!membership) return null;
-    const conceptEl = this.repos.elements.findById(membership.toElementId);
-    return conceptEl && !conceptEl.deletedAt ? conceptEl.title : null;
+    return this.repos.concepts.firstConceptName(id);
   }
 
   /**
