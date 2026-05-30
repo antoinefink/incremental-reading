@@ -36,6 +36,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
 import { ExtractionService, rawExtractIntervalDays } from "./extraction-service";
+import { createRepositories } from "./index";
+import { LineageQuery } from "./lineage-query";
 import { SourceRepository } from "./source-repository";
 import { createInMemoryDb } from "./test-db";
 
@@ -340,6 +342,130 @@ describe("ExtractionService.createExtraction", () => {
     expect(handle.db.select().from(documentMarks).all().length).toBe(marksBefore);
     expect(handle.db.select().from(operationLog).all().length).toBe(opsBefore);
     expect(handle.db.select().from(documents).all().length).toBe(docsBefore);
+  });
+});
+
+describe("ExtractionService.createExtraction — sub-extracts (T025)", () => {
+  /** Create a top-level extract from the source's 2nd block, return its id + blocks. */
+  function seedExtract(handle: DbHandle, sourceId: ElementId) {
+    const blocks = blockIdsOf(handle, sourceId);
+    const service = new ExtractionService(handle.db);
+    const { element } = service.createExtraction({
+      sourceElementId: sourceId,
+      selectedText: "The definition paragraph two.",
+      blockIds: [blocks[1] as BlockId],
+      startOffset: 0,
+      endOffset: 29,
+      priority: 0.625,
+    });
+    return { extractId: element.id, extractBlocks: blockIdsOf(handle, element.id) };
+  }
+
+  it("splits an extract into a sub-extract preserving source → extract → sub-extract", () => {
+    const sourceId = seedSource(handle, 0.625);
+    const { extractId, extractBlocks } = seedExtract(handle, sourceId);
+    const service = new ExtractionService(handle.db);
+
+    // Select inside the EXTRACT body and lift it into a sub-extract: parentId = the
+    // extract, sourceElementId = the original source root (the reuse the spec requires).
+    const { element: sub, location } = service.createExtraction({
+      sourceElementId: sourceId,
+      parentId: extractId,
+      selectedText: "definition paragraph two.",
+      blockIds: [extractBlocks[0] as BlockId],
+      startOffset: 4,
+      endOffset: 29,
+      priority: 0.625,
+    });
+
+    // Lineage: parent is the extract, source root is still the original source.
+    expect(sub.type).toBe("extract");
+    expect(sub.parentId).toBe(extractId);
+    expect(sub.sourceId).toBe(sourceId);
+
+    // The source_locations anchor points INTO the parent extract (where the text
+    // was selected), NOT the original source — so jump-to-source lands correctly.
+    const row = handle.db
+      .select()
+      .from(sourceLocations)
+      .where(eq(sourceLocations.elementId, sub.id))
+      .get();
+    expect(row?.sourceElementId).toBe(extractId);
+    expect(JSON.parse(row?.blockIds ?? "[]")).toEqual([extractBlocks[0]]);
+    expect(location.sourceElementId).toBe(extractId);
+
+    // A derived_from edge points the sub-extract at its PARENT EXTRACT.
+    const rel = handle.db
+      .select()
+      .from(elementRelations)
+      .where(
+        and(
+          eq(elementRelations.fromElementId, sub.id),
+          eq(elementRelations.relationType, "derived_from"),
+        ),
+      )
+      .get();
+    expect(rel?.toElementId).toBe(extractId);
+
+    // The PARENT EXTRACT's body gains an extracted_span mark (not the source's).
+    const parentMark = handle.db
+      .select()
+      .from(documentMarks)
+      .where(
+        and(eq(documentMarks.documentId, extractId), eq(documentMarks.markType, "extracted_span")),
+      )
+      .get();
+    expect(parentMark).toBeTruthy();
+    expect(parentMark?.blockId).toBe(extractBlocks[0]);
+
+    // Sub-extracts are attention items like extracts — scheduled, NOT FSRS.
+    expect(sub.status).toBe("scheduled");
+    expect(sub.dueAt).toBeTruthy();
+    expect(
+      handle.db.select().from(reviewStates).where(eq(reviewStates.elementId, sub.id)).get(),
+    ).toBeUndefined();
+  });
+
+  it("inherits the original source's priority and tags onto the sub-extract", () => {
+    const sourceId = seedSource(handle, 0.875); // A priority
+    new ElementRepository(handle.db).addTag(sourceId, "ai");
+    const { extractId, extractBlocks } = seedExtract(handle, sourceId);
+    const service = new ExtractionService(handle.db);
+
+    const { element: sub } = service.createExtraction({
+      sourceElementId: sourceId,
+      parentId: extractId,
+      selectedText: "definition paragraph two.",
+      blockIds: [extractBlocks[0] as BlockId],
+      priority: 0.875,
+    });
+
+    expect(sub.priority).toBe(0.875);
+    expect(new ElementRepository(handle.db).listTags(sub.id)).toContain("ai");
+  });
+
+  it("the lineage query returns source → extract → sub-extract at correct depths", () => {
+    const sourceId = seedSource(handle, 0.625);
+    const { extractId, extractBlocks } = seedExtract(handle, sourceId);
+    const service = new ExtractionService(handle.db);
+    const { element: sub } = service.createExtraction({
+      sourceElementId: sourceId,
+      parentId: extractId,
+      selectedText: "definition paragraph two.",
+      blockIds: [extractBlocks[0] as BlockId],
+      priority: 0.625,
+    });
+
+    const lineage = new LineageQuery(createRepositories(handle.db)).get(sub.id);
+    expect(lineage).toBeTruthy();
+    expect(lineage?.rootId).toBe(sourceId);
+    const byId = new Map((lineage?.nodes ?? []).map((n) => [n.id, n]));
+    expect(byId.get(sourceId)?.depth).toBe(0);
+    expect(byId.get(extractId)?.depth).toBe(1);
+    expect(byId.get(sub.id)?.depth).toBe(2);
+    // The sub-extract is tagged as such; the active node is the requested element.
+    expect(byId.get(sub.id)?.meta).toBe("sub-extract");
+    expect(byId.get(sub.id)?.active).toBe(true);
   });
 });
 

@@ -33,6 +33,13 @@
  * extract; the parent extract for a sub-extract — T025 passes an explicit
  * `parentId`). The renderer never runs any of this; it reaches the service only
  * through the validated `extractions.create` IPC command.
+ *
+ * Sub-extracts (T025) reuse this path VERBATIM — only `parentId` differs. When a
+ * `parentId` is given, the selected text was lifted from the PARENT extract's body,
+ * so the `source_locations` anchor (block ids + offsets + label) points into the
+ * parent extract while `elements.source_id` still points at the original source
+ * root. The result is the navigable chain `source → extract → sub-extract` whose
+ * jump-to-source lands in the parent extract's document (where the text lives).
  */
 
 import type {
@@ -146,7 +153,14 @@ export class ExtractionService {
       throw new Error("ExtractionService.createExtraction: at least one block id is required");
     }
     const title = (input.title ?? "").trim() || titleFromSelection(input.selectedText);
-    const label = input.label ?? this.deriveLabel(input.sourceElementId, input.blockIds[0]);
+    // The selection was lifted from the PARENT element's body (the source for a
+    // top-level extract; the PARENT EXTRACT for a sub-extract — T025). The
+    // `source_locations` anchor and its human label therefore point INTO that
+    // parent document, while `elements.source_id` stays the lineage root. This is
+    // the ONLY thing that differs for a sub-extract — the rest of the path is the
+    // T021 extraction verbatim (same element/body/relation/tags/schedule/mark).
+    const locationSource = input.parentId ?? input.sourceElementId;
+    const label = input.label ?? this.deriveLabel(locationSource, input.blockIds[0]);
     // The body seed is computed BEFORE the transaction (pure CPU work, no DB).
     const conversion = plainTextToProseMirrorDoc(input.selectedText);
     // Read the source's inherited tags up front (a read; the writes happen in tx).
@@ -154,9 +168,12 @@ export class ExtractionService {
 
     return this.db.transaction((tx) => {
       // 1) extract element + source_locations anchor (create_element + create_extract).
+      //    `sourceElementId` is the lineage root (→ elements.source_id); the location
+      //    anchor points into `locationSource` (the parent extract for a sub-extract).
       const { element, location } = this.sources.createExtractWithin(tx, {
         sourceElementId: input.sourceElementId,
         parentId: input.parentId ?? input.sourceElementId,
+        locationSourceElementId: locationSource,
         title,
         priority: input.priority,
         stage: "raw_extract",

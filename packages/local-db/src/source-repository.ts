@@ -93,6 +93,17 @@ export interface CreateExtractInput {
   readonly sourceElementId: ElementId;
   /** Origin element the extract is lifted from; defaults to `sourceElementId`. */
   readonly parentId?: ElementId;
+  /**
+   * The element the `source_locations` anchor points INTO — i.e. the document the
+   * selected text (and thus `blockIds`/offsets) actually lives in. For a top-level
+   * extract this is the source itself; for a SUB-extract (T025) it is the PARENT
+   * extract, since the text was selected from the parent extract's body. Defaults
+   * to `sourceElementId` so the existing top-level path is unchanged. Keeping this
+   * distinct from `sourceElementId` (the lineage root, which stays on
+   * `elements.source_id`) is what makes jump-to-source land in the right document
+   * for a sub-extract.
+   */
+  readonly locationSourceElementId?: ElementId;
   readonly title: string;
   readonly priority: Priority;
   readonly stage?: DistillationStage;
@@ -285,10 +296,14 @@ export class SourceRepository {
     });
 
     const locationId: SourceLocationId = newSourceLocationId();
+    // The anchor points into the document the text was selected from: the parent
+    // extract for a sub-extract (T025), the source itself for a top-level extract.
+    // This is distinct from `elements.source_id` (the lineage root) above.
+    const locationSourceElementId = input.locationSourceElementId ?? input.sourceElementId;
     const location: ElementLocation = {
       id: locationId,
       elementId: element.id,
-      sourceElementId: input.sourceElementId,
+      sourceElementId: locationSourceElementId,
       blockIds: input.blockIds,
       startOffset: input.startOffset ?? null,
       endOffset: input.endOffset ?? null,
@@ -315,7 +330,12 @@ export class SourceRepository {
     new OperationLogRepository(tx).append(tx, {
       opType: "create_extract",
       elementId: element.id,
-      payload: { extractId: element.id, sourceElementId: input.sourceElementId, locationId },
+      payload: {
+        extractId: element.id,
+        sourceElementId: input.sourceElementId,
+        locationSourceElementId,
+        locationId,
+      },
     });
 
     return { element, location };

@@ -72,6 +72,13 @@ const h = vi.hoisted(() => {
     postpone: vi.fn().mockResolvedValue({ extract: inspectorData.element, postponeCount: 1 }),
     markDone: vi.fn().mockResolvedValue({ extract: inspectorData.element }),
     deleteExtract: vi.fn().mockResolvedValue({ extract: inspectorData.element }),
+    createExtraction: vi.fn().mockResolvedValue({
+      extract: { id: "sub_1", parentId: "ex_1", sourceId: "src_1" },
+      location: { sourceElementId: "ex_1" },
+    }),
+    // The selection the toolbar/Split act on. `null` by default (no live selection);
+    // tests override `current` to simulate a selection inside the extract body.
+    selectionLocation: { current: null as null | Record<string, unknown> },
   };
 });
 
@@ -128,6 +135,7 @@ vi.mock("../lib/appApi", () => ({
     postponeExtract: h.postpone,
     markExtractDone: h.markDone,
     deleteExtract: h.deleteExtract,
+    createExtraction: h.createExtraction,
   },
 }));
 
@@ -143,6 +151,18 @@ vi.mock("@interleave/editor", () => ({
   SourceEditor: () => <div data-testid="mock-editor" />,
   toBlockInputs: () => [],
   emptyDoc: () => ({ type: "doc", content: [] }),
+  setReaderDecorations: vi.fn(),
+}));
+
+// Stub the selection hook so the test can drive the "live selection" directly:
+// `position` stays null (no toolbar rendered in jsdom), and `location` reflects the
+// hoisted `selectionLocation.current` so Split/Sub-extract have something to act on.
+vi.mock("./useTextSelection", () => ({
+  useTextSelection: () => ({
+    position: null,
+    location: h.selectionLocation.current,
+    dismiss: vi.fn(),
+  }),
 }));
 
 // The inspector refresh is a window event; stub it so it is a no-op in the test.
@@ -206,5 +226,62 @@ describe("ExtractView — actions", () => {
 
     fireEvent.click(screen.getByTestId("extract-delete"));
     await waitFor(() => expect(h.deleteExtract).toHaveBeenCalledWith({ id: "ex_1" }));
+  });
+});
+
+describe("ExtractView — sub-extract (T025)", () => {
+  beforeEach(() => {
+    h.selectionLocation.current = null;
+  });
+
+  it("Sub-extract with a live selection calls extractions.create with parentId = this extract and sourceElementId = the source root", async () => {
+    // Simulate text selected inside the extract body.
+    h.selectionLocation.current = {
+      selectedText: "definition paragraph two.",
+      blockIds: ["blk_ex_1"],
+      startOffset: 4,
+      endOffset: 29,
+    };
+    render(<ExtractView />);
+    fireEvent.click(await screen.findByTestId("extract-subextract"));
+    await waitFor(() => expect(h.createExtraction).toHaveBeenCalledTimes(1));
+    // Reuses the T021 command verbatim — only the ids differ: parent = THIS extract,
+    // source root = the original source (so the sub-extract's source_id stays the root).
+    expect(h.createExtraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceElementId: "src_1",
+        parentId: "ex_1",
+        selectedText: "definition paragraph two.",
+        blockIds: ["blk_ex_1"],
+        startOffset: 4,
+        endOffset: 29,
+      }),
+    );
+    // A sub-extract is NOT a stage transition and never touches the card builder.
+    expect(h.updateStage).not.toHaveBeenCalled();
+  });
+
+  it("Split with a live selection also creates a sub-extract (same path)", async () => {
+    h.selectionLocation.current = {
+      selectedText: "definition paragraph two.",
+      blockIds: ["blk_ex_1"],
+      startOffset: 4,
+      endOffset: 29,
+    };
+    render(<ExtractView />);
+    fireEvent.click(await screen.findByTestId("extract-split"));
+    await waitFor(() => expect(h.createExtraction).toHaveBeenCalledTimes(1));
+    expect(h.createExtraction).toHaveBeenCalledWith(
+      expect.objectContaining({ parentId: "ex_1", sourceElementId: "src_1" }),
+    );
+  });
+
+  it("Sub-extract with no live selection does not call extractions.create", async () => {
+    h.selectionLocation.current = null;
+    render(<ExtractView />);
+    fireEvent.click(await screen.findByTestId("extract-subextract"));
+    // Give any (incorrect) async path a tick — it must NOT fire the command.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.createExtraction).not.toHaveBeenCalled();
   });
 });

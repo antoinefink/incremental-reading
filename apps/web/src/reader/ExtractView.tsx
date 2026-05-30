@@ -19,12 +19,23 @@
  * ATTENTION scheduler main-side and survive an app restart; this component only
  * orchestrates UI state + IPC. The RIGHT card-builder column is M6 (T033/T034) —
  * "Convert" routes to that placeholder.
+ *
+ * Sub-extracts (T025): the same {@link SelectionToolbar} + {@link useTextSelection}
+ * seam the source reader uses (T019) is reused INSIDE the extract body. Selecting a
+ * fragment and pressing Extract/Sub-extract (or the Split/Sub-extract action-bar
+ * buttons) calls the very same `extractions.create` command as T021 — only with
+ * `parentId` = THIS extract and `sourceElementId` = the original source root. That
+ * reuse is what guarantees the sub-extract gets identical lineage/scheduling/logging
+ * (its own body, a `source_locations` anchor INTO this extract, a `derived_from`
+ * edge, inherited priority/tags, and an attention `due_at`) and the navigable chain
+ * `source → extract → sub-extract`. No new service/command is added.
  */
 
 import {
   type Editor,
   SourceEditor,
   type SourceEditorChange,
+  setReaderDecorations,
   toBlockInputs,
 } from "@interleave/editor";
 import { useNavigate, useParams } from "@tanstack/react-router";
@@ -42,6 +53,8 @@ import {
 } from "../lib/appApi";
 import { useDocument } from "../pages/source/useDocument";
 import { useNavigateToLocation } from "./navigateToLocation";
+import { SelectionToolbar, type SelectionToolbarAction } from "./SelectionToolbar";
+import { useTextSelection } from "./useTextSelection";
 import "../pages/source/reader.css";
 import "./extract-view.css";
 
@@ -75,6 +88,10 @@ export function ExtractView() {
   const [flash, setFlash] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const editorRef = useRef<Editor | null>(null);
+  // A reactive mirror of the editor instance so the selection hook (T019/T025)
+  // re-binds its listeners when the editor (re)mounts; the ref stays for imperative use.
+  const [editor, setEditor] = useState<Editor | null>(null);
+  const [editorReady, setEditorReady] = useState(false);
   // The latest edited body, mirrored so Trim/Rewrite can save the current text.
   const latestChange = useRef<SourceEditorChange | null>(null);
 
@@ -108,6 +125,8 @@ export function ExtractView() {
 
   const onEditorReady = useCallback((instance: Editor | null) => {
     editorRef.current = instance;
+    setEditor(instance);
+    setEditorReady(instance !== null);
   }, []);
 
   // Track the latest edited body (the editor debounces and also auto-saves via
@@ -239,8 +258,130 @@ export function ExtractView() {
     void navigate({ to: "/review" });
   }, [navigate, toast]);
 
-  // Split + Sub-extract are T025 — surface the buttons, route to a toast until then.
-  const onSplit = useCallback(() => toast("Split lands in T025"), [toast]);
+  // The original source root this extract descends from (its lineage root). The
+  // inspector resolves `source` from `elements.source_id`, which points at the
+  // original source for a top-level extract AND for an already-nested extract — so
+  // a sub-extract's `source_id` stays the root no matter how deep the chain.
+  const sourceRootId = inspector?.source?.id ?? null;
+
+  // Text-selection toolbar inside the extract body (T025 reuses the T019 seam).
+  // The hook owns the anchor + resolved location; this view owns only the action
+  // wiring. Using or dismissing the toolbar never mutates the extract body.
+  const selection = useTextSelection(editor, editorReady);
+
+  // T025 — Sub-extract: lift the current selection in THIS extract's body into a
+  // NEW child extract via the SAME `extractions.create` command as T021. Only the
+  // ids differ: `parentId` = this extract, `sourceElementId` = the original source
+  // root, so the sub-extract's `source_id` stays the root while its location anchors
+  // into this extract. On success the parent paints `.extracted` over the selected
+  // blocks and the lineage tree re-fetches so the sub-extract appears in place. The
+  // view never touches SQL — it only ships the resolved location across IPC.
+  const onSubExtract = useCallback(async () => {
+    const loc = selection.location;
+    if (!id || !loc || !sourceRootId || busy) {
+      selection.dismiss();
+      return;
+    }
+    setBusy(true);
+    try {
+      await appApi.createExtraction({
+        sourceElementId: sourceRootId,
+        parentId: id,
+        selectedText: loc.selectedText,
+        blockIds: loc.blockIds,
+        startOffset: loc.startOffset,
+        endOffset: loc.endOffset,
+      });
+      doc.markExtracted(loc.blockIds);
+      reload();
+      requestInspectorRefresh();
+      toast("Sub-extract created");
+    } catch {
+      toast("Could not create sub-extract");
+    } finally {
+      setBusy(false);
+      selection.dismiss();
+    }
+  }, [id, selection, sourceRootId, busy, doc, reload, toast]);
+
+  // The selection toolbar maps Extract/Cloze/Highlight/Copy/Cancel actions inside
+  // the extract body. Extract == Sub-extract here (the selection is lifted into a
+  // child of THIS extract). Cloze/Highlight are deferred (M6 / not in the extract
+  // review surface); Copy/Cancel are renderer-only.
+  const onSelectionAction = useCallback(
+    (action: SelectionToolbarAction) => {
+      const loc = selection.location;
+      switch (action) {
+        case "extract":
+          void onSubExtract();
+          break;
+        case "copy": {
+          if (loc?.selectedText && typeof navigator !== "undefined" && navigator.clipboard) {
+            void navigator.clipboard.writeText(loc.selectedText).then(
+              () => toast("Copied to clipboard"),
+              () => toast("Could not copy"),
+            );
+          }
+          selection.dismiss();
+          break;
+        }
+        case "cloze":
+          toast("Cloze lands in M6");
+          selection.dismiss();
+          break;
+        case "highlight":
+        case "cancel":
+          selection.dismiss();
+          break;
+      }
+    },
+    [selection, onSubExtract, toast],
+  );
+
+  // The action-bar Split / Sub-extract buttons act on the live selection. When there
+  // is a selection they create a sub-extract; otherwise they prompt the user to select
+  // text first (the toolbar is the primary entry point, the buttons are the fallback).
+  const onSplit = useCallback(() => {
+    if (selection.location) {
+      void onSubExtract();
+    } else {
+      toast("Select text in the extract to sub-extract it");
+    }
+  }, [selection.location, onSubExtract, toast]);
+
+  // Keyboard while the toolbar is open: E → sub-extract (mirrors the reader's T019
+  // capture-phase handler so a bare letter is not typed into the contentEditable).
+  useEffect(() => {
+    if (!desktop || !selection.position) return;
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+      const k = e.key.toLowerCase();
+      if (k === "e") {
+        e.preventDefault();
+        onSelectionAction("extract");
+      }
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [desktop, selection.position, onSelectionAction]);
+
+  // Paint the `.extracted` display marker over blocks of this extract that already
+  // have a child sub-extract anchored to them (T025), mirroring the source reader.
+  // `doc.markExtracted` merges the just-created sub-extract's blocks optimistically
+  // so the marker appears without a reload.
+  useEffect(() => {
+    const instance = editorRef.current;
+    if (!instance || !editorReady) return;
+    setReaderDecorations(instance, {
+      firstUnreadBlockId: null,
+      readPointBlockId: null,
+      extractedBlockIds: doc.extractedBlockIds,
+      highlights: [],
+      flashedBlockId: null,
+    });
+  }, [editorReady, doc.extractedBlockIds]);
 
   if (!desktop) {
     return (
@@ -409,6 +550,7 @@ export function ExtractView() {
                 key={`${id ?? "none"}:${doc.status}`}
                 initialDoc={doc.initialDoc}
                 editable
+                readerDecorations
                 onChange={onChange}
                 onEditorReady={onEditorReady}
               />
@@ -500,6 +642,8 @@ export function ExtractView() {
           </div>
         </section>
       </div>
+
+      <SelectionToolbar position={selection.position} onAction={onSelectionAction} />
 
       {flash ? (
         <div className="reader-flash" data-testid="extract-flash" role="status">
