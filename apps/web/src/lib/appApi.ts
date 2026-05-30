@@ -688,6 +688,70 @@ export interface CardsCreateResult {
 }
 
 // ---------------------------------------------------------------------------
+// cards.update() / cards.suspend() / cards.delete() / cards.flag()  (T038)
+// ---------------------------------------------------------------------------
+
+/** A flat summary of a card after a repair action (body + status + flag). */
+export interface CardEditSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly status: string;
+  readonly stage: string;
+  readonly priority: number;
+  readonly title: string;
+  readonly kind: string;
+  readonly prompt: string | null;
+  readonly answer: string | null;
+  readonly cloze: string | null;
+  readonly parentId: string | null;
+  readonly sourceId: string | null;
+  /** Whether the card is currently flagged-as-bad. */
+  readonly flagged: boolean;
+  /** True after a soft delete. */
+  readonly deleted: boolean;
+}
+
+export interface CardsUpdateRequest {
+  readonly cardId: string;
+  /** New Q&A prompt (for a `qa` card); ignored for cloze. */
+  readonly prompt?: string;
+  /** New Q&A answer (for a `qa` card); ignored for cloze. */
+  readonly answer?: string;
+  /** New canonical `{{c1::answer}}` cloze text (for a `cloze` card); ignored for Q&A. */
+  readonly cloze?: string;
+}
+
+export interface CardsUpdateResult {
+  readonly card: CardEditSummary;
+}
+
+export interface CardsSuspendRequest {
+  readonly cardId: string;
+}
+
+export interface CardsSuspendResult {
+  readonly card: CardEditSummary;
+}
+
+export interface CardsDeleteRequest {
+  readonly cardId: string;
+}
+
+export interface CardsDeleteResult {
+  readonly card: CardEditSummary;
+}
+
+export interface CardsFlagRequest {
+  readonly cardId: string;
+  readonly flagged: boolean;
+  readonly reason?: string;
+}
+
+export interface CardsFlagResult {
+  readonly card: CardEditSummary;
+}
+
+// ---------------------------------------------------------------------------
 // extracts.updateStage() / .rewrite() / .postpone() / .markDone() / .delete()
 //   (T024 — extract review mode actions)
 // ---------------------------------------------------------------------------
@@ -834,6 +898,8 @@ export interface ReviewCardView {
   readonly schedulerSignals: ReviewSchedulerSignals;
   readonly leech: boolean;
   readonly lapses: number;
+  /** True when the user has flagged this card as bad (T038). */
+  readonly flagged: boolean;
 }
 
 export interface ReviewSessionNextRequest {
@@ -954,6 +1020,10 @@ export interface AppApi {
   };
   readonly cards: {
     create(request: CardsCreateRequest): Promise<CardsCreateResult>;
+    update(request: CardsUpdateRequest): Promise<CardsUpdateResult>;
+    suspend(request: CardsSuspendRequest): Promise<CardsSuspendResult>;
+    delete(request: CardsDeleteRequest): Promise<CardsDeleteResult>;
+    flag(request: CardsFlagRequest): Promise<CardsFlagResult>;
   };
   readonly extracts: {
     updateStage(request: ExtractsUpdateStageRequest): Promise<ExtractsUpdateStageResult>;
@@ -1114,6 +1184,25 @@ export const appApi = {
    */
   createCard(request: CardsCreateRequest): Promise<CardsCreateResult> {
     return requireAppApi().cards.create(request);
+  },
+  /**
+   * Edit a card's body in review (T038) — prompt/answer (Q&A) or cloze text. Writes
+   * the `cards` row + logs `update_element`; never touches lineage / FSRS state.
+   */
+  updateCard(request: CardsUpdateRequest): Promise<CardsUpdateResult> {
+    return requireAppApi().cards.update(request);
+  },
+  /** Suspend a card in review (T038): status `suspended`; logs `update_element`. */
+  suspendCard(request: CardsSuspendRequest): Promise<CardsSuspendResult> {
+    return requireAppApi().cards.suspend(request);
+  },
+  /** Soft-delete a card in review (T038); logs `soft_delete_element`. Recoverable. */
+  deleteCard(request: CardsDeleteRequest): Promise<CardsDeleteResult> {
+    return requireAppApi().cards.delete(request);
+  },
+  /** Flag/un-flag a card as bad in review (T038) — non-destructive; logs `update_element`. */
+  flagCard(request: CardsFlagRequest): Promise<CardsFlagResult> {
+    return requireAppApi().cards.flag(request);
   },
   /** Advance an extract `raw → clean → atomic` (or set a stage); reschedules it (T024). */
   updateExtractStage(request: ExtractsUpdateStageRequest): Promise<ExtractsUpdateStageResult> {

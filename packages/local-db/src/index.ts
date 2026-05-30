@@ -20,6 +20,11 @@
 
 export { AssetRepository, type CreateAssetInput } from "./asset-repository";
 export {
+  type CardEditResult,
+  CardEditService,
+  type UpdateCardBodyInput,
+} from "./card-edit-service";
+export {
   CardService,
   type CreateCardFromExtractInput,
   type CreateCardResult,

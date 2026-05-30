@@ -304,9 +304,138 @@
   font-weight: 500;
   cursor: pointer;
 }
-.rv-repair__btn:hover {
+.rv-repair__btn:hover:not(:disabled) {
   background: var(--surface-2);
   color: var(--text);
+}
+.rv-repair__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.rv-repair__btn--active {
+  color: var(--danger);
+}
+.rv-repair__btn--active svg {
+  color: var(--danger);
+}
+
+/* ---------- inline edit form (T038) ---------- */
+.rv-edit {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: var(--s-5, 18px);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg, var(--r-md));
+  background: var(--surface-2);
+}
+.rv-edit__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.rv-edit__label {
+  font-size: var(--t-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.rv-edit__textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-read);
+  font-size: var(--t-base);
+  line-height: var(--lh-snug);
+}
+.rv-edit__textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.rv-edit__error {
+  color: var(--danger);
+  font-size: var(--t-sm);
+}
+.rv-edit__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---------- source-context drawer (T038, kit `.drawer`) ---------- */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  border: none;
+  padding: 0;
+  background: var(--overlay, rgba(0, 0, 0, 0.32));
+  cursor: pointer;
+}
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 41;
+  width: min(420px, 90vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-lg, var(--shadow-md));
+  animation: rvDrawerIn var(--med, 0.22s) var(--ease, ease) both;
+}
+@keyframes rvDrawerIn {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s-4, 14px) var(--s-5, 18px);
+  border-bottom: 1px solid var(--border);
+}
+.drawer__title {
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+.drawer__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: var(--s-5, 18px);
+  overflow: auto;
+}
+.drawer__src {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.drawer__src-meta {
+  display: flex;
+  flex-direction: column;
+}
+.drawer__src-title {
+  font-weight: 600;
+  font-size: var(--t-sm);
+}
+.drawer__src-loc {
+  font-size: var(--t-2xs);
+  color: var(--text-3);
 }
 
 /* ---------- leech banner (kit `.banner`) ---------- */

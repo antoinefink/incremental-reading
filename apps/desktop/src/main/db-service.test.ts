@@ -805,6 +805,19 @@ describe("DbService — review session (T037)", () => {
     return row.id;
   }
 
+  /** The ids of all due cards in the FSRS deck at `asOf` (walks the session). */
+  function dueDeckIds(svc: DbService, asOf: string): string[] {
+    const ids: string[] = [];
+    // Walk the deck via `session.next({ exclude })` until it is exhausted (the same
+    // seam the renderer uses); bounded so a bug can never loop forever.
+    for (let i = 0; i < 500; i++) {
+      const res = svc.reviewSessionNext({ asOf, exclude: ids });
+      if (!res.card) break;
+      ids.push(res.card.id);
+    }
+    return ids;
+  }
+
   it("reviewSessionNext returns the due card carrying the full card view (cards only)", () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
@@ -979,6 +992,183 @@ describe("DbService — review session (T037)", () => {
     expect(exhausted.total).toBe(0);
     expect(exhausted.remaining).toBe(0);
 
+    svc.close();
+  });
+
+  // --- T038: in-review card repair (edit / suspend / delete / flag) ---
+
+  it("updateCard edits the Q&A body, logs update_element, and preserves lineage + review state", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const cardId = seededDueCardId(svc);
+
+    const beforeState = svc.repos.review.findReviewState(cardId as never);
+    const beforeLogs = svc.repos.review.listReviewLogs(cardId as never).length;
+    const beforeLocation = svc.repos.review.findCardById(cardId as never)?.card.sourceLocationId;
+    const beforeOps = (
+      svc.raw.sqlite
+        .prepare("SELECT COUNT(*) AS n FROM operation_log WHERE op_type = 'update_element'")
+        .get() as { n: number }
+    ).n;
+
+    const result = svc.updateCard({
+      cardId,
+      prompt: "Edited prompt at the moment of failure?",
+      answer: "Edited answer.",
+    });
+
+    // The body changed; lineage (source-location anchor) is intact.
+    expect(result.card.prompt).toBe("Edited prompt at the moment of failure?");
+    expect(result.card.answer).toBe("Edited answer.");
+    const after = svc.repos.review.findCardById(cardId as never);
+    expect(after?.card.prompt).toBe("Edited prompt at the moment of failure?");
+    expect(after?.card.sourceLocationId).toBe(beforeLocation);
+    expect(beforeLocation).toBeTruthy();
+
+    // The FSRS review state + the append-only logs are NOT touched by an edit.
+    const afterState = svc.repos.review.findReviewState(cardId as never);
+    expect(afterState?.dueAt).toBe(beforeState?.dueAt);
+    expect(afterState?.reps).toBe(beforeState?.reps);
+    expect(svc.repos.review.listReviewLogs(cardId as never).length).toBe(beforeLogs);
+
+    // Exactly one new update_element op (one transaction).
+    const afterOps = (
+      svc.raw.sqlite
+        .prepare("SELECT COUNT(*) AS n FROM operation_log WHERE op_type = 'update_element'")
+        .get() as { n: number }
+    ).n;
+    expect(afterOps).toBe(beforeOps + 1);
+
+    svc.close();
+  });
+
+  it("updateCard rejects emptying a Q&A card's required fields", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const cardId = seededDueCardId(svc);
+    expect(() => svc.updateCard({ cardId, prompt: "" })).toThrow();
+    svc.close();
+  });
+
+  it("suspendCard sets status suspended and drops the card out of the due deck", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const cardId = seededDueCardId(svc);
+
+    // The card is in the due deck before suspending.
+    const before = dueDeckIds(svc, ASOF);
+    expect(before).toContain(cardId);
+
+    const result = svc.suspendCard({ cardId });
+    expect(result.card.status).toBe("suspended");
+    expect(svc.repos.elements.findById(cardId as never)?.status).toBe("suspended");
+
+    // It no longer appears in the due-card deck (dueCards excludes suspended).
+    const after = dueDeckIds(svc, ASOF);
+    expect(after).not.toContain(cardId);
+    // But its review state + logs survive (recoverable).
+    expect(svc.repos.review.findReviewState(cardId as never)).not.toBeNull();
+
+    svc.close();
+  });
+
+  it("deleteCard soft-deletes (status deleted, deletedAt set) and logs soft_delete_element", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const cardId = seededDueCardId(svc);
+
+    const beforeOps = (
+      svc.raw.sqlite
+        .prepare("SELECT COUNT(*) AS n FROM operation_log WHERE op_type = 'soft_delete_element'")
+        .get() as { n: number }
+    ).n;
+
+    const result = svc.deleteCard({ cardId });
+    expect(result.card.status).toBe("deleted");
+    expect(result.card.deleted).toBe(true);
+    const el = svc.repos.elements.findById(cardId as never);
+    expect(el?.status).toBe("deleted");
+    expect(el?.deletedAt).toBeTruthy();
+
+    const afterOps = (
+      svc.raw.sqlite
+        .prepare("SELECT COUNT(*) AS n FROM operation_log WHERE op_type = 'soft_delete_element'")
+        .get() as { n: number }
+    ).n;
+    expect(afterOps).toBe(beforeOps + 1);
+
+    svc.close();
+  });
+
+  it("flagCard toggles a non-destructive flag (via update_element) without destroying the card", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const cardId = seededDueCardId(svc);
+
+    const beforeOps = (
+      svc.raw.sqlite
+        .prepare("SELECT COUNT(*) AS n FROM operation_log WHERE op_type = 'update_element'")
+        .get() as { n: number }
+    ).n;
+
+    const flagged = svc.flagCard({ cardId, flagged: true, reason: "ambiguous pronoun" });
+    expect(flagged.card.flagged).toBe(true);
+    // The card is NOT destroyed and stays live in the deck (a flag is advisory).
+    expect(svc.repos.elements.findById(cardId as never)?.status).not.toBe("deleted");
+    expect(dueDeckIds(svc, ASOF)).toContain(cardId);
+    // The flag rides on the review card view so it resurfaces visibly.
+    expect(svc.reviewSessionNext({ asOf: ASOF }).card?.flagged).toBe(true);
+
+    // Un-flagging clears it (the latest marker wins).
+    const cleared = svc.flagCard({ cardId, flagged: false });
+    expect(cleared.card.flagged).toBe(false);
+
+    // Two update_element ops (flag + un-flag); no other op type used.
+    const afterOps = (
+      svc.raw.sqlite
+        .prepare("SELECT COUNT(*) AS n FROM operation_log WHERE op_type = 'update_element'")
+        .get() as { n: number }
+    ).n;
+    expect(afterOps).toBe(beforeOps + 2);
+
+    svc.close();
+  });
+
+  it("a card edit + flag survive a close + reopen (T038 restart analogue)", () => {
+    const first = new DbService();
+    first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(first.seedIfEmpty()).toBe(true);
+    const cardId = seededDueCardId(first);
+    first.updateCard({ cardId, prompt: "Durable edited prompt?", answer: "Durable answer." });
+    first.flagCard({ cardId, flagged: true });
+    first.close();
+
+    const second = new DbService();
+    second.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const reopened = second.repos.review.findCardById(cardId as never);
+    expect(reopened?.card.prompt).toBe("Durable edited prompt?");
+    expect(second.reviewSessionNext({ asOf: ASOF }).card?.flagged).toBe(true);
+    second.close();
+  });
+
+  it("repair commands reject a non-card / unknown element (cards only)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const extract = svc.raw.sqlite
+      .prepare("SELECT id FROM elements WHERE type = 'extract' AND deleted_at IS NULL LIMIT 1")
+      .get() as { id: string } | undefined;
+    expect(extract).toBeDefined();
+    const id = extract?.id ?? "";
+    expect(() => svc.updateCard({ cardId: id, prompt: "x", answer: "y" })).toThrow();
+    expect(() => svc.suspendCard({ cardId: id })).toThrow();
+    expect(() => svc.deleteCard({ cardId: id })).toThrow();
+    expect(() => svc.flagCard({ cardId: "el_missing", flagged: true })).toThrow();
     svc.close();
   });
 });

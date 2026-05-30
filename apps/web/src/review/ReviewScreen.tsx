@@ -39,6 +39,7 @@ import {
 import { useNavigateToLocation } from "../reader/navigateToLocation";
 import { Kbd } from "../shell/Kbd";
 import { useSelection } from "../shell/selection";
+import { ReviewRepairBar } from "./ReviewRepairBar";
 import "./review.css";
 
 /** The four ratings in display + keyboard order (1–4). */
@@ -232,6 +233,18 @@ export function ReviewScreen() {
     },
     [card, revealed, busy, asOf, loadNext],
   );
+
+  /**
+   * Advance past the current card WITHOUT recording a grade (suspend/delete remove
+   * it from the live deck — they are repairs, not reviews). The card is added to the
+   * `exclude` set so `session.next` returns the next due card, and `reviewed`/the
+   * per-grade tally are left untouched.
+   */
+  const advancePastCurrent = useCallback(async () => {
+    if (!card) return;
+    excludeRef.current = [...excludeRef.current, card.id];
+    await loadNext();
+  }, [card, loadNext]);
 
   /** Jump back to the originating source paragraph (lineage: card → location → source). */
   const openSource = useCallback(() => {
@@ -491,35 +504,17 @@ export function ReviewScreen() {
               </div>
             </div>
 
-            {/* repair actions — wired in T038/T040; open-source is live (lineage). */}
-            <div className="rv-repair" data-testid="review-repair">
-              <button type="button" className="rv-repair__btn" disabled>
-                <Icon name="edit" size={14} />
-                Edit
-              </button>
-              <button
-                type="button"
-                className="rv-repair__btn"
-                data-testid="review-repair-source"
-                disabled={!card.sourceLocationLabel}
-                onClick={openSource}
-              >
-                <Icon name="source" size={14} />
-                Open source
-              </button>
-              <button type="button" className="rv-repair__btn" disabled>
-                <Icon name="pause" size={14} />
-                Suspend
-              </button>
-              <button type="button" className="rv-repair__btn" disabled>
-                <Icon name="leech" size={14} />
-                Mark leech
-              </button>
-              <button type="button" className="rv-repair__btn" disabled>
-                <Icon name="trash" size={14} />
-                Delete
-              </button>
-            </div>
+            {/* repair actions (T038) — edit / open source / add context / suspend /
+                flag / delete; open-source jumps back via lineage (T022). */}
+            <ReviewRepairBar
+              card={card}
+              busy={busy}
+              onOpenSource={openSource}
+              onCardUpdated={(updated) =>
+                setCard((c) => (c && c.id === updated.id ? { ...c, ...updated } : c))
+              }
+              onCardRemoved={advancePastCurrent}
+            />
           </div>
         ) : (
           <div className="rv-summary" data-testid="review-empty">

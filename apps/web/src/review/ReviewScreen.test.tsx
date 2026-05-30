@@ -45,6 +45,7 @@ const h = vi.hoisted(() => {
     },
     leech: false,
     lapses: 0,
+    flagged: false,
   };
   const clozeCard: ReviewCardView = {
     id: "card-cloze",
@@ -71,6 +72,7 @@ const h = vi.hoisted(() => {
     },
     leech: false,
     lapses: 0,
+    flagged: false,
   };
   return {
     navigateSpy: vi.fn(),

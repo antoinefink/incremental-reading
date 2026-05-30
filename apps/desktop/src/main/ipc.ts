@@ -11,6 +11,10 @@
 import { app, ipcMain } from "electron";
 import {
   CardsCreateRequestSchema,
+  CardsDeleteRequestSchema,
+  CardsFlagRequestSchema,
+  CardsSuspendRequestSchema,
+  CardsUpdateRequestSchema,
   DbStatusRequestSchema,
   DocumentMarksAddRequestSchema,
   DocumentMarksListRequestSchema,
@@ -180,6 +184,26 @@ export function registerIpcHandlers(dbService: DbService): () => void {
   ipcMain.handle(IPC_CHANNELS.cardsCreate, (_event, rawRequest: unknown) => {
     const request = CardsCreateRequestSchema.parse(rawRequest);
     return dbService.createCard(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.cardsUpdate, (_event, rawRequest: unknown) => {
+    const request = CardsUpdateRequestSchema.parse(rawRequest);
+    return dbService.updateCard(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.cardsSuspend, (_event, rawRequest: unknown) => {
+    const request = CardsSuspendRequestSchema.parse(rawRequest);
+    return dbService.suspendCard(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.cardsDelete, (_event, rawRequest: unknown) => {
+    const request = CardsDeleteRequestSchema.parse(rawRequest);
+    return dbService.deleteCard(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.cardsFlag, (_event, rawRequest: unknown) => {
+    const request = CardsFlagRequestSchema.parse(rawRequest);
+    return dbService.flagCard(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.extractsUpdateStage, (_event, rawRequest: unknown) => {

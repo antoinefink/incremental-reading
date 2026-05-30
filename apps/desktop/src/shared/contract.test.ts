@@ -10,6 +10,10 @@
 import { describe, expect, it } from "vitest";
 import {
   CardsCreateRequestSchema,
+  CardsDeleteRequestSchema,
+  CardsFlagRequestSchema,
+  CardsSuspendRequestSchema,
+  CardsUpdateRequestSchema,
   DocumentBlockInputSchema,
   DocumentMarksAddRequestSchema,
   DocumentMarksListRequestSchema,
@@ -69,6 +73,10 @@ describe("IPC channels", () => {
         "documents:marks:list",
         "extractions:create",
         "cards:create",
+        "cards:update",
+        "cards:suspend",
+        "cards:delete",
+        "cards:flag",
         "extracts:updateStage",
         "extracts:rewrite",
         "extracts:postpone",
@@ -189,6 +197,42 @@ describe("CardsCreateRequestSchema (T032)", () => {
     expect(() =>
       CardsCreateRequestSchema.parse({ kind: "qa", prompt: "Q?", answer: "A." }),
     ).toThrow();
+  });
+});
+
+describe("Card repair schemas (T038)", () => {
+  it("cards.update accepts a Q&A body edit, a cloze edit, and requires at least one field", () => {
+    expect(
+      CardsUpdateRequestSchema.parse({ cardId: "el_1", prompt: "New?", answer: "New." }),
+    ).toEqual({ cardId: "el_1", prompt: "New?", answer: "New." });
+    expect(CardsUpdateRequestSchema.parse({ cardId: "el_1", cloze: "{{c1::x}}" }).cloze).toBe(
+      "{{c1::x}}",
+    );
+    // No body fields → rejected (the refine).
+    expect(() => CardsUpdateRequestSchema.parse({ cardId: "el_1" })).toThrow();
+    // Missing id → rejected.
+    expect(() => CardsUpdateRequestSchema.parse({ prompt: "x" })).toThrow();
+  });
+
+  it("cards.suspend / cards.delete require a cardId", () => {
+    expect(CardsSuspendRequestSchema.parse({ cardId: "el_1" }).cardId).toBe("el_1");
+    expect(CardsDeleteRequestSchema.parse({ cardId: "el_1" }).cardId).toBe("el_1");
+    expect(() => CardsSuspendRequestSchema.parse({})).toThrow();
+    expect(() => CardsDeleteRequestSchema.parse({})).toThrow();
+  });
+
+  it("cards.flag requires a cardId + boolean flagged, with an optional reason", () => {
+    const parsed = CardsFlagRequestSchema.parse({
+      cardId: "el_1",
+      flagged: true,
+      reason: "ambiguous pronoun",
+    });
+    expect(parsed.flagged).toBe(true);
+    expect(parsed.reason).toBe("ambiguous pronoun");
+    expect(CardsFlagRequestSchema.parse({ cardId: "el_1", flagged: false }).flagged).toBe(false);
+    // A non-boolean flag / missing id → rejected.
+    expect(() => CardsFlagRequestSchema.parse({ cardId: "el_1", flagged: "yes" })).toThrow();
+    expect(() => CardsFlagRequestSchema.parse({ flagged: true })).toThrow();
   });
 });
 

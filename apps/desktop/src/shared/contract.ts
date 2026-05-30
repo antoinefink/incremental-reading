@@ -1291,6 +1291,123 @@ export interface CardsCreateResult {
 }
 
 // ---------------------------------------------------------------------------
+// cards.update() / cards.suspend() / cards.delete() / cards.flag()  (T038 — in-review repair)
+// ---------------------------------------------------------------------------
+
+/**
+ * The in-review card-repair surface (T038). The review session's repair row
+ * (Edit / Open source / Suspend / Delete / Flag-as-bad) becomes functional so the
+ * user can fix a bad card the MOMENT it fails, without leaving review. The
+ * renderer sends an intent; the MAIN process runs the `CardEditService`
+ * (`packages/local-db`) in ONE transaction per action, appending the correct
+ * EXISTING `operation_log` op (NO new op types — the closed 15-op set is
+ * unchanged):
+ *
+ *  - `cards.update`  → edit the card body (Q&A prompt/answer or cloze text); writes
+ *    the `cards` row + logs `update_element`. Lineage (`sourceLocationId`),
+ *    `review_states`, and the append-only `review_logs` are NEVER touched — an edit
+ *    must not corrupt the in-flight FSRS state.
+ *  - `cards.suspend` → status `suspended` (`update_element`); the card leaves the
+ *    due deck (`dueCards` excludes suspended) but keeps its review state/logs.
+ *  - `cards.delete`  → SOFT delete (`deletedAt` + status `deleted`,
+ *    `soft_delete_element`); lineage stays valid, recoverable from trash (T044).
+ *  - `cards.flag`    → a non-destructive "flag-as-bad" QUALITY marker stored in the
+ *    `update_element` op payload (no new column — the durable leech/flag migration
+ *    is T040's); the card stays in the deck. Logs `update_element`.
+ *
+ * **Open source** is renderer NAVIGATION (the card's `sourceLocationId` →
+ * `SourceRepository.findLocationById` → `navigateToLocation`, reusing T022) — NOT
+ * an IPC mutation; there is no `cards.openSource` command. There is still no
+ * generic `db.query`.
+ */
+
+/**
+ * A flat summary of a card after a repair action. Carries the body (so the
+ * renderer reflects an edit without a re-fetch), the lifecycle `status` (so it
+ * knows the card left the deck on suspend/delete), and the current `flagged`
+ * quality marker.
+ */
+export interface CardEditSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly status: string;
+  readonly stage: string;
+  /** Numeric priority `0.0`–`1.0`; the UI derives the A/B/C/D label. */
+  readonly priority: number;
+  readonly title: string;
+  /** Card kind (`qa`/`cloze`). */
+  readonly kind: string;
+  /** The Q&A prompt, or the cloze `{{cN::…}}` text. */
+  readonly prompt: string | null;
+  /** The Q&A answer; `null` for cloze cards. */
+  readonly answer: string | null;
+  /** The canonical cloze text; `null` for Q&A cards. */
+  readonly cloze: string | null;
+  /** The originating extract id (lineage parent). */
+  readonly parentId: string | null;
+  /** The owning source element id (lineage root). */
+  readonly sourceId: string | null;
+  /** Whether the card is currently flagged-as-bad (a manual quality marker). */
+  readonly flagged: boolean;
+  /** True after a soft delete. */
+  readonly deleted: boolean;
+}
+
+export const CardsUpdateRequestSchema = z
+  .object({
+    /** The card element id to edit. */
+    cardId: ElementIdSchema,
+    /** New Q&A prompt (for a `qa` card); ignored for a cloze card. */
+    prompt: z.string().trim().max(20_000).optional(),
+    /** New Q&A answer (for a `qa` card); ignored for a cloze card. */
+    answer: z.string().trim().max(20_000).optional(),
+    /** New canonical `{{c1::answer}}` cloze text (for a `cloze` card); ignored for Q&A. */
+    cloze: z.string().trim().max(20_000).optional(),
+  })
+  .refine((value) => value.prompt != null || value.answer != null || value.cloze != null, {
+    message: "cards.update requires at least one of prompt / answer / cloze",
+  });
+export type CardsUpdateRequest = z.infer<typeof CardsUpdateRequestSchema>;
+
+export interface CardsUpdateResult {
+  readonly card: CardEditSummary;
+}
+
+export const CardsSuspendRequestSchema = z.object({
+  /** The card element id to suspend. */
+  cardId: ElementIdSchema,
+});
+export type CardsSuspendRequest = z.infer<typeof CardsSuspendRequestSchema>;
+
+export interface CardsSuspendResult {
+  readonly card: CardEditSummary;
+}
+
+export const CardsDeleteRequestSchema = z.object({
+  /** The card element id to soft-delete. */
+  cardId: ElementIdSchema,
+});
+export type CardsDeleteRequest = z.infer<typeof CardsDeleteRequestSchema>;
+
+export interface CardsDeleteResult {
+  readonly card: CardEditSummary;
+}
+
+export const CardsFlagRequestSchema = z.object({
+  /** The card element id to flag/un-flag. */
+  cardId: ElementIdSchema,
+  /** Set the flag (`true`) or clear it (`false`). */
+  flagged: z.boolean(),
+  /** Optional human reason for the flag (stored in the op payload). */
+  reason: z.string().trim().max(2048).optional(),
+});
+export type CardsFlagRequest = z.infer<typeof CardsFlagRequestSchema>;
+
+export interface CardsFlagResult {
+  readonly card: CardEditSummary;
+}
+
+// ---------------------------------------------------------------------------
 // review.session.next() / review.preview() / review.grade()  (T037 — the session)
 // ---------------------------------------------------------------------------
 
@@ -1362,6 +1479,8 @@ export interface ReviewCardView {
   readonly leech: boolean;
   /** Cumulative FSRS lapses (failed reviews). */
   readonly lapses: number;
+  /** True when the user has flagged this card as bad (T038 — a manual quality marker). */
+  readonly flagged: boolean;
 }
 
 export const ReviewSessionNextRequestSchema = z.object({
@@ -1553,6 +1672,18 @@ export interface AppApi {
      * `add_tag`/`add_relation`); does NO FSRS math (M7 first-schedules it).
      */
     create(request: CardsCreateRequest): Promise<CardsCreateResult>;
+    /**
+     * Edit a card's body (T038) — prompt/answer (Q&A) or cloze text — in review;
+     * writes the `cards` row + logs `update_element`. Never touches lineage,
+     * `review_states`, or `review_logs`.
+     */
+    update(request: CardsUpdateRequest): Promise<CardsUpdateResult>;
+    /** Suspend a card (T038): status `suspended`; logs `update_element`. Leaves the deck. */
+    suspend(request: CardsSuspendRequest): Promise<CardsSuspendResult>;
+    /** Soft-delete a card (T038): `deletedAt` + status `deleted`; logs `soft_delete_element`. */
+    delete(request: CardsDeleteRequest): Promise<CardsDeleteResult>;
+    /** Flag/un-flag a card as bad (T038) — a non-destructive marker; logs `update_element`. */
+    flag(request: CardsFlagRequest): Promise<CardsFlagResult>;
   };
   readonly extracts: {
     /**

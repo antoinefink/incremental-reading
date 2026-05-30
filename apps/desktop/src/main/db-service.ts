@@ -40,6 +40,7 @@ import {
 } from "@interleave/core";
 import { type DbHandle, migrateDatabase, openDatabase } from "@interleave/db";
 import {
+  CardEditService,
   CardService,
   createRepositories,
   type DocumentMark,
@@ -56,8 +57,17 @@ import {
 import { type IntervalPreview, SchedulerService } from "@interleave/scheduler";
 import { seedDemoCollection } from "@interleave/testing";
 import type {
+  CardEditSummary,
   CardsCreateRequest,
   CardsCreateResult,
+  CardsDeleteRequest,
+  CardsDeleteResult,
+  CardsFlagRequest,
+  CardsFlagResult,
+  CardsSuspendRequest,
+  CardsSuspendResult,
+  CardsUpdateRequest,
+  CardsUpdateResult,
   DbStatus,
   DocumentMarkPayload,
   DocumentMarksAddRequest,
@@ -130,6 +140,7 @@ export class DbService {
   private extraction: ExtractionService | null = null;
   private extractReview: ExtractService | null = null;
   private cardService: CardService | null = null;
+  private cardEditService: CardEditService | null = null;
   private scheduler: SchedulerService | null = null;
   private migrated = false;
 
@@ -168,6 +179,7 @@ export class DbService {
     this.extraction = new ExtractionService(this.handle.db);
     this.extractReview = new ExtractService(this.handle.db);
     this.cardService = new CardService(this.handle.db);
+    this.cardEditService = new CardEditService(this.handle.db);
     // The FSRS card scheduler (T036) — one instance per open DB, reading the
     // `defaultDesiredRetention` setting (T011) as its first-class retention input.
     // FSRS schedules CARDS ONLY; sources/topics/extracts stay on the separate
@@ -192,6 +204,7 @@ export class DbService {
     this.extraction = null;
     this.extractReview = null;
     this.cardService = null;
+    this.cardEditService = null;
     this.scheduler = null;
     this.migrated = false;
   }
@@ -845,6 +858,101 @@ export class DbService {
     };
   }
 
+  /** The in-review card-repair service (T038), bound to the open database. */
+  private get cardEdit(): CardEditService {
+    if (!this.cardEditService) {
+      throw new Error("DbService: database is not open");
+    }
+    return this.cardEditService;
+  }
+
+  /** Map a {@link CardEditResult} (element + cards row) onto the flat wire shape. */
+  private toCardEditSummary(result: {
+    element: {
+      id: ElementId;
+      type: string;
+      status: string;
+      stage: string;
+      priority: number;
+      title: string;
+      parentId: ElementId | null;
+      sourceId: ElementId | null;
+      deletedAt: string | null;
+    };
+    card: { kind: string; prompt: string | null; answer: string | null; cloze: string | null };
+  }): CardEditSummary {
+    const { element, card } = result;
+    return {
+      id: element.id,
+      type: element.type,
+      status: element.status,
+      stage: element.stage,
+      priority: element.priority,
+      title: element.title,
+      kind: card.kind,
+      prompt: card.prompt,
+      answer: card.answer,
+      cloze: card.cloze,
+      parentId: element.parentId,
+      sourceId: element.sourceId,
+      flagged: this.cardEdit.isFlagged(element.id),
+      deleted: element.deletedAt != null,
+    };
+  }
+
+  /**
+   * Edit a card's body in review (T038) via {@link CardEditService.updateBody}: the
+   * `cards` row's prompt/answer (Q&A) or cloze text is updated, `elements.updatedAt`
+   * is stamped, and `update_element` is logged — all in ONE transaction. Lineage
+   * (`sourceLocationId`), the FSRS `review_states`, and the append-only `review_logs`
+   * are NEVER touched (an edit must not corrupt the in-flight FSRS state). The body
+   * is kept non-empty for the card's kind; the rich card-quality gate is M6/T035.
+   */
+  updateCard(request: CardsUpdateRequest): CardsUpdateResult {
+    const result = this.cardEdit.updateBody(request.cardId as ElementId, {
+      ...(request.prompt !== undefined ? { prompt: request.prompt } : {}),
+      ...(request.answer !== undefined ? { answer: request.answer } : {}),
+      ...(request.cloze !== undefined ? { cloze: request.cloze } : {}),
+    });
+    return { card: this.toCardEditSummary(result) };
+  }
+
+  /**
+   * Suspend a card in review (T038) via {@link CardEditService.suspend}: status
+   * `suspended` (`update_element`). The card drops out of `QueueRepository.dueCards`
+   * (which excludes suspended) but keeps its `review_states` + `review_logs`,
+   * recoverable by un-suspending.
+   */
+  suspendCard(request: CardsSuspendRequest): CardsSuspendResult {
+    const result = this.cardEdit.suspend(request.cardId as ElementId);
+    return { card: this.toCardEditSummary(result) };
+  }
+
+  /**
+   * SOFT-delete a card in review (T038) via {@link CardEditService.delete}
+   * (`soft_delete_element`): `deletedAt` + status `deleted`, never a hard DELETE.
+   * Lineage references remain valid and it is restorable from the trash (T044).
+   */
+  deleteCard(request: CardsDeleteRequest): CardsDeleteResult {
+    const result = this.cardEdit.delete(request.cardId as ElementId);
+    return { card: this.toCardEditSummary(result) };
+  }
+
+  /**
+   * Flag/un-flag a card as bad in review (T038) via {@link CardEditService.flag} — a
+   * non-destructive QUALITY marker stored in the `update_element` op payload (no new
+   * column; the durable leech/flag migration is T040's). The card stays in the deck;
+   * its body, lineage, and FSRS state are untouched. Logs `update_element`.
+   */
+  flagCard(request: CardsFlagRequest): CardsFlagResult {
+    const result = this.cardEdit.flag(
+      request.cardId as ElementId,
+      request.flagged,
+      request.reason ?? null,
+    );
+    return { card: this.toCardEditSummary(result) };
+  }
+
   /** The FSRS card scheduler (T036), bound to the open database. */
   private get cardScheduler(): SchedulerService {
     if (!this.scheduler) {
@@ -993,6 +1101,9 @@ export class DbService {
       // so the surface is stable. `lapses` is real today.
       leech: false,
       lapses: state?.lapses ?? 0,
+      // Flag-as-bad (T038) — derived from the card's op-log (no column); the review
+      // face shows the flag so the user sees a previously-flagged card resurface.
+      flagged: this.cardEdit.isFlagged(element.id),
     };
   }
 

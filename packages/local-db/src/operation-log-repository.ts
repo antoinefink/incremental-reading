@@ -14,7 +14,7 @@
 
 import type { OperationLogEntry, OperationType } from "@interleave/core";
 import { operationLog } from "@interleave/db";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { newOperationId, nowIso } from "./ids";
 import type { DbClient } from "./types";
 
@@ -70,20 +70,28 @@ export class OperationLogRepository {
     };
   }
 
-  /** All ops for one element, newest first. */
+  /**
+   * All ops for one element, newest first. Ties on `createdAt` (two ops appended
+   * in the same millisecond — e.g. flag-then-unflag) are broken by the implicit
+   * insertion-order `rowid` so "newest first" is deterministic; callers that rely
+   * on the latest marker winning (e.g. `CardEditService.flagState`) need this.
+   */
   listForElement(elementId: string): OperationLogEntry[] {
     return this.db
       .select()
       .from(operationLog)
       .where(eq(operationLog.elementId, elementId))
-      .orderBy(desc(operationLog.createdAt))
+      .orderBy(desc(operationLog.createdAt), desc(sql`rowid`))
       .all()
       .map(rowToEntry);
   }
 
   /** The whole log, newest first (audit/backup helper). */
   listAll(limit?: number): OperationLogEntry[] {
-    const base = this.db.select().from(operationLog).orderBy(desc(operationLog.createdAt));
+    const base = this.db
+      .select()
+      .from(operationLog)
+      .orderBy(desc(operationLog.createdAt), desc(sql`rowid`));
     const rows = limit === undefined ? base.all() : base.limit(limit).all();
     return rows.map(rowToEntry);
   }

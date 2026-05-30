@@ -18,6 +18,10 @@ import { IPC_CHANNELS } from "../shared/channels";
 import type {
   AppApi,
   CardsCreateRequest,
+  CardsDeleteRequest,
+  CardsFlagRequest,
+  CardsSuspendRequest,
+  CardsUpdateRequest,
   DocumentMarksAddRequest,
   DocumentMarksListRequest,
   DocumentMarksRemoveRequest,
@@ -108,6 +112,11 @@ const appApi: AppApi = {
   },
   cards: {
     create: (request: CardsCreateRequest) => ipcRenderer.invoke(IPC_CHANNELS.cardsCreate, request),
+    update: (request: CardsUpdateRequest) => ipcRenderer.invoke(IPC_CHANNELS.cardsUpdate, request),
+    suspend: (request: CardsSuspendRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.cardsSuspend, request),
+    delete: (request: CardsDeleteRequest) => ipcRenderer.invoke(IPC_CHANNELS.cardsDelete, request),
+    flag: (request: CardsFlagRequest) => ipcRenderer.invoke(IPC_CHANNELS.cardsFlag, request),
   },
   extracts: {
     updateStage: (request: ExtractsUpdateStageRequest) =>
