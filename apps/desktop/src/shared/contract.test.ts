@@ -41,6 +41,7 @@ import {
   ReviewGradeRequestSchema,
   ReviewPreviewRequestSchema,
   ReviewSessionNextRequestSchema,
+  SearchQueryRequestSchema,
   SettingKeySchema,
   SettingsGetRequestSchema,
   SettingsPatchSchema,
@@ -100,6 +101,7 @@ describe("IPC channels", () => {
         "tags:list",
         "tags:add",
         "tags:remove",
+        "search:query",
         "readPoint:get",
         "readPoint:set",
       ].sort(),
@@ -984,5 +986,29 @@ describe("Tag request schemas (T041)", () => {
       expect(() => schema.parse({ elementId: "el_a", tag: "x".repeat(257) })).toThrow();
       expect(() => schema.parse({ elementId: "", tag: "memory" })).toThrow();
     }
+  });
+});
+
+describe("Search request schema (T042)", () => {
+  it("SearchQueryRequestSchema accepts a query + optional type/concept/tag/limit and rejects bad values", () => {
+    expect(SearchQueryRequestSchema.parse({ q: "memory" })).toEqual({ q: "memory" });
+    expect(
+      SearchQueryRequestSchema.parse({
+        q: "memory",
+        type: "extract",
+        conceptId: "el_c",
+        tag: "definitions",
+        limit: 10,
+      }),
+    ).toEqual({ q: "memory", type: "extract", conceptId: "el_c", tag: "definitions", limit: 10 });
+
+    // An empty query is allowed (it degrades to [] main-side), but only the
+    // searchable types are accepted, and the limit is bounded.
+    expect(SearchQueryRequestSchema.parse({ q: "" }).q).toBe("");
+    expect(() => SearchQueryRequestSchema.parse({ q: "x", type: "topic" })).toThrow();
+    expect(() => SearchQueryRequestSchema.parse({ q: "x", limit: 0 })).toThrow();
+    expect(() => SearchQueryRequestSchema.parse({ q: "x", limit: 999 })).toThrow();
+    expect(() => SearchQueryRequestSchema.parse({ q: "x".repeat(513) })).toThrow();
+    expect(() => SearchQueryRequestSchema.parse({})).toThrow();
   });
 });

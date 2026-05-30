@@ -54,6 +54,7 @@ export const IPC_CHANNELS = {
   tagsList: "tags:list",
   tagsAdd: "tags:add",
   tagsRemove: "tags:remove",
+  searchQuery: "search:query",
   readPointGet: "readPoint:get",
   readPointSet: "readPoint:set",
 } as const;

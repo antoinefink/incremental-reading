@@ -150,7 +150,7 @@ Detailed specs: [`tasks/M1-foundations.md`](./tasks/M1-foundations.md)
 
 - [x] **T041 — Concepts & tags** · done · _deps: T008_
   Done when: concepts (hierarchical) and tags (flat) can be created/assigned; elements filter by concept and tags.
-- [ ] **T042 — Search** · _deps: T008_
+- [x] **T042 — Search** · done · _deps: T008_
   Done when: local full-text search over source title/body, extract body, card prompt/answer, and tags returns sources/extracts/cards quickly with simple ranking.
 - [ ] **T043 — Source/reference display** · _deps: T022, T032_
   Done when: every extract and card shows source title/URL/author/date/location (review hides it until answer reveal); nothing feels orphaned.
@@ -318,6 +318,7 @@ overload management, semantic search, AI, media, reliability, scale.
 
 Record notable completions / decisions here as tasks land (newest first).
 
+- 2026-05-30 - T042 Search - done. Local full-text search over sources/extracts/cards is now backed by SQLite FTS5 (`source_fts`, `extract_fts`, `card_fts`), kept in sync by repository writes and exposed through the typed `window.appApi` search surface so the renderer never touches the DB directly.
 - 2026-05-30 - T041 Concepts & tags - done. Hierarchical concepts and flat tags can now be created and assigned to elements, and elements can be filtered by concept and tags.
 - 2026-05-30 - T040 Basic leech detection - done. Cards that repeatedly fail are now detected as leeches (warn at 4 lapses) and surfaced in a dedicated cleanup view with rewrite/suspend/delete actions. The leech-detection heuristic lives in `packages/scheduler` (`leech.ts`) with unit tests (`leech.test.ts`); leech state persists on `review_states`/`cards` (Drizzle migration `0001_clever_rictor.sql`) via `ReviewRepository` in `packages/local-db`, and the cleanup view (`apps/web/src/maintenance/`) plus the review repair bar drive everything through the typed `window.appApi` surface (channels + contract + ipc + db-service + preload + appApi) so the renderer never touches the DB directly. Covered by Vitest (`packages/scheduler/src/leech.test.ts`, `packages/local-db/src/leech.test.ts`, `db-service.test.ts`, `contract.test.ts`, `ReviewRepairBar.test.tsx`, `nav.test.ts`) and the Playwright spec (`tests/electron/leech.spec.ts`).
 - 2026-05-30 - T039 Sibling burying - done. A review session no longer surfaces two cards that share the same parent element back-to-back: a transactional `ReviewSessionService` (`packages/local-db/src/review-session-service.ts`) tracks the recently-shown card lineage and skips/defers siblings of the just-reviewed card when picking the next due card (unless the user explicitly opts into showing siblings). The behavior is exposed through the typed `window.appApi` queue/review surface so the renderer never touches the DB directly, with a Settings toggle (`packages/core/src/settings.ts`, `apps/web/src/pages/Settings.tsx`). Covered by Vitest (`review-session-service.test.ts`, `db-service.test.ts`, `contract.test.ts`, `settings.test.ts`, `ReviewScreen.test.tsx`, `ReviewRepairBar.test.tsx`) and the Playwright spec (`tests/electron/sibling-burying.spec.ts`).

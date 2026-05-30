@@ -1796,6 +1796,60 @@ export interface TagsRemoveResult {
 }
 
 // ---------------------------------------------------------------------------
+// search.*  (T042 — local FTS5 full-text search)
+// ---------------------------------------------------------------------------
+
+/**
+ * The searchable element types (the only types with an FTS index). The library
+ * `result` list groups by these; topics/tasks/concepts are not full-text indexed.
+ */
+export const SearchableTypeSchema = z.enum(["source", "extract", "card"]);
+export type SearchableType = z.infer<typeof SearchableTypeSchema>;
+
+/**
+ * A ranked search hit — enough for the library `result` row + selection detail.
+ * `snippet` is a short matched excerpt; `score` is the (lower-is-better) `bm25`
+ * rank exposed for debugging/ordering; the source meta (`sourceTitle`/
+ * `sourceLocationLabel`) lets the row reuse the refblock formatter (T043).
+ */
+export interface SearchResult {
+  readonly id: string;
+  readonly type: SearchableType;
+  readonly title: string;
+  readonly snippet: string;
+  readonly score: number;
+  /** Numeric priority (0..1) + its A/B/C/D label, for the row badge. */
+  readonly priority: number;
+  readonly priorityLabel: PriorityLabelInput;
+  /** The concept this element is a member of, by name; `null` when none. */
+  readonly concept: string | null;
+  /** Owning source title (provenance) for the row's refblock; `null` when none. */
+  readonly sourceTitle: string | null;
+  /** Human-readable source location label ("Definition · ¶1"); `null` when none. */
+  readonly sourceLocationLabel: string | null;
+  /** Next-attention time (ISO), for the row's scheduler chip; `null` when none. */
+  readonly dueAt: string | null;
+}
+
+export const SearchQueryRequestSchema = z.object({
+  /** The raw user query. Sanitized into a safe FTS5 MATCH expression main-side. */
+  q: z.string().max(512),
+  /** Restrict to a single searchable type. */
+  type: SearchableTypeSchema.optional(),
+  /** Restrict to members of this concept (by concept id) — T041 filter. */
+  conceptId: ElementIdSchema.optional(),
+  /** Restrict to elements carrying this tag name — T041 filter. */
+  tag: TagNameSchema.optional(),
+  /** Cap the result count (1..200; defaults main-side). */
+  limit: z.number().int().min(1).max(200).optional(),
+});
+export type SearchQueryRequest = z.infer<typeof SearchQueryRequestSchema>;
+
+export interface SearchQueryResult {
+  readonly results: readonly SearchResult[];
+}
+
+// ---------------------------------------------------------------------------
 // The typed surface the renderer sees as `window.appApi`.
 // ---------------------------------------------------------------------------
 
@@ -1987,6 +2041,16 @@ export interface AppApi {
     add(request: TagsAddRequest): Promise<TagsAddResult>;
     /** Untag an element (T041); logs `remove_tag`. */
     remove(request: TagsRemoveRequest): Promise<TagsRemoveResult>;
+  };
+  readonly search: {
+    /**
+     * Local FTS5 full-text search (T042) over source title/body + extract body +
+     * card prompt/answer + tags, ranked best-first with simple `bm25` ranking.
+     * Applies the optional type/concept/tag filters in the query layer. An empty
+     * or malformed query returns `[]`. Read-only (appends no op). The renderer
+     * never issues SQL — it calls this typed command.
+     */
+    query(request: SearchQueryRequest): Promise<SearchQueryResult>;
   };
   readonly readPoints: {
     /** Load an element's read-point (resume position), or `null` (T017). */

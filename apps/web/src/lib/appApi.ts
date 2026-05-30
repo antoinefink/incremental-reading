@@ -1118,6 +1118,41 @@ export interface TagsRemoveResult {
   readonly element: ElementOrganizeState | null;
 }
 
+// ---------------------------------------------------------------------------
+// search.*  (T042 — local FTS5 full-text search)
+// ---------------------------------------------------------------------------
+
+/** The searchable element types (the only types with an FTS index). */
+export type SearchableType = "source" | "extract" | "card";
+
+/** A ranked search hit — enough for the library `result` row + selection detail. */
+export interface SearchResult {
+  readonly id: string;
+  readonly type: SearchableType;
+  readonly title: string;
+  readonly snippet: string;
+  /** FTS5 `bm25` rank — lower is a better match. */
+  readonly score: number;
+  readonly priority: number;
+  readonly priorityLabel: PriorityLabel;
+  readonly concept: string | null;
+  readonly sourceTitle: string | null;
+  readonly sourceLocationLabel: string | null;
+  readonly dueAt: string | null;
+}
+
+export interface SearchQueryRequest {
+  readonly q: string;
+  readonly type?: SearchableType;
+  readonly conceptId?: string;
+  readonly tag?: string;
+  readonly limit?: number;
+}
+
+export interface SearchQueryResult {
+  readonly results: readonly SearchResult[];
+}
+
 /** The exact shape the preload exposes as `window.appApi`. */
 export interface AppApi {
   readonly app: {
@@ -1198,6 +1233,9 @@ export interface AppApi {
     list(): Promise<TagsListResult>;
     add(request: TagsAddRequest): Promise<TagsAddResult>;
     remove(request: TagsRemoveRequest): Promise<TagsRemoveResult>;
+  };
+  readonly search: {
+    query(request: SearchQueryRequest): Promise<SearchQueryResult>;
   };
   readonly readPoints: {
     get(request: ReadPointGetRequest): Promise<ReadPointGetResult>;
@@ -1457,6 +1495,14 @@ export const appApi = {
   /** Untag an element (T041); logs `remove_tag`. */
   removeTag(request: TagsRemoveRequest): Promise<TagsRemoveResult> {
     return requireAppApi().tags.remove(request);
+  },
+  /**
+   * Local FTS5 full-text search (T042) over source title/body + extract body +
+   * card prompt/answer + tags, ranked best-first. Optional type/concept/tag
+   * filters. An empty/malformed query returns `{ results: [] }`.
+   */
+  searchQuery(request: SearchQueryRequest): Promise<SearchQueryResult> {
+    return requireAppApi().search.query(request);
   },
   /** Load an element's read-point (resume position), or `null` (T017). */
   getReadPoint(request: ReadPointGetRequest): Promise<ReadPointGetResult> {

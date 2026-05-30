@@ -15,6 +15,13 @@
       "when": 1780130802483,
       "tag": "0001_clever_rictor",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1780217202483,
+      "tag": "0002_search_fts5",
+      "breakpoints": true
     }
   ]
 }

@@ -1554,4 +1554,82 @@ describe("DbService — review session (T037)", () => {
     expect(data.data?.tags).toContain("persisted-tag");
     second.close();
   });
+
+  // -------------------------------------------------------------------------
+  // search.*  (T042 — local FTS5 full-text search)
+  // -------------------------------------------------------------------------
+
+  it("search.query finds + ranks seeded source/extract/card and enriches each row (T042)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    // The seed has "intelligence" in the source title + body, the extract
+    // title/body, and the card prompt/answer (so all three types match).
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    const { results } = svc.search({ q: "intelligence" });
+    expect(results.length).toBeGreaterThan(0);
+    // All three searchable types are represented.
+    const types = new Set(results.map((r) => r.type));
+    expect(types).toContain("source");
+    expect(types).toContain("extract");
+    expect(types).toContain("card");
+
+    // Each row is enriched: priority label + (for extract/card) the owning source.
+    for (const r of results) {
+      expect(["A", "B", "C", "D"]).toContain(r.priorityLabel);
+    }
+    const extract = results.find((r) => r.type === "extract");
+    expect(extract?.sourceTitle).toBe("On the Measure of Intelligence");
+
+    // The query layer narrows by type.
+    const onlyCards = svc.search({ q: "intelligence", type: "card" }).results;
+    expect(onlyCards.length).toBeGreaterThan(0);
+    expect(onlyCards.every((r) => r.type === "card")).toBe(true);
+
+    svc.close();
+  });
+
+  it("search.query validates the payload, filters by tag, and returns [] for an empty query (T042)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    // Empty / whitespace → no results, no throw.
+    expect(svc.search({ q: "" }).results).toEqual([]);
+    expect(svc.search({ q: "   " }).results).toEqual([]);
+
+    // The seed tagged the extract `definitions`; a tag filter narrows to it.
+    const tagged = svc.search({ q: "intelligence", tag: "definitions" }).results;
+    expect(tagged.length).toBeGreaterThan(0);
+    expect(tagged.some((r) => r.type === "extract")).toBe(true);
+    // A non-matching tag excludes everything.
+    expect(svc.search({ q: "intelligence", tag: "no-such-tag" }).results).toEqual([]);
+
+    svc.close();
+  });
+
+  it("search excludes soft-deleted elements and survives a close + reopen (T042 restart analogue)", () => {
+    const first = new DbService();
+    first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(first.seedIfEmpty()).toBe(true);
+
+    const before = first.search({ q: "intelligence" }).results;
+    expect(before.length).toBeGreaterThan(0);
+    first.close();
+
+    // Reopen the SAME file: the FTS index persisted in the SQLite file.
+    const second = new DbService();
+    second.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const after = second.search({ q: "intelligence" }).results;
+    expect(after.map((r) => r.id).sort()).toEqual(before.map((r) => r.id).sort());
+
+    // Soft-delete the seeded source → it leaves the index (the trigger fires).
+    const sourceId = after.find((r) => r.type === "source")?.id ?? "";
+    expect(sourceId).not.toBe("");
+    second.repos.elements.softDelete(sourceId as never);
+    const afterDelete = second.search({ q: "intelligence" }).results.map((r) => r.id);
+    expect(afterDelete).not.toContain(sourceId);
+
+    second.close();
+  });
 });

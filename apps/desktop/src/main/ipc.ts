@@ -51,6 +51,7 @@ import {
   ReviewLeechesRequestSchema,
   ReviewPreviewRequestSchema,
   ReviewSessionNextRequestSchema,
+  SearchQueryRequestSchema,
   SettingsGetAllRequestSchema,
   SettingsGetRequestSchema,
   SettingsUpdateManyRequestSchema,
@@ -298,6 +299,11 @@ export function registerIpcHandlers(dbService: DbService): () => void {
   ipcMain.handle(IPC_CHANNELS.tagsRemove, (_event, rawRequest: unknown) => {
     const request = TagsRemoveRequestSchema.parse(rawRequest);
     return dbService.removeTag(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.searchQuery, (_event, rawRequest: unknown) => {
+    const request = SearchQueryRequestSchema.parse(rawRequest);
+    return dbService.search(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.readPointGet, (_event, rawRequest: unknown) => {

@@ -48,9 +48,13 @@ afterEach(() => {
 
 describe("schema migration", () => {
   it("creates all 18 M1 tables from empty", () => {
+    // Exclude the T042 FTS5 search index — its virtual tables (source_fts /
+    // extract_fts / card_fts) and their auto-created shadow tables (…_data,
+    // …_idx, …_content, …_docsize, …_config) all appear as `type='table'` but
+    // are M8 search additions, not M1 base tables.
     const rows = handle.sqlite
       .prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__drizzle%' ORDER BY name",
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__drizzle%' AND name NOT LIKE '%fts%' ORDER BY name",
       )
       .all() as { name: string }[];
     const names = rows.map((r) => r.name);

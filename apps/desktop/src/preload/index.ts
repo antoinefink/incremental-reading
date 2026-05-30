@@ -50,6 +50,7 @@ import type {
   ReviewGradeRequest,
   ReviewPreviewRequest,
   ReviewSessionNextRequest,
+  SearchQueryRequest,
   // review.leeches() / concepts.list() / tags.list() take no request payload.
   SettingsGetRequest,
   SettingsUpdateManyRequest,
@@ -160,6 +161,9 @@ const appApi: AppApi = {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.tagsList),
     add: (request: TagsAddRequest) => ipcRenderer.invoke(IPC_CHANNELS.tagsAdd, request),
     remove: (request: TagsRemoveRequest) => ipcRenderer.invoke(IPC_CHANNELS.tagsRemove, request),
+  },
+  search: {
+    query: (request: SearchQueryRequest) => ipcRenderer.invoke(IPC_CHANNELS.searchQuery, request),
   },
   readPoints: {
     get: (request: ReadPointGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.readPointGet, request),

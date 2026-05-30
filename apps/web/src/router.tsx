@@ -24,6 +24,7 @@
  */
 import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import { DesktopStatusPanel } from "./components/DesktopStatusPanel";
+import { LibraryScreen } from "./library/LibraryScreen";
 import { LeechCleanup } from "./maintenance/LeechCleanup";
 import { InboxScreen } from "./pages/inbox/InboxScreen";
 import { Placeholder } from "./pages/Placeholder";
@@ -114,17 +115,17 @@ const leechCleanupRoute = createRoute({
   component: LeechCleanup,
 });
 
+/**
+ * Library & Search (T042) — local FTS5 full-text search over source title/body +
+ * extract body + card prompt/answer + tags, ranked best-first, with the
+ * filterbar (type/concept/priority) + grouped/highlighted results + the read-only
+ * concept Map tab. All search runs in SQLite FTS5 behind the typed
+ * `window.appApi.search.query`; the renderer holds no SQL or ranking logic.
+ */
 const searchRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/search",
-  component: () => (
-    <Placeholder
-      routeId="search"
-      icon="library"
-      title="Library & Search"
-      body="Find any source, extract, or card across your whole collection."
-    />
-  ),
+  component: LibraryScreen,
 });
 
 const settingsRoute = createRoute({

@@ -133,6 +133,9 @@ import type {
   ReviewPreviewResult,
   ReviewSessionNextRequest,
   ReviewSessionNextResult,
+  SearchQueryRequest,
+  SearchQueryResult,
+  SearchResult,
   SettingsGetAllResult,
   SettingsGetResult,
   SettingsUpdateManyResult,
@@ -1491,6 +1494,84 @@ export class DbService {
   removeTag(request: TagsRemoveRequest): TagsRemoveResult {
     this.repos.elements.removeTag(request.elementId as ElementId, request.tag);
     return { element: this.organizeState(request.elementId as ElementId) };
+  }
+
+  // -------------------------------------------------------------------------
+  // search.*  (T042 — local FTS5 full-text search)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Local FTS5 full-text search (T042) through {@link SearchRepository.search}:
+   * ranked matches over source title/body + extract body + card prompt/answer +
+   * tags, with the optional type/concept/tag filters applied in the query layer.
+   * Each ranked hit is enriched main-side with its priority label, concept, and
+   * source provenance/location (the row's refblock) — reusing the same lineage
+   * reads the review/inspector use, so the library row reads consistently. An
+   * empty/malformed query yields `{ results: [] }`. Read-only (appends no op).
+   */
+  search(request: SearchQueryRequest): SearchQueryResult {
+    const hits = this.repos.search.search(request.q, {
+      ...(request.type ? { type: request.type } : {}),
+      ...(request.conceptId ? { conceptId: request.conceptId as ElementId } : {}),
+      ...(request.tag ? { tag: request.tag } : {}),
+      ...(request.limit !== undefined ? { limit: request.limit } : {}),
+    });
+
+    const results: SearchResult[] = [];
+    for (const hit of hits) {
+      const element = this.repos.elements.findById(hit.id as ElementId);
+      if (!element || element.deletedAt) continue;
+
+      // Source provenance + location for the row's refblock. For a `source` hit
+      // the element IS the source; for an extract/card, resolve the owning source
+      // and the card's/extract's source-location anchor.
+      const { sourceTitle, sourceLocationLabel } = this.refMetaForElement(element.id, hit.type);
+
+      results.push({
+        id: element.id,
+        type: hit.type,
+        title: hit.title,
+        snippet: hit.snippet,
+        score: hit.score,
+        priority: element.priority,
+        priorityLabel: priorityToLabel(element.priority),
+        concept: this.conceptForElement(element.id),
+        sourceTitle,
+        sourceLocationLabel,
+        dueAt: element.dueAt ?? null,
+      });
+    }
+    return { results };
+  }
+
+  /**
+   * Resolve the source title + location label for a search row's refblock,
+   * reusing the existing lineage reads. A `source` hit references itself; an
+   * `extract`/`card` references its owning source element + its source-location
+   * anchor. Soft-deleted sources degrade to `null` (a calm "no source"), never a
+   * broken reference (T043 enriches this with URL/author/date later).
+   */
+  private refMetaForElement(
+    id: ElementId,
+    type: "source" | "extract" | "card",
+  ): { sourceTitle: string | null; sourceLocationLabel: string | null } {
+    if (type === "source") {
+      const el = this.repos.elements.findById(id);
+      return {
+        sourceTitle: el && !el.deletedAt ? el.title : null,
+        sourceLocationLabel: null,
+      };
+    }
+    const el = this.repos.elements.findById(id);
+    const sourceId = el?.sourceId ?? null;
+    const sourceEl = sourceId ? this.repos.elements.findById(sourceId) : null;
+    const sourceTitle = sourceEl && !sourceEl.deletedAt ? sourceEl.title : null;
+
+    // The element's own source-location anchor (extracts and cards both carry one).
+    let sourceLocationLabel: string | null = null;
+    const location = this.repos.sources.findLocationForElement(id);
+    if (location) sourceLocationLabel = location.label ?? null;
+    return { sourceTitle, sourceLocationLabel };
   }
 
   /** The element's organize state (concepts + tags), or `null` when soft-deleted/unknown. */

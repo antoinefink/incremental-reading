@@ -124,7 +124,14 @@ export {
   ReviewSessionService,
 } from "./review-session-service";
 export { type ScheduleResult, SchedulerService } from "./scheduler-service";
-export { type SearchOptions, SearchRepository } from "./search-repository";
+export {
+  type SearchableType,
+  type SearchHit,
+  type SearchOptions,
+  type SearchQueryOptions,
+  SearchRepository,
+  toMatchExpression,
+} from "./search-repository";
 export { SettingsRepository } from "./settings-repository";
 export { deriveSourceLocationLabel, type LabelBlock } from "./source-location-label";
 export {

@@ -1,0 +1,426 @@
+/*
+ * Library & Search screen styles (T042).
+ *
+ * Ported pixel-for-pixel from the design kit (`design/kit/styles/app.css`:
+ * `.filterbar`, `.filter-group`, `.filter-opt`, `.checkbox`, `.result`,
+ * `.result__title`/`__meta`, `.graph`/`.gnode`) for the React 19 renderer.
+ * Shared primitives (`.concept-tag`, `.badge`, `.refblock`, `.prio`) come from
+ * the inspector/queue/review CSS already loaded; this file adds only the
+ * library-specific layout. All colors/spacing are design tokens — never
+ * hard-coded.
+ */
+
+.lib-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* search input bar at the top */
+.lib-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.lib-searchbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  max-width: 460px;
+  padding: 7px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.lib-searchbar input {
+  border: none;
+  background: none;
+  outline: none;
+  font: inherit;
+  color: var(--text);
+  width: 100%;
+}
+.lib-grow {
+  flex: 1;
+}
+
+/* segmented Results / Map tabs */
+.lib-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.lib-seg__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  color: var(--text-2);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.lib-seg__btn--on {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgb(0 0 0 / 0.06));
+}
+
+.lib-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* filter sidebar (kit `.filterbar`) */
+.filterbar {
+  width: 220px;
+  flex: none;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.filter-group__title {
+  font-size: var(--t-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+.filter-opt {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-size: var(--t-sm);
+  color: var(--text-2);
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+}
+.filter-opt:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.filter-opt--on {
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 500;
+}
+.filter-opt__count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+}
+.filter-opt--disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.filter-opt--disabled:hover {
+  background: none;
+  color: var(--text-2);
+}
+
+.prio-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  flex: none;
+}
+.prio-dot--a {
+  background: var(--prio-a);
+}
+.prio-dot--b {
+  background: var(--prio-b);
+}
+.prio-dot--c {
+  background: var(--prio-c);
+}
+.prio-dot--d {
+  background: var(--prio-d);
+}
+
+/* results column */
+.lib-results {
+  flex: 1;
+  overflow-y: auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.lib-results__inner {
+  padding: 10px;
+}
+.lib-sec {
+  margin-bottom: 8px;
+}
+.lib-sec__head {
+  display: flex;
+  align-items: center;
+  padding: 8px 14px 4px;
+}
+.lib-sec__title {
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* result rows (kit `.result`) */
+.result {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  align-items: center;
+  border: 1px solid transparent;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+.result:hover {
+  background: var(--surface-2);
+}
+.result--on {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+.result__title {
+  font-size: var(--t-base);
+  font-weight: 500;
+  color: var(--text);
+}
+.result__title em {
+  font-style: normal;
+  background: var(--mark-hl);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+.result__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 3px;
+  font-size: var(--t-xs);
+  color: var(--text-3);
+}
+.result__snippet {
+  color: var(--text-3);
+}
+
+/* selection detail panel */
+.lib-detail {
+  width: 320px;
+  flex: none;
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.lib-detail__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.lib-detail__title {
+  font-weight: 600;
+  font-size: var(--t-sm);
+  color: var(--text);
+}
+.lib-detail__type {
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+  text-transform: capitalize;
+}
+.lib-detail__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* empty state */
+.lib-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 64px 24px;
+  gap: 10px;
+  color: var(--text-3);
+}
+.lib-empty__icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.lib-empty__title {
+  font-size: var(--t-base);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.lib-empty__body {
+  font-size: var(--t-sm);
+  max-width: 320px;
+}
+
+/* concept map tab (kit `.graph`/`.gnode`) */
+.lib-map {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+.lib-map__canvas {
+  flex: 1;
+  padding: 24px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.lib-map__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+.lib-map__title {
+  font-size: var(--t-lg);
+  font-weight: 600;
+  margin: 0;
+  color: var(--text);
+}
+.lib-map__hint {
+  font-size: var(--t-sm);
+  color: var(--text-3);
+}
+.lib-map__panel {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  min-height: 0;
+}
+.graph {
+  width: 100%;
+  height: 100%;
+}
+.graph svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.gnode {
+  cursor: pointer;
+}
+.gnode circle {
+  transition: stroke-width var(--fast, 0.12s) ease;
+}
+.gnode:hover circle {
+  stroke-width: 2.5;
+}
+.gnode text {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  fill: var(--text);
+  pointer-events: none;
+}
+.lib-map__side {
+  width: 300px;
+  flex: none;
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.lib-map__concept {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lib-map__concept-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.lib-map__concept-counts {
+  display: flex;
+  gap: 14px;
+  font-size: var(--t-xs);
+  color: var(--text-2);
+}
+.lib-map__concept-counts b {
+  color: var(--text);
+}
+
+.lib-loading {
+  padding: 24px;
+  color: var(--text-3);
+  font-size: var(--t-sm);
+}
+
+.lib-error {
+  padding: 8px;
+  color: var(--danger);
+  font-size: var(--t-sm);
+}
+
+/* primary "open" button in the selection detail */
+.lib-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  width: 100%;
+}
+.lib-btn:hover {
+  filter: brightness(1.05);
+}
