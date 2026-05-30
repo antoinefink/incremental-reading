@@ -39,6 +39,9 @@ import type {
   QueueUndoRequest,
   ReadPointGetRequest,
   ReadPointSetRequest,
+  ReviewGradeRequest,
+  ReviewPreviewRequest,
+  ReviewSessionNextRequest,
   SettingsGetRequest,
   SettingsUpdateManyRequest,
   SettingsUpdateRequest,
@@ -117,6 +120,13 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.extractsMarkDone, request),
     delete: (request: ExtractsDeleteRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.extractsDelete, request),
+  },
+  review: {
+    sessionNext: (request?: ReviewSessionNextRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.reviewSessionNext, request ?? {}),
+    preview: (request: ReviewPreviewRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.reviewPreview, request),
+    grade: (request: ReviewGradeRequest) => ipcRenderer.invoke(IPC_CHANNELS.reviewGrade, request),
   },
   readPoints: {
     get: (request: ReadPointGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.readPointGet, request),

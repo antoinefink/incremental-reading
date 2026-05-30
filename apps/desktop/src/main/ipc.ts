@@ -38,6 +38,9 @@ import {
   QueueUndoRequestSchema,
   ReadPointGetRequestSchema,
   ReadPointSetRequestSchema,
+  ReviewGradeRequestSchema,
+  ReviewPreviewRequestSchema,
+  ReviewSessionNextRequestSchema,
   SettingsGetAllRequestSchema,
   SettingsGetRequestSchema,
   SettingsUpdateManyRequestSchema,
@@ -202,6 +205,21 @@ export function registerIpcHandlers(dbService: DbService): () => void {
   ipcMain.handle(IPC_CHANNELS.extractsDelete, (_event, rawRequest: unknown) => {
     const request = ExtractsDeleteRequestSchema.parse(rawRequest);
     return dbService.deleteExtract(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.reviewSessionNext, (_event, rawRequest: unknown) => {
+    const request = ReviewSessionNextRequestSchema.parse(rawRequest ?? {});
+    return dbService.reviewSessionNext(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.reviewPreview, (_event, rawRequest: unknown) => {
+    const request = ReviewPreviewRequestSchema.parse(rawRequest);
+    return dbService.reviewPreview(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.reviewGrade, (_event, rawRequest: unknown) => {
+    const request = ReviewGradeRequestSchema.parse(rawRequest);
+    return dbService.reviewGrade(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.readPointGet, (_event, rawRequest: unknown) => {

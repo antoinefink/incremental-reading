@@ -1,0 +1,468 @@
+/**
+ * Active-recall review session styles (T037).
+ *
+ * Rebuilt from the design kit's `screen-review.jsx` + `styles/app.css`
+ * (`.rcard`, `.grades`, `.grade--*`, `.pbar`, `.refblock`, `.cloze`, the leech
+ * `.banner`, the `.metric` summary, the context `.drawer`) for the renderer's
+ * React 19 + Tailwind v4 stack, driven entirely by the design tokens. The shared
+ * primitives (`.badge`, `.prio`, `.stage`, `.sched`, `.fsrs-stats`, `.tag`) come
+ * from `inspector.css`; only the review-specific classes live here. UI only — no
+ * domain logic. Matches `design/kit/screenshots/review2.png` pixel-for-pixel.
+ */
+
+/* ---------- session shell ---------- */
+.rv-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 100%;
+  position: relative;
+}
+
+/* ---------- session top bar (progress + clock + end) ---------- */
+.rv-top {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4, 16px);
+  padding: var(--s-4, 14px) var(--s-6, 24px);
+  border-bottom: 1px solid var(--border);
+}
+.rv-progress {
+  flex: 1;
+  max-width: 320px;
+}
+.rv-progress__nums {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+}
+.rv-progress__count {
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  color: var(--text-2);
+}
+.rv-progress__clock {
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+}
+.rv-end {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.rv-end:hover {
+  color: var(--text);
+  border-color: var(--text-3);
+}
+
+/* ---------- progress bar (kit `.pbar`) ---------- */
+.pbar {
+  height: 4px;
+  border-radius: var(--r-full);
+  background: var(--border);
+  overflow: hidden;
+}
+.pbar__fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--r-full);
+  transition: width var(--med) var(--ease);
+}
+
+/* ---------- centered work area ---------- */
+.rv-page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow: auto;
+}
+.rv-stage {
+  width: 100%;
+  max-width: 620px;
+}
+.rv-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.rv-meta__chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---------- review card (kit `.rcard`) ---------- */
+.rcard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-md);
+  width: 100%;
+  overflow: hidden;
+}
+.rcard__face {
+  padding: var(--s-10, 40px) var(--s-9, 32px);
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.rcard__prompt {
+  font-family: var(--font-read);
+  font-size: var(--t-xl);
+  line-height: var(--lh-snug);
+  color: var(--text);
+}
+.rcard__answer {
+  font-family: var(--font-read);
+  font-size: var(--t-lg);
+  line-height: var(--lh-normal);
+  color: var(--text);
+}
+.rcard__reveal-wrap {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.card-sep {
+  height: 1px;
+  background: var(--border);
+  border: none;
+  margin: 0;
+}
+.rcard__pad {
+  padding: var(--s-6, 24px);
+}
+
+/* ---------- cloze spans (kit `.cloze`) ---------- */
+.cloze {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-radius: var(--r-xs);
+  padding: 1px 8px;
+  font-weight: 600;
+}
+.cloze--revealed {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+/* ---------- source reference (kit `.refblock`) ---------- */
+.refblock {
+  border-left: 3px solid var(--border-strong);
+  padding: var(--s-3, 10px) var(--s-5, 18px);
+  background: var(--surface-2);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  font-family: var(--font-read);
+  font-size: var(--t-base);
+  color: var(--text-2);
+  line-height: var(--lh-snug);
+}
+.refblock__src {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--s-3, 10px);
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  color: var(--accent-text);
+}
+.refblock__src:hover {
+  text-decoration: underline;
+}
+
+/* ---------- reveal button ---------- */
+.rv-reveal {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 46px;
+  border-radius: var(--r-md);
+  border: none;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-family: var(--font-ui);
+  font-size: var(--t-base);
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter var(--fast) var(--ease);
+}
+.rv-reveal:hover {
+  filter: brightness(1.05);
+}
+
+/* ---------- grade buttons (kit `.grades` / `.grade--*`) ---------- */
+.grades {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--s-3, 10px);
+}
+.grade {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: var(--s-4, 14px) var(--s-3, 10px);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  cursor: pointer;
+  transition: all var(--fast) var(--ease);
+}
+.grade:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.grade:disabled {
+  opacity: 0.55;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
+}
+.grade__label {
+  font-size: var(--t-base);
+  font-weight: 600;
+}
+.grade__int {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  color: var(--text-3);
+}
+.grade--again:hover {
+  border-color: var(--danger);
+}
+.grade--again .grade__label {
+  color: var(--danger);
+}
+.grade--hard:hover {
+  border-color: var(--warn);
+}
+.grade--hard .grade__label {
+  color: var(--warn);
+}
+.grade--good:hover {
+  border-color: var(--accent);
+}
+.grade--good .grade__label {
+  color: var(--accent-text);
+}
+.grade--easy:hover {
+  border-color: var(--ok);
+}
+.grade--easy .grade__label {
+  color: var(--ok);
+}
+.grade .shell-kbd {
+  margin-top: 2px;
+}
+
+/* ---------- repair action row ---------- */
+.rv-repair {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.rv-repair__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.rv-repair__btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* ---------- leech banner (kit `.banner`) ---------- */
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3, 10px);
+  padding: var(--s-3, 12px) var(--s-4, 14px);
+  border: 1px solid var(--warn-soft-bd, var(--border-strong));
+  background: var(--warn-soft);
+  border-radius: var(--r-md);
+  margin-bottom: 12px;
+}
+.banner svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--warn);
+  margin-top: 1px;
+}
+.banner__title {
+  font-weight: 600;
+  font-size: var(--t-sm);
+}
+.banner__body {
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  margin-top: 2px;
+}
+
+/* ---------- concept tag (kit `.concept-tag`) ---------- */
+.concept-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--r-full);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: var(--t-2xs);
+  font-weight: 500;
+}
+
+/* ---------- completion summary (kit `.empty` + `.metric`) ---------- */
+.rv-summary {
+  width: 100%;
+  max-width: 520px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+.rv-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--s-3, 12px);
+  padding: var(--s-9, 36px) var(--s-7, 28px);
+}
+.rv-empty__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--r-full);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.rv-empty__title {
+  font-size: var(--t-lg);
+  font-weight: 600;
+}
+.rv-empty__body {
+  font-size: var(--t-base);
+  color: var(--text-2);
+  max-width: 380px;
+}
+.rv-empty__actions {
+  display: flex;
+  gap: var(--s-2, 8px);
+  margin-top: var(--s-2, 8px);
+}
+.rv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.rv-btn:hover {
+  border-color: var(--text-3);
+}
+.rv-btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+.rv-summary__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  padding: 0 24px 24px;
+}
+.metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: var(--s-4, 14px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.metric__val {
+  font-family: var(--font-ui);
+  font-size: var(--t-2xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.metric__label {
+  font-size: var(--t-xs);
+  color: var(--text-2);
+}
+
+/* ---------- empty-deck / non-desktop ---------- */
+.rv-blank {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+/* ---------- animation ---------- */
+.rv-fade {
+  animation: rvFadeUp var(--med, 0.22s) var(--ease, ease) both;
+}
+@keyframes rvFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

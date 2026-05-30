@@ -794,6 +794,115 @@ export interface ReadPointSetResult {
   readonly readPoint: ReadPointPayload;
 }
 
+// ---------------------------------------------------------------------------
+// review.session.next() / review.preview() / review.grade()  (T037 — the session)
+// ---------------------------------------------------------------------------
+
+/** The canonical FSRS rating values the renderer grades with. */
+export type ReviewRating = "again" | "hard" | "good" | "easy";
+
+/** The FSRS scheduler signals a review card carries for its chip + stat readout. */
+export interface ReviewSchedulerSignals {
+  readonly kind: "fsrs";
+  readonly retrievability: number | null;
+  readonly stability: number | null;
+  readonly difficulty: number | null;
+  readonly reps: number | null;
+  readonly lapses: number | null;
+  readonly fsrsState: string | null;
+}
+
+/**
+ * Everything the review face needs for ONE card. The `answer`/`cloze`/`ref` ship
+ * with the card but the renderer keeps them hidden until reveal (no reveal
+ * round-trip — review stays local + fast).
+ */
+export interface ReviewCardView {
+  readonly id: string;
+  readonly kind: string;
+  /** The Q&A prompt, or the cloze `{{cN::…}}` text the front masks until reveal. */
+  readonly prompt: string;
+  readonly answer: string | null;
+  readonly cloze: string | null;
+  readonly priority: number;
+  readonly stage: string;
+  readonly concept: string | null;
+  readonly sourceTitle: string | null;
+  readonly sourceLocationLabel: string | null;
+  /** A verbatim snapshot of the originating text (the refblock quote), or `null`. */
+  readonly ref: string | null;
+  readonly schedulerSignals: ReviewSchedulerSignals;
+  readonly leech: boolean;
+  readonly lapses: number;
+}
+
+export interface ReviewSessionNextRequest {
+  /** Card ids already seen this session — skipped so the deck advances (T039 seam). */
+  readonly exclude?: readonly string[];
+  /** "Now" the due read compares against (ISO-8601); defaults to the server clock. */
+  readonly asOf?: string;
+}
+
+export interface ReviewSessionNextResult {
+  readonly card: ReviewCardView | null;
+  /** Due cards remaining AFTER this card (excluding the `exclude` set). */
+  readonly remaining: number;
+  /** The total due-card deck size (incl. this card; excluding the `exclude` set). */
+  readonly total: number;
+}
+
+/** One previewed grade outcome: the resulting due time + interval (days) + a label. */
+export interface ReviewIntervalPreview {
+  readonly dueAt: string;
+  readonly scheduledDays: number;
+  /** Compact human label, e.g. `"10m"`, `"2d"`, `"5d"`. */
+  readonly label: string;
+}
+
+export interface ReviewPreviewRequest {
+  readonly cardId: string;
+  readonly asOf?: string;
+}
+
+export interface ReviewPreviewResult {
+  /** The four possible next intervals keyed by rating, or `null` (no review state). */
+  readonly intervals: Record<ReviewRating, ReviewIntervalPreview> | null;
+}
+
+export interface ReviewGradeRequest {
+  readonly cardId: string;
+  readonly rating: ReviewRating;
+  /** The measured reveal→grade response time (ms), persisted on `review_logs`. */
+  readonly responseMs: number;
+  readonly asOf?: string;
+}
+
+/** The durable review-log row written by a grade (append-only). */
+export interface ReviewLogSummary {
+  readonly id: string;
+  readonly elementId: string;
+  readonly rating: string;
+  readonly reviewedAt: string;
+  readonly responseMs: number;
+  readonly nextDueAt: string;
+}
+
+/** The advanced FSRS state after a grade. */
+export interface ReviewStateSummary {
+  readonly dueAt: string | null;
+  readonly stability: number;
+  readonly difficulty: number;
+  readonly reps: number;
+  readonly lapses: number;
+  readonly fsrsState: string;
+  readonly lastReviewedAt: string | null;
+}
+
+export interface ReviewGradeResult {
+  readonly reviewLog: ReviewLogSummary;
+  readonly reviewState: ReviewStateSummary;
+}
+
 /** The exact shape the preload exposes as `window.appApi`. */
 export interface AppApi {
   readonly app: {
@@ -852,6 +961,11 @@ export interface AppApi {
     postpone(request: ExtractsPostponeRequest): Promise<ExtractsPostponeResult>;
     markDone(request: ExtractsMarkDoneRequest): Promise<ExtractsMarkDoneResult>;
     delete(request: ExtractsDeleteRequest): Promise<ExtractsDeleteResult>;
+  };
+  readonly review: {
+    sessionNext(request?: ReviewSessionNextRequest): Promise<ReviewSessionNextResult>;
+    preview(request: ReviewPreviewRequest): Promise<ReviewPreviewResult>;
+    grade(request: ReviewGradeRequest): Promise<ReviewGradeResult>;
   };
   readonly readPoints: {
     get(request: ReadPointGetRequest): Promise<ReadPointGetResult>;
@@ -1020,6 +1134,28 @@ export const appApi = {
   /** Soft-delete an extract; logs `soft_delete_element` (T024). */
   deleteExtract(request: ExtractsDeleteRequest): Promise<ExtractsDeleteResult> {
     return requireAppApi().extracts.delete(request);
+  },
+  /**
+   * The next due card in the active-recall session (T037) — the FSRS deck (cards
+   * due by `review_states.due_at`), soonest first, skipping `exclude`d ids. Carries
+   * the full card so reveal needs no round-trip. Read-only.
+   */
+  reviewSessionNext(request?: ReviewSessionNextRequest): Promise<ReviewSessionNextResult> {
+    return requireAppApi().review.sessionNext(request);
+  },
+  /**
+   * Preview the four next intervals for a card's grade buttons (T037) — PURE, no
+   * mutation. The grade buttons render `intervals[rating].label`.
+   */
+  reviewPreview(request: ReviewPreviewRequest): Promise<ReviewPreviewResult> {
+    return requireAppApi().review.preview(request);
+  },
+  /**
+   * Grade a card (T037) — FSRS reschedule + a durable `review_logs` row in ONE
+   * transaction (logs `add_review_log`). Records the reveal→grade response time.
+   */
+  reviewGrade(request: ReviewGradeRequest): Promise<ReviewGradeResult> {
+    return requireAppApi().review.grade(request);
   },
   /** Load an element's read-point (resume position), or `null` (T017). */
   getReadPoint(request: ReadPointGetRequest): Promise<ReadPointGetResult> {

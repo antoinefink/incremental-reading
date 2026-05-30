@@ -783,3 +783,202 @@ describe("DbService", () => {
     second.close();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Review session (T037) — the FSRS review loop over the typed surface.
+// ---------------------------------------------------------------------------
+
+describe("DbService — review session (T037)", () => {
+  /** A future clock so the seeded Q&A card (dueAt 2026-06-03) reads as due. */
+  const ASOF = "2027-06-01T12:00:00.000Z";
+
+  /** The seeded due Q&A card id (it has two reviews → a real future dueAt). */
+  function seededDueCardId(svc: DbService): string {
+    const row = svc.raw.sqlite
+      .prepare(
+        `SELECT e.id AS id FROM elements e
+         JOIN cards c ON c.element_id = e.id
+         WHERE c.kind = 'qa' AND e.deleted_at IS NULL LIMIT 1`,
+      )
+      .get() as { id: string } | undefined;
+    if (!row) throw new Error("seeded Q&A card not found");
+    return row.id;
+  }
+
+  it("reviewSessionNext returns the due card carrying the full card view (cards only)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    const res = svc.reviewSessionNext({ asOf: ASOF });
+    expect(res.total).toBeGreaterThanOrEqual(1);
+    expect(res.card).not.toBeNull();
+    // The deck is FSRS cards only — never an extract/source.
+    expect(res.card?.kind === "qa" || res.card?.kind === "cloze").toBe(true);
+    // The card ships its answer + lineage so reveal needs no round-trip.
+    expect(res.card?.schedulerSignals.kind).toBe("fsrs");
+    expect(typeof res.card?.prompt).toBe("string");
+
+    svc.close();
+  });
+
+  it("reviewPreview returns four ordered intervals and mutates nothing", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const cardId = seededDueCardId(svc);
+
+    const before = svc.repos.review.findReviewState(cardId as never);
+    const { intervals } = svc.reviewPreview({ cardId, asOf: ASOF });
+    expect(intervals).not.toBeNull();
+    if (!intervals) throw new Error("no intervals");
+    // Non-decreasing scheduled days across again → hard → good → easy.
+    expect(intervals.again.scheduledDays).toBeLessThanOrEqual(intervals.hard.scheduledDays);
+    expect(intervals.hard.scheduledDays).toBeLessThanOrEqual(intervals.good.scheduledDays);
+    expect(intervals.good.scheduledDays).toBeLessThanOrEqual(intervals.easy.scheduledDays);
+    // Each carries a human label.
+    expect(intervals.good.label.length).toBeGreaterThan(0);
+    // PURE: the persisted state is unchanged by a preview.
+    const after = svc.repos.review.findReviewState(cardId as never);
+    expect(after?.dueAt).toBe(before?.dueAt);
+    expect(after?.reps).toBe(before?.reps);
+
+    svc.close();
+  });
+
+  it("reviewGrade advances review_states, appends one review_logs row, logs add_review_log", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const cardId = seededDueCardId(svc);
+
+    const beforeState = svc.repos.review.findReviewState(cardId as never);
+    const beforeLogs = svc.repos.review.listReviewLogs(cardId as never).length;
+    const beforeOps = svc.raw.sqlite
+      .prepare("SELECT COUNT(*) AS n FROM operation_log WHERE op_type = 'add_review_log'")
+      .get() as { n: number };
+
+    const result = svc.reviewGrade({
+      cardId,
+      rating: "good",
+      responseMs: 3200,
+      asOf: ASOF,
+    });
+
+    // The durable review log was written with the response time + rating.
+    expect(result.reviewLog.rating).toBe("good");
+    expect(result.reviewLog.responseMs).toBe(3200);
+    expect(result.reviewLog.elementId).toBe(cardId);
+
+    // Exactly one new review_logs row.
+    const afterLogs = svc.repos.review.listReviewLogs(cardId as never).length;
+    expect(afterLogs).toBe(beforeLogs + 1);
+
+    // review_states advanced: reps incremented, dueAt moved forward, elements.dueAt synced.
+    const afterState = svc.repos.review.findReviewState(cardId as never);
+    expect(afterState?.reps).toBe((beforeState?.reps ?? 0) + 1);
+    expect(afterState?.dueAt).toBe(result.reviewState.dueAt);
+    expect(afterState?.lastReviewedAt).toBe(ASOF);
+    const cardEl = svc.repos.elements.findById(cardId as never);
+    expect(cardEl?.dueAt).toBe(result.reviewState.dueAt);
+
+    // Exactly one new add_review_log operation-log entry (one transaction).
+    const afterOps = svc.raw.sqlite
+      .prepare("SELECT COUNT(*) AS n FROM operation_log WHERE op_type = 'add_review_log'")
+      .get() as { n: number };
+    expect(afterOps.n).toBe(beforeOps.n + 1);
+
+    svc.close();
+  });
+
+  it("grades across all four ratings produce ordered next intervals (again < good < easy)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const cardId = seededDueCardId(svc);
+
+    // Read the four previews up front (pure) and assert the ordering FSRS guarantees.
+    const { intervals } = svc.reviewPreview({ cardId, asOf: ASOF });
+    if (!intervals) throw new Error("no intervals");
+    expect(intervals.again.scheduledDays).toBeLessThan(intervals.easy.scheduledDays);
+    expect(intervals.again.scheduledDays).toBeLessThanOrEqual(intervals.good.scheduledDays);
+
+    // Grading 'again' increments lapses (a failed review).
+    const lapsesBefore = svc.repos.review.findReviewState(cardId as never)?.lapses ?? 0;
+    svc.reviewGrade({ cardId, rating: "again", responseMs: 8000, asOf: ASOF });
+    const lapsesAfter = svc.repos.review.findReviewState(cardId as never)?.lapses ?? 0;
+    expect(lapsesAfter).toBe(lapsesBefore + 1);
+
+    svc.close();
+  });
+
+  it("the rescheduling survives a close + reopen (restart analogue)", () => {
+    const first = new DbService();
+    first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(first.seedIfEmpty()).toBe(true);
+    const cardId = seededDueCardId(first);
+    const { reviewState } = first.reviewGrade({
+      cardId,
+      rating: "good",
+      responseMs: 2100,
+      asOf: ASOF,
+    });
+    const persistedDue = reviewState.dueAt;
+    first.close();
+
+    // A brand-new service on the SAME file sees the advanced due date + the log.
+    const second = new DbService();
+    second.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const state = second.repos.review.findReviewState(cardId as never);
+    expect(state?.dueAt).toBe(persistedDue);
+    expect(second.repos.review.listReviewLogs(cardId as never).length).toBeGreaterThan(0);
+    second.close();
+  });
+
+  it("reviewGrade rejects a non-card element (FSRS is cards only)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const extract = svc.raw.sqlite
+      .prepare("SELECT id FROM elements WHERE type = 'extract' AND deleted_at IS NULL LIMIT 1")
+      .get() as { id: string } | undefined;
+    expect(extract).toBeDefined();
+    expect(() =>
+      svc.reviewGrade({ cardId: extract?.id ?? "", rating: "good", responseMs: 100, asOf: ASOF }),
+    ).toThrow();
+    svc.close();
+  });
+
+  it("reviewSessionNext caps the session at the dailyReviewBudget setting", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    // There is at least one due card unbounded.
+    expect(svc.reviewSessionNext({ asOf: ASOF }).total).toBeGreaterThanOrEqual(1);
+
+    // Pin the budget to its minimum (10) so the cap is exercised deterministically
+    // without seeding hundreds of cards. The budget bounds the WHOLE session, so
+    // the surfaceable remainder is `budget − seen`.
+    svc.updateAppSettings({ dailyReviewBudget: 10 });
+    expect(svc.getAppSettings().settings.dailyReviewBudget).toBe(10);
+
+    // With 9 cards already seen this session, the cap leaves room for exactly one
+    // more card to surface — the seeded due card still appears.
+    const seen9 = Array.from({ length: 9 }, (_, i) => `seen-card-${i}`);
+    const withRoom = svc.reviewSessionNext({ asOf: ASOF, exclude: seen9 });
+    expect(withRoom.card).not.toBeNull();
+    expect(withRoom.total).toBe(1);
+    expect(withRoom.remaining).toBe(0);
+
+    // Once the budget is fully consumed (10 seen), no further card is surfaced even
+    // though the FSRS due deck is non-empty — the budget is the deck cap.
+    const seen10 = Array.from({ length: 10 }, (_, i) => `seen-card-${i}`);
+    const exhausted = svc.reviewSessionNext({ asOf: ASOF, exclude: seen10 });
+    expect(exhausted.card).toBeNull();
+    expect(exhausted.total).toBe(0);
+    expect(exhausted.remaining).toBe(0);
+
+    svc.close();
+  });
+});

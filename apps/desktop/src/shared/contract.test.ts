@@ -30,6 +30,9 @@ import {
   LineageGetRequestSchema,
   ReadPointGetRequestSchema,
   ReadPointSetRequestSchema,
+  ReviewGradeRequestSchema,
+  ReviewPreviewRequestSchema,
+  ReviewSessionNextRequestSchema,
   SettingKeySchema,
   SettingsGetRequestSchema,
   SettingsPatchSchema,
@@ -71,6 +74,9 @@ describe("IPC channels", () => {
         "extracts:postpone",
         "extracts:markDone",
         "extracts:delete",
+        "review:session:next",
+        "review:preview",
+        "review:grade",
         "readPoint:get",
         "readPoint:set",
       ].sort(),
@@ -183,6 +189,39 @@ describe("CardsCreateRequestSchema (T032)", () => {
     expect(() =>
       CardsCreateRequestSchema.parse({ kind: "qa", prompt: "Q?", answer: "A." }),
     ).toThrow();
+  });
+});
+
+describe("Review session schemas (T037)", () => {
+  it("session.next accepts an empty payload, an exclude list, and an asOf", () => {
+    expect(ReviewSessionNextRequestSchema.parse({})).toEqual({});
+    const parsed = ReviewSessionNextRequestSchema.parse({
+      exclude: ["el_1", "el_2"],
+      asOf: "2027-06-01T12:00:00.000Z",
+    });
+    expect(parsed.exclude).toEqual(["el_1", "el_2"]);
+  });
+
+  it("preview requires a cardId", () => {
+    expect(ReviewPreviewRequestSchema.parse({ cardId: "el_1" }).cardId).toBe("el_1");
+    expect(() => ReviewPreviewRequestSchema.parse({})).toThrow();
+  });
+
+  it("grade accepts the four canonical ratings + a non-negative responseMs", () => {
+    for (const rating of ["again", "hard", "good", "easy"] as const) {
+      const parsed = ReviewGradeRequestSchema.parse({ cardId: "el_1", rating, responseMs: 1200 });
+      expect(parsed.rating).toBe(rating);
+    }
+  });
+
+  it("grade rejects an unknown rating, a negative responseMs, and a missing cardId", () => {
+    expect(() =>
+      ReviewGradeRequestSchema.parse({ cardId: "el_1", rating: "perfect", responseMs: 1 }),
+    ).toThrow();
+    expect(() =>
+      ReviewGradeRequestSchema.parse({ cardId: "el_1", rating: "good", responseMs: -1 }),
+    ).toThrow();
+    expect(() => ReviewGradeRequestSchema.parse({ rating: "good", responseMs: 1 })).toThrow();
   });
 });
 

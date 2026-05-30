@@ -26,6 +26,7 @@ import {
   ELEMENT_TYPES,
   KEYBOARD_LAYOUTS,
   MARK_TYPES,
+  REVIEW_RATINGS,
   THEMES,
 } from "@interleave/core";
 import { z } from "zod";
@@ -1290,6 +1291,160 @@ export interface CardsCreateResult {
 }
 
 // ---------------------------------------------------------------------------
+// review.session.next() / review.preview() / review.grade()  (T037 — the session)
+// ---------------------------------------------------------------------------
+
+/**
+ * The active-recall review surface (T037). `/review` loads the due-card deck
+ * (FSRS `due_at ≤ now`, soonest first), reveals the answer, shows the four grade
+ * buttons with next-interval previews, and on a grade records the response time +
+ * reschedules the card via the FSRS `SchedulerService` → `ReviewRepository`. The
+ * three commands keep the renderer thin: it holds ONLY UI/session state (deck
+ * cursor, revealed flag, the reveal→grade timer) — never FSRS math, never SQL.
+ *
+ * **Two-scheduler split (load-bearing):** this surface is for `card` elements
+ * ONLY. The deck is `QueueRepository.dueCards` (cards due by `review_states.due_at`),
+ * NOT the attention `dueAttentionItems` — sources/extracts are not part of the
+ * review session (their combined daily queue is M5). Every grade is a durable,
+ * append-only `review_logs` row (`add_review_log`) written in ONE transaction.
+ *
+ * **Local + fast:** `review.session.next` ships the FULL card — including the
+ * `answer`/`cloze`/`ref` — so the renderer hides them until reveal WITHOUT a
+ * round-trip on reveal. `exclude` lets the caller skip already-seen card ids
+ * (the seam T039 sibling-burying drives main-side); the renderer never computes
+ * sibling relationships. There is still no generic `db.query`.
+ */
+
+/** The FSRS scheduler signals a review card carries for its `SchedulerChip` + `FsrsStats`. */
+export interface ReviewSchedulerSignals {
+  readonly kind: "fsrs";
+  /** Card recall probability now (`0.0`–`1.0`), or `null` for a never-reviewed card. */
+  readonly retrievability: number | null;
+  /** FSRS memory stability in days, or `null`. */
+  readonly stability: number | null;
+  /** FSRS item difficulty (≈ 1–10), or `null`. */
+  readonly difficulty: number | null;
+  readonly reps: number | null;
+  readonly lapses: number | null;
+  readonly fsrsState: string | null;
+}
+
+/**
+ * Everything the review face needs for ONE card. The `answer`/`cloze`/`ref`
+ * travel with the card but the renderer keeps them hidden until reveal (review
+ * stays local — no reveal round-trip). `sourceLocationId` + `ref` make the
+ * jump-to-source affordance actionable (lineage: card → source location → source).
+ */
+export interface ReviewCardView {
+  readonly id: string;
+  /** Card kind (`qa`/`cloze`). */
+  readonly kind: string;
+  /** The Q&A prompt, or the cloze text (`{{cN::…}}`) the front masks until reveal. */
+  readonly prompt: string;
+  /** The Q&A answer (hidden until reveal); `null` for cloze cards. */
+  readonly answer: string | null;
+  /** The canonical cloze text (`{{cN::…}}`), masked on the front; `null` for Q&A. */
+  readonly cloze: string | null;
+  /** Numeric priority `0.0`–`1.0`; the UI derives the A/B/C/D label. */
+  readonly priority: number;
+  readonly stage: string;
+  /** A concept this card is a member of, or `null`. */
+  readonly concept: string | null;
+  /** The owning source's title (provenance), for the `refblock`. */
+  readonly sourceTitle: string | null;
+  /** The human-readable source location label ("¶ 4" / "p. 12"), or `null`. */
+  readonly sourceLocationLabel: string | null;
+  /** A verbatim snapshot of the originating text (the `refblock` quote), or `null`. */
+  readonly ref: string | null;
+  /** The FSRS signals for the chip + stat readout. */
+  readonly schedulerSignals: ReviewSchedulerSignals;
+  /** True when the card has crossed the leech lapse threshold (T040 makes this real). */
+  readonly leech: boolean;
+  /** Cumulative FSRS lapses (failed reviews). */
+  readonly lapses: number;
+}
+
+export const ReviewSessionNextRequestSchema = z.object({
+  /** Card ids already seen this session — skipped so the deck advances (T039 seam). */
+  exclude: z.array(ElementIdSchema).max(10_000).optional(),
+  /** "Now" the due read compares against (ISO-8601); defaults to the server clock. */
+  asOf: z.string().trim().max(64).optional(),
+});
+export type ReviewSessionNextRequest = z.infer<typeof ReviewSessionNextRequestSchema>;
+
+export interface ReviewSessionNextResult {
+  /** The next due card to show, or `null` when the deck is exhausted. */
+  readonly card: ReviewCardView | null;
+  /** How many due cards remain (excluding the `exclude` set), AFTER this card. */
+  readonly remaining: number;
+  /** The total due-card deck size (excluding the `exclude` set), incl. this card. */
+  readonly total: number;
+}
+
+/** One previewed grade outcome: the resulting due time + interval (days) + a label. */
+export interface ReviewIntervalPreview {
+  readonly dueAt: string;
+  /** Interval from `now` to the previewed due time, in (fractional) days. */
+  readonly scheduledDays: number;
+  /** Compact human label, e.g. `"10m"`, `"2d"`, `"5d"`. */
+  readonly label: string;
+}
+
+/** The canonical rating values the renderer may grade with (validated against `REVIEW_RATINGS`). */
+export const ReviewRatingSchema = z.enum(REVIEW_RATINGS);
+
+export const ReviewPreviewRequestSchema = z.object({
+  /** The card id to preview the four next intervals for. */
+  cardId: ElementIdSchema,
+  /** "Now" the previews compare against (ISO-8601); defaults to the server clock. */
+  asOf: z.string().trim().max(64).optional(),
+});
+export type ReviewPreviewRequest = z.infer<typeof ReviewPreviewRequestSchema>;
+
+export interface ReviewPreviewResult {
+  /** The four possible next intervals, keyed by rating (PURE — nothing is mutated). */
+  readonly intervals: Record<"again" | "hard" | "good" | "easy", ReviewIntervalPreview> | null;
+}
+
+export const ReviewGradeRequestSchema = z.object({
+  /** The card id being graded. */
+  cardId: ElementIdSchema,
+  /** The grade (`again`/`hard`/`good`/`easy`). */
+  rating: ReviewRatingSchema,
+  /** The measured reveal→grade response time in ms (persisted on `review_logs`). */
+  responseMs: z.number().int().min(0).max(86_400_000),
+  /** "Now" the grade is recorded at (ISO-8601); defaults to the server clock. */
+  asOf: z.string().trim().max(64).optional(),
+});
+export type ReviewGradeRequest = z.infer<typeof ReviewGradeRequestSchema>;
+
+/** The durable review-log row written by a grade (append-only). */
+export interface ReviewLogSummary {
+  readonly id: string;
+  readonly elementId: string;
+  readonly rating: string;
+  readonly reviewedAt: string;
+  readonly responseMs: number;
+  readonly nextDueAt: string;
+}
+
+/** The advanced FSRS state after a grade. */
+export interface ReviewStateSummary {
+  readonly dueAt: string | null;
+  readonly stability: number;
+  readonly difficulty: number;
+  readonly reps: number;
+  readonly lapses: number;
+  readonly fsrsState: string;
+  readonly lastReviewedAt: string | null;
+}
+
+export interface ReviewGradeResult {
+  readonly reviewLog: ReviewLogSummary;
+  readonly reviewState: ReviewStateSummary;
+}
+
+// ---------------------------------------------------------------------------
 // The typed surface the renderer sees as `window.appApi`.
 // ---------------------------------------------------------------------------
 
@@ -1414,6 +1569,25 @@ export interface AppApi {
     markDone(request: ExtractsMarkDoneRequest): Promise<ExtractsMarkDoneResult>;
     /** Soft-delete an extract; logs `soft_delete_element` (T024). */
     delete(request: ExtractsDeleteRequest): Promise<ExtractsDeleteResult>;
+  };
+  readonly review: {
+    /**
+     * The next due card in the active-recall session (T037) — the FSRS deck
+     * (`review_states.due_at ≤ now`), soonest first, skipping `exclude`d ids.
+     * Carries the full card so reveal needs no round-trip. Read-only.
+     */
+    sessionNext(request?: ReviewSessionNextRequest): Promise<ReviewSessionNextResult>;
+    /**
+     * Preview the four next intervals for a card's grade buttons (T037) — calls
+     * `SchedulerService.previewIntervals`. PURE: mutates nothing.
+     */
+    preview(request: ReviewPreviewRequest): Promise<ReviewPreviewResult>;
+    /**
+     * Grade a card (T037) — FSRS reschedule + a durable `review_logs` row, in ONE
+     * transaction via `SchedulerService.gradeCard` → `ReviewRepository.recordReview`,
+     * logging `add_review_log`. Records the response time. Cards only.
+     */
+    grade(request: ReviewGradeRequest): Promise<ReviewGradeResult>;
   };
   readonly readPoints: {
     /** Load an element's read-point (resume position), or `null` (T017). */

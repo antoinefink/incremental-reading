@@ -38,6 +38,9 @@ export const IPC_CHANNELS = {
   extractsPostpone: "extracts:postpone",
   extractsMarkDone: "extracts:markDone",
   extractsDelete: "extracts:delete",
+  reviewSessionNext: "review:session:next",
+  reviewPreview: "review:preview",
+  reviewGrade: "review:grade",
   readPointGet: "readPoint:get",
   readPointSet: "readPoint:set",
 } as const;

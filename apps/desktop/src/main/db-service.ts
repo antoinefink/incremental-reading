@@ -29,6 +29,7 @@ import type {
   ReviewRating,
   ReviewState,
   SiblingGroupId,
+  SourceLocationId,
 } from "@interleave/core";
 import {
   canonicalizeUrl,
@@ -102,6 +103,13 @@ import type {
   ReadPointGetResult,
   ReadPointSetRequest,
   ReadPointSetResult,
+  ReviewCardView,
+  ReviewGradeRequest,
+  ReviewGradeResult,
+  ReviewPreviewRequest,
+  ReviewPreviewResult,
+  ReviewSessionNextRequest,
+  ReviewSessionNextResult,
   SettingsGetAllResult,
   SettingsGetResult,
   SettingsUpdateManyResult,
@@ -905,6 +913,190 @@ export class DbService {
       throw new Error(`DbService.gradeCard: review state vanished after recordReview`);
     }
     return { reviewLog, reviewState };
+  }
+
+  /** The FSRS forgetting-curve constants (factor=19/81, decay=-0.5). */
+  private static readonly FSRS_DECAY = -0.5;
+  private static readonly FSRS_FACTOR = 19 / 81;
+
+  /**
+   * Approximate retrievability `R(t) = (1 + FACTOR · t / S)^DECAY` from stability
+   * `S` (days) + days since the last review — the same pure presentation formula
+   * the inspector/queue use for the `SchedulerChip`/`FsrsStats`. A never-reviewed
+   * card has no meaningful value (`null`).
+   */
+  private static approximateRetrievability(
+    stability: number,
+    lastReviewedAt: string | null,
+    asOfMs: number,
+  ): number | null {
+    if (!lastReviewedAt || stability <= 0) return null;
+    const last = Date.parse(lastReviewedAt);
+    if (Number.isNaN(last)) return null;
+    const elapsedDays = Math.max(0, (asOfMs - last) / 86_400_000);
+    const r = (1 + (DbService.FSRS_FACTOR * elapsedDays) / stability) ** DbService.FSRS_DECAY;
+    return Math.min(1, Math.max(0, r));
+  }
+
+  /**
+   * Assemble the flat {@link ReviewCardView} for one card element — everything the
+   * review face needs WITHOUT a reveal round-trip (the answer/cloze/ref ship with
+   * the card; the renderer hides them until reveal). Composes the `cards` row, the
+   * `review_states` FSRS signals, the lineage source location (jump-to-source), the
+   * owning source title, and the concept. Returns `null` for a non-card / deleted id.
+   */
+  private toReviewCardView(cardElementId: ElementId, asOfMs: number): ReviewCardView | null {
+    const card = this.repos.review.findCardById(cardElementId);
+    if (card?.element.type !== "card" || card.element.deletedAt) return null;
+    const element = card.element;
+    const state = this.repos.review.findReviewState(cardElementId);
+
+    // Lineage: the card's source-location anchor (card → source location → source).
+    const sourceLocationId = card.card.sourceLocationId as SourceLocationId | null;
+    const location = sourceLocationId
+      ? this.repos.sources.findLocationById(sourceLocationId)
+      : null;
+
+    // The owning source's title (provenance) for the refblock.
+    const sourceId = element.sourceId;
+    const sourceEl = sourceId ? this.repos.elements.findById(sourceId) : null;
+    const sourceTitle = sourceEl && !sourceEl.deletedAt ? sourceEl.title : null;
+
+    const retrievability = state
+      ? DbService.approximateRetrievability(state.stability, state.lastReviewedAt, asOfMs)
+      : null;
+
+    return {
+      id: element.id,
+      kind: card.card.kind,
+      // The front prompt: a Q&A card's `prompt`; a cloze card's `cloze` text (the
+      // renderer masks the `{{cN::…}}` spans until reveal).
+      prompt: card.card.kind === "cloze" ? (card.card.cloze ?? "") : (card.card.prompt ?? ""),
+      answer: card.card.answer,
+      cloze: card.card.cloze,
+      priority: element.priority,
+      stage: element.stage,
+      concept: this.conceptForElement(element.id),
+      sourceTitle,
+      sourceLocationLabel: location?.label ?? null,
+      ref: location?.selectedText ?? null,
+      schedulerSignals: {
+        kind: "fsrs",
+        retrievability,
+        stability: state?.stability ?? null,
+        difficulty: state?.difficulty ?? null,
+        reps: state?.reps ?? null,
+        lapses: state?.lapses ?? null,
+        fsrsState: state?.fsrsState ?? null,
+      },
+      // Leech surfacing is T040 (no leech flag column yet); the field is wired now
+      // so the surface is stable. `lapses` is real today.
+      leech: false,
+      lapses: state?.lapses ?? 0,
+    };
+  }
+
+  /** The first concept this element is a member of, or `null` (mirrors QueueQuery). */
+  private conceptForElement(id: ElementId): string | null {
+    const membership = this.repos.elements
+      .listRelationsFrom(id)
+      .find((r) => r.relationType === "concept_membership");
+    if (!membership) return null;
+    const conceptEl = this.repos.elements.findById(membership.toElementId);
+    return conceptEl && !conceptEl.deletedAt ? conceptEl.title : null;
+  }
+
+  /**
+   * The next due card in the active-recall session (T037). Reads the FSRS due deck
+   * (`QueueRepository.dueCards` — cards due by `review_states.due_at`, soonest
+   * first), skips the `exclude` set (the seam T039 sibling-burying drives), caps the
+   * session at the `dailyReviewBudget` setting (the soft cap on items surfaced per
+   * day, default 60 — read from {@link SettingsRepository}), and returns the FULL
+   * {@link ReviewCardView} for the first remaining card + the budget-bounded deck
+   * counts. The budget bounds the WHOLE session: cards already reviewed (the
+   * `exclude` set) count against it, so the surfaceable remainder is `budget −
+   * exclude.length`. **Cards only** (the two-scheduler split — attention items are
+   * not in the review session). Read-only: no mutation, no `operation_log`.
+   */
+  reviewSessionNext(request: ReviewSessionNextRequest): ReviewSessionNextResult {
+    const asOf = (request.asOf ?? new Date().toISOString()) as IsoTimestamp;
+    const asOfMs = Date.parse(asOf);
+    const exclude = new Set<string>(request.exclude ?? []);
+    // The daily review budget is the deck cap (soft cap on items surfaced per day).
+    // It bounds the entire session, so cards already seen this session (the `exclude`
+    // set) consume it — only `budget − seen` further cards may be surfaced.
+    const budget = this.repos.settings.getAppSettings().dailyReviewBudget;
+    const surfaceableCap = Math.max(0, budget - exclude.size);
+    const due = this.queueRepo.dueCards(asOf);
+    const remainingDeck = due.filter((c) => !exclude.has(c.id)).slice(0, surfaceableCap);
+    const total = remainingDeck.length;
+    const next = remainingDeck[0];
+    if (!next) return { card: null, remaining: 0, total };
+    const card = this.toReviewCardView(next.id, asOfMs);
+    if (!card) return { card: null, remaining: Math.max(0, total - 1), total };
+    return { card, remaining: Math.max(0, total - 1), total };
+  }
+
+  /** The {@link QueueRepository} (via the repository bundle) for the FSRS due deck. */
+  private get queueRepo() {
+    return this.repos.queue;
+  }
+
+  /**
+   * Preview the four next intervals for a card's grade buttons (T037) via the FSRS
+   * {@link SchedulerService} — wraps {@link previewCardIntervals} into the flat wire
+   * shape. PURE: mutates nothing. `intervals` is `null` when the id is not a card or
+   * has no review state.
+   */
+  reviewPreview(request: ReviewPreviewRequest): ReviewPreviewResult {
+    const asOf = (request.asOf ?? new Date().toISOString()) as IsoTimestamp;
+    const previews = this.previewCardIntervals(request.cardId as ElementId, asOf);
+    if (!previews) return { intervals: null };
+    return {
+      intervals: {
+        again: previews.again,
+        hard: previews.hard,
+        good: previews.good,
+        easy: previews.easy,
+      },
+    };
+  }
+
+  /**
+   * Grade a card (T037) — the FSRS write path wrapped into the flat wire shape.
+   * Delegates to {@link gradeCard} (which runs `SchedulerService.gradeCard` →
+   * `ReviewRepository.recordReview`, appending the immutable `review_logs` row,
+   * advancing `review_states` + `elements.due_at`, and logging `add_review_log` in
+   * ONE transaction, plus the `card_draft → active_card` first-review promotion).
+   * Records the response time. Cards only.
+   */
+  reviewGrade(request: ReviewGradeRequest): ReviewGradeResult {
+    const asOf = (request.asOf ?? new Date().toISOString()) as IsoTimestamp;
+    const { reviewLog, reviewState } = this.gradeCard(
+      request.cardId as ElementId,
+      request.rating as ReviewRating,
+      request.responseMs,
+      asOf,
+    );
+    return {
+      reviewLog: {
+        id: reviewLog.id,
+        elementId: reviewLog.elementId,
+        rating: reviewLog.rating,
+        reviewedAt: reviewLog.reviewedAt,
+        responseMs: reviewLog.responseMs,
+        nextDueAt: reviewLog.nextDueAt,
+      },
+      reviewState: {
+        dueAt: reviewState.dueAt,
+        stability: reviewState.stability,
+        difficulty: reviewState.difficulty,
+        reps: reviewState.reps,
+        lapses: reviewState.lapses,
+        fsrsState: reviewState.fsrsState,
+        lastReviewedAt: reviewState.lastReviewedAt,
+      },
+    };
   }
 
   private get extractService(): ExtractService {

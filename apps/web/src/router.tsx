@@ -31,6 +31,7 @@ import { QueueScreen } from "./pages/queue/QueueScreen";
 import { Settings } from "./pages/Settings";
 import { SourceReader } from "./pages/source/SourceReader";
 import { ExtractView } from "./reader/ExtractView";
+import { ReviewScreen } from "./review/ReviewScreen";
 import { Shell } from "./shell/Shell";
 
 const rootRoute = createRootRoute({ component: Shell });
@@ -86,17 +87,18 @@ const extractRoute = createRoute({
   component: ExtractView,
 });
 
+/**
+ * The active-recall review session (T037) — the FSRS review loop. `/review`
+ * loads the due-card deck (FSRS `due_at ≤ now`), reveals the answer, grades
+ * Again/Hard/Good/Easy with next-interval previews, logs the response time +
+ * reschedules through `SchedulerService` → `ReviewRepository`, and advances —
+ * every grade writing a durable `review_logs` row. All over the typed
+ * `window.appApi.review.*` surface; the renderer holds no FSRS math or SQL.
+ */
 const reviewRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/review",
-  component: () => (
-    <Placeholder
-      routeId="review"
-      icon="review"
-      title="Review"
-      body="Active-recall review: reveal, grade Again / Hard / Good / Easy, advance."
-    />
-  ),
+  component: ReviewScreen,
 });
 
 const searchRoute = createRoute({
