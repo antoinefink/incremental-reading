@@ -345,6 +345,53 @@ mark.extracted {
   max-width: 680px;
   margin: 0 auto;
   padding: 36px 0 120px;
+  /* Positioning context for the per-paragraph "mark processed" overlay (T026). */
+  position: relative;
+}
+
+/* ---------- Per-paragraph "mark processed" affordance (T026) ---------- */
+/* Ported from design/kit/styles/app.css (`.readpara__mark`) against the canonical
+   tokens. The buttons live in an absolutely-positioned overlay over the live editor
+   (we never mutate the ProseMirror DOM); each is anchored to its block's measured
+   top. The right column (-34px past the 680px column) keeps them in the margin. */
+.readpara-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.readpara__mark {
+  position: absolute;
+  right: -34px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-3);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  /* Buttons are individually clickable even though the overlay is pass-through. */
+  pointer-events: auto;
+  opacity: 0;
+  transition:
+    opacity var(--fast) var(--ease),
+    color var(--fast) var(--ease),
+    border-color var(--fast) var(--ease);
+}
+/* Reveal on hover over the rail, and keep a processed paragraph's restore button
+   visible so the user can always undo (matches the kit's persistent restore icon). */
+.reader-rail:hover .readpara__mark,
+.readpara__mark[data-processed="true"] {
+  opacity: 1;
+}
+.readpara__mark:hover {
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+.readpara__mark[data-processed="true"] {
+  color: var(--accent-text);
+  border-color: var(--accent-soft);
 }
 .reader-railhead {
   display: flex;

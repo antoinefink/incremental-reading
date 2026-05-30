@@ -379,6 +379,9 @@ export function ExtractView() {
       readPointBlockId: null,
       extractedBlockIds: doc.extractedBlockIds,
       highlights: [],
+      // Processed-span dimming (T026) is a SOURCE-reader affordance; the extract
+      // body doesn't surface it here.
+      processed: [],
       flashedBlockId: null,
     });
   }, [editorReady, doc.extractedBlockIds]);

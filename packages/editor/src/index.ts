@@ -44,6 +44,15 @@ export {
   HIGHLIGHT_MARK_NAME,
   Highlight,
 } from "./marks/highlight";
+// Processed-span mark (T026): dim a read/extracted passage (`mark.dimmed`) so the
+// user can declutter a long source WITHOUT deleting content. Reversible; persisted
+// as a `processed_span` `document_marks` row (reusing the T020 mark surface), kept
+// strictly separate from highlight (`mark.hl`) and extracted-span (`mark.extracted`).
+export {
+  PROCESSED_MARK_CLASS,
+  PROCESSED_MARK_NAME,
+  ProcessedSpan,
+} from "./marks/processed";
 export {
   clampOffsetToBlock,
   firstUnreadBlockId,
@@ -62,6 +71,7 @@ export {
 export {
   createReaderDecorationsPlugin,
   type HighlightDecoration,
+  type ProcessedDecoration,
   type ReaderDecorationState,
   ReaderDecorations,
   readerDecorationsKey,

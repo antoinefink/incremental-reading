@@ -123,6 +123,7 @@ export function flashBlock(
     readPointBlockId: null,
     extractedBlockIds: [],
     highlights: [],
+    processed: [],
     flashedBlockId: null,
   };
   setReaderDecorations(editor, { ...base, flashedBlockId: blockId });

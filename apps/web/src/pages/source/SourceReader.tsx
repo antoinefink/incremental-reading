@@ -48,8 +48,10 @@ import { SelectionToolbar, type SelectionToolbarAction } from "../../reader/Sele
 import { useTextSelection } from "../../reader/useTextSelection";
 import { Kbd } from "../../shell/Kbd";
 import { useSelection } from "../../shell/selection";
+import { ProcessedSpanButtons } from "./ProcessedSpanButtons";
 import { useDocument } from "./useDocument";
 import { useHighlights } from "./useHighlights";
+import { useProcessedSpans } from "./useProcessedSpans";
 import { useReadPoint } from "./useReadPoint";
 import "./reader.css";
 
@@ -153,6 +155,8 @@ export function SourceReader() {
   const doc = useDocument(id);
   const rp = useReadPoint(id);
   const hl = useHighlights(id);
+  // Processed spans (T026): dim read/extracted paragraphs without deleting them.
+  const proc = useProcessedSpans(id);
 
   const [inspector, setInspector] = useState<InspectorData | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -164,6 +168,16 @@ export function SourceReader() {
   const [editorReady, setEditorReady] = useState(false);
   // Whether we have already jumped to the read-point for the current load.
   const jumpedRef = useRef(false);
+
+  // A token that changes whenever something that can move the paragraph anchors
+  // changes (the loaded doc, the processed set — dimming shrinks a block's margin —
+  // or the highlight set), so the per-paragraph "mark processed" overlay re-measures
+  // its button positions. Derived (not state) so it stays in sync without an effect.
+  const processedRevision =
+    (doc.currentDoc ? 1 : 0) +
+    proc.processed.length * 31 +
+    hl.highlights.length * 7 +
+    (editorReady ? 1 : 0);
 
   // Drive the shell's universal inspector to this source so its metadata,
   // lineage, and "Extracts from this source" children show in the right panel.
@@ -339,6 +353,7 @@ export function SourceReader() {
       readPointBlockId: rp.readPoint?.blockId ?? null,
       extractedBlockIds: doc.extractedBlockIds,
       highlights: hl.highlights,
+      processed: proc.processed,
       flashedBlockId,
     });
     // Resume near the read-point exactly once per load, so reopening lands at the
@@ -354,6 +369,7 @@ export function SourceReader() {
     doc.extractedBlockIds,
     rp.firstUnreadBlockId,
     hl.highlights,
+    proc.processed,
     editorKey,
   ]);
 
@@ -400,6 +416,36 @@ export function SourceReader() {
     document.addEventListener("click", onClick);
     return () => document.removeEventListener("click", onClick);
   }, [desktop, hl, toast]);
+
+  // Clicking a dimmed (processed) paragraph restores it (T026 — processed spans are
+  // reversible). The processed block carries `data-processed-mark-id` via the node
+  // decoration; we read that id off the clicked block and delete the backing
+  // `document_marks` row through the hook. We ignore clicks that land on a highlight
+  // (handled above) or that are part of a text selection (so reading/selecting a
+  // dimmed paragraph still works) — only a plain click on the dimmed block restores.
+  useEffect(() => {
+    if (!desktop) return;
+    function onClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      // A highlight click is handled by its own listener — don't double-fire.
+      if (target.closest("mark.hl[data-mark-id]")) return;
+      // Don't restore while the user is selecting text inside the paragraph.
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && (sel.toString()?.length ?? 0) > 0) return;
+      const blockEl = target.closest("[data-processed-mark-id]") as HTMLElement | null;
+      if (!blockEl) return;
+      const markId = blockEl.getAttribute("data-processed-mark-id");
+      if (!markId) return;
+      e.preventDefault();
+      void proc.restore(markId).then(
+        () => toast("Restored"),
+        () => toast("Could not restore"),
+      );
+    }
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
+  }, [desktop, proc, toast]);
 
   // Set read-point at the current caret (Space + the primary action button).
   const onSetReadPoint = useCallback(async () => {
@@ -560,14 +606,27 @@ export function SourceReader() {
               {doc.error ?? "Failed to load this source."}
             </p>
           ) : (
-            <SourceEditor
-              key={editorKey}
-              initialDoc={doc.initialDoc}
-              editable
-              readerDecorations
-              onChange={doc.save}
-              onEditorReady={onEditorReady}
-            />
+            <>
+              <SourceEditor
+                key={editorKey}
+                initialDoc={doc.initialDoc}
+                editable
+                readerDecorations
+                onChange={doc.save}
+                onEditorReady={onEditorReady}
+              />
+              {/* Per-paragraph "mark processed (dim)" / "restore" affordance (T026),
+                  overlaid on the live editor's paragraph blocks (never mutating its
+                  DOM). Re-measures whenever the doc or the processed/highlight set
+                  changes (the `revision` token). */}
+              <ProcessedSpanButtons
+                editor={editor}
+                editorReady={editorReady}
+                processed={proc}
+                revision={processedRevision}
+                onToggled={(result) => toast(result === "marked" ? "Marked processed" : "Restored")}
+              />
+            </>
           )}
         </div>
       </div>

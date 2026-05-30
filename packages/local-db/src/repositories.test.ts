@@ -603,6 +603,71 @@ describe("DocumentRepository — marks (T020 highlights)", () => {
     expect(documents.listMarksByType(source.id, "highlight")).toHaveLength(1);
     expect(documents.listMarksByType(source.id, "extracted_span")).toHaveLength(1);
   });
+
+  it("round-trips a processed_span mark, logs update_document, and leaves the body unchanged (T026)", () => {
+    const sources = new SourceRepository(handle.db);
+    const documents = new DocumentRepository(handle.db);
+    const ops = new OperationLogRepository(handle.db);
+    const elements = new ElementRepository(handle.db);
+
+    const { element: source } = sources.create({ title: "Processable", priority: 0.5 });
+    documents.upsert({
+      elementId: source.id,
+      prosemirrorJson: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            attrs: { blockId: "b1" },
+            content: [{ type: "text", text: "the quick brown fox" }],
+          },
+        ],
+      },
+      plainText: "the quick brown fox",
+      blocks: [{ blockType: "paragraph", order: 0, stableBlockId: "b1" as BlockId }],
+    });
+    const elementsBefore = elements.listByType("source").length;
+    const bodyBefore = documents.findById(source.id);
+
+    // Mark the paragraph processed (dims it in the reader — does NOT delete content).
+    const mark = documents.addMark({
+      elementId: source.id,
+      blockId: "b1" as BlockId,
+      markType: "processed_span",
+      range: [0, 19],
+    });
+    expect(mark.markType).toBe("processed_span");
+
+    // It is listable and filterable, and kept STRICTLY separate from highlight /
+    // extracted_span (same table, different kind).
+    expect(documents.listMarksByType(source.id, "processed_span")).toHaveLength(1);
+    expect(documents.listMarksByType(source.id, "highlight")).toHaveLength(0);
+    expect(documents.listMarksByType(source.id, "extracted_span")).toHaveLength(0);
+
+    // The mutation logged `update_document` (NO new op type): one from the body
+    // `upsert`, one from the `addMark` ⇒ two so far.
+    expect(ops.listForElement(source.id).filter((e) => e.opType === "update_document").length).toBe(
+      2,
+    );
+    // It created NO new element (processed is an annotation, not lineage)…
+    expect(elements.listByType("source").length).toBe(elementsBefore);
+    // …and the underlying source BODY is byte-for-byte unchanged (never destroyed).
+    const bodyAfter = documents.findById(source.id);
+    expect(bodyAfter?.plainText).toBe(bodyBefore?.plainText);
+    expect(JSON.stringify(bodyAfter?.prosemirrorJson)).toBe(
+      JSON.stringify(bodyBefore?.prosemirrorJson),
+    );
+
+    // Restoring removes the annotation row, logs another update_document, and STILL
+    // leaves the body intact — fully reversible.
+    expect(documents.removeMark(mark.id)).toBe(true);
+    expect(documents.listMarksByType(source.id, "processed_span")).toHaveLength(0);
+    expect(ops.listForElement(source.id).filter((e) => e.opType === "update_document").length).toBe(
+      3,
+    );
+    const bodyRestored = documents.findById(source.id);
+    expect(bodyRestored?.plainText).toBe(bodyBefore?.plainText);
+  });
 });
 
 describe("DocumentRepository — read-points (T017)", () => {

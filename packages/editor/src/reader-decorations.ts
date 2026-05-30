@@ -55,6 +55,22 @@ export interface HighlightDecoration {
   readonly end: number;
 }
 
+/**
+ * One persisted processed span to overlay (T026): a STABLE block id with a
+ * `processed_span` `document_marks` row. Marking a block processed DIMS it
+ * (`.dimmed`) so the user can declutter a long source WITHOUT deleting content;
+ * `markId` lets the reader map the block's restore button back to the
+ * `document_marks` row to remove it (fully reversible). T026 dims at PARAGRAPH
+ * granularity (matching the kit's per-paragraph toggle), so the whole block is
+ * dimmed rather than a sub-range.
+ */
+export interface ProcessedDecoration {
+  /** The `document_marks.id` of the persisted processed span. */
+  readonly markId: string;
+  /** The STABLE block id the processed span dims. */
+  readonly blockId: string;
+}
+
 /** The inputs that drive the reader decorations (pushed by the host). */
 export interface ReaderDecorationState {
   /** The first UNREAD block id; the divider is placed before it. `null` ⇒ none. */
@@ -65,6 +81,8 @@ export interface ReaderDecorationState {
   readonly extractedBlockIds: readonly string[];
   /** Persisted highlights to overlay as `mark.hl` inline decorations (T020). */
   readonly highlights: readonly HighlightDecoration[];
+  /** Persisted processed spans to dim as `.dimmed` node decorations (T026). */
+  readonly processed: readonly ProcessedDecoration[];
   /**
    * The block briefly ringed after a jump-to-source (T022). The `.jumped` node
    * decoration draws the kit's accent ring; the host clears it after a beat via
@@ -79,6 +97,7 @@ const EMPTY_STATE: ReaderDecorationState = {
   readPointBlockId: null,
   extractedBlockIds: [],
   highlights: [],
+  processed: [],
   flashedBlockId: null,
 };
 
@@ -124,6 +143,10 @@ export function createReaderDecorationsPlugin(): Plugin<ReaderDecorationState> {
       decorations(editorState) {
         const inputs = readerDecorationsKey.getState(editorState) ?? EMPTY_STATE;
         const extracted = new Set(inputs.extractedBlockIds);
+        // Map a processed block id → its `document_marks.id` (the restore button
+        // reads this off `data-processed-mark-id` to remove the dimming). T026.
+        const processedByBlock = new Map<string, string>();
+        for (const p of inputs.processed) processedByBlock.set(p.blockId, p.markId);
         // Group highlights by block id so a single doc walk can place them inline.
         const highlightsByBlock = new Map<string, HighlightDecoration[]>();
         for (const hl of inputs.highlights) {
@@ -139,19 +162,29 @@ export function createReaderDecorationsPlugin(): Plugin<ReaderDecorationState> {
           if (typeof blockId !== "string" || blockId.length === 0) return true;
 
           // Node decoration: extracted-span display class + read-point anchor +
-          // the transient jump-to-source flash ring (T022).
+          // the transient jump-to-source flash ring (T022) + the processed-span
+          // dimming (T026).
           const classes: string[] = [];
           if (extracted.has(blockId)) classes.push("extracted");
           if (blockId === inputs.flashedBlockId) classes.push("jumped");
+          const processedMarkId = processedByBlock.get(blockId);
+          if (processedMarkId) classes.push("dimmed");
           const attrs: {
             class?: string;
             "data-readpoint-block"?: string;
             "data-jumped"?: string;
+            "data-processed-mark-id"?: string;
           } = {};
           if (classes.length > 0) attrs.class = classes.join(" ");
           if (blockId === inputs.readPointBlockId) attrs["data-readpoint-block"] = "true";
           if (blockId === inputs.flashedBlockId) attrs["data-jumped"] = "true";
-          if (attrs.class || attrs["data-readpoint-block"] || attrs["data-jumped"]) {
+          if (processedMarkId) attrs["data-processed-mark-id"] = processedMarkId;
+          if (
+            attrs.class ||
+            attrs["data-readpoint-block"] ||
+            attrs["data-jumped"] ||
+            attrs["data-processed-mark-id"]
+          ) {
             decorations.push(Decoration.node(pos, pos + node.nodeSize, attrs));
           }
 

@@ -53,6 +53,7 @@ const BASE: ReaderDecorationState = {
   readPointBlockId: null,
   extractedBlockIds: [],
   highlights: [],
+  processed: [],
   flashedBlockId: null,
 };
 
@@ -204,6 +205,38 @@ describe("ReaderDecorations plugin", () => {
       decorationsOf(state)
         .find()
         .filter((d) => (d as unknown as DecorationInternal).type?.attrs?.class?.includes("jumped")),
+    ).toHaveLength(0);
+  });
+
+  it("dims a processed block with the `dimmed` class + its mark id (T026)", () => {
+    const state = withInputs(buildState(DOC), {
+      processed: [{ markId: "p1", blockId: "b2" }],
+    });
+    const decos = decorationsOf(state).find();
+    const dimmed = decos.filter((d) =>
+      (d as unknown as DecorationInternal).type?.attrs?.class?.includes("dimmed"),
+    );
+    expect(dimmed).toHaveLength(1);
+    // The restore button reads the backing `document_marks.id` off this attr.
+    expect(
+      (dimmed[0] as unknown as DecorationInternal).type?.attrs?.["data-processed-mark-id"],
+    ).toBe("p1");
+  });
+
+  it("removes the dimming when the processed input is cleared (reversible)", () => {
+    let state = withInputs(buildState(DOC), {
+      processed: [{ markId: "p1", blockId: "b2" }],
+    });
+    expect(
+      decorationsOf(state)
+        .find()
+        .filter((d) => (d as unknown as DecorationInternal).type?.attrs?.class?.includes("dimmed")),
+    ).toHaveLength(1);
+    state = withInputs(state, { processed: [] });
+    expect(
+      decorationsOf(state)
+        .find()
+        .filter((d) => (d as unknown as DecorationInternal).type?.attrs?.class?.includes("dimmed")),
     ).toHaveLength(0);
   });
 });
