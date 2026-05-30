@@ -1,0 +1,317 @@
+/*
+ * "Process queue" learning loop styles (T031).
+ *
+ * The one-at-a-time session surface — a centered process card with a metadata row,
+ * the item body (attention items) or a card prompt/reveal stub (cards), and the
+ * inline action bar. Chrome (the progress bar, the budget/mode segmented controls,
+ * the done state) is framed at the top. Token-only (no hard-coded colors); reuses
+ * the `q-panel` / `q-empty` / `sessionbar__start` / `snackbar` classes from
+ * `queue.css` + the shared `badge`/`prio`/`sched`/`stage`/`tico` from `inspector.css`.
+ */
+
+.pq-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ---------- Session header ---------- */
+.pq-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-5);
+  padding: var(--s-4) var(--s-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.pq-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pq-end:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.pq-progress {
+  flex: 1;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.pq-progress__nums {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  color: var(--text-2);
+}
+.pq-progress__est {
+  color: var(--text-3);
+}
+.pq-progress__bar {
+  height: 5px;
+  border-radius: var(--r-full);
+  background: var(--sunken);
+  overflow: hidden;
+}
+.pq-progress__fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--fast) var(--ease);
+}
+.pq-modes {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.pq-modes__label {
+  color: var(--text-3);
+  font-size: var(--t-sm);
+  margin-right: 4px;
+}
+.pq-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 27px;
+  padding: 0 10px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--fast) var(--ease);
+}
+.pq-seg:hover {
+  border-color: var(--text-3);
+  color: var(--text);
+}
+.pq-seg--on {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--canvas);
+}
+
+.pq-error {
+  color: var(--danger);
+  font-size: var(--t-sm);
+  padding: var(--s-3) var(--s-6);
+  margin: 0;
+}
+
+/* ---------- Centered work area ---------- */
+.pq-center {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-7) var(--s-6);
+}
+
+.pq-card {
+  width: 100%;
+  max-width: 640px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-sm);
+  padding: var(--s-7);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+.pq-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+}
+.pq-card__chips {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.pq-card__title {
+  font-size: var(--t-xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin: 0;
+  line-height: 1.25;
+}
+
+/* ---------- Card prompt / reveal stub ---------- */
+.pq-cardface {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+  align-items: center;
+  text-align: center;
+  padding: var(--s-5) 0;
+}
+.pq-card__prompt {
+  font-family: var(--font-read);
+  font-size: var(--t-lg);
+  color: var(--text);
+  margin: 0;
+  line-height: 1.5;
+}
+.pq-card__answer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-4);
+  padding-top: var(--s-5);
+  border-top: 1px solid var(--border);
+  width: 100%;
+}
+.pq-card__note {
+  font-size: var(--t-sm);
+  color: var(--text-2);
+  max-width: 420px;
+  margin: 0;
+}
+.pq-reveal {
+  align-self: center;
+}
+
+/* ---------- Attention-item body preview ---------- */
+.pq-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.pq-body__src {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-sm);
+  color: var(--text-2);
+}
+.pq-body__text {
+  font-family: var(--font-read);
+  font-size: var(--t-base);
+  line-height: 1.6;
+  color: var(--text);
+  margin: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+.pq-body__text--empty {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+/* ---------- Action bar ---------- */
+.pq-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--border);
+}
+.pq-actions__spacer {
+  flex: 1;
+}
+.pq-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--fast) var(--ease);
+}
+.pq-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+.pq-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.pq-btn--primary {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft-bd);
+  color: var(--accent-text);
+}
+.pq-btn--primary:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.pq-btn--done {
+  background: var(--ok-soft);
+  border-color: color-mix(in oklch, var(--ok) 30%, transparent);
+  color: var(--ok);
+}
+.pq-btn--done:hover:not(:disabled) {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.pq-btn--danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in oklch, var(--danger) 35%, transparent);
+  background: var(--danger-soft);
+}
+
+.pq-keys {
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+  margin: 0;
+  text-align: center;
+}
+.pq-keys kbd {
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  padding: 1px 5px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+/* ---------- Done state ---------- */
+.pq-donepanel {
+  width: 100%;
+  max-width: 520px;
+}
+.pq-done__actions {
+  display: flex;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+}

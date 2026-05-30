@@ -287,10 +287,11 @@ export function QueueScreen() {
   );
 
   const startSession = useCallback(() => {
-    // The T031 "Process queue" loop lands at /review (or a dedicated /process route);
-    // until then "Start session" routes to the review placeholder.
-    void navigate({ to: "/review" });
-  }, [navigate]);
+    // The T031 "Process queue" loop lives at /process: one element at a time,
+    // advancing after each action, reusing the same typed mutation path as this
+    // list. Carry the `asOf` clock so the loop reads the SAME due set the list shows.
+    void navigate({ to: "/process", search: asOf ? { asOf } : {} });
+  }, [navigate, asOf]);
 
   /** Human label for the snackbar after a removing action (T030). */
   const removedMessage = useCallback((item: QueueItemSummary, kind: RowActionKind): string => {

@@ -26,6 +26,7 @@ import { createRootRoute, createRoute, createRouter } from "@tanstack/react-rout
 import { DesktopStatusPanel } from "./components/DesktopStatusPanel";
 import { InboxScreen } from "./pages/inbox/InboxScreen";
 import { Placeholder } from "./pages/Placeholder";
+import { ProcessQueue } from "./pages/queue/ProcessQueue";
 import { QueueScreen } from "./pages/queue/QueueScreen";
 import { Settings } from "./pages/Settings";
 import { SourceReader } from "./pages/source/SourceReader";
@@ -57,6 +58,20 @@ const queueRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/queue",
   component: QueueScreen,
+});
+
+/**
+ * The "Process queue" learning loop (T031) — a focused, one-element-at-a-time mode
+ * the queue's "Start session" button opens. It reuses the same typed `queue.list` /
+ * `queue.act` / `elements.setPriority` surface as the list (no new mutation path),
+ * advancing the cursor after every action so the user processes ten mixed
+ * sources/extracts/cards without returning to a list. Lives on its own `/process`
+ * route so the `/review` placeholder stays reserved for the M7 review session.
+ */
+const processRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/process",
+  component: ProcessQueue,
 });
 
 const sourceRoute = createRoute({
@@ -126,6 +141,7 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   inboxRoute,
   queueRoute,
+  processRoute,
   sourceRoute,
   extractRoute,
   reviewRoute,
