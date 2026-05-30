@@ -213,3 +213,94 @@ test("authoring a Q&A card from an extract persists it with lineage and survives
 
   await app.close();
 });
+
+/** The cloze document_marks on a card, via the typed bridge. */
+async function clozeMarks(page: Page, id: string) {
+  return page.evaluate(async (elementId) => {
+    const api = window.appApi as unknown as {
+      documents: {
+        marks: {
+          list(req: {
+            elementId: string;
+            markType?: string;
+          }): Promise<{ marks: { blockId: string; markType: string; attrs: unknown }[] }>;
+        };
+      };
+    };
+    const { marks } = await api.documents.marks.list({ elementId, markType: "cloze" });
+    return marks;
+  }, id);
+}
+
+test("authoring a multi-cloze card from an extract persists canonical text + cloze marks and survives restart", async () => {
+  let app = await launchApp(dataDir, { seedOnEmpty: true });
+  let page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+  const url = new URL(page.url());
+  baseUrl = `${url.protocol}//${url.host}`;
+  const srcId = await resolveSourceId(page);
+  // A FRESH extract so its only card child is the cloze card we author here.
+  const clozeExtractId = await createIntroExtract(page, srcId);
+
+  await openExtract(page, clozeExtractId);
+
+  // CONVERT → switch to the Cloze tab (the toolbar Cloze action also opens here; the
+  // Convert button + tab click is the deterministic path for the E2E).
+  await page.getByTestId("extract-convert").click();
+  await expect(page.getByTestId("card-builder")).toBeVisible();
+  await page.getByTestId("cb-tab-cloze").click();
+  await expect(page.getByTestId("cb-cloze-text")).toBeVisible();
+
+  // AUTHOR a multi-cloze deletion (`{{c1::…}} {{c2::…}}`).
+  await page
+    .getByTestId("cb-cloze-text")
+    .fill("Memory moves from the {{c1::hippocampus}} to the {{c2::neocortex}}.");
+  // The preview shows two hidden deletions; the count hint reflects 2.
+  await expect(page.getByTestId("cb-cloze-count")).toContainText("2 cloze deletions");
+  expect(await page.getByTestId("cb-cloze-deletion").count()).toBe(2);
+  await page.getByTestId("cb-create").click();
+  await expect(page.getByText("Cloze card created")).toBeVisible();
+
+  // LINEAGE — the cloze card is the extract's one card child.
+  await expect
+    .poll(async () => {
+      const data = await inspect(page, clozeExtractId);
+      return (data?.children ?? []).filter((c) => c.type === "card").length;
+    })
+    .toBe(1);
+  const exData = await inspect(page, clozeExtractId);
+  const clozeCardId = (exData?.children ?? []).find((c) => c.type === "card")?.id ?? "";
+  expect(clozeCardId).not.toBe("");
+
+  // The persisted cloze card: stored canonical numbered text + 2 cloze marks.
+  const clozeRow = await page.evaluate(async (id) => {
+    const api = window.appApi as unknown as {
+      inspector: { get(req: { id: string }): Promise<{ data: { element: { stage: string } } }> };
+    };
+    const { data } = await api.inspector.get({ id });
+    return data?.element ?? null;
+  }, clozeCardId);
+  expect(clozeRow?.stage).toBe("card_draft");
+  const marks = await clozeMarks(page, clozeCardId);
+  expect(marks.length).toBe(2);
+  expect(new Set(marks.map((m) => (m.attrs as { clozeIndex: number }).clozeIndex))).toEqual(
+    new Set([1, 2]),
+  );
+
+  // RESTART — the cloze card, its kind/canonical text, and its marks survive.
+  await app.close();
+  app = await launchApp(dataDir);
+  page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  const afterRestart = await inspect(page, clozeCardId);
+  expect(afterRestart?.element.type).toBe("card");
+  expect(afterRestart?.element.stage).toBe("card_draft");
+  expect(afterRestart?.parent?.id).toBe(clozeExtractId);
+  expect(afterRestart?.source?.id).toBe(srcId);
+
+  const marksAfter = await clozeMarks(page, clozeCardId);
+  expect(marksAfter.length).toBe(2);
+
+  await app.close();
+});

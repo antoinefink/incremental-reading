@@ -1,5 +1,5 @@
 /**
- * Card builder (T033 — Q&A card creation; the Cloze tab is fleshed out in T034).
+ * Card builder (T033 — Q&A card creation; T034 — cloze card creation).
  *
  * The RIGHT column of `design/kit/app/screen-builder.jsx`, rebuilt for our stack.
  * From the extract distillation workspace ({@link ExtractView}) the user opens this
@@ -7,27 +7,35 @@
  *
  *  - the `Cloze` / `Q&A` tabs (Image occlusion stays disabled — M15);
  *  - the Q&A `Front · question` + `Back · answer` textareas;
- *  - a live `cardprev` preview that shows the front and toggles to the back on
- *    reveal (Space, mirroring the kit's `Kbd ␣`);
+ *  - the Cloze `Cloze text` textarea — wrap answers in `{{ }}`; the preview renders
+ *    each deletion as `[ … ]` and reveals the answers on toggle, driven by the
+ *    `@interleave/core` `renderClozePrompt` helper (NOT ad-hoc regex here);
+ *  - a live `cardprev` preview that shows the front and toggles to the back / reveals
+ *    cloze answers (Space, mirroring the kit's `Kbd ␣`);
  *  - the `qc` quality-checklist CONTAINER (the heuristics land in T035 — this task
  *    renders the shell only);
  *  - the A/B/C/D priority chips (default = the extract's label) + the FSRS
  *    `SchedulerChip` (FSRS side; schedule values are previews/`—` until M7);
- *  - a `Create Q&A card` block button.
+ *  - a `Create Q&A card` / `Create cloze card` block button.
  *
  * Pressing Create calls the typed `cards.create` command (T032) — the renderer
  * ships ONLY the authored strings + the `extractId` + the chosen priority label.
- * All lineage/priority/tag inheritance happens main-side in `CardService`; this
- * component is presentational — NO SQL, NO priority-numeric math, NO lineage
- * resolution here (Architectural rules). On success the builder stays open and
- * threads the returned `siblingGroupId` so a Q&A + cloze pair can be authored
- * back-to-back as siblings.
+ * For a cloze card the renderer canonicalizes the `{{ }}` text to the numbered
+ * `{{c1::answer}}` form via `@interleave/core` before sending it (the main side
+ * re-canonicalizes + derives the structured metadata + persists the `cloze`
+ * document_marks; the renderer never touches SQL). All lineage/priority/tag
+ * inheritance happens main-side in `CardService`; this component is presentational —
+ * NO SQL, NO priority-numeric math, NO lineage resolution, NO cloze parsing logic of
+ * its own (Architectural rules). On success the builder stays open and threads the
+ * returned `siblingGroupId` so a Q&A + cloze pair (or a multi-cloze set) can be
+ * authored back-to-back as siblings.
  *
  * The card is created at `card_draft` with an UN-DUE `review_states` row (M6 does
  * no FSRS math); it appears in the inspector + lineage tree immediately and enters
  * FSRS rotation in M7.
  */
 
+import { canonicalizeCloze, parseCloze, renderClozePrompt } from "@interleave/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "../components/Icon";
 import { priorityLabel } from "../components/inspector/primitives";
@@ -61,8 +69,8 @@ export interface CardBuilderProps {
 }
 
 /**
- * Author a card from an extract. Q&A is fully wired (T033); the Cloze tab renders
- * a minimal authoring field whose parsing/marks/preview are completed in T034.
+ * Author a card from an extract. Both tabs are fully wired: Q&A (T033) and Cloze
+ * (T034 — `{{ }}` authoring, `[ … ]` preview + reveal, canonical numbered send).
  */
 export function CardBuilder({
   extractId,
@@ -102,22 +110,30 @@ export function CardBuilder({
   }, [defaultLabel]);
 
   const qaValid = front.trim().length > 0 && back.trim().length > 0;
-  const clozeValid = cloze.trim().length > 0;
-  const canCreate = tab === "qa" ? qaValid : clozeValid;
+  // A cloze is authorable once it has at least one deletion (a coarse boundary — the
+  // rich quality gate is T035). `clozeCount` is computed below; reference it lazily.
+  const canCreate = tab === "qa" ? qaValid : parseCloze(cloze).clozeCount > 0;
 
-  // The preview face: Q&A shows front, toggling to back on reveal. (Cloze preview
-  // rendering — `[ … ]` deletions — is wired in T034.)
+  // The Q&A preview face: front, toggling to back on reveal.
   const previewFace = useMemo(() => {
-    if (tab === "qa") return revealed ? back : front;
-    return cloze;
-  }, [tab, revealed, front, back, cloze]);
+    return revealed ? back : front;
+  }, [revealed, front, back]);
+
+  // The cloze preview spans (T034): each `{{cN::…}}` renders as `[ … ]` and reveals
+  // its answer on toggle, via the core helper — no ad-hoc regex in the component. The
+  // distinct-deletion count drives the "Create cloze card" affordance + (later) T035.
+  const clozeSpans = useMemo(
+    () => renderClozePrompt(cloze, { revealAll: revealed }),
+    [cloze, revealed],
+  );
+  const clozeCount = useMemo(() => parseCloze(cloze).clozeCount, [cloze]);
 
   const toggleReveal = useCallback(() => setRevealed((r) => !r), []);
 
-  // Space toggles the preview reveal (mirrors the kit's `Kbd ␣`), but only when the
-  // user is NOT typing into a field — a bare Space inside a textarea must type a space.
+  // Space toggles the preview reveal on BOTH tabs (mirrors the kit's `Kbd ␣`), but
+  // only when the user is NOT typing into a field — a bare Space inside a textarea
+  // must type a space. Bound once; the handler reads no render-scoped state.
   useEffect(() => {
-    if (tab !== "qa") return;
     function onKey(e: KeyboardEvent) {
       if (e.code !== "Space" && e.key !== " ") return;
       if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
@@ -129,7 +145,7 @@ export function CardBuilder({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tab]);
+  }, []);
 
   const create = useCallback(async () => {
     if (!canCreate || busy) return;
@@ -140,7 +156,12 @@ export function CardBuilder({
         kind: tab,
         priority,
         ...(siblingGroupId ? { siblingGroupId } : {}),
-        ...(tab === "qa" ? { prompt: front.trim(), answer: back.trim() } : { cloze: cloze.trim() }),
+        ...(tab === "qa"
+          ? { prompt: front.trim(), answer: back.trim() }
+          : // Canonicalize `{{ }}` → numbered `{{c1::…}}` before sending so the
+            // stored `cards.cloze` is always canonical (the main side re-canonicalizes
+            // and derives the structured metadata + `cloze` document_marks).
+            { cloze: canonicalizeCloze(cloze) }),
       });
       // Thread the (minted/reused) group so the next card from this extract is a sibling.
       setSiblingGroupId(result.card.siblingGroupId);
@@ -280,14 +301,46 @@ export function CardBuilder({
                 onChange={(e) => setCloze(e.target.value)}
                 placeholder="Wrap each answer like {{c1::answer}}…"
               />
+              <div className="cb-field__hint" data-testid="cb-cloze-count">
+                {clozeCount === 0
+                  ? "No cloze deletion yet — wrap a phrase in {{ }}"
+                  : `${clozeCount} cloze deletion${clozeCount > 1 ? "s" : ""}`}
+              </div>
             </div>
             <div className="cb-preview">
-              <div className="cardprev__label">Preview</div>
+              <div className="cardprev__label">Preview · {revealed ? "answers" : "deletions"}</div>
               <div className="cardprev" data-testid="cb-preview">
-                <div className="cardprev__face">
-                  {cloze.trim() ? cloze : <span className="dimmed">—</span>}
+                <div className="cardprev__face cardprev__face--cloze">
+                  {clozeCount === 0 ? (
+                    <span className="dimmed">—</span>
+                  ) : (
+                    clozeSpans.map((span, i) =>
+                      span.kind === "deletion" ? (
+                        <span
+                          // biome-ignore lint/suspicious/noArrayIndexKey: spans are positional
+                          key={i}
+                          className={`cloze${span.revealed ? " cloze--revealed" : ""}`}
+                          data-testid="cb-cloze-deletion"
+                        >
+                          {span.content}
+                        </span>
+                      ) : (
+                        // biome-ignore lint/suspicious/noArrayIndexKey: spans are positional
+                        <span key={i}>{span.content}</span>
+                      ),
+                    )
+                  )}
                 </div>
               </div>
+              <button
+                type="button"
+                className="cb-reveal"
+                data-testid="cb-reveal"
+                onClick={toggleReveal}
+              >
+                <Icon name="eye" size={14} /> {revealed ? "Hide answers" : "Reveal answers"}
+                <kbd className="cb-kbd">␣</kbd>
+              </button>
             </div>
           </>
         )}

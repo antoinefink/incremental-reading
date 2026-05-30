@@ -695,6 +695,53 @@ describe("DbService", () => {
     svc.close();
   });
 
+  it("createCard (multi-cloze) persists a cloze document_mark per deletion, listable via the bridge (T034)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const { extractId } = seedSourceAndExtract(svc);
+
+    const { card } = svc.createCard({
+      extractId,
+      kind: "cloze",
+      cloze: "Memory moves from the {{c1::hippocampus}} to the {{c2::neocortex}}.",
+    });
+
+    // The renderer-facing read path returns the two cloze marks, each tagged with
+    // its clozeIndex, keyed by the card's stable block id (re-anchorable on render).
+    const { marks } = svc.listDocumentMarks({ elementId: card.id, markType: "cloze" });
+    expect(marks.length).toBe(2);
+    const indices = marks
+      .map((m) => (m.attrs as { clozeIndex?: number } | null)?.clozeIndex)
+      .sort();
+    expect(indices).toEqual([1, 2]);
+    // All marks anchor to the SAME (single) block id.
+    expect(new Set(marks.map((m) => m.blockId)).size).toBe(1);
+
+    svc.close();
+  });
+
+  it("a cloze card + its marks survive a full close + reopen (T034 restart analogue)", () => {
+    const first = new DbService();
+    first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const { extractId } = seedSourceAndExtract(first);
+    const { card } = first.createCard({
+      extractId,
+      kind: "cloze",
+      cloze: "Both {{c1::cats}} and {{c2::dogs}} are mammals.",
+    });
+    const cardId = card.id;
+    first.close();
+
+    const second = new DbService();
+    second.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const reopened = second.repos.review.findCardById(cardId as never);
+    expect(reopened?.card.kind).toBe("cloze");
+    expect(reopened?.card.cloze).toBe("Both {{c1::cats}} and {{c2::dogs}} are mammals.");
+    const { marks } = second.listDocumentMarks({ elementId: cardId, markType: "cloze" });
+    expect(marks.length).toBe(2);
+    second.close();
+  });
+
   it("createCard rejects an unknown / soft-deleted extract (T032)", () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });

@@ -36,6 +36,14 @@ export {
   jumpToSource,
   scrollBlockIntoView,
 } from "./jump-to-source";
+// Cloze mark (T034): the cloze-deletion span on a CARD body (`span.cloze`,
+// carrying a `clozeIndex` attr). Reuses the T020 mark surface with
+// `markType: "cloze"`; the canonical source of truth is `cards.cloze` numbered text.
+export {
+  CLOZE_MARK_CLASS,
+  CLOZE_MARK_NAME,
+  Cloze,
+} from "./marks/cloze";
 // Document marks (T020 →): highlight (and, later, processed-span) Tiptap marks +
 // commands. Marks are applied through these commands, never DOM surgery; the
 // canonical persistence is a `document_marks` row keyed by stable block id + range.

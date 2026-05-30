@@ -14,6 +14,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   AssetId,
+  BlockId,
   ElementId,
   IsoTimestamp,
   OperationId,
@@ -35,6 +36,8 @@ export const newAssetId = (): AssetId => uuid() as AssetId;
 export const newOperationId = (): OperationId => uuid() as OperationId;
 export const newReviewLogId = (): ReviewLogId => uuid() as ReviewLogId;
 export const newSiblingGroupId = (): SiblingGroupId => uuid() as SiblingGroupId;
+/** Mint a stable block id (the lineage anchor extracts/marks/read-points reference). */
+export const newBlockId = (): BlockId => uuid() as BlockId;
 
 /** Mint a stable id for a non-branded row (document block, read-point, etc.). */
 export const newRowId = (): string => uuid();

@@ -294,6 +294,11 @@
   color: var(--text-3);
 }
 
+.cb-field__hint {
+  font-size: var(--t-2xs, 11px);
+  color: var(--text-3);
+}
+
 .cb-textarea {
   width: 100%;
   resize: vertical;
@@ -463,6 +468,27 @@
 .cb-meta__v {
   font-family: var(--font-mono, monospace);
   color: var(--text-2);
+}
+
+/* Cloze deletion span in the preview (kit `.cloze` / `.cloze--revealed`). */
+.cloze {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-radius: var(--r-xs, 4px);
+  padding: 1px 8px;
+  font-weight: 600;
+}
+
+.cloze--revealed {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+/* The cloze preview face left-aligns its flowing sentence (vs the centered Q&A face). */
+.cardprev__face--cloze {
+  display: block;
+  text-align: left;
+  width: 100%;
 }
 
 .cb-create {

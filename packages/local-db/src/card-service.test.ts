@@ -25,7 +25,16 @@
 
 import type { BlockId, ElementId, Priority } from "@interleave/core";
 import type { DbHandle } from "@interleave/db";
-import { cards, elementRelations, elementTags, operationLog, reviewStates } from "@interleave/db";
+import {
+  cards,
+  documentBlocks,
+  documentMarks,
+  documents,
+  elementRelations,
+  elementTags,
+  operationLog,
+  reviewStates,
+} from "@interleave/db";
 import { and, eq, isNotNull, lte } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CardService } from "./card-service";
@@ -267,6 +276,106 @@ describe("CardService.createFromExtract — cloze card + siblings", () => {
     expect(row?.cloze).toContain("{{c1::skill-acquisition efficiency}}");
     expect(row?.prompt).toBeNull();
     expect(row?.answer).toBeNull();
+  });
+
+  it("canonicalizes a bare {{answer}} cloze to numbered {{c1::…}} form", () => {
+    const { extractId } = seedExtract(handle);
+    const service = new CardService(handle.db);
+
+    const { element } = service.createFromExtract({
+      extractId,
+      kind: "cloze",
+      // The kit's bare form — must be auto-numbered before it is stored.
+      cloze: "From the {{hippocampus}} to the {{neocortex}}.",
+    });
+
+    const row = handle.db.select().from(cards).where(eq(cards.elementId, element.id)).get();
+    expect(row?.cloze).toBe("From the {{c1::hippocampus}} to the {{c2::neocortex}}.");
+  });
+
+  it("seeds the card body + a cloze document_mark per deletion (multi-cloze ⇒ clozeCount 2)", () => {
+    const { extractId } = seedExtract(handle);
+    const service = new CardService(handle.db);
+
+    const { element } = service.createFromExtract({
+      extractId,
+      kind: "cloze",
+      cloze: "Memory moves from the {{c1::hippocampus}} to the {{c2::neocortex}}.",
+    });
+
+    // The card has its OWN document body (one paragraph block) — needed so the cloze
+    // marks can anchor to a stable block id (the marks FK targets documents).
+    const body = handle.db
+      .select()
+      .from(documents)
+      .where(eq(documents.elementId, element.id))
+      .get();
+    expect(body).toBeTruthy();
+    // Answers are inline in the body text; the markers are NOT written there.
+    expect(body?.plainText).toBe("Memory moves from the hippocampus to the neocortex.");
+    expect(body?.plainText).not.toContain("{{");
+
+    const blocks = handle.db
+      .select()
+      .from(documentBlocks)
+      .where(eq(documentBlocks.documentId, element.id))
+      .all();
+    expect(blocks.length).toBe(1);
+    const blockId = blocks[0]?.stableBlockId;
+
+    // One `cloze` mark per deletion, anchored to the block, carrying its clozeIndex.
+    const marks = handle.db
+      .select()
+      .from(documentMarks)
+      .where(eq(documentMarks.documentId, element.id))
+      .all();
+    const clozeMarks = marks.filter((m) => m.markType === "cloze");
+    expect(clozeMarks.length).toBe(2);
+    expect(clozeMarks.every((m) => m.blockId === blockId)).toBe(true);
+    const indices = clozeMarks
+      .map((m) => (m.attrs ? (JSON.parse(m.attrs) as { clozeIndex: number }).clozeIndex : null))
+      .sort();
+    expect(indices).toEqual([1, 2]);
+    // The ranges line up with the answer spans in the body text.
+    for (const m of clozeMarks) {
+      const [start, end] = JSON.parse(m.range) as [number, number];
+      const span = (body?.plainText ?? "").slice(start, end);
+      expect(["hippocampus", "neocortex"]).toContain(span);
+    }
+
+    // The mark writes are logged under update_document (no new op type).
+    const docOps = handle.db
+      .select()
+      .from(operationLog)
+      .where(eq(operationLog.elementId, element.id))
+      .all()
+      .filter((r) => r.opType === "update_document");
+    expect(docOps.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("seeds NO card body / cloze marks for a Q&A card", () => {
+    const { extractId } = seedExtract(handle);
+    const service = new CardService(handle.db);
+
+    const { element } = service.createFromExtract({
+      extractId,
+      kind: "qa",
+      prompt: "Q?",
+      answer: "A.",
+    });
+
+    const body = handle.db
+      .select()
+      .from(documents)
+      .where(eq(documents.elementId, element.id))
+      .get();
+    expect(body).toBeUndefined();
+    const marks = handle.db
+      .select()
+      .from(documentMarks)
+      .where(eq(documentMarks.documentId, element.id))
+      .all();
+    expect(marks.length).toBe(0);
   });
 
   it("groups two cards from one extract under the same sibling_group id, and neither is FSRS-due", () => {

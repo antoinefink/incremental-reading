@@ -158,3 +158,42 @@ describe("CardBuilder — Q&A tab", () => {
     expect(h.onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("CardBuilder — Cloze tab (T034)", () => {
+  it("renders each deletion as the placeholder and reveals answers on toggle", () => {
+    renderBuilder({
+      initialTab: "cloze",
+      initialClozeText: "Memory moves from the {{c1::hippocampus}} to the {{c2::neocortex}}.",
+    });
+    // Two deletions, both hidden as the `[ … ]` placeholder.
+    const deletions = screen.getAllByTestId("cb-cloze-deletion");
+    expect(deletions).toHaveLength(2);
+    expect(deletions.every((d) => d.textContent === "[ … ]")).toBe(true);
+    expect(screen.getByTestId("cb-cloze-count").textContent).toContain("2 cloze deletions");
+    // Reveal flips every deletion to its answer.
+    fireEvent.click(screen.getByTestId("cb-reveal"));
+    const revealed = screen.getAllByTestId("cb-cloze-deletion");
+    expect(revealed.map((d) => d.textContent)).toEqual(["hippocampus", "neocortex"]);
+  });
+
+  it("disables Create until the cloze text has a deletion, then sends canonical text", async () => {
+    renderBuilder({ initialTab: "cloze", initialClozeText: "" });
+    const create = screen.getByTestId("cb-create");
+    expect(create).toBeDisabled();
+    // A bare `{{answer}}` is auto-numbered to `{{c1::…}}` before sending.
+    fireEvent.change(screen.getByTestId("cb-cloze-text"), {
+      target: { value: "Intelligence is {{skill-acquisition efficiency}}." },
+    });
+    expect(create).not.toBeDisabled();
+    fireEvent.click(create);
+    await waitFor(() => expect(h.createCard).toHaveBeenCalledTimes(1));
+    expect(h.createCard).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extractId: "ex_1",
+        kind: "cloze",
+        cloze: "Intelligence is {{c1::skill-acquisition efficiency}}.",
+      }),
+    );
+    expect(h.onToast).toHaveBeenCalledWith("Cloze card created");
+  });
+});

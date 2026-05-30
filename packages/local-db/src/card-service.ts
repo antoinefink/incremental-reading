@@ -52,9 +52,11 @@ import type {
   SiblingGroupId,
   SourceLocationId,
 } from "@interleave/core";
+import { canonicalizeCloze, parseCloze } from "@interleave/core";
 import type { InterleaveDatabase } from "@interleave/db";
+import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
-import { newSiblingGroupId } from "./ids";
+import { newBlockId, newSiblingGroupId } from "./ids";
 import type { CardWithElement } from "./review-repository";
 import { ReviewRepository } from "./review-repository";
 import { SourceRepository } from "./source-repository";
@@ -113,11 +115,13 @@ export class CardService {
   private readonly elements: ElementRepository;
   private readonly review: ReviewRepository;
   private readonly sources: SourceRepository;
+  private readonly documents: DocumentRepository;
 
   constructor(private readonly db: InterleaveDatabase) {
     this.elements = new ElementRepository(db);
     this.review = new ReviewRepository(db);
     this.sources = new SourceRepository(db);
+    this.documents = new DocumentRepository(db);
   }
 
   /**
@@ -150,7 +154,17 @@ export class CardService {
     // Reads up front (no DB writes): the extract's inherited tags.
     const inheritedTags = this.elements.listTags(input.extractId);
 
-    const title = (input.title ?? "").trim() || titleFromBody(input);
+    // Cloze cards store the CANONICAL `{{c1::answer}}` text (T034) — the single
+    // source of truth. Bare `{{answer}}` markers from the kit/renderer are
+    // auto-numbered here; the structured model (count + index→answer spans) is
+    // derived deterministically from this text by `parseCloze`, and the deletion
+    // spans are persisted as `cloze` document_marks on the card body below.
+    const cloze =
+      input.kind === "cloze" && input.cloze != null ? canonicalizeCloze(input.cloze) : input.cloze;
+
+    const title =
+      (input.title ?? "").trim() ||
+      titleFromBody(cloze !== undefined ? { ...input, cloze } : input);
 
     const { element, card } = this.db.transaction((tx) => {
       // 1–3) the card element + cards row + UN-DUE review_states row (create_element
@@ -162,7 +176,7 @@ export class CardService {
         stage: "card_draft",
         prompt: input.prompt ?? null,
         answer: input.answer ?? null,
-        cloze: input.cloze ?? null,
+        cloze: cloze ?? null,
         parentId,
         sourceId,
         sourceLocationId,
@@ -182,9 +196,72 @@ export class CardService {
         siblingGroupId,
       });
 
+      // 6) CLOZE structured metadata (T034): seed the card's own document body from
+      //    the RENDERED prompt (answers inline, on ONE block so all deletions share a
+      //    stable anchor) and persist each deletion as a `cloze` document_marks row
+      //    keyed by that block id + its `[start,end]` answer range + `{ clozeIndex }`.
+      //    Reuses the existing mark surface (markType `cloze`, op `update_document`) —
+      //    NO new column, NO new op. Derived from `cards.cloze`, so it re-renders
+      //    without re-parsing free text. The markers are NEVER written to the
+      //    source/extract body (that would corrupt the extract) — only the card's.
+      if (input.kind === "cloze" && cloze != null) {
+        this.seedClozeBodyWithin(tx, created.element.id, cloze);
+      }
+
       return created;
     });
 
     return { element, card, siblingGroupId, sourceLocationId };
+  }
+
+  /**
+   * Seed a cloze card's document body + its `cloze` document_marks inside the card
+   * transaction (T034). The body is the RENDERED prompt (answers inline) collapsed
+   * to a SINGLE paragraph block, so every deletion's `[start,end]` answer range
+   * (computed by `parseCloze` against that same rendered text) anchors to one stable
+   * block id. One `cloze` mark per deletion, `attrs: { clozeIndex }`. All on the same
+   * `tx` (update_document), so the body + marks commit or roll back with the card.
+   */
+  private seedClozeBodyWithin(
+    tx: Parameters<DocumentRepository["upsertWithin"]>[0],
+    cardId: ElementId,
+    clozeText: string,
+  ): void {
+    const parsed = parseCloze(clozeText);
+    // The card body is `parsed.rendered` (answers inline) on ONE paragraph block, so
+    // every deletion's `[start,end]` (offsets parseCloze computed against THIS exact
+    // string) lines up. We build the single-block doc directly (not the multi-block
+    // splitter) so a `rendered` containing a blank line can never shift the offsets.
+    const blockId = newBlockId();
+    const prosemirrorJson = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          attrs: { blockId },
+          ...(parsed.rendered.length > 0
+            ? { content: [{ type: "text", text: parsed.rendered }] }
+            : {}),
+        },
+      ],
+    };
+    this.documents.upsertWithin(tx, {
+      elementId: cardId,
+      prosemirrorJson,
+      plainText: parsed.rendered,
+      blocks: [{ blockType: "paragraph", order: 0, stableBlockId: blockId }],
+    });
+    // One `cloze` mark per deletion, anchored to the single block.
+    for (const deletion of parsed.deletions) {
+      // Guard against an out-of-range span (defensive; ranges come from the same text).
+      if (deletion.end <= deletion.start) continue;
+      this.documents.addMarkWithin(tx, {
+        elementId: cardId,
+        blockId,
+        markType: "cloze",
+        range: [deletion.start, deletion.end],
+        attrs: { clozeIndex: deletion.index },
+      });
+    }
   }
 }

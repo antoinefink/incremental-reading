@@ -22,6 +22,21 @@ export const CORE_PACKAGE = "@interleave/core" as const;
 // before value exports and alphabetizes by module, so per-block comments are
 // kept minimal; the authoritative docs live on each declaration in its module.
 
+// Cloze parse/serialize/preview — structured-metadata source of truth (./cloze).
+export type {
+  ClozeDeletion,
+  ClozeSpan,
+  ParsedCloze,
+  RenderClozeOptions,
+} from "./cloze";
+export {
+  CLOZE_PLACEHOLDER,
+  canonicalizeCloze,
+  hasClozeMarker,
+  parseCloze,
+  renderClozePrompt,
+  serializeCloze,
+} from "./cloze";
 // The universal element + lineage neighbours (./element).
 export type {
   Element,
