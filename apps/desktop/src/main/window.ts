@@ -17,7 +17,7 @@
  */
 
 import path from "node:path";
-import { BrowserWindow } from "electron";
+import { app, BrowserWindow } from "electron";
 import { RENDERER_URL } from "./renderer-protocol";
 
 /** Where the preload bundle is emitted (relative to the compiled main file). */
@@ -59,7 +59,11 @@ export function createMainWindow(options: CreateWindowOptions): BrowserWindow {
     win.show();
   });
 
-  const devServerUrl = options.devServerUrl ?? process.env.VITE_DEV_SERVER_URL ?? undefined;
+  // The packaged app never loads a dev server (T050): even if the env var leaks
+  // into a shipped build, production loads the offline `app://` renderer.
+  const devServerUrl = app.isPackaged
+    ? undefined
+    : (options.devServerUrl ?? process.env.VITE_DEV_SERVER_URL ?? undefined);
 
   if (devServerUrl) {
     void win.loadURL(devServerUrl);

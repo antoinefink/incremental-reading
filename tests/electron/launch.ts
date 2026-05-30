@@ -47,6 +47,13 @@ export function makeDataDir(): string {
 export interface LaunchOptions {
   /** Seed the demo collection when the database is empty (T010 inspector E2E). */
   readonly seedOnEmpty?: boolean;
+  /**
+   * Show the first-run onboarding overlay (T050). DEFAULTS to suppressed: the
+   * existing feature specs start from a fresh, empty data dir, where the welcome
+   * overlay would otherwise cover the UI. The dedicated onboarding spec passes
+   * `{ showOnboarding: true }` to exercise the real first-run flow.
+   */
+  readonly showOnboarding?: boolean;
 }
 
 /**
@@ -69,6 +76,9 @@ export async function launchApp(
       ...process.env,
       INTERLEAVE_DATA_DIR: dataDir,
       ...(options.seedOnEmpty ? { INTERLEAVE_SEED_ON_EMPTY: "1" } : {}),
+      // Suppress the first-run onboarding overlay unless a spec opts in, so it
+      // never covers the UI in the feature specs (all start empty). See main/index.ts.
+      ...(options.showOnboarding ? {} : { INTERLEAVE_SUPPRESS_ONBOARDING: "1" }),
       // Ensure production-mode renderer load (built files, not the dev server).
       VITE_DEV_SERVER_URL: "",
       NODE_ENV: "production",

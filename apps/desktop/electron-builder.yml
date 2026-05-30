@@ -1,0 +1,95 @@
+# electron-builder configuration (T050) — package the Interleave desktop shell
+# into an installable macOS .app + .dmg.
+#
+# WHY electron-builder (not @electron-forge): this repo already owns its build
+# pipeline — esbuild bundles `main.cjs`/`preload.cjs` (`build.mjs`), a custom
+# `app://` protocol serves the renderer offline, and `scripts/vendor-native.mjs`
+# vendors the Electron-ABI `better-sqlite3` addon. electron-builder is a
+# packaging-ONLY tool: it wraps the already-built `dist/` + `node_modules` and
+# produces the `.app`/`.dmg` with first-class `asarUnpack` for native modules,
+# slotting cleanly AROUND the existing pipeline. @electron-forge wants to OWN the
+# build (its own webpack/vite plugins + bundling lifecycle), which would fight
+# the esbuild/`build.mjs` + custom protocol + bespoke native-module vendoring.
+#
+# The packager is ADDITIVE: `pnpm dist` runs (1) the renderer build, (2)
+# `build.mjs` (which now also stages the renderer into `dist/renderer`), then
+# (3) electron-builder. The dev (`electron .`) and Playwright (`launch.ts`,
+# `INTERLEAVE_DATA_DIR`) paths are unchanged — they never invoke electron-builder.
+
+appId: dev.interleave.desktop
+productName: Interleave
+copyright: Copyright © 2026 Interleave
+
+# The compiled main entry (esbuild output). `package.json#main` already points here;
+# directories.output is where the .app/.dmg land.
+directories:
+  output: release
+  buildResources: build
+
+# Disable electron-builder's own native rebuild — we vendor the Electron-ABI
+# `better_sqlite3.node` ourselves (`scripts/vendor-native.mjs`) and load it via
+# `native-binding.ts`. Rebuilding here would clobber that with a Node-ABI binary.
+npmRebuild: false
+buildDependenciesFromSource: false
+
+# What goes INTO the asar. esbuild bundles EVERYTHING — every workspace package
+# (`@interleave/*`), `drizzle-orm`, `zod`, AND the `better-sqlite3` JS wrapper —
+# into a single self-contained `dist/main.cjs` (`build.mjs` externalizes only
+# `electron` + better-sqlite3's never-reached `bindings`/`prebuild-install`). So
+# the packaged app needs NO runtime `node_modules` at all: we ship `dist/**` (the
+# compiled main/preload + staged renderer + drizzle migrations) and the vendored
+# native addon, and the top-level symlinked `node_modules` is excluded entirely.
+#
+# IMPORTANT — why no `@interleave/*` production deps: those packages are
+# devDependencies (see package.json). If they were production deps, pnpm would
+# symlink them into `node_modules/@interleave/*` → `../../packages/*`, and
+# electron-builder's production-dependency collector would walk OUTSIDE the app
+# dir and abort packing a `.turbo/turbo-build.log` whose relative path escapes
+# the app (`… must be under …/apps/desktop/`). Keeping them as devDeps (they are
+# already inlined into main.cjs) removes that walk and is what makes packing
+# succeed. The ONLY production dependency is `better-sqlite3`, whose JS is bundled
+# too — its `node_modules` copy is intentionally never packed.
+files:
+  - "dist/**/*"
+  - "native/**/*"
+  - "package.json"
+  - "!dist/**/*.map"
+  - "!**/*.ts"
+  - "!**/*.test.*"
+  - "!node_modules/**/*"
+
+# The native SQLite addon CANNOT be dlopen'd from inside an asar archive, so it is
+# unpacked to `app.asar.unpacked/native/better_sqlite3.node`. `native-binding.ts`
+# rewrites the in-asar path to the `.unpacked` sibling at runtime. main.cjs loads
+# this addon by absolute path via better-sqlite3's `nativeBinding` option, so the
+# bundled JS wrapper never needs its own compiled addon.
+asar: true
+asarUnpack:
+  - "native/**/*"
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  # Code-signing + notarization are DEFERRED for the MVP (CLAUDE.md "macOS at
+  # minimum" = installs and runs locally). An unsigned build shows a Gatekeeper
+  # warning on first launch (right-click → Open). Stubs left for a later release
+  # task: set `identity` to the Developer ID and add an `afterSign` notarize hook.
+  identity: null
+  # hardenedRuntime + entitlements are required for notarization; harmless unsigned.
+  hardenedRuntime: false
+  # icon: build/icon.icns   # add a real .icns for the final release
+
+dmg:
+  title: Interleave ${version}
+  # Standard "drag to /Applications" layout.
+  contents:
+    - x: 130
+      y: 220
+      type: file
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications

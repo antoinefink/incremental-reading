@@ -202,6 +202,14 @@ const appApi: AppApi = {
       ipcRenderer.on(IPC_CHANNELS.menuShowShortcuts, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.menuShowShortcuts, listener);
     },
+    // Receive-only subscription (T050): the native File → "Back up…" menu item
+    // sends `menu:createBackup`; we forward a payload-free callback and return an
+    // unsubscribe fn. Same narrow, named-event pattern as `onShowShortcuts`.
+    onCreateBackup: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC_CHANNELS.menuCreateBackup, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.menuCreateBackup, listener);
+    },
   },
 };
 

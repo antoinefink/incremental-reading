@@ -29,6 +29,7 @@ function makeHandlers(): ShellShortcutHandlers {
     toggleCheatSheet: vi.fn(),
     onNavigate: vi.fn(),
     onUndo: vi.fn(),
+    onCreateBackup: vi.fn(),
     onSearch: vi.fn(),
     onOpenSource: vi.fn(),
     onOpenParent: vi.fn(),
@@ -128,6 +129,18 @@ describe("useShellShortcuts — global element actions", () => {
 
     fireEvent.keyDown(getByTestId("field"), { key: "z", metaKey: true });
     expect(h.onUndo).toHaveBeenCalledTimes(1); // unchanged — field undo is native
+  });
+
+  it("⌘B triggers a backup outside a field, but not while typing (T050)", () => {
+    const h = makeHandlers();
+    const { getByTestId } = render(<Host handlers={h} />);
+
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    expect(h.onCreateBackup).toHaveBeenCalledTimes(1);
+
+    // While typing, ⌘B must not hijack the field (editor bold chord stays native).
+    fireEvent.keyDown(getByTestId("field"), { key: "b", metaKey: true });
+    expect(h.onCreateBackup).toHaveBeenCalledTimes(1); // unchanged
   });
 });
 

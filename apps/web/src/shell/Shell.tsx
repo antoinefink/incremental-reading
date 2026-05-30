@@ -24,8 +24,10 @@
 import type { LocalVaultPath, VaultRoot } from "@interleave/core";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { BackupPrompt, runBackup } from "../components/BackupPrompt";
 import { Icon } from "../components/Icon";
 import { Inspector } from "../components/inspector/Inspector";
+import { Onboarding } from "../components/Onboarding";
 import { Snackbar } from "../components/Snackbar";
 import { appApi, isDesktop } from "../lib/appApi";
 import { toggleTheme as applyToggleTheme, getStoredTheme, type Theme } from "../theme";
@@ -249,6 +251,7 @@ function ShellInner() {
   const [cheatOpen, setCheatOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => getStoredTheme());
   const [undoToast, setUndoToast] = useState<string | null>(null);
+  const [backupToast, setBackupToast] = useState<string | null>(null);
 
   const onNavigate = (to: string) => {
     void navigate({ to });
@@ -261,6 +264,28 @@ function ShellInner() {
    * actions delegate to `useGlobalActions` (same `window.appApi` commands as the
    * inspector buttons). No domain logic here — pure dispatch.
    */
+  /**
+   * Create a backup now (T050) — the single handler the ⌘B shortcut, the ⌘K
+   * "Create a backup" command, and the native File → "Back up…" menu all route
+   * through. It calls the SAME `appApi.createBackup()` the BackupPrompt button
+   * calls (via the shared `runBackup` helper, which also records the timestamp in
+   * settings so the reminder resets and survives restart) — no second path. No
+   * domain logic here; the backup bundle is produced entirely in the main process.
+   */
+  const onCreateBackup = () => {
+    if (!isDesktop()) return;
+    setBackupToast("Creating backup…");
+    void runBackup()
+      .then((res) => setBackupToast(`Backup created · ${res.fileCount} files`))
+      .catch((e: unknown) =>
+        setBackupToast(e instanceof Error ? `Backup failed: ${e.message}` : "Backup failed"),
+      );
+  };
+  // Latest backup handler, so the native-menu subscription can mount once and still
+  // call the current closure (matches the `handlers` ref pattern in useShellShortcuts).
+  const createBackupRef = useRef(onCreateBackup);
+  createBackupRef.current = onCreateBackup;
+
   const runAction = (actionId: PaletteActionId) => {
     switch (actionId) {
       case "open-source":
@@ -280,6 +305,9 @@ function ShellInner() {
         break;
       case "start-review":
         // The palette item already navigated to /review via its `to`; nothing more.
+        break;
+      case "create-backup":
+        onCreateBackup();
         break;
       case "cheat-sheet":
         setCheatOpen(true);
@@ -319,6 +347,14 @@ function ShellInner() {
     return appApi.onMenuShowShortcuts(() => setCheatOpen(true));
   }, []);
 
+  // The native File → "Back up…" (⌘B) menu item runs the SAME backup command as the
+  // ⌘B shortcut and the ⌘K palette, via the narrow `menu.onCreateBackup` bridge.
+  // The handler is re-read through a ref so the subscription mounts once.
+  useEffect(() => {
+    if (!isDesktop()) return;
+    return appApi.onMenuCreateBackup(() => createBackupRef.current());
+  }, []);
+
   const onToggleTheme = () => {
     const next = applyToggleTheme();
     setTheme(next);
@@ -336,6 +372,7 @@ function ShellInner() {
     toggleCheatSheet: () => setCheatOpen((o) => !o),
     onNavigate,
     onUndo,
+    onCreateBackup,
     onSearch: globalActions.search,
     onOpenSource: globalActions.openSource,
     onOpenParent: globalActions.openParent,
@@ -355,12 +392,19 @@ function ShellInner() {
       <div className="shell-main">
         <Topbar onOpenCommand={() => setCommandOpen(true)} />
         <main className="shell-page">
+          {/* Gentle, app-wide "no backup in N days" reminder + "create a backup
+              now" affordance (T050). Renders null until due / outside desktop. */}
+          <BackupPrompt />
           <Outlet />
         </main>
         <StatusBar />
       </div>
 
       <Inspector />
+
+      {/* First-run welcome / empty-state onboarding (T050) — shown once, then a
+          `ui.seenOnboarding` flag persists in settings (survives restart). */}
+      <Onboarding />
 
       <CommandPalette
         open={commandOpen}
@@ -375,6 +419,12 @@ function ShellInner() {
         message={undoToast}
         onClose={() => setUndoToast(null)}
         testId="shell-undo-snackbar"
+      />
+      {/* Backup toast (T050) — confirms the ⌘B / palette / menu backup command. */}
+      <Snackbar
+        message={backupToast}
+        onClose={() => setBackupToast(null)}
+        testId="shell-backup-snackbar"
       />
     </div>
   );

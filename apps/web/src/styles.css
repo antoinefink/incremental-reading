@@ -12,6 +12,27 @@
       with no `dark:` variant required.
    ============================================================ */
 
+/* Self-hosted IBM Plex superfamily (T050 — fully offline).
+   The packaged desktop app loads the renderer over the offline `app://` protocol
+   with NO network, so the fonts must ship inside the bundle, not be fetched from
+   Google Fonts. These @fontsource imports inline the exact weights/styles the app
+   uses (Sans 400/500/600/700 + italic 400; Serif 400/500/600 + italic 400; Mono
+   400/500/600); Vite bundles their woff2 into `dist/assets`. The canonical
+   `design/tokens.css` still owns the font-FAMILY variables — its network @import
+   is commented out there (see that file) so this is the single font source. */
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/400-italic.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans/700.css";
+@import "@fontsource/ibm-plex-serif/400.css";
+@import "@fontsource/ibm-plex-serif/400-italic.css";
+@import "@fontsource/ibm-plex-serif/500.css";
+@import "@fontsource/ibm-plex-serif/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
 @import "../../../design/tokens.css";
 @import "tailwindcss";
 

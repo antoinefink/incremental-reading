@@ -2406,5 +2406,12 @@ export interface AppApi {
      * — it carries no payload and exposes no generic listener.
      */
     onShowShortcuts(callback: () => void): () => void;
+    /**
+     * Subscribe to the native File → "Back up…" (⌘B) menu item (T050). A one-way
+     * main → renderer event so the native menu runs the SAME `backups.create()`
+     * command as the ⌘B shortcut and the ⌘K palette. Returns an unsubscribe fn;
+     * payload-free, no generic listener — same narrow pattern as `onShowShortcuts`.
+     */
+    onCreateBackup(callback: () => void): () => void;
   };
 }

@@ -116,6 +116,7 @@ describe("IPC channels", () => {
         "balance:get",
         "backups:create",
         "menu:showShortcuts",
+        "menu:createBackup",
       ].sort(),
     );
     expect(Object.values(IPC_CHANNELS)).not.toContain("db:query");

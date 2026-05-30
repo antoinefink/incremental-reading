@@ -15,6 +15,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Electron is not available under Vitest; stub the single import paths.ts uses.
 vi.mock("electron", () => ({
   app: {
+    // Dev/test posture: the INTERLEAVE_DATA_DIR override is honored only when NOT
+    // packaged (T050). Tests run unpackaged, so the override path is exercised.
+    isPackaged: false,
     getPath: (name: string) => path.join(os.tmpdir(), "interleave-electron-mock", name),
   },
 }));

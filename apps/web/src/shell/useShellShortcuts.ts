@@ -4,6 +4,7 @@
  * Wires the keyboard-first chrome described in the charter:
  *   - ⌘K / Ctrl+K  → toggle the command palette
  *   - ⌘Z / Ctrl+Z  → general command-level undo (T044 — reverse the last op)
+ *   - ⌘B / Ctrl+B  → create a backup now (T050 — same command as the prompt/menu)
  *   - ?            → toggle the cheat sheet
  *   - g then <key> → quick-navigate (g q → /queue, g r → /review, …)
  *   - /            → open search (T048 — routes to /search)
@@ -41,6 +42,8 @@ export type ShellShortcutHandlers = {
   onNavigate: (to: string) => void;
   /** General command-level undo (T044) — ⌘Z/Ctrl+Z outside text entry. */
   onUndo: () => void;
+  /** Create a backup now (T050) — ⌘B/Ctrl+B; same command as the prompt/menu. */
+  onCreateBackup: () => void;
   /** Open search (T048) — `/` focuses/opens the search surface. */
   onSearch: () => void;
   /** Open the selected element's source (T048) — `o`. No-op if nothing selected. */
@@ -90,6 +93,21 @@ export function useShellShortcuts(handlersIn: ShellShortcutHandlers): void {
       ) {
         e.preventDefault();
         handlers.current.onUndo();
+        return;
+      }
+
+      // ⌘B / Ctrl+B → create a backup now (T050). Outside text entry (so it never
+      // hijacks an editor's bold chord), no Shift/Alt. Routes through the SAME
+      // typed `appApi.createBackup()` the prompt button + native menu call.
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "b" &&
+        !typing
+      ) {
+        e.preventDefault();
+        handlers.current.onCreateBackup();
         return;
       }
 

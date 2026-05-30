@@ -8,17 +8,29 @@
  *   src/preload/index.ts → dist/preload.cjs (CJS, node platform)
  *   packages/db/drizzle  → dist/drizzle     (migrations, run on startup)
  *
- * `electron` and `better-sqlite3` are externalized: `electron` is provided by the
- * runtime, and `better-sqlite3` is a native module `require`d from node_modules.
- * The shared (Node-ABI) `better-sqlite3` JS is used as-is; the Electron main loads
- * the Electron-ABI binary by passing `nativeBinding` (see `native-binding.ts` +
- * `scripts/vendor-native.mjs`). Workspace TS (`@interleave/db`, `@interleave/core`,
- * `drizzle-orm`, `zod`) is bundled so the main process is a single file.
+ * Only `electron` is externalized (provided by the runtime). EVERYTHING else —
+ * the workspace TS (`@interleave/db`, `@interleave/core`, `@interleave/local-db`,
+ * `@interleave/scheduler`), `drizzle-orm`, `zod`, AND the `better-sqlite3` JS
+ * wrapper — is bundled into a single self-contained `main.cjs`. The Electron main
+ * always loads the Electron-ABI native addon by absolute path via `nativeBinding`
+ * (see `native-binding.ts` + `scripts/vendor-native.mjs`), so `better-sqlite3`'s
+ * own `require('bindings')('better_sqlite3.node')` lookup is NEVER reached at
+ * runtime — `bindings` + `prebuild-install` are therefore kept external (they are
+ * dead in our path and would otherwise drag native-prebuild machinery into the
+ * bundle).
+ *
+ * WHY bundle better-sqlite3 (T050 packaging fix): externalizing it forced a
+ * `dist/node_modules/better-sqlite3` copy that electron-builder's file matcher
+ * silently DROPS (it special-cases `node_modules/` under the app dir), so the
+ * packaged `require("better-sqlite3")` resolved to nothing and the .app could not
+ * open SQLite. Bundling the pure-JS wrapper into `main.cjs` removes that whole
+ * staging dance and makes the packaged main fully self-contained except for the
+ * `asarUnpack`ed `.node` addon it loads by path.
  *
  * Pass `--watch` for an incremental dev build.
  */
 
-import { cpSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
@@ -28,8 +40,15 @@ const repoRoot = path.resolve(here, "..", "..");
 const distDir = path.join(here, "dist");
 const watch = process.argv.includes("--watch");
 
-/** Native + runtime-provided modules that must not be bundled. */
-const external = ["electron", "better-sqlite3"];
+/**
+ * Runtime-provided / never-reached modules that must not be bundled.
+ *   - `electron`: provided by the Electron runtime.
+ *   - `bindings` / `prebuild-install`: better-sqlite3's auto native-addon loader,
+ *     only reached when `nativeBinding` is unset — which the app never does (it
+ *     always passes the vendored Electron-ABI addon path). Kept external so
+ *     esbuild does not pull prebuild tooling into the bundle.
+ */
+const external = ["electron", "bindings", "prebuild-install"];
 
 /** Path to the `import.meta.url` shim injected into the main CJS bundle. */
 const importMetaShim = path.join(here, "import-meta-url-shim.js");
@@ -63,6 +82,30 @@ function stageMigrations() {
   cpSync(from, to, { recursive: true });
 }
 
+/**
+ * Stage the built renderer next to the compiled main (T050).
+ *
+ * In a packaged app `app.isPackaged` is true and `index.ts` resolves the renderer
+ * at `dist/renderer` (relative to the compiled main), served offline over the
+ * `app://` protocol. The renderer is built by `@interleave/web build` into
+ * `apps/web/dist`; we copy it here so `electron-builder` can pack a single,
+ * self-contained `dist/` tree. No-op (with a clear warning) if the renderer has
+ * not been built yet — `pnpm dist` builds it first.
+ */
+function stageRenderer() {
+  const from = path.join(repoRoot, "apps", "web", "dist");
+  const to = path.join(distDir, "renderer");
+  rmSync(to, { recursive: true, force: true });
+  if (!existsSync(path.join(from, "index.html"))) {
+    console.warn(
+      `[desktop] renderer not built at ${from} — skipping renderer staging.\n` +
+        "          Run `pnpm --filter @interleave/web build` (or `pnpm dist`) first.",
+    );
+    return;
+  }
+  cpSync(from, to, { recursive: true });
+}
+
 async function run() {
   mkdirSync(distDir, { recursive: true });
 
@@ -88,6 +131,11 @@ async function run() {
     console.log("[desktop] esbuild watching main + preload…");
     return;
   }
+
+  // Stage the built renderer for the packaged app (offline `app://` load). Skipped
+  // in watch/dev (the dev server serves the renderer) and harmless when the
+  // renderer dist is absent (e.g. the Playwright harness loads it from apps/web/dist).
+  stageRenderer();
 
   await Promise.all(targets.map((t) => esbuild.build(t)));
   console.log("[desktop] built main.cjs + preload.cjs + drizzle/");

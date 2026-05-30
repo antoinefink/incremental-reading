@@ -77,6 +77,7 @@ export type PaletteActionId =
   | "lower-priority"
   | "start-review"
   | "search"
+  | "create-backup"
   | "cheat-sheet";
 
 /**
@@ -179,6 +180,14 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     group: "Actions",
     scope: "global",
     palette: { group: "Session", icon: "play", actionId: "start-review", to: "/review" },
+  },
+  {
+    id: "create-backup",
+    label: "Create a backup",
+    keys: ["⌘", "B"],
+    group: "Actions",
+    scope: "global",
+    palette: { group: "Session", icon: "shield", actionId: "create-backup" },
   },
   // ---- Reading (reader scope) ----------------------------------------------
   {

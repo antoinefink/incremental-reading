@@ -70,6 +70,11 @@ export const IPC_CHANNELS = {
   // channel (main → renderer), not an `invoke` handler — the preload exposes a
   // narrow receive-only subscription, never a generic listener.
   menuShowShortcuts: "menu:showShortcuts",
+  // One-way main → renderer event (T050): the native File → "Back up…" menu item
+  // asks the renderer to run a backup (through the SAME `appApi.createBackup()` the
+  // ⌘B shortcut + ⌘K command use). SEND channel; the preload exposes a narrow
+  // receive-only subscription, never a generic listener.
+  menuCreateBackup: "menu:createBackup",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

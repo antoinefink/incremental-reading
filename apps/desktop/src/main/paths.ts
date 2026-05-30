@@ -41,12 +41,14 @@ export interface AppPaths {
 }
 
 /**
- * Resolve the app data directory. Honors `INTERLEAVE_DATA_DIR` (used by tests),
- * otherwise nests under Electron's per-OS `userData`/`appData` path.
+ * Resolve the app data directory. Honors `INTERLEAVE_DATA_DIR` ONLY in dev/test
+ * (so the Playwright restart spec can point at an isolated temp dir); the PACKAGED
+ * app always uses the real per-OS app-data directory and ignores the override
+ * (T050 — a shipped build must not be redirectable by a stray env var).
  */
 export function resolveDataDir(): string {
   const override = process.env.INTERLEAVE_DATA_DIR;
-  if (override && override.length > 0) {
+  if (!app.isPackaged && override && override.length > 0) {
     return path.resolve(override);
   }
   // `appData` is the OS-standard app-data root (Application Support on macOS,

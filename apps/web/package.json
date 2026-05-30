@@ -12,6 +12,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5",
+    "@fontsource/ibm-plex-sans": "^5",
+    "@fontsource/ibm-plex-serif": "^5",
     "@interleave/core": "workspace:*",
     "@interleave/editor": "workspace:*",
     "@tanstack/react-router": "^1.170.9",

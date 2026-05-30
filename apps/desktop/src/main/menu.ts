@@ -19,10 +19,20 @@
 import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 import { IPC_CHANNELS } from "../shared/channels";
 
+/** Send a payload-free signal to the focused renderer over the given channel. */
+function sendToRenderer(channel: string): void {
+  const target = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null;
+  target?.webContents.send(channel);
+}
+
 /** Tell the focused renderer to open the in-app cheat sheet. */
 function sendShowShortcuts(): void {
-  const target = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null;
-  target?.webContents.send(IPC_CHANNELS.menuShowShortcuts);
+  sendToRenderer(IPC_CHANNELS.menuShowShortcuts);
+}
+
+/** Tell the focused renderer to run a backup (same command as ⌘B / the palette). */
+function sendCreateBackup(): void {
+  sendToRenderer(IPC_CHANNELS.menuCreateBackup);
 }
 
 /**
@@ -51,6 +61,21 @@ export function installApplicationMenu(): void {
       ],
     });
   }
+
+  // File — the macOS polish (T050): a "Back up…" item (⌘B) that asks the renderer
+  // to run the SAME backup command as the in-app prompt + ⌘K palette, plus Close.
+  template.push({
+    label: "File",
+    submenu: [
+      {
+        label: "Back up…",
+        accelerator: "CmdOrCtrl+B",
+        click: () => sendCreateBackup(),
+      },
+      { type: "separator" },
+      isMac ? { role: "close" } : { role: "quit" },
+    ],
+  });
 
   // Edit — the clipboard roles the contenteditable editor needs (T048: editor
   // chords keep working) + undo/redo (native field-level; the app's command-level

@@ -1420,6 +1420,8 @@ export interface AppApi {
   readonly menu: {
     /** Subscribe to the native Help → "Keyboard shortcuts" menu item (T048). */
     onShowShortcuts(callback: () => void): () => void;
+    /** Subscribe to the native File → "Back up…" menu item (T050). */
+    onCreateBackup(callback: () => void): () => void;
   };
 }
 
@@ -1750,5 +1752,15 @@ export const appApi = {
   onMenuShowShortcuts(callback: () => void): () => void {
     if (!isDesktop() || !window.appApi?.menu) return () => {};
     return window.appApi.menu.onShowShortcuts(callback);
+  },
+  /**
+   * Subscribe to the native File → "Back up…" (⌘B) menu item (T050). The shell
+   * calls this to run a backup from the menu bar — the SAME `createBackup()`
+   * command the prompt button and ⌘K command use. Returns an unsubscribe fn; a
+   * no-op outside the desktop shell.
+   */
+  onMenuCreateBackup(callback: () => void): () => void {
+    if (!isDesktop() || !window.appApi?.menu) return () => {};
+    return window.appApi.menu.onCreateBackup(callback);
   },
 } as const;

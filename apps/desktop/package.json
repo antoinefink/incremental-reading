@@ -14,24 +14,27 @@
     "lint": "echo \"@interleave/desktop: linted at the workspace root via Biome\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "rebuild:native": "node scripts/vendor-native.mjs",
-    "postinstall": "node scripts/vendor-native.mjs"
+    "postinstall": "node scripts/vendor-native.mjs",
+    "dist": "node scripts/dist.mjs",
+    "dist:pack": "electron-builder --mac --config electron-builder.yml"
   },
   "dependencies": {
+    "better-sqlite3": "^12.10.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
     "@interleave/core": "workspace:*",
     "@interleave/db": "workspace:*",
     "@interleave/local-db": "workspace:*",
     "@interleave/scheduler": "workspace:*",
     "@interleave/testing": "workspace:*",
-    "better-sqlite3": "^12.10.0",
-    "drizzle-orm": "^0.45.2",
-    "yazl": "^3.3.1",
-    "zod": "^4.4.3"
-  },
-  "devDependencies": {
-    "@electron/rebuild": "^4.0.4",
     "@types/node": "^22.10.0",
     "@types/yazl": "^2.4.6",
+    "drizzle-orm": "^0.45.2",
     "electron": "^38.8.6",
-    "esbuild": "^0.25.12"
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.25.12",
+    "yazl": "^3.3.1",
+    "zod": "^4.4.3"
   }
 }

@@ -3,7 +3,14 @@
    IBM Plex superfamily · cool-neutral palette · blue accent
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Serif:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+/* IBM Plex superfamily — self-hosted, NOT fetched from Google Fonts (T050).
+   The shipped Electron app loads the renderer over the offline `app://` protocol
+   with no network, so the app vendors these via @fontsource (imported in
+   `apps/web/src/styles.css`, which Vite bundles into the build). The network
+   @import is intentionally disabled here so the canonical token file is
+   offline-correct and the app makes zero font network requests at runtime. The
+   font-FAMILY variables below remain the single source of truth. */
+/* @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Serif:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap'); */
 
 :root {
   /* ---- Type families ---- */

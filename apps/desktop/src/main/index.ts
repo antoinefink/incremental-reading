@@ -36,8 +36,13 @@ const rendererDir = app.isPackaged
     path.join(distDir, "renderer")
   : path.resolve(distDir, "..", "..", "web", "dist");
 
-/** Whether to load the Vite dev server (dev) vs the built renderer (prod). */
-const devServerUrl = process.env.VITE_DEV_SERVER_URL || undefined;
+/**
+ * Whether to load the Vite dev server (dev) vs the built renderer (prod). The
+ * PACKAGED app NEVER honours `VITE_DEV_SERVER_URL` (T050 — a shipped build must
+ * load the offline `app://` renderer, not localhost, even if the env var leaks in);
+ * dev/test (`electron .` / the Playwright harness) still drive it via the env var.
+ */
+const devServerUrl = app.isPackaged ? undefined : process.env.VITE_DEV_SERVER_URL || undefined;
 
 function bootstrap(): void {
   // 1) App data dir + vault skeleton (idempotent).
@@ -62,6 +67,19 @@ function bootstrap(): void {
       if (seeded) console.log("[main] seeded empty database with the demo collection");
     } catch (error) {
       console.error("[main] seed-on-empty failed:", error);
+    }
+  }
+
+  // 2c) E2E convenience: pre-set the "seen onboarding" flag so the first-run
+  //     welcome overlay (T050) does not cover the UI in the existing feature
+  //     specs (which all start from a fresh, empty data dir). Opt-in via
+  //     INTERLEAVE_SUPPRESS_ONBOARDING; the dedicated onboarding spec leaves it
+  //     unset to exercise the real first-run flow. Never affects production.
+  if (process.env.INTERLEAVE_SUPPRESS_ONBOARDING === "1") {
+    try {
+      dbService.updateSetting("ui.seenOnboarding", true);
+    } catch (error) {
+      console.error("[main] suppress-onboarding failed:", error);
     }
   }
 
