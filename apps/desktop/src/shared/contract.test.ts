@@ -15,6 +15,9 @@ import {
   CardsMarkLeechRequestSchema,
   CardsSuspendRequestSchema,
   CardsUpdateRequestSchema,
+  ConceptsAssignRequestSchema,
+  ConceptsCreateRequestSchema,
+  ConceptsUnassignRequestSchema,
   DocumentBlockInputSchema,
   DocumentMarksAddRequestSchema,
   DocumentMarksListRequestSchema,
@@ -44,6 +47,8 @@ import {
   SettingsUpdateManyRequestSchema,
   SettingsUpdateRequestSchema,
   SourcesImportManualRequestSchema,
+  TagsAddRequestSchema,
+  TagsRemoveRequestSchema,
 } from "./contract";
 
 describe("IPC channels", () => {
@@ -88,6 +93,13 @@ describe("IPC channels", () => {
         "review:preview",
         "review:grade",
         "review:leeches",
+        "concepts:create",
+        "concepts:list",
+        "concepts:assign",
+        "concepts:unassign",
+        "tags:list",
+        "tags:add",
+        "tags:remove",
         "readPoint:get",
         "readPoint:set",
       ].sort(),
@@ -926,6 +938,51 @@ describe("Extracts postpone/markDone/delete request schemas (T024)", () => {
       expect(schema.parse({ id: "el_ex" })).toEqual({ id: "el_ex" });
       expect(() => schema.parse({ id: "" })).toThrow();
       expect(() => schema.parse({})).toThrow();
+    }
+  });
+});
+
+describe("Concept request schemas (T041)", () => {
+  it("ConceptsCreateRequestSchema accepts a name and an optional parent, trims, and rejects empty/oversized names", () => {
+    expect(ConceptsCreateRequestSchema.parse({ name: "Cognition" })).toEqual({ name: "Cognition" });
+    expect(ConceptsCreateRequestSchema.parse({ name: "  Memory  " }).name).toBe("Memory");
+    expect(
+      ConceptsCreateRequestSchema.parse({ name: "Intelligence", parentConceptId: "el_parent" }),
+    ).toEqual({ name: "Intelligence", parentConceptId: "el_parent" });
+    expect(
+      ConceptsCreateRequestSchema.parse({ name: "X", parentConceptId: null }).parentConceptId,
+    ).toBeNull();
+
+    expect(() => ConceptsCreateRequestSchema.parse({ name: "" })).toThrow();
+    expect(() => ConceptsCreateRequestSchema.parse({ name: "   " })).toThrow();
+    expect(() => ConceptsCreateRequestSchema.parse({ name: "x".repeat(257) })).toThrow();
+    expect(() => ConceptsCreateRequestSchema.parse({})).toThrow();
+  });
+
+  it("ConceptsAssign/UnassignRequestSchema require both ids", () => {
+    for (const schema of [ConceptsAssignRequestSchema, ConceptsUnassignRequestSchema]) {
+      expect(schema.parse({ elementId: "el_a", conceptId: "el_c" })).toEqual({
+        elementId: "el_a",
+        conceptId: "el_c",
+      });
+      expect(() => schema.parse({ elementId: "el_a" })).toThrow();
+      expect(() => schema.parse({ conceptId: "el_c" })).toThrow();
+      expect(() => schema.parse({ elementId: "", conceptId: "el_c" })).toThrow();
+    }
+  });
+});
+
+describe("Tag request schemas (T041)", () => {
+  it("TagsAdd/RemoveRequestSchema accept an id + tag, trim, and reject empty/oversized tags", () => {
+    for (const schema of [TagsAddRequestSchema, TagsRemoveRequestSchema]) {
+      expect(schema.parse({ elementId: "el_a", tag: "memory" })).toEqual({
+        elementId: "el_a",
+        tag: "memory",
+      });
+      expect(schema.parse({ elementId: "el_a", tag: "  memory  " }).tag).toBe("memory");
+      expect(() => schema.parse({ elementId: "el_a", tag: "" })).toThrow();
+      expect(() => schema.parse({ elementId: "el_a", tag: "x".repeat(257) })).toThrow();
+      expect(() => schema.parse({ elementId: "", tag: "memory" })).toThrow();
     }
   });
 });

@@ -173,6 +173,12 @@ export interface LocationSummary {
   readonly endOffset: number | null;
 }
 
+/** A concept summary embedded in the inspector payload (T041). */
+export interface ConceptInspectorSummary {
+  readonly id: string;
+  readonly name: string;
+}
+
 export interface InspectorData {
   readonly element: ElementSummary;
   readonly scheduler: SchedulerSignals;
@@ -182,6 +188,8 @@ export interface InspectorData {
   readonly provenance: SourceProvenance | null;
   readonly location: LocationSummary | null;
   readonly tags: readonly string[];
+  /** Concepts this element is a member of (T041 — `concept_membership` edges). */
+  readonly concepts: readonly ConceptInspectorSummary[];
   readonly review: ReviewSummary | null;
 }
 
@@ -287,13 +295,15 @@ export interface QueueCounts {
   readonly protected: number;
 }
 
-/** Filters the queue read accepts (type/concept/status). */
+/** Filters the queue read accepts (type/concept/tag/status). */
 export interface QueueListRequest {
   /** "Now" the due reads compare against (ISO-8601); defaults to the server clock. */
   readonly asOf?: string;
   readonly types?: readonly string[];
-  /** Concept filter (T041 — deferred; wired now for a stable surface). */
+  /** Concept filter, by concept NAME (T041). */
   readonly concept?: string;
+  /** Tag filter, by tag name (T041). */
+  readonly tag?: string;
   readonly statuses?: readonly string[];
 }
 
@@ -1020,6 +1030,94 @@ export interface ReviewLeechesResult {
   readonly cards: readonly LeechSummary[];
 }
 
+// ---------------------------------------------------------------------------
+// concepts.* / tags.*  (T041 — organize: hierarchical concepts + flat tags)
+// ---------------------------------------------------------------------------
+
+/** A flat concept summary (id + name + parent link). */
+export interface ConceptSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly parentConceptId: string | null;
+}
+
+/** A concept node for the filterbar/map: the concept + its cheap derived counts. */
+export interface ConceptNode {
+  readonly id: string;
+  readonly name: string;
+  readonly parentConceptId: string | null;
+  /** Number of direct child concepts in the hierarchy. */
+  readonly childCount: number;
+  /** Number of LIVE elements that are members of this concept. */
+  readonly memberCount: number;
+}
+
+/** A tag with its live usage count (for the library filterbar). */
+export interface TagSummary {
+  readonly name: string;
+  readonly count: number;
+}
+
+/** The element's organize state after an assign/unassign/tag mutation. */
+export interface ElementOrganizeState {
+  readonly elementId: string;
+  readonly concepts: readonly ConceptSummary[];
+  readonly tags: readonly string[];
+}
+
+export interface ConceptsCreateRequest {
+  readonly name: string;
+  readonly parentConceptId?: string | null;
+}
+
+export interface ConceptsCreateResult {
+  readonly concept: ConceptSummary;
+}
+
+export interface ConceptsListResult {
+  readonly concepts: readonly ConceptNode[];
+}
+
+export interface ConceptsAssignRequest {
+  readonly elementId: string;
+  readonly conceptId: string;
+}
+
+export interface ConceptsAssignResult {
+  readonly element: ElementOrganizeState | null;
+}
+
+export interface ConceptsUnassignRequest {
+  readonly elementId: string;
+  readonly conceptId: string;
+}
+
+export interface ConceptsUnassignResult {
+  readonly element: ElementOrganizeState | null;
+}
+
+export interface TagsListResult {
+  readonly tags: readonly TagSummary[];
+}
+
+export interface TagsAddRequest {
+  readonly elementId: string;
+  readonly tag: string;
+}
+
+export interface TagsAddResult {
+  readonly element: ElementOrganizeState | null;
+}
+
+export interface TagsRemoveRequest {
+  readonly elementId: string;
+  readonly tag: string;
+}
+
+export interface TagsRemoveResult {
+  readonly element: ElementOrganizeState | null;
+}
+
 /** The exact shape the preload exposes as `window.appApi`. */
 export interface AppApi {
   readonly app: {
@@ -1089,6 +1187,17 @@ export interface AppApi {
     preview(request: ReviewPreviewRequest): Promise<ReviewPreviewResult>;
     grade(request: ReviewGradeRequest): Promise<ReviewGradeResult>;
     leeches(): Promise<ReviewLeechesResult>;
+  };
+  readonly concepts: {
+    create(request: ConceptsCreateRequest): Promise<ConceptsCreateResult>;
+    list(): Promise<ConceptsListResult>;
+    assign(request: ConceptsAssignRequest): Promise<ConceptsAssignResult>;
+    unassign(request: ConceptsUnassignRequest): Promise<ConceptsUnassignResult>;
+  };
+  readonly tags: {
+    list(): Promise<TagsListResult>;
+    add(request: TagsAddRequest): Promise<TagsAddResult>;
+    remove(request: TagsRemoveRequest): Promise<TagsRemoveResult>;
   };
   readonly readPoints: {
     get(request: ReadPointGetRequest): Promise<ReadPointGetResult>;
@@ -1314,6 +1423,40 @@ export const appApi = {
    */
   reviewLeeches(): Promise<ReviewLeechesResult> {
     return requireAppApi().review.leeches();
+  },
+  /**
+   * Create a hierarchical concept (T041) — the `concept`-type element + its
+   * `concepts` row, in one transaction. Logs `create_element`. Validates the parent.
+   */
+  createConcept(request: ConceptsCreateRequest): Promise<ConceptsCreateResult> {
+    return requireAppApi().concepts.create(request);
+  },
+  /** All concepts as a flat hierarchy (id/name/parent + child & member counts) (T041). */
+  listConcepts(): Promise<ConceptsListResult> {
+    return requireAppApi().concepts.list();
+  },
+  /**
+   * Assign an element to a concept (T041) — add the `concept_membership` edge; logs
+   * `add_relation`. Idempotent. Returns the element's `{ concepts, tags }`.
+   */
+  assignConcept(request: ConceptsAssignRequest): Promise<ConceptsAssignResult> {
+    return requireAppApi().concepts.assign(request);
+  },
+  /** Unassign an element from a concept (T041) — remove the edge; logs `remove_relation`. */
+  unassignConcept(request: ConceptsUnassignRequest): Promise<ConceptsUnassignResult> {
+    return requireAppApi().concepts.unassign(request);
+  },
+  /** All tags with their live usage count (T041) — the library filterbar. */
+  listTags(): Promise<TagsListResult> {
+    return requireAppApi().tags.list();
+  },
+  /** Tag an element (T041) — created on demand; logs `add_tag`. Idempotent. */
+  addTag(request: TagsAddRequest): Promise<TagsAddResult> {
+    return requireAppApi().tags.add(request);
+  },
+  /** Untag an element (T041); logs `remove_tag`. */
+  removeTag(request: TagsRemoveRequest): Promise<TagsRemoveResult> {
+    return requireAppApi().tags.remove(request);
   },
   /** Load an element's read-point (resume position), or `null` (T017). */
   getReadPoint(request: ReadPointGetRequest): Promise<ReadPointGetResult> {

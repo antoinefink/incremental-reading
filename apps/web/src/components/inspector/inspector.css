@@ -325,6 +325,124 @@
   opacity: 0.45;
 }
 
+/* ---------- Concept pills (T041) ---------- */
+.concept-tag {
+  font-size: var(--t-xs);
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: var(--r-full);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: color-mix(in oklch, var(--el-concept) 12%, transparent);
+  color: var(--el-concept);
+  border: 1px solid color-mix(in oklch, var(--el-concept) 25%, transparent);
+}
+.concept-tag::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: var(--r-full);
+  background: currentColor;
+}
+.concept-tag--btn {
+  font-family: var(--font-ui);
+  cursor: pointer;
+}
+.concept-tag--btn:hover {
+  background: color-mix(in oklch, var(--el-concept) 18%, transparent);
+}
+.concept-tag--btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ---------- Add/remove organize controls (T041) ---------- */
+.insp-organize {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.insp-organize__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.insp-organize__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.insp-chip-del {
+  margin-left: 2px;
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.55;
+  padding: 0;
+}
+.insp-chip-del:hover {
+  opacity: 1;
+}
+.insp-add {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.insp-add__input {
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 3px 8px;
+  height: 26px;
+  flex: 1;
+  min-width: 0;
+}
+.insp-add__input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.insp-add__btn {
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  font-weight: 500;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--r-sm);
+  padding: 3px 9px;
+  height: 26px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.insp-add__btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.insp-add__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.insp-add__select {
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 3px 8px;
+  height: 26px;
+  flex: 1;
+  min-width: 0;
+}
+
 /* ---------- Metadata rows ---------- */
 .meta-list {
   display: flex;

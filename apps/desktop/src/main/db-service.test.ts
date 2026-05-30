@@ -1429,4 +1429,129 @@ describe("DbService — review session (T037)", () => {
     expect(second.repos.review.isCardLeech(leechId as never)).toBe(true);
     second.close();
   });
+
+  // -------------------------------------------------------------------------
+  // concepts.* / tags.*  (T041)
+  // -------------------------------------------------------------------------
+
+  /** Find the seeded top-level extract id (it carries the seeded tags + concept). */
+  function seededExtractId(svc: DbService): string {
+    const row = svc.raw.sqlite
+      .prepare(
+        "SELECT id FROM elements WHERE type = 'extract' AND title = 'Intelligence = skill-acquisition efficiency' LIMIT 1",
+      )
+      .get() as { id: string } | undefined;
+    return row?.id ?? "";
+  }
+
+  it("concepts.create builds a hierarchy and concepts.list returns it with member counts (T041)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    // The seed already created Cognition → Intelligence; create a fresh root + child.
+    const parent = svc.createConcept({ name: "Methods" }).concept;
+    const child = svc.createConcept({ name: "Spacing", parentConceptId: parent.id }).concept;
+    expect(child.parentConceptId).toBe(parent.id);
+
+    const list = svc.listConcepts().concepts;
+    const names = list.map((c) => c.name).sort();
+    expect(names).toEqual(["Cognition", "Intelligence", "Methods", "Spacing"]);
+    // The seeded "Intelligence" concept has the source + extract as members.
+    const intelligence = list.find((c) => c.name === "Intelligence");
+    expect(intelligence?.memberCount).toBe(2);
+    const cognition = list.find((c) => c.name === "Cognition");
+    expect(cognition?.childCount).toBe(1);
+
+    svc.close();
+  });
+
+  it("concepts.create rejects an empty name and a bad parent (T041)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(() => svc.createConcept({ name: "   " })).toThrow();
+    expect(() => svc.createConcept({ name: "Orphan", parentConceptId: "nope" })).toThrow(
+      /parent concept/,
+    );
+    svc.close();
+  });
+
+  it("concepts.assign/unassign + tags.add/remove return the element's organize state and log the right ops (T041)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const extractId = seededExtractId(svc);
+    const concept = svc.createConcept({ name: "Spacing" }).concept;
+
+    const assigned = svc.assignConcept({ elementId: extractId, conceptId: concept.id });
+    expect(assigned.element?.concepts.map((c) => c.name)).toContain("Spacing");
+
+    const tagged = svc.addTag({ elementId: extractId, tag: "new-tag" });
+    expect(tagged.element?.tags).toContain("new-tag");
+
+    // Idempotent re-assign / re-tag.
+    svc.assignConcept({ elementId: extractId, conceptId: concept.id });
+    svc.addTag({ elementId: extractId, tag: "new-tag" });
+
+    const unassigned = svc.unassignConcept({ elementId: extractId, conceptId: concept.id });
+    expect(unassigned.element?.concepts.map((c) => c.name)).not.toContain("Spacing");
+    const untagged = svc.removeTag({ elementId: extractId, tag: "new-tag" });
+    expect(untagged.element?.tags).not.toContain("new-tag");
+
+    // The correct EXISTING ops were logged on the extract (no new op types).
+    const opTypes = svc.repos.operationLog.listForElement(extractId as never).map((o) => o.opType);
+    expect(opTypes).toEqual(
+      expect.arrayContaining(["add_relation", "remove_relation", "add_tag", "remove_tag"]),
+    );
+
+    svc.close();
+  });
+
+  it("tags.list returns live usage counts; the queue filters by concept and tag (T041)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const extractId = seededExtractId(svc);
+
+    // The seed tagged the extract `machine-learning` + `definitions`.
+    const tagNames = svc.listAllTags().tags.map((t) => t.name);
+    expect(tagNames).toEqual(expect.arrayContaining(["machine-learning", "definitions"]));
+
+    // Make the extract due on the attention scheduler so it is in the queue, then
+    // filter by its seeded concept (Intelligence) and tag (definitions).
+    svc.repos.elements.reschedule(extractId as never, "2026-05-29T08:00:00.000Z" as never);
+    const asOf = "2026-05-30T12:00:00.000Z";
+
+    const byConcept = svc.listQueue({ asOf, concept: "Intelligence" }).items.map((i) => i.id);
+    expect(byConcept).toContain(extractId);
+
+    const byTag = svc.listQueue({ asOf, tag: "definitions" }).items.map((i) => i.id);
+    expect(byTag).toContain(extractId);
+
+    // A non-matching concept/tag excludes it.
+    expect(svc.listQueue({ asOf, concept: "Nope" }).items.map((i) => i.id)).not.toContain(
+      extractId,
+    );
+    expect(svc.listQueue({ asOf, tag: "nope" }).items.map((i) => i.id)).not.toContain(extractId);
+
+    svc.close();
+  });
+
+  it("a concept assignment + a tag survive a full close + reopen (T041 restart analogue)", () => {
+    const first = new DbService();
+    first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(first.seedIfEmpty()).toBe(true);
+    const extractId = seededExtractId(first);
+    const concept = first.createConcept({ name: "Persisted" }).concept;
+    first.assignConcept({ elementId: extractId, conceptId: concept.id });
+    first.addTag({ elementId: extractId, tag: "persisted-tag" });
+    first.close();
+
+    const second = new DbService();
+    second.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const data = second.getInspectorData(extractId);
+    expect(data.data?.concepts.map((c) => c.name)).toContain("Persisted");
+    expect(data.data?.tags).toContain("persisted-tag");
+    second.close();
+  });
 });

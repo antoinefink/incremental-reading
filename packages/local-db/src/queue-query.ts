@@ -73,7 +73,7 @@ export interface QueueItemSummary {
   readonly sourceTitle: string | null;
   /** The source's author, when the row is (or belongs to) a source. */
   readonly author: string | null;
-  /** A concept this row is a member of (T041 populates this; null until then). */
+  /** A concept this row is a member of (the first membership), or null (T041). */
   readonly concept: string | null;
   /** Card kind (`qa`/`cloze`), for the card meta line; null for non-cards. */
   readonly cardType: string | null;
@@ -89,8 +89,10 @@ export interface QueueItemSummary {
 export interface QueueFilters {
   /** Keep only these element types. */
   readonly types?: readonly ElementType[];
-  /** Keep only rows that are a member of this concept (T041 — deferred/no-op until then). */
+  /** Keep only rows that are a member of this concept (by concept NAME) (T041). */
   readonly concept?: string;
+  /** Keep only rows tagged with this tag name (T041). */
+  readonly tag?: string;
   /** Keep only these lifecycle statuses. */
   readonly statuses?: readonly ElementStatus[];
 }
@@ -242,7 +244,7 @@ export class QueueQuery {
     });
   }
 
-  /** Whether a row passes the active type/concept/status filters. */
+  /** Whether a row passes the active type/concept/tag/status filters. */
   private matchesFilters(row: QueueItemSummary, filters: QueueFilters): boolean {
     if (filters.types && filters.types.length > 0) {
       if (!filters.types.includes(row.type as ElementType)) return false;
@@ -251,9 +253,15 @@ export class QueueQuery {
       if (!filters.statuses.includes(row.status as ElementStatus)) return false;
     }
     if (filters.concept) {
-      // Concept membership lands with T041 (M8); until concepts are populated this
-      // is a best-effort match against any membership edge already present.
-      if (row.concept !== filters.concept) return false;
+      // Match against ANY of the element's concept memberships by name (T041), not
+      // just the first one displayed on the row — an element can join several.
+      const names = this.repos.concepts.conceptsForElement(row.id as ElementId).map((c) => c.name);
+      if (!names.includes(filters.concept)) return false;
+    }
+    if (filters.tag) {
+      // Tag filtering (T041): the element must carry the tag (filter in the repo
+      // layer, never React).
+      if (!this.repos.elements.listTags(row.id as ElementId).includes(filters.tag)) return false;
     }
     return true;
   }
@@ -337,9 +345,10 @@ export class QueueQuery {
   }
 
   /**
-   * The first concept this element is a member of, or `null`. Concepts are
-   * populated by T041 (M8); the seed already adds `concept_membership` edges so
-   * this returns a real name for seeded rows and `null` otherwise.
+   * The first concept this element is a member of (for the per-row meta line), or
+   * `null` (T041). The `concept_membership` edges are written by the
+   * `ConceptRepository`; this surfaces the first one for display (filtering matches
+   * against ALL memberships — see {@link matchesFilters}).
    */
   private conceptFor(id: ElementId): string | null {
     const membership = this.repos.elements

@@ -105,7 +105,15 @@ export interface InspectorData {
   readonly provenance: SourceProvenance | null;
   readonly location: LocationSummary | null;
   readonly tags: readonly string[];
+  /** Concepts this element is a member of (T041 — `concept_membership` edges). */
+  readonly concepts: readonly ConceptInspectorSummary[];
   readonly review: ReviewSummary | null;
+}
+
+/** A concept summary embedded in the inspector payload (T041). */
+export interface ConceptInspectorSummary {
+  readonly id: string;
+  readonly name: string;
 }
 
 /** The FSRS decay constant (factor=19/81, decay=-0.5) used by the forgetting curve. */
@@ -193,6 +201,10 @@ export class InspectorQuery {
         : null;
     const children = elements.listChildren(id);
     const tags = elements.listTags(id);
+    // Concepts the element is a member of (T041 — the `concept_membership` edges).
+    const concepts = this.repos.concepts
+      .conceptsForElement(id)
+      .map((c) => ({ id: c.id as string, name: c.name }));
 
     const provenanceRow = element.type === "source" ? sources.findById(id) : null;
     const provenance: SourceProvenance | null = provenanceRow
@@ -293,6 +305,7 @@ export class InspectorQuery {
       provenance,
       location,
       tags,
+      concepts,
       review: reviewSummary,
     };
   }

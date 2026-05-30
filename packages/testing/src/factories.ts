@@ -16,15 +16,16 @@
  * handle of every created element/location/card. Tests navigate lineage by that
  * handle (by reference), not by guessing ids — the same way the seeded UI does.
  *
- * Concepts have no dedicated repository or `operation_log` op (like assets and
- * settings), so the concept rows are inserted via the bound Drizzle client and
- * concept *membership* is recorded as a `concept_membership` edge through
- * {@link ElementRepository.addRelation} (which does log `add_relation`).
+ * Concepts (T041) are created through {@link ConceptRepository.createConcept},
+ * which writes the `concept`-type element (logging `create_element`) AND the
+ * `concepts` hierarchy row in ONE transaction; concept *membership* is recorded as
+ * a `concept_membership` edge through {@link ElementRepository.addRelation} (which
+ * logs `add_relation`). The seed therefore round-trips the exact shape the
+ * `concepts.*` `window.appApi` surface reads.
  */
 
 import type { BlockId, ElementId, IsoTimestamp, SiblingGroupId } from "@interleave/core";
 import { PRIORITY_LABEL_VALUE } from "@interleave/core";
-import { concepts, type InterleaveDatabase } from "@interleave/db";
 import {
   type CardWithElement,
   type ExtractWithLocation,
@@ -293,31 +294,6 @@ export interface DemoCollection {
 }
 
 /**
- * Create a concept as a `concept`-type element (via {@link ElementRepository}, so
- * `create_element` is logged) PLUS its `concepts` hierarchy side-table row. A
- * concept IS an element — concept-membership edges in `element_relations`
- * reference `elements.id`, so the concept must exist as an element for the FK to
- * hold. The hierarchy row carries the optional parent link. Returns the concept
- * element id.
- */
-function createConcept(
-  repos: Repositories,
-  db: InterleaveDatabase,
-  name: string,
-  parentConceptId: ElementId | null,
-): ElementId {
-  const element = repos.elements.create({
-    type: "concept",
-    status: "active",
-    stage: "synthesis",
-    priority: PRIORITY_LABEL_VALUE.B,
-    title: name,
-  });
-  db.insert(concepts).values({ id: element.id, name, parentConceptId }).run();
-  return element.id;
-}
-
-/**
  * Build the realistic demo collection through the repositories. Designed to run
  * against a freshly-reset database — the dev `pnpm seed` script
  * (`packages/db/scripts/seed-dev.ts`) deletes + re-migrates the dev SQLite file
@@ -337,7 +313,7 @@ function createConcept(
  *  - asset metadata (a snapshot + a PDF) pointing at vault paths/hashes;
  *  - a second, lower-priority `inbox` source for triage variety.
  */
-export function seedDemoCollection(repos: Repositories, db: InterleaveDatabase): DemoCollection {
+export function seedDemoCollection(repos: Repositories): DemoCollection {
   const f = DEMO_FIXTURES;
 
   // 1) Source element + provenance, accepted into active learning.
@@ -463,19 +439,19 @@ export function seedDemoCollection(repos: Repositories, db: InterleaveDatabase):
     repos.review.recordReview(leechCard.element.id, review);
   }
 
-  // 8) Concepts (hierarchical) + membership edges, and tags on the extract.
-  const parentConceptId = createConcept(repos, db, f.concepts.parent.name, null);
-  const childConceptId = createConcept(repos, db, f.concepts.child.name, parentConceptId);
-  repos.elements.addRelation({
-    fromElementId: sourceId,
-    toElementId: childConceptId,
-    relationType: "concept_membership",
+  // 8) Concepts (hierarchical) + membership edges, and tags on the extract. Built
+  //    through the ConceptRepository (T041) — `createConcept` writes the
+  //    `concept`-type element (logging `create_element`) AND the `concepts`
+  //    hierarchy row in one transaction; membership is a `concept_membership` edge.
+  const parentConcept = repos.concepts.createConcept({ name: f.concepts.parent.name });
+  const childConcept = repos.concepts.createConcept({
+    name: f.concepts.child.name,
+    parentConceptId: parentConcept.id,
   });
-  repos.elements.addRelation({
-    fromElementId: extractId,
-    toElementId: childConceptId,
-    relationType: "concept_membership",
-  });
+  const parentConceptId = parentConcept.id;
+  const childConceptId = childConcept.id;
+  repos.concepts.assignConcept(sourceId, childConceptId);
+  repos.concepts.assignConcept(extractId, childConceptId);
   for (const tag of f.tags) {
     repos.elements.addTag(extractId, tag);
   }

@@ -47,6 +47,13 @@ export const IPC_CHANNELS = {
   reviewPreview: "review:preview",
   reviewGrade: "review:grade",
   reviewLeeches: "review:leeches",
+  conceptsCreate: "concepts:create",
+  conceptsList: "concepts:list",
+  conceptsAssign: "concepts:assign",
+  conceptsUnassign: "concepts:unassign",
+  tagsList: "tags:list",
+  tagsAdd: "tags:add",
+  tagsRemove: "tags:remove",
   readPointGet: "readPoint:get",
   readPointSet: "readPoint:set",
 } as const;

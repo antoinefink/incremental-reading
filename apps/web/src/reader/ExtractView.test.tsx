@@ -60,6 +60,7 @@ const h = vi.hoisted(() => {
       endOffset: 29,
     },
     tags: [],
+    concepts: [],
     review: null,
   };
   return {

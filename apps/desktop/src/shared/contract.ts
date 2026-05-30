@@ -311,8 +311,16 @@ export interface InspectorData {
   readonly location: LocationSummary | null;
   /** Flat tag names attached to the element. */
   readonly tags: readonly string[];
+  /** Concepts this element is a member of (T041 — `concept_membership` edges). */
+  readonly concepts: readonly ConceptInspectorSummary[];
   /** FSRS review summary for cards; `null` for attention-scheduled elements. */
   readonly review: ReviewSummary | null;
+}
+
+/** A concept summary embedded in the inspector payload (T041). */
+export interface ConceptInspectorSummary {
+  readonly id: string;
+  readonly name: string;
 }
 
 export const ElementIdSchema = z.string().min(1).max(128);
@@ -408,9 +416,10 @@ export interface ElementsSetPriorityResult {
  * renderer applies on top — the sort here is deterministic. Read-only: no
  * mutation, no `operation_log`. There is still no generic `db.query`.
  *
- * `concept` filtering is partially DEFERRED — concepts/tags land with T041 (M8).
- * The parameter + the filter chip are wired now so the surface is stable; until
- * concept memberships are populated it narrows on whatever membership edges exist.
+ * `concept` + `tag` filtering is REAL (T041, M8): the query layer narrows on the
+ * element's `concept_membership` edges (matched by concept NAME, against ALL of an
+ * element's memberships) and its `element_tags`. The filtering lives in the
+ * `QueueQuery`/repository layer, never in React.
  */
 
 /** Which scheduler a queue row is on — the FSRS vs attention split. */
@@ -479,8 +488,10 @@ export const QueueListRequestSchema = z.object({
   asOf: z.string().trim().max(64).optional(),
   /** Keep only these element types. */
   types: z.array(z.enum(ELEMENT_TYPES)).optional(),
-  /** Keep only rows that are a member of this concept (T041 — deferred). */
+  /** Keep only rows that are a member of this concept, by concept NAME (T041). */
   concept: z.string().trim().max(256).optional(),
+  /** Keep only rows tagged with this tag name (T041). */
+  tag: z.string().trim().max(256).optional(),
   /** Keep only these lifecycle statuses. */
   statuses: z.array(z.enum(ELEMENT_STATUSES)).optional(),
 });
@@ -1658,6 +1669,133 @@ export interface ReviewLeechesResult {
 }
 
 // ---------------------------------------------------------------------------
+// concepts.* / tags.*  (T041 — organize: hierarchical concepts + flat tags)
+// ---------------------------------------------------------------------------
+
+/**
+ * The organize surface (T041). Concepts are HIERARCHICAL (a `concept`-type element
+ * + a `concepts.parentConceptId` hierarchy row, created together so
+ * `create_element` is logged); tags are FLAT (`tags`/`element_tags`). Both can be
+ * created/assigned to any element and removed, and elements can be filtered by
+ * concept (the queue's `concept` filter) and by tag (the library, T042). Every
+ * mutation runs in ONE transaction and appends the correct EXISTING op — NO new op
+ * types: concept create → `create_element`; concept membership → `add_relation` /
+ * `remove_relation`; tags → `add_tag` / `remove_tag`. The renderer reaches this
+ * only through these typed commands; there is still no generic `db.query`.
+ *
+ * `concepts.create` validates the parent (when given) exists; assigning is
+ * idempotent (re-assigning the same pair is a no-op). The assign/unassign + tag
+ * add/remove results echo back the element's full `{ concepts, tags }` so the
+ * inspector reflects the change without a re-fetch.
+ */
+
+/** A bounded concept/tag name (1–256 chars). */
+const ConceptNameSchema = z.string().trim().min(1).max(256);
+const TagNameSchema = z.string().trim().min(1).max(256);
+
+/** A flat concept summary (id + name + parent link). */
+export interface ConceptSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly parentConceptId: string | null;
+}
+
+/** A concept node for the filterbar/map: the concept + its cheap derived counts. */
+export interface ConceptNode {
+  readonly id: string;
+  readonly name: string;
+  readonly parentConceptId: string | null;
+  /** Number of direct child concepts in the hierarchy. */
+  readonly childCount: number;
+  /** Number of LIVE (not soft-deleted) elements that are members of this concept. */
+  readonly memberCount: number;
+}
+
+/** A tag with its live usage count (for the library filterbar). */
+export interface TagSummary {
+  readonly name: string;
+  readonly count: number;
+}
+
+/** The element's organize state after an assign/unassign/tag mutation. */
+export interface ElementOrganizeState {
+  readonly elementId: string;
+  readonly concepts: readonly ConceptSummary[];
+  readonly tags: readonly string[];
+}
+
+export const ConceptsCreateRequestSchema = z.object({
+  /** Display name (1–256 chars). */
+  name: ConceptNameSchema,
+  /** Optional parent concept id (must exist); omit/null for a root concept. */
+  parentConceptId: ElementIdSchema.nullable().optional(),
+});
+export type ConceptsCreateRequest = z.infer<typeof ConceptsCreateRequestSchema>;
+
+export interface ConceptsCreateResult {
+  readonly concept: ConceptSummary;
+}
+
+/** `concepts.list()` takes no arguments. */
+export const ConceptsListRequestSchema = z.void();
+
+export interface ConceptsListResult {
+  readonly concepts: readonly ConceptNode[];
+}
+
+export const ConceptsAssignRequestSchema = z.object({
+  /** The element to add to the concept (any type). */
+  elementId: ElementIdSchema,
+  /** The concept element id to assign. */
+  conceptId: ElementIdSchema,
+});
+export type ConceptsAssignRequest = z.infer<typeof ConceptsAssignRequestSchema>;
+
+export interface ConceptsAssignResult {
+  /** The element's organize state after the assignment, or `null` when unknown. */
+  readonly element: ElementOrganizeState | null;
+}
+
+export const ConceptsUnassignRequestSchema = z.object({
+  elementId: ElementIdSchema,
+  conceptId: ElementIdSchema,
+});
+export type ConceptsUnassignRequest = z.infer<typeof ConceptsUnassignRequestSchema>;
+
+export interface ConceptsUnassignResult {
+  readonly element: ElementOrganizeState | null;
+}
+
+/** `tags.list()` takes no arguments. */
+export const TagsListRequestSchema = z.void();
+
+export interface TagsListResult {
+  readonly tags: readonly TagSummary[];
+}
+
+export const TagsAddRequestSchema = z.object({
+  /** The element to tag (any type). */
+  elementId: ElementIdSchema,
+  /** The tag name (created on demand, idempotent). */
+  tag: TagNameSchema,
+});
+export type TagsAddRequest = z.infer<typeof TagsAddRequestSchema>;
+
+export interface TagsAddResult {
+  readonly element: ElementOrganizeState | null;
+}
+
+export const TagsRemoveRequestSchema = z.object({
+  elementId: ElementIdSchema,
+  tag: TagNameSchema,
+});
+export type TagsRemoveRequest = z.infer<typeof TagsRemoveRequestSchema>;
+
+export interface TagsRemoveResult {
+  readonly element: ElementOrganizeState | null;
+}
+
+// ---------------------------------------------------------------------------
 // The typed surface the renderer sees as `window.appApi`.
 // ---------------------------------------------------------------------------
 
@@ -1825,6 +1963,30 @@ export interface AppApi {
      * reuses `cards.update`/`suspend`/`delete`/`markLeech`.
      */
     leeches(): Promise<ReviewLeechesResult>;
+  };
+  readonly concepts: {
+    /**
+     * Create a hierarchical concept (T041) — the `concept`-type element + its
+     * `concepts` row, in one transaction. Logs `create_element`. Validates the parent.
+     */
+    create(request: ConceptsCreateRequest): Promise<ConceptsCreateResult>;
+    /** All concepts as a flat hierarchy (id/name/parent + child & member counts). Read-only. */
+    list(): Promise<ConceptsListResult>;
+    /**
+     * Assign an element to a concept (T041) — add the `concept_membership` edge;
+     * logs `add_relation`. Idempotent. Returns the element's `{ concepts, tags }`.
+     */
+    assign(request: ConceptsAssignRequest): Promise<ConceptsAssignResult>;
+    /** Unassign an element from a concept (T041) — remove the edge; logs `remove_relation`. */
+    unassign(request: ConceptsUnassignRequest): Promise<ConceptsUnassignResult>;
+  };
+  readonly tags: {
+    /** All tags with their live usage count (T041) — the library filterbar. Read-only. */
+    list(): Promise<TagsListResult>;
+    /** Tag an element (T041) — created on demand; logs `add_tag`. Idempotent. */
+    add(request: TagsAddRequest): Promise<TagsAddResult>;
+    /** Untag an element (T041); logs `remove_tag`. */
+    remove(request: TagsRemoveRequest): Promise<TagsRemoveResult>;
   };
   readonly readPoints: {
     /** Load an element's read-point (resume position), or `null` (T017). */

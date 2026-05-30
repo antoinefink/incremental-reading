@@ -182,6 +182,40 @@ describe("ElementRepository", () => {
       expect.arrayContaining(["add_relation", "remove_relation", "add_tag", "remove_tag"]),
     );
   });
+
+  it("listAllTags reports live usage counts; elementsForTag returns live tagged elements (T041)", () => {
+    const repo = new ElementRepository(handle.db);
+    const mk = (title: string) =>
+      repo.create({
+        type: "extract",
+        status: "active",
+        stage: "raw_extract",
+        priority: 0.5,
+        title,
+      }).id;
+    const a = mk("a");
+    const b = mk("b");
+    const c = mk("c");
+
+    repo.addTag(a, "memory");
+    repo.addTag(b, "memory");
+    repo.addTag(c, "definitions");
+
+    const tags = repo.listAllTags();
+    expect(tags).toEqual([
+      { name: "definitions", count: 1 },
+      { name: "memory", count: 2 },
+    ]);
+
+    expect(new Set(repo.elementsForTag("memory"))).toEqual(new Set([a, b]));
+    expect(repo.elementsForTag("definitions")).toEqual([c]);
+    expect(repo.elementsForTag("unknown")).toEqual([]);
+
+    // Soft-deleting a tagged element drops it from the count + the membership read.
+    repo.softDelete(a);
+    expect(repo.listAllTags().find((t) => t.name === "memory")?.count).toBe(1);
+    expect(repo.elementsForTag("memory")).toEqual([b]);
+  });
 });
 
 describe("SourceRepository — lineage", () => {

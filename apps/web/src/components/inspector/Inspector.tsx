@@ -26,6 +26,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   appApi,
+  type ConceptNode,
   type ElementSummary,
   type ElementsSetPriorityAction,
   type InspectorData,
@@ -41,6 +42,7 @@ import { Icon } from "../Icon";
 import "./inspector.css";
 import { LineageTree } from "./LineageTree";
 import {
+  ConceptTag,
   FsrsStats,
   MetaRow,
   Prio,
@@ -197,25 +199,225 @@ function PriorityControl({
   );
 }
 
+/**
+ * Concepts + tags organize section (T041) — assign/unassign hierarchical concepts
+ * (`ConceptTag` pills + a picker) and add/remove flat tags (`Tag` pills + an
+ * input). Every change goes through the typed `concepts.*` / `tags.*` bridge
+ * commands (logging `add_relation`/`remove_relation`/`add_tag`/`remove_tag`); the
+ * parent re-reads on success so the inspector reflects the change. UI orchestration
+ * only — no SQL, no membership math, in the renderer.
+ */
+function OrganizeSection({
+  elementId,
+  concepts,
+  tags,
+  allConcepts,
+  onChanged,
+}: {
+  elementId: string;
+  concepts: readonly { id: string; name: string }[];
+  tags: readonly string[];
+  allConcepts: readonly ConceptNode[];
+  onChanged: () => void;
+}) {
+  const [tagDraft, setTagDraft] = useState("");
+  const [conceptDraft, setConceptDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const assignedIds = new Set(concepts.map((c) => c.id));
+  const assignable = allConcepts.filter((c) => !assignedIds.has(c.id));
+
+  const run = useCallback(
+    async (fn: () => Promise<unknown>) => {
+      if (busy) return;
+      setBusy(true);
+      try {
+        await fn();
+        onChanged();
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, onChanged],
+  );
+
+  const onAddTag = () => {
+    const tag = tagDraft.trim();
+    if (!tag) return;
+    void run(async () => {
+      await appApi.addTag({ elementId, tag });
+      setTagDraft("");
+    });
+  };
+
+  const onAssignConcept = () => {
+    if (!conceptDraft) return;
+    void run(async () => {
+      await appApi.assignConcept({ elementId, conceptId: conceptDraft });
+      setConceptDraft("");
+    });
+  };
+
+  return (
+    <>
+      {/* Concepts. */}
+      <div className="insp-sec" data-testid="concepts-section">
+        <div className="insp-sec__title">Concepts</div>
+        <div className="insp-organize">
+          {concepts.length > 0 ? (
+            <div className="insp-organize__row" data-testid="concept-pills">
+              {concepts.map((c) => (
+                <span
+                  key={c.id}
+                  className="insp-organize__chip"
+                  data-testid="concept-pill"
+                  data-concept-id={c.id}
+                >
+                  <ConceptTag name={c.name} />
+                  <button
+                    type="button"
+                    className="insp-chip-del"
+                    data-testid="concept-remove"
+                    aria-label={`Remove concept ${c.name}`}
+                    disabled={busy}
+                    onClick={() =>
+                      run(() => appApi.unassignConcept({ elementId, conceptId: c.id }))
+                    }
+                  >
+                    <Icon name="x" size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="insp-empty">No concepts.</p>
+          )}
+          {assignable.length > 0 && (
+            <div className="insp-add">
+              <select
+                className="insp-add__select"
+                data-testid="concept-picker"
+                aria-label="Assign concept"
+                value={conceptDraft}
+                disabled={busy}
+                onChange={(e) => setConceptDraft(e.target.value)}
+              >
+                <option value="">Assign concept…</option>
+                {assignable.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.parentConceptId ? `↳ ${c.name}` : c.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="insp-add__btn"
+                data-testid="concept-assign"
+                disabled={busy || !conceptDraft}
+                onClick={onAssignConcept}
+              >
+                Assign
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Tags. */}
+      <div className="insp-sec" data-testid="tags-section">
+        <div className="insp-sec__title">Tags</div>
+        <div className="insp-organize">
+          {tags.length > 0 ? (
+            <div className="insp-organize__row" data-testid="tag-pills">
+              {tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="insp-organize__chip"
+                  data-testid="tag-pill"
+                  data-tag={tag}
+                >
+                  <Tag name={tag} />
+                  <button
+                    type="button"
+                    className="insp-chip-del"
+                    data-testid="tag-remove"
+                    aria-label={`Remove tag ${tag}`}
+                    disabled={busy}
+                    onClick={() => run(() => appApi.removeTag({ elementId, tag }))}
+                  >
+                    <Icon name="x" size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="insp-empty">No tags.</p>
+          )}
+          <div className="insp-add">
+            <input
+              className="insp-add__input"
+              data-testid="tag-input"
+              placeholder="Add a tag…"
+              value={tagDraft}
+              disabled={busy}
+              onChange={(e) => setTagDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  onAddTag();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="insp-add__btn"
+              data-testid="tag-add"
+              disabled={busy || tagDraft.trim().length === 0}
+              onClick={onAddTag}
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 /** The full metadata view for one inspected element. */
 function InspectorBody({
   data,
   lineage,
+  allConcepts,
   onSelect,
   onPickLineageNode,
   onJumpToLocation,
   onSetPriority,
+  onOrganizeChanged,
   priorityBusy,
 }: {
   data: InspectorData;
   lineage: LineageData | null;
+  allConcepts: readonly ConceptNode[];
   onSelect: (id: string) => void;
   onPickLineageNode: (node: LineageNode) => void;
   onJumpToLocation: (location: NonNullable<InspectorData["location"]>) => void;
   onSetPriority: (action: ElementsSetPriorityAction) => void;
+  onOrganizeChanged: () => void;
   priorityBusy: boolean;
 }) {
-  const { element, scheduler, parent, children, source, provenance, location, tags, review } = data;
+  const {
+    element,
+    scheduler,
+    parent,
+    children,
+    source,
+    provenance,
+    location,
+    tags,
+    concepts,
+    review,
+  } = data;
   return (
     <div className="insp" data-testid="inspector-content" data-element-type={element.type}>
       {/* Header: type icon + title + the at-a-glance chips. */}
@@ -408,19 +610,14 @@ function InspectorBody({
         </div>
       )}
 
-      {/* Tags. */}
-      <div className="insp-sec" data-testid="tags-section">
-        <div className="insp-sec__title">Tags</div>
-        {tags.length > 0 ? (
-          <div className="insp-chips">
-            {tags.map((tag) => (
-              <Tag key={tag} name={tag} />
-            ))}
-          </div>
-        ) : (
-          <p className="insp-empty">No tags.</p>
-        )}
-      </div>
+      {/* Concepts + tags (T041) — assign/unassign + add/remove, through the bridge. */}
+      <OrganizeSection
+        elementId={element.id}
+        concepts={concepts}
+        tags={tags}
+        allConcepts={allConcepts}
+        onChanged={onOrganizeChanged}
+      />
     </div>
   );
 }
@@ -438,6 +635,7 @@ export function Inspector() {
   const [data, setData] = useState<InspectorData | null>(null);
   const [lineage, setLineage] = useState<LineageData | null>(null);
   const [elements, setElements] = useState<readonly ElementSummary[]>([]);
+  const [allConcepts, setAllConcepts] = useState<readonly ConceptNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [priorityBusy, setPriorityBusy] = useState(false);
@@ -465,6 +663,15 @@ export function Inspector() {
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      });
+    // The concept list feeds the inspector's "Assign concept" picker (T041).
+    appApi
+      .listConcepts()
+      .then((res) => {
+        if (!cancelled) setAllConcepts(res.concepts);
+      })
+      .catch(() => {
+        if (!cancelled) setAllConcepts([]);
       });
     return () => {
       cancelled = true;
@@ -512,6 +719,18 @@ export function Inspector() {
   }, [selectedId, refreshTick]);
 
   const onSelect = useCallback((id: string) => select(id), [select]);
+
+  // After a concept/tag assign/unassign/add/remove (T041), re-read the inspected
+  // element so its concepts + tags reflect the change, and bump the picker/concept
+  // list so a freshly-created concept appears in the picker.
+  const onOrganizeChanged = useCallback(() => {
+    if (!isDesktop() || !selectedId) return;
+    appApi
+      .getInspectorData({ id: selectedId })
+      .then((res) => setData(res.data))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    setRefreshTick((t) => t + 1);
+  }, [selectedId]);
 
   // The universal priority write path (T027): set/raise/lower goes through the
   // typed `elements.setPriority` command (logs `update_element` main-side). On
@@ -591,10 +810,12 @@ export function Inspector() {
           <InspectorBody
             data={data}
             lineage={lineage}
+            allConcepts={allConcepts}
             onSelect={onSelect}
             onPickLineageNode={onPickLineageNode}
             onJumpToLocation={navigateToLocation}
             onSetPriority={onSetPriority}
+            onOrganizeChanged={onOrganizeChanged}
             priorityBusy={priorityBusy}
           />
         ) : selectedId && !data ? (

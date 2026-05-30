@@ -42,7 +42,7 @@ function main(): void {
     console.log("[seed] migrations applied");
 
     const repos = createRepositories(db);
-    const collection = seedDemoCollection(repos, db);
+    const collection = seedDemoCollection(repos);
     const ops = new OperationLogRepository(db);
 
     // Echo the lineage chain so it is obvious the seed wired it correctly.

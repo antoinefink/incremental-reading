@@ -203,6 +203,33 @@ describe("QueueQuery", () => {
     expect(items.every((i) => i.status === "active")).toBe(true);
   });
 
+  it("filters by concept (T041) — keeps only members of the named concept", () => {
+    const { extractId, sourceId } = buildDueSet();
+    // Assign ONLY the extract to a concept; the source stays unassigned.
+    const concept = repos.concepts.createConcept({ name: "Intelligence" });
+    repos.concepts.assignConcept(extractId, concept.id);
+
+    const { items } = queue.list({ asOf: NOW, filters: { concept: "Intelligence" } });
+    const ids = items.map((i) => i.id);
+    expect(ids).toContain(extractId);
+    expect(ids).not.toContain(sourceId);
+
+    // A different concept name returns no matches.
+    expect(queue.list({ asOf: NOW, filters: { concept: "Nope" } }).items).toHaveLength(0);
+  });
+
+  it("filters by tag (T041) — keeps only elements carrying the tag", () => {
+    const { extractId, qaCardId } = buildDueSet();
+    repos.elements.addTag(extractId, "definitions");
+
+    const { items } = queue.list({ asOf: NOW, filters: { tag: "definitions" } });
+    const ids = items.map((i) => i.id);
+    expect(ids).toContain(extractId);
+    expect(ids).not.toContain(qaCardId);
+
+    expect(queue.list({ asOf: NOW, filters: { tag: "missing" } }).items).toHaveLength(0);
+  });
+
   it("reports per-type counts over the unfiltered due set", () => {
     buildDueSet();
     const { counts } = queue.list({ asOf: NOW });

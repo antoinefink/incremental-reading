@@ -233,3 +233,19 @@ export function MetaRow({ k, children }: { k: string; children: React.ReactNode 
 export function Tag({ name }: { name: string }) {
   return <span className="tag">{name}</span>;
 }
+
+/**
+ * Concept pill (T041) — the kit's `concept-tag` (a dot + name, `--el-concept`
+ * token). Clickable when `onClick` is provided (e.g. to navigate to/filter by the
+ * concept). Distinct from {@link Tag} (the flat `#`-prefixed label).
+ */
+export function ConceptTag({ name, onClick }: { name: string; onClick?: () => void }) {
+  if (onClick) {
+    return (
+      <button type="button" className="concept-tag concept-tag--btn" onClick={onClick}>
+        {name}
+      </button>
+    );
+  }
+  return <span className="concept-tag">{name}</span>;
+}

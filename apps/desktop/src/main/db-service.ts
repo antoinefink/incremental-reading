@@ -71,6 +71,13 @@ import type {
   CardsSuspendResult,
   CardsUpdateRequest,
   CardsUpdateResult,
+  ConceptsAssignRequest,
+  ConceptsAssignResult,
+  ConceptsCreateRequest,
+  ConceptsCreateResult,
+  ConceptsListResult,
+  ConceptsUnassignRequest,
+  ConceptsUnassignResult,
   DbStatus,
   DocumentMarkPayload,
   DocumentMarksAddRequest,
@@ -83,6 +90,7 @@ import type {
   DocumentsGetResult,
   DocumentsSaveRequest,
   DocumentsSaveResult,
+  ElementOrganizeState,
   ElementsSetPriorityRequest,
   ElementsSetPriorityResult,
   ExtractActionSummary,
@@ -132,6 +140,11 @@ import type {
   SettingValue,
   SourcesImportManualRequest,
   SourcesImportManualResult,
+  TagsAddRequest,
+  TagsAddResult,
+  TagsListResult,
+  TagsRemoveRequest,
+  TagsRemoveResult,
 } from "../shared/contract";
 
 export class DbService {
@@ -406,6 +419,7 @@ export class DbService {
       filters: {
         ...(request.types ? { types: request.types } : {}),
         ...(request.concept ? { concept: request.concept } : {}),
+        ...(request.tag ? { tag: request.tag } : {}),
         ...(request.statuses ? { statuses: request.statuses } : {}),
       },
     });
@@ -1405,6 +1419,93 @@ export class DbService {
     return { extract: this.toExtractActionSummary(element) };
   }
 
+  // -------------------------------------------------------------------------
+  // concepts.* / tags.*  (T041 — organize)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Create a hierarchical concept (T041) through {@link ConceptRepository}: the
+   * `concept`-type element (logging `create_element`) AND its `concepts` row, in
+   * ONE transaction. Validates the parent (when given) exists. No new op type.
+   */
+  createConcept(request: ConceptsCreateRequest): ConceptsCreateResult {
+    const concept = this.repos.concepts.createConcept({
+      name: request.name,
+      ...(request.parentConceptId ? { parentConceptId: request.parentConceptId as ElementId } : {}),
+    });
+    return {
+      concept: { id: concept.id, name: concept.name, parentConceptId: concept.parentConceptId },
+    };
+  }
+
+  /**
+   * All concepts as a flat hierarchy (id/name/parent + direct-child & member
+   * counts) for the filterbar + the read-only concept map (T041). Read-only.
+   */
+  listConcepts(): ConceptsListResult {
+    return {
+      concepts: this.repos.concepts.listConcepts().map((c) => ({
+        id: c.id,
+        name: c.name,
+        parentConceptId: c.parentConceptId,
+        childCount: c.childCount,
+        memberCount: c.memberCount,
+      })),
+    };
+  }
+
+  /**
+   * Assign an element to a concept (T041) — add the `concept_membership` edge via
+   * {@link ConceptRepository.assignConcept} (logs `add_relation`, idempotent).
+   * Returns the element's refreshed `{ concepts, tags }`.
+   */
+  assignConcept(request: ConceptsAssignRequest): ConceptsAssignResult {
+    this.repos.concepts.assignConcept(
+      request.elementId as ElementId,
+      request.conceptId as ElementId,
+    );
+    return { element: this.organizeState(request.elementId as ElementId) };
+  }
+
+  /** Unassign an element from a concept (T041) — remove the edge; logs `remove_relation`. */
+  unassignConcept(request: ConceptsUnassignRequest): ConceptsUnassignResult {
+    this.repos.concepts.unassignConcept(
+      request.elementId as ElementId,
+      request.conceptId as ElementId,
+    );
+    return { element: this.organizeState(request.elementId as ElementId) };
+  }
+
+  /** All tags with their live usage count (T041) — the library filterbar. Read-only. */
+  listAllTags(): TagsListResult {
+    return { tags: this.repos.elements.listAllTags() };
+  }
+
+  /** Tag an element (T041) — created on demand; logs `add_tag`. Idempotent. */
+  addTag(request: TagsAddRequest): TagsAddResult {
+    this.repos.elements.addTag(request.elementId as ElementId, request.tag);
+    return { element: this.organizeState(request.elementId as ElementId) };
+  }
+
+  /** Untag an element (T041); logs `remove_tag`. */
+  removeTag(request: TagsRemoveRequest): TagsRemoveResult {
+    this.repos.elements.removeTag(request.elementId as ElementId, request.tag);
+    return { element: this.organizeState(request.elementId as ElementId) };
+  }
+
+  /** The element's organize state (concepts + tags), or `null` when soft-deleted/unknown. */
+  private organizeState(id: ElementId): ElementOrganizeState | null {
+    const element = this.repos.elements.findById(id);
+    if (!element || element.deletedAt) return null;
+    return {
+      elementId: id,
+      concepts: this.repos.concepts
+        .conceptsForElement(id)
+        .map((c) => ({ id: c.id, name: c.name, parentConceptId: c.parentConceptId })),
+      tags: this.repos.elements.listTags(id),
+    };
+  }
+
   /**
    * Load an element's read-point (resume position) (T017) through
    * {@link DocumentRepository}. Returns the STABLE block id + offset + updated
@@ -1445,11 +1546,10 @@ export class DbService {
    * launches do not seed.
    */
   seedIfEmpty(): boolean {
-    const { db } = this.require();
     const repos = this.repos;
     const existing = repos.elements.listByType("source");
     if (existing.length > 0) return false;
-    seedDemoCollection(repos, db);
+    seedDemoCollection(repos);
     return true;
   }
 

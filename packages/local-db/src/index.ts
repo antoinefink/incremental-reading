@@ -30,6 +30,12 @@ export {
   type CreateCardResult,
 } from "./card-service";
 export {
+  type ConceptNode,
+  ConceptRepository,
+  type ConceptSummary,
+  type CreateConceptInput,
+} from "./concept-repository";
+export {
   type AddMarkInput,
   type DocumentBlockInput,
   type DocumentMark,
@@ -143,6 +149,7 @@ export interface Repositories {
   readonly review: import("./review-repository").ReviewRepository;
   readonly queue: import("./queue-repository").QueueRepository;
   readonly search: import("./search-repository").SearchRepository;
+  readonly concepts: import("./concept-repository").ConceptRepository;
   readonly assets: import("./asset-repository").AssetRepository;
   readonly settings: import("./settings-repository").SettingsRepository;
   readonly operationLog: import("./operation-log-repository").OperationLogRepository;
@@ -150,6 +157,7 @@ export interface Repositories {
 
 import type { InterleaveDatabase } from "@interleave/db";
 import { AssetRepository } from "./asset-repository";
+import { ConceptRepository } from "./concept-repository";
 import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
 import { OperationLogRepository } from "./operation-log-repository";
@@ -160,7 +168,7 @@ import { SettingsRepository } from "./settings-repository";
 import { SourceRepository } from "./source-repository";
 
 /**
- * Build all nine repositories against one Drizzle client. Called by the Electron
+ * Build all repositories against one Drizzle client. Called by the Electron
  * main/DB service after it opens + migrates the database.
  */
 export function createRepositories(db: InterleaveDatabase): Repositories {
@@ -171,6 +179,7 @@ export function createRepositories(db: InterleaveDatabase): Repositories {
     review: new ReviewRepository(db),
     queue: new QueueRepository(db),
     search: new SearchRepository(db),
+    concepts: new ConceptRepository(db),
     assets: new AssetRepository(db),
     settings: new SettingsRepository(db),
     operationLog: new OperationLogRepository(db),

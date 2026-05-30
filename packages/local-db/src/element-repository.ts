@@ -449,4 +449,53 @@ export class ElementRepository {
       .all()
       .map((t) => t.name);
   }
+
+  /**
+   * All tags with their LIVE usage count (T041) — the read behind the library
+   * filterbar's tag list. Counts only assignments to live (not soft-deleted)
+   * elements, so a tag whose only owners were trashed reports `0`. Read-only.
+   */
+  listAllTags(): { name: string; count: number }[] {
+    const tagRows = this.db.select().from(tags).all();
+    if (tagRows.length === 0) return [];
+    const counts = new Map<string, number>();
+    const joinRows = this.db.select().from(elementTags).all();
+    for (const join of joinRows) {
+      const el = this.db
+        .select({ deletedAt: elements.deletedAt })
+        .from(elements)
+        .where(eq(elements.id, join.elementId as ElementId))
+        .get();
+      if (!el || el.deletedAt) continue;
+      counts.set(join.tagId, (counts.get(join.tagId) ?? 0) + 1);
+    }
+    return tagRows
+      .map((t) => ({ name: t.name, count: counts.get(t.id) ?? 0 }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /**
+   * The LIVE element ids tagged with a given tag name (T041) — feeds tag
+   * filtering. Returns `[]` when the tag is unknown. Read-only.
+   */
+  elementsForTag(tagName: string): ElementId[] {
+    const tagRow = this.db.select().from(tags).where(eq(tags.name, tagName)).get();
+    if (!tagRow) return [];
+    const joinRows = this.db
+      .select()
+      .from(elementTags)
+      .where(eq(elementTags.tagId, tagRow.id))
+      .all();
+    const out: ElementId[] = [];
+    for (const join of joinRows) {
+      const id = join.elementId as ElementId;
+      const el = this.db
+        .select({ deletedAt: elements.deletedAt })
+        .from(elements)
+        .where(eq(elements.id, id))
+        .get();
+      if (el && !el.deletedAt) out.push(id);
+    }
+    return out;
+  }
 }

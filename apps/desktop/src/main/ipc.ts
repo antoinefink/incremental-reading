@@ -16,6 +16,10 @@ import {
   CardsMarkLeechRequestSchema,
   CardsSuspendRequestSchema,
   CardsUpdateRequestSchema,
+  ConceptsAssignRequestSchema,
+  ConceptsCreateRequestSchema,
+  ConceptsListRequestSchema,
+  ConceptsUnassignRequestSchema,
   DbStatusRequestSchema,
   DocumentMarksAddRequestSchema,
   DocumentMarksListRequestSchema,
@@ -52,6 +56,9 @@ import {
   SettingsUpdateManyRequestSchema,
   SettingsUpdateRequestSchema,
   SourcesImportManualRequestSchema,
+  TagsAddRequestSchema,
+  TagsListRequestSchema,
+  TagsRemoveRequestSchema,
 } from "../shared/contract";
 import type { DbService } from "./db-service";
 
@@ -256,6 +263,41 @@ export function registerIpcHandlers(dbService: DbService): () => void {
   ipcMain.handle(IPC_CHANNELS.reviewLeeches, () => {
     ReviewLeechesRequestSchema.parse(undefined);
     return dbService.reviewLeeches();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.conceptsCreate, (_event, rawRequest: unknown) => {
+    const request = ConceptsCreateRequestSchema.parse(rawRequest);
+    return dbService.createConcept(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.conceptsList, () => {
+    ConceptsListRequestSchema.parse(undefined);
+    return dbService.listConcepts();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.conceptsAssign, (_event, rawRequest: unknown) => {
+    const request = ConceptsAssignRequestSchema.parse(rawRequest);
+    return dbService.assignConcept(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.conceptsUnassign, (_event, rawRequest: unknown) => {
+    const request = ConceptsUnassignRequestSchema.parse(rawRequest);
+    return dbService.unassignConcept(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.tagsList, () => {
+    TagsListRequestSchema.parse(undefined);
+    return dbService.listAllTags();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.tagsAdd, (_event, rawRequest: unknown) => {
+    const request = TagsAddRequestSchema.parse(rawRequest);
+    return dbService.addTag(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.tagsRemove, (_event, rawRequest: unknown) => {
+    const request = TagsRemoveRequestSchema.parse(rawRequest);
+    return dbService.removeTag(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.readPointGet, (_event, rawRequest: unknown) => {

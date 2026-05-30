@@ -23,6 +23,9 @@ import type {
   CardsMarkLeechRequest,
   CardsSuspendRequest,
   CardsUpdateRequest,
+  ConceptsAssignRequest,
+  ConceptsCreateRequest,
+  ConceptsUnassignRequest,
   DocumentMarksAddRequest,
   DocumentMarksListRequest,
   DocumentMarksRemoveRequest,
@@ -47,11 +50,13 @@ import type {
   ReviewGradeRequest,
   ReviewPreviewRequest,
   ReviewSessionNextRequest,
-  // review.leeches() takes no request payload.
+  // review.leeches() / concepts.list() / tags.list() take no request payload.
   SettingsGetRequest,
   SettingsUpdateManyRequest,
   SettingsUpdateRequest,
   SourcesImportManualRequest,
+  TagsAddRequest,
+  TagsRemoveRequest,
 } from "../shared/contract";
 
 const appApi: AppApi = {
@@ -141,6 +146,20 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.reviewPreview, request),
     grade: (request: ReviewGradeRequest) => ipcRenderer.invoke(IPC_CHANNELS.reviewGrade, request),
     leeches: () => ipcRenderer.invoke(IPC_CHANNELS.reviewLeeches),
+  },
+  concepts: {
+    create: (request: ConceptsCreateRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.conceptsCreate, request),
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.conceptsList),
+    assign: (request: ConceptsAssignRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.conceptsAssign, request),
+    unassign: (request: ConceptsUnassignRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.conceptsUnassign, request),
+  },
+  tags: {
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.tagsList),
+    add: (request: TagsAddRequest) => ipcRenderer.invoke(IPC_CHANNELS.tagsAdd, request),
+    remove: (request: TagsRemoveRequest) => ipcRenderer.invoke(IPC_CHANNELS.tagsRemove, request),
   },
   readPoints: {
     get: (request: ReadPointGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.readPointGet, request),
