@@ -20,6 +20,7 @@ export const IPC_CHANNELS = {
   elementsSetPriority: "elements:setPriority",
   queueList: "queue:list",
   queueAct: "queue:act",
+  queueSchedule: "queue:schedule",
   queueUndo: "queue:undo",
   lineageGet: "lineage:get",
   sourcesImportManual: "sources:importManual",

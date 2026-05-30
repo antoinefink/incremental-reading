@@ -47,6 +47,7 @@ import {
   LineageGetRequestSchema,
   QueueActRequestSchema,
   QueueListRequestSchema,
+  QueueScheduleRequestSchema,
   QueueUndoRequestSchema,
   ReadPointGetRequestSchema,
   ReadPointSetRequestSchema,
@@ -149,6 +150,11 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.queueAct, (_event, rawRequest: unknown) => {
     const request = QueueActRequestSchema.parse(rawRequest);
     return dbService.actOnQueueItem(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.queueSchedule, (_event, rawRequest: unknown) => {
+    const request = QueueScheduleRequestSchema.parse(rawRequest);
+    return dbService.scheduleQueueItem(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.queueUndo, (_event, rawRequest: unknown) => {

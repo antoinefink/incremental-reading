@@ -180,6 +180,10 @@
   margin-bottom: 16px;
   flex-wrap: wrap;
 }
+/* the lifecycle-status sub-row sits just under the type filters (T029) */
+.q-filters--status {
+  margin-top: -8px;
+}
 .chip {
   font-family: var(--font-ui);
   font-size: var(--t-sm);

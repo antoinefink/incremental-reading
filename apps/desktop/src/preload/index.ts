@@ -46,6 +46,7 @@ import type {
   LineageGetRequest,
   QueueActRequest,
   QueueListRequest,
+  QueueScheduleRequest,
   QueueUndoRequest,
   ReadPointGetRequest,
   ReadPointSetRequest,
@@ -91,6 +92,8 @@ const appApi: AppApi = {
   queue: {
     list: (request?: QueueListRequest) => ipcRenderer.invoke(IPC_CHANNELS.queueList, request ?? {}),
     act: (request: QueueActRequest) => ipcRenderer.invoke(IPC_CHANNELS.queueAct, request),
+    schedule: (request: QueueScheduleRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.queueSchedule, request),
     undo: (request: QueueUndoRequest) => ipcRenderer.invoke(IPC_CHANNELS.queueUndo, request),
   },
   lineage: {

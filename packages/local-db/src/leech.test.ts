@@ -18,7 +18,7 @@
 import type { BlockId, ElementId, IsoTimestamp, Priority } from "@interleave/core";
 import type { DbHandle } from "@interleave/db";
 import { cards as cardsTable, operationLog } from "@interleave/db";
-import { LEECH_LAPSE_THRESHOLD, SchedulerService } from "@interleave/scheduler";
+import { CardSchedulerService, LEECH_LAPSE_THRESHOLD } from "@interleave/scheduler";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CardService } from "./card-service";
@@ -73,7 +73,7 @@ const DAY_MS = 86_400_000;
  */
 function lapse(cardId: ElementId, targetLapses: number): ReviewRepository {
   const review = new ReviewRepository(handle.db);
-  const scheduler = new SchedulerService({ desiredRetention: 0.9, enableFuzz: false });
+  const scheduler = new CardSchedulerService({ desiredRetention: 0.9, enableFuzz: false });
   let ms = BASE_MS;
   const step = (rating: "again" | "good" | "easy") => {
     const state = review.findReviewState(cardId);

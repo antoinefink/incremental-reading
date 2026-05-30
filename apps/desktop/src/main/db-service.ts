@@ -40,6 +40,7 @@ import {
 } from "@interleave/core";
 import { type DbHandle, migrateDatabase, openDatabase } from "@interleave/db";
 import {
+  SchedulerService as AttentionScheduleService,
   CardEditService,
   CardService,
   createRepositories,
@@ -58,7 +59,7 @@ import {
   resolveSourceRef,
   UndoService,
 } from "@interleave/local-db";
-import { type IntervalPreview, SchedulerService } from "@interleave/scheduler";
+import { CardSchedulerService, type IntervalPreview } from "@interleave/scheduler";
 import { seedDemoCollection } from "@interleave/testing";
 import type {
   AnalyticsGetRequest,
@@ -126,6 +127,8 @@ import type {
   QueueActResult,
   QueueListRequest,
   QueueListResult,
+  QueueScheduleRequest,
+  QueueScheduleResult,
   QueueUndoRequest,
   QueueUndoResult,
   ReadPointGetRequest,
@@ -178,7 +181,14 @@ export class DbService {
   private cardService: CardService | null = null;
   private cardEditService: CardEditService | null = null;
   private reviewSession: ReviewSessionService | null = null;
-  private scheduler: SchedulerService | null = null;
+  private scheduler: CardSchedulerService | null = null;
+  /**
+   * The ATTENTION-scheduler APPLY seam (T028) — explicit tomorrow / next-week /
+   * next-month / manual scheduling for non-card attention items, distinct from the
+   * FSRS `scheduler` above (the two-scheduler split). Reachable from the renderer
+   * via `queue.schedule`.
+   */
+  private attentionScheduler: AttentionScheduleService | null = null;
   private undoService: UndoService | null = null;
   private migrated = false;
 
@@ -224,10 +234,15 @@ export class DbService {
     // The FSRS card scheduler (T036) — one instance per open DB, reading the
     // `defaultDesiredRetention` setting (T011) as its first-class retention input.
     // FSRS schedules CARDS ONLY; sources/topics/extracts stay on the separate
-    // attention scheduler (QueueActionService / ExtractService), never here.
-    this.scheduler = new SchedulerService({
+    // attention scheduler (AttentionScheduleService / QueueActionService /
+    // ExtractService), never here.
+    this.scheduler = new CardSchedulerService({
       desiredRetention: this.repositories.settings.getAppSettings().defaultDesiredRetention,
     });
+    // The attention-scheduler APPLY seam (T028): the only place explicit
+    // tomorrow/next-week/next-month/manual scheduling for non-card attention items
+    // is persisted. Cards are rejected here (the two-scheduler split holds).
+    this.attentionScheduler = new AttentionScheduleService(this.handle.db);
     // The general, command-level undo (T044): inverts the last operation_log op via
     // the existing repository write paths. Distinct from the queue's recipe undo (T030).
     this.undoService = new UndoService(this.handle.db);
@@ -251,6 +266,7 @@ export class DbService {
     this.cardEditService = null;
     this.reviewSession = null;
     this.scheduler = null;
+    this.attentionScheduler = null;
     this.undoService = null;
     this.migrated = false;
   }
@@ -485,6 +501,38 @@ export class DbService {
         ? { kind: result.undo.kind, previousStatus: result.undo.previousStatus }
         : null,
     };
+  }
+
+  /** The attention-scheduler APPLY seam (T028), bound to the open database. */
+  private get attentionScheduleService(): AttentionScheduleService {
+    if (!this.attentionScheduler) {
+      throw new Error("DbService: database is not open");
+    }
+    return this.attentionScheduler;
+  }
+
+  /**
+   * Schedule a non-card attention item for an EXPLICIT return (T028) — tomorrow /
+   * next week / next month / a manual date — through the attention
+   * {@link AttentionScheduleService} (`SchedulerService.scheduleAt`), the apply seam
+   * over the pure `AttentionScheduler.scheduleForChoice`. It computes the new
+   * `due_at` and persists it via {@link ElementRepository.reschedule}
+   * (`reschedule_element`, status → `scheduled`) in ONE transaction — NO new op type.
+   *
+   * THE TWO-SCHEDULER SPLIT holds: a `card` is rejected by the service (cards
+   * schedule on FSRS, never the attention heuristic). After scheduling, the item
+   * usually recedes from the DUE set (a future date), so the refreshed `item` is
+   * `null` exactly as a `postpone` returns — the renderer re-reads the queue. The
+   * renderer reaches this only over validated IPC; there is no generic `db.query`.
+   */
+  scheduleQueueItem(request: QueueScheduleRequest): QueueScheduleResult {
+    const id = request.id as ElementId;
+    const choice =
+      request.choice.kind === "manual"
+        ? { manual: request.choice.date as IsoTimestamp }
+        : request.choice.kind;
+    const { intervalDays, element } = this.attentionScheduleService.scheduleAt(id, choice);
+    return { item: null, dueAt: element.dueAt as string, intervalDays };
   }
 
   /**
@@ -1059,7 +1107,7 @@ export class DbService {
   }
 
   /** The FSRS card scheduler (T036), bound to the open database. */
-  private get cardScheduler(): SchedulerService {
+  private get cardScheduler(): CardSchedulerService {
     if (!this.scheduler) {
       throw new Error("DbService: database is not open");
     }
@@ -1070,7 +1118,7 @@ export class DbService {
    * Preview the four possible next intervals for a card (T036) — the data the
    * review grade buttons render (T037). Reads the card's current `review_states`
    * via {@link ReviewRepository.findReviewState} and asks the FSRS
-   * {@link SchedulerService} for the four outcomes. PURE: it mutates NOTHING (no
+   * {@link CardSchedulerService} for the four outcomes. PURE: it mutates NOTHING (no
    * `review_states` write, no `operation_log`). Returns `null` when the id is not a
    * card or has no review state. The renderer reaches this only over validated IPC
    * (T037's `review.preview`); there is no generic `db.query`.
@@ -1090,7 +1138,7 @@ export class DbService {
    * Grade one card (T036) — the FSRS write path. FSRS is for CARDS ONLY: this
    * rejects a non-card element so the engine never schedules an extract/source.
    * It reads the card's current `review_states`, asks the FSRS
-   * {@link SchedulerService} to compute the next memory state (the FSRS math lives
+   * {@link CardSchedulerService} to compute the next memory state (the FSRS math lives
    * in `packages/scheduler`, never here or in the repository), then persists it via
    * {@link ReviewRepository.recordReview} — which appends the immutable
    * `review_logs` row, advances `review_states` (due/stability/difficulty/elapsed/
@@ -1289,7 +1337,7 @@ export class DbService {
 
   /**
    * Preview the four next intervals for a card's grade buttons (T037) via the FSRS
-   * {@link SchedulerService} — wraps {@link previewCardIntervals} into the flat wire
+   * {@link CardSchedulerService} — wraps {@link previewCardIntervals} into the flat wire
    * shape. PURE: mutates nothing. `intervals` is `null` when the id is not a card or
    * has no review state.
    */
@@ -1309,7 +1357,7 @@ export class DbService {
 
   /**
    * Grade a card (T037) — the FSRS write path wrapped into the flat wire shape.
-   * Delegates to {@link gradeCard} (which runs `SchedulerService.gradeCard` →
+   * Delegates to {@link gradeCard} (which runs `CardSchedulerService.gradeCard` →
    * `ReviewRepository.recordReview`, appending the immutable `review_logs` row,
    * advancing `review_states` + `elements.due_at`, and logging `add_review_log` in
    * ONE transaction, plus the `card_draft → active_card` first-review promotion).

@@ -29,6 +29,7 @@ import { Icon, type IconName } from "../../components/Icon";
 import { Prio, SchedulerChip, Stage, TypeIcon } from "../../components/inspector/primitives";
 import { BudgetMeter } from "../../components/queue/BudgetMeter";
 import { QueueSnackbar } from "../../components/queue/QueueSnackbar";
+import { ScheduleMenu } from "../../components/queue/ScheduleMenu";
 import "../../components/inspector/inspector.css";
 import {
   appApi,
@@ -36,6 +37,7 @@ import {
   type QueueActAction,
   type QueueItemSummary,
   type QueueListResult,
+  type QueueScheduleChoice,
   type SchedulerSignals,
 } from "../../lib/appApi";
 import { useSelection } from "../../shell/selection";
@@ -67,6 +69,25 @@ const FILTERS: readonly { id: FilterId; label: string }[] = [
   { id: "extract", label: "Extracts" },
   { id: "task", label: "Tasks" },
   { id: "high", label: "High priority" },
+];
+
+/**
+ * The lifecycle-status filter (T029 Notes — "status filters are fully functional in
+ * M5"). The due read already excludes done/dismissed/suspended/deleted, so the
+ * meaningful split over the due set is freshly-pulled-in `active`/`pending` items vs
+ * `scheduled` returns. `all` sends no `statuses` (the full due set). The selected
+ * statuses are passed to `queue.list({ statuses })` — the narrowing happens
+ * main-side in `QueueQuery.matchesFilters`, never in React.
+ */
+type StatusFilterId = "all" | "active" | "scheduled";
+const STATUS_FILTERS: readonly {
+  id: StatusFilterId;
+  label: string;
+  statuses?: readonly string[];
+}[] = [
+  { id: "all", label: "Any status" },
+  { id: "active", label: "Active", statuses: ["active", "pending", "inbox"] },
+  { id: "scheduled", label: "Scheduled", statuses: ["scheduled"] },
 ];
 
 /** A due-state badge (overdue / today / soon) — distinct from the lifecycle `Status`. */
@@ -107,6 +128,7 @@ function QueueItem({
   onSelect,
   onOpen,
   onAction,
+  onSchedule,
 }: {
   item: QueueItemSummary;
   active: boolean;
@@ -115,6 +137,8 @@ function QueueItem({
   onSelect: (item: QueueItemSummary) => void;
   onOpen: (item: QueueItemSummary) => void;
   onAction: (item: QueueItemSummary, kind: RowActionKind) => void;
+  /** Explicit (tomorrow/next-week/next-month/manual) scheduling — attention items only. */
+  onSchedule: (item: QueueItemSummary, choice: QueueScheduleChoice) => void;
 }) {
   const action = actionFor(item);
   // The chip reads the queue's trimmed signals as the inspector's wider shape.
@@ -189,6 +213,11 @@ function QueueItem({
         </span>
       </button>
       <span className="qitem__acts" data-testid="queue-actions">
+        {/* Explicit reschedule (tomorrow/next-week/next-month/manual) — non-card
+            attention items only (cards schedule on FSRS, never the attention seam). */}
+        {item.type !== "card" ? (
+          <ScheduleMenu disabled={busy} onSchedule={(choice) => onSchedule(item, choice)} />
+        ) : null}
         {ROW_ACTIONS.map((a) => (
           <button
             key={a.kind}
@@ -219,6 +248,7 @@ export function QueueScreen() {
   const asOf = typeof search.asOf === "string" ? search.asOf : undefined;
   const [data, setData] = useState<QueueListResult | null>(null);
   const [filter, setFilter] = useState<FilterId>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilterId>("all");
   const [error, setError] = useState<string | null>(null);
   /** The id of the row whose action is currently in flight (its buttons disable). */
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -232,13 +262,20 @@ export function QueueScreen() {
   const refresh = useCallback(async () => {
     if (!isDesktop()) return;
     try {
-      const next = await appApi.listQueue(asOf ? { asOf } : undefined);
+      // The active status filter is passed THROUGH to the read so the narrowing
+      // happens main-side (`QueueQuery.matchesFilters`), never in React. `all` sends
+      // no `statuses` (the full due set).
+      const statuses = STATUS_FILTERS.find((s) => s.id === statusFilter)?.statuses;
+      const next = await appApi.listQueue({
+        ...(asOf ? { asOf } : {}),
+        ...(statuses ? { statuses } : {}),
+      });
       setData(next);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [asOf]);
+  }, [asOf, statusFilter]);
 
   useEffect(() => {
     void refresh();
@@ -327,6 +364,28 @@ export function QueueScreen() {
       }
     },
     [busyId, refresh, removedMessage],
+  );
+
+  /**
+   * Schedule a non-card attention item for an EXPLICIT return (T028) — tomorrow /
+   * next week / next month / a manual date — through the typed `queue.schedule`
+   * surface, then re-read the queue (the item usually recedes from the due set). The
+   * scheduling math lives main-side; the renderer only sends the intent.
+   */
+  const onSchedule = useCallback(
+    async (item: QueueItemSummary, choice: QueueScheduleChoice) => {
+      if (!isDesktop() || busyId) return;
+      setBusyId(item.id);
+      try {
+        await appApi.scheduleQueueItem({ id: item.id, choice });
+        await refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [busyId, refresh],
   );
 
   /**
@@ -450,6 +509,22 @@ export function QueueScreen() {
           })}
         </div>
 
+        {/* status filter (passed through to the read — narrowing happens main-side) */}
+        <div className="q-filters q-filters--status" data-testid="queue-status-filters">
+          {STATUS_FILTERS.map((s) => (
+            <button
+              type="button"
+              key={s.id}
+              data-testid={`queue-status-${s.id}`}
+              aria-pressed={statusFilter === s.id}
+              onClick={() => setStatusFilter(s.id)}
+              className={`chip${statusFilter === s.id ? " chip--active" : ""}`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
         {/* list */}
         {visible.length > 0 ? (
           <div className="q-list" data-testid="queue-list">
@@ -462,6 +537,7 @@ export function QueueScreen() {
                 onSelect={onSelect}
                 onOpen={onOpen}
                 onAction={onAction}
+                onSchedule={onSchedule}
               />
             ))}
           </div>

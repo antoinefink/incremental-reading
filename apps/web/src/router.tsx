@@ -95,7 +95,7 @@ const extractRoute = createRoute({
  * The active-recall review session (T037) — the FSRS review loop. `/review`
  * loads the due-card deck (FSRS `due_at ≤ now`), reveals the answer, grades
  * Again/Hard/Good/Easy with next-interval previews, logs the response time +
- * reschedules through `SchedulerService` → `ReviewRepository`, and advances —
+ * reschedules through `CardSchedulerService` → `ReviewRepository`, and advances —
  * every grade writing a durable `review_logs` row. All over the typed
  * `window.appApi.review.*` surface; the renderer holds no FSRS math or SQL.
  */

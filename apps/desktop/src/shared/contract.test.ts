@@ -39,6 +39,9 @@ import {
   InspectorGetRequestSchema,
   IPC_CHANNELS,
   LineageGetRequestSchema,
+  QueueActRequestSchema,
+  QueueScheduleRequestSchema,
+  QueueUndoRequestSchema,
   ReadPointGetRequestSchema,
   ReadPointSetRequestSchema,
   ReviewGradeRequestSchema,
@@ -70,6 +73,7 @@ describe("IPC channels", () => {
         "elements:setPriority",
         "queue:list",
         "queue:act",
+        "queue:schedule",
         "queue:undo",
         "lineage:get",
         "sources:importManual",
@@ -158,6 +162,100 @@ describe("ElementsSetPriorityRequestSchema (T027)", () => {
 
   it("rejects a missing id", () => {
     expect(() => ElementsSetPriorityRequestSchema.parse({ action: { kind: "raise" } })).toThrow();
+  });
+});
+
+describe("QueueActRequestSchema (T030)", () => {
+  it("accepts each known action kind", () => {
+    for (const kind of ["postpone", "raise", "lower", "markDone", "dismiss", "delete"] as const) {
+      const parsed = QueueActRequestSchema.parse({ id: "el_1", action: { kind } });
+      expect(parsed.action.kind).toBe(kind);
+    }
+  });
+
+  it("rejects an unknown action kind (the discriminated-union boundary)", () => {
+    expect(() =>
+      QueueActRequestSchema.parse({ id: "el_1", action: { kind: "schedule" } }),
+    ).toThrow();
+    expect(() => QueueActRequestSchema.parse({ id: "el_1", action: { kind: "open" } })).toThrow();
+  });
+
+  it("rejects a missing id and a missing action", () => {
+    expect(() => QueueActRequestSchema.parse({ action: { kind: "postpone" } })).toThrow();
+    expect(() => QueueActRequestSchema.parse({ id: "el_1" })).toThrow();
+    expect(() => QueueActRequestSchema.parse({ id: "", action: { kind: "postpone" } })).toThrow();
+  });
+});
+
+describe("QueueScheduleRequestSchema (T028)", () => {
+  it("accepts each preset choice", () => {
+    for (const kind of ["tomorrow", "nextWeek", "nextMonth"] as const) {
+      const parsed = QueueScheduleRequestSchema.parse({ id: "el_1", choice: { kind } });
+      expect(parsed.choice.kind).toBe(kind);
+    }
+  });
+
+  it("accepts a manual choice with an ISO date (trimmed)", () => {
+    const parsed = QueueScheduleRequestSchema.parse({
+      id: "el_1",
+      choice: { kind: "manual", date: "  2026-07-01T12:00:00.000Z  " },
+    });
+    expect(parsed.choice).toEqual({ kind: "manual", date: "2026-07-01T12:00:00.000Z" });
+  });
+
+  it("rejects an unknown choice kind and a manual choice without a date", () => {
+    expect(() =>
+      QueueScheduleRequestSchema.parse({ id: "el_1", choice: { kind: "someday" } }),
+    ).toThrow();
+    expect(() =>
+      QueueScheduleRequestSchema.parse({ id: "el_1", choice: { kind: "manual" } }),
+    ).toThrow();
+    expect(() =>
+      QueueScheduleRequestSchema.parse({ id: "el_1", choice: { kind: "manual", date: "" } }),
+    ).toThrow();
+  });
+
+  it("rejects a missing id", () => {
+    expect(() => QueueScheduleRequestSchema.parse({ choice: { kind: "tomorrow" } })).toThrow();
+  });
+});
+
+describe("QueueUndoRequestSchema (T030)", () => {
+  it("accepts a restore recipe and a status recipe with a valid previous status", () => {
+    expect(
+      QueueUndoRequestSchema.parse({
+        id: "el_1",
+        undo: { kind: "restore", previousStatus: "active" },
+      }).undo.kind,
+    ).toBe("restore");
+    expect(
+      QueueUndoRequestSchema.parse({
+        id: "el_1",
+        undo: { kind: "status", previousStatus: "scheduled" },
+      }).undo.previousStatus,
+    ).toBe("scheduled");
+  });
+
+  it("rejects an unknown undo kind and an invalid previous status", () => {
+    expect(() =>
+      QueueUndoRequestSchema.parse({
+        id: "el_1",
+        undo: { kind: "revert", previousStatus: "active" },
+      }),
+    ).toThrow();
+    expect(() =>
+      QueueUndoRequestSchema.parse({
+        id: "el_1",
+        undo: { kind: "restore", previousStatus: "bogus" },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a missing id or undo recipe", () => {
+    expect(() =>
+      QueueUndoRequestSchema.parse({ undo: { kind: "restore", previousStatus: "active" } }),
+    ).toThrow();
+    expect(() => QueueUndoRequestSchema.parse({ id: "el_1" })).toThrow();
   });
 });
 

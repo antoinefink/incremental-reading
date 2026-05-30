@@ -100,4 +100,24 @@ export class OperationLogRepository {
   count(): number {
     return this.db.select().from(operationLog).all().length;
   }
+
+  /**
+   * Count how many times an element has been postponed, by scanning its
+   * `reschedule_element` ops for the `postpone === true` marker. This is the ONE
+   * canonical, schema-churn-free postpone counter — the attention scheduler, the
+   * queue read, the inspector readout, and the extract service all call THIS so the
+   * marker shape lives in exactly one place (and the four call sites cannot drift).
+   * The postpone count itself stays in the op payload (no schema column).
+   */
+  countPostpones(elementId: string): number {
+    return this.listForElement(elementId).filter((op) => {
+      if (op.opType !== "reschedule_element") return false;
+      const payload = op.payload;
+      return (
+        typeof payload === "object" &&
+        payload !== null &&
+        (payload as { postpone?: unknown }).postpone === true
+      );
+    }).length;
+  }
 }

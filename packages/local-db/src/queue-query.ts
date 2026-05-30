@@ -360,19 +360,11 @@ export class QueueQuery {
   }
 
   /**
-   * How many times an attention element has been postponed — counted from its
-   * `reschedule_element` ops carrying the `postpone` marker (the schema-churn-free
-   * counter the `SchedulerChip` shows). Mirrors `InspectorQuery.countPostpones`.
+   * How many times an attention element has been postponed — delegates to the ONE
+   * canonical {@link OperationLogRepository.countPostpones} (the schema-churn-free
+   * counter the `SchedulerChip` shows), shared with the inspector + scheduler.
    */
   private countPostpones(id: ElementId): number {
-    return this.repos.operationLog
-      .listForElement(id)
-      .filter(
-        (op) =>
-          op.opType === "reschedule_element" &&
-          typeof op.payload === "object" &&
-          op.payload !== null &&
-          (op.payload as { postpone?: unknown }).postpone === true,
-      ).length;
+    return this.repos.operationLog.countPostpones(id);
   }
 }

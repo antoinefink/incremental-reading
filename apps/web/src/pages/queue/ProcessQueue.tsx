@@ -28,6 +28,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "../../components/Icon";
 import { Prio, SchedulerChip, Stage, TypeIcon } from "../../components/inspector/primitives";
+import { ScheduleMenu } from "../../components/queue/ScheduleMenu";
 import "../../components/inspector/inspector.css";
 import {
   appApi,
@@ -35,6 +36,7 @@ import {
   type QueueActAction,
   type QueueItemSummary,
   type QueueListResult,
+  type QueueScheduleChoice,
   type SchedulerSignals,
 } from "../../lib/appApi";
 import { useActiveScope } from "../../shell/activeScope";
@@ -234,6 +236,29 @@ export function ProcessQueue() {
     [current, busy, advance],
   );
 
+  /**
+   * Schedule the current (non-card attention) item for an EXPLICIT return (T028) —
+   * tomorrow / next week / next month / a manual date — through the SAME typed
+   * `queue.schedule` bridge command the list uses, then ADVANCE. Like the other
+   * loop actions it never returns to the list; the scheduling math lives main-side.
+   */
+  const schedule = useCallback(
+    async (choice: QueueScheduleChoice) => {
+      if (!current || busy || !isDesktop()) return;
+      setBusy(true);
+      try {
+        await appApi.scheduleQueueItem({ id: current.id, choice });
+        setProcessed((p) => p + 1);
+        advance();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [current, busy, advance],
+  );
+
   /** Skip the current item without mutating it (just advance the cursor). */
   const skip = useCallback(() => {
     if (!current) return;
@@ -385,6 +410,7 @@ export function ProcessQueue() {
             body={body}
             busy={busy}
             onAction={act}
+            onSchedule={schedule}
             onSkip={skip}
             onOpen={open}
           />
@@ -400,6 +426,7 @@ function ProcessCard({
   body,
   busy,
   onAction,
+  onSchedule,
   onSkip,
   onOpen,
 }: {
@@ -407,6 +434,8 @@ function ProcessCard({
   body: ItemBody | null;
   busy: boolean;
   onAction: (kind: LoopActionKind) => void;
+  /** Explicit (tomorrow/next-week/next-month/manual) scheduling — attention items only. */
+  onSchedule: (choice: QueueScheduleChoice) => void;
   onSkip: () => void;
   onOpen: () => void;
 }) {
@@ -528,6 +557,9 @@ function ProcessCard({
           <Icon name="postpone" size={14} />
           Postpone
         </button>
+        {/* Explicit reschedule (tomorrow/next-week/next-month/manual) — non-card
+            attention items only (cards schedule on FSRS, never the attention seam). */}
+        {!isCard ? <ScheduleMenu disabled={busy} onSchedule={onSchedule} /> : null}
         <button
           type="button"
           className="pq-btn"

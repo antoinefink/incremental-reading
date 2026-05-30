@@ -381,6 +381,32 @@ export interface QueueActResult {
   readonly undo: QueueActUndo | null;
 }
 
+/**
+ * One explicit (non-heuristic) attention-schedule choice (discriminated by `kind`):
+ * tomorrow / next week / next month / a manual ISO date (T028). For non-card
+ * attention items only — the renderer never offers this on a card (FSRS schedules
+ * cards). The main process does the date math via the pure `AttentionScheduler`.
+ */
+export type QueueScheduleChoice =
+  | { readonly kind: "tomorrow" }
+  | { readonly kind: "nextWeek" }
+  | { readonly kind: "nextMonth" }
+  | { readonly kind: "manual"; readonly date: string };
+
+export interface QueueScheduleRequest {
+  readonly id: string;
+  readonly choice: QueueScheduleChoice;
+}
+
+export interface QueueScheduleResult {
+  /** The refreshed row, or `null` when the item is no longer due / id unknown. */
+  readonly item: QueueItemSummary | null;
+  /** The new `due_at` the item was scheduled to (ISO-8601). */
+  readonly dueAt: string;
+  /** The interval (in days) from "now" the chosen schedule resolved to. */
+  readonly intervalDays: number;
+}
+
 /** Undo a removing queue action (the snackbar's "Undo") — echoes back the recipe. */
 export interface QueueUndoRequest {
   readonly id: string;
@@ -1335,6 +1361,7 @@ export interface AppApi {
   readonly queue: {
     list(request?: QueueListRequest): Promise<QueueListResult>;
     act(request: QueueActRequest): Promise<QueueActResult>;
+    schedule(request: QueueScheduleRequest): Promise<QueueScheduleResult>;
     undo(request: QueueUndoRequest): Promise<QueueUndoResult>;
   };
   readonly lineage: {
@@ -1506,6 +1533,15 @@ export const appApi = {
    */
   actOnQueueItem(request: QueueActRequest): Promise<QueueActResult> {
     return requireAppApi().queue.act(request);
+  },
+  /**
+   * Schedule a non-card attention item for an EXPLICIT return (T028) — tomorrow /
+   * next week / next month / a manual date. Runs through the attention-scheduler
+   * apply seam (`reschedule_element`, status → `scheduled`); cards are rejected
+   * (FSRS schedules cards). Returns the new `due_at` + interval.
+   */
+  scheduleQueueItem(request: QueueScheduleRequest): Promise<QueueScheduleResult> {
+    return requireAppApi().queue.schedule(request);
   },
   /**
    * Undo a removing queue action (T030) — restore a soft-deleted row or re-set the

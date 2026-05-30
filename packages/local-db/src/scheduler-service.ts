@@ -70,22 +70,14 @@ export class SchedulerService {
   }
 
   /**
-   * Count how many times an element has been postponed, by scanning its
-   * `reschedule_element` ops for the `postpone` marker. The schema-churn-free
-   * postpone counter the attention scheduler reads (mirrors
-   * `ExtractService.countPostpones`, lifted here so any attention element can use
-   * it — sources/topics/tasks postpone too, not just extracts).
+   * Count how many times an element has been postponed — delegates to the ONE
+   * canonical {@link OperationLogRepository.countPostpones} so the marker shape is
+   * defined in exactly one place (sources/topics/tasks postpone too, not just
+   * extracts). Kept as a public method because the queue actions read it to record
+   * the running count in the next postpone's op payload.
    */
   countPostpones(id: ElementId): number {
-    return this.operationLog.listForElement(id).filter((op) => {
-      if (op.opType !== "reschedule_element") return false;
-      const payload = op.payload;
-      return (
-        typeof payload === "object" &&
-        payload !== null &&
-        (payload as { postpone?: unknown }).postpone === true
-      );
-    }).length;
+    return this.operationLog.countPostpones(id);
   }
 
   /**

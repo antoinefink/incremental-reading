@@ -1,7 +1,7 @@
 /**
  * The FSRS card scheduler (T036) — the CARD half of the two-scheduler split.
  *
- * `SchedulerService` wraps `ts-fsrs` behind OUR own interface so the engine is
+ * `CardSchedulerService` wraps `ts-fsrs` behind OUR own interface so the engine is
  * swappable + testable and the rest of the app never imports `ts-fsrs` types or
  * enums. It is the SINGLE source of FSRS scheduling math. Given a card's current
  * `ReviewState`, the current time, a rating, and the response time, it computes the
@@ -79,8 +79,8 @@ export interface IntervalPreview {
   readonly label: string;
 }
 
-/** Options for constructing a {@link SchedulerService}. */
-export interface SchedulerServiceOptions {
+/** Options for constructing a {@link CardSchedulerService}. */
+export interface CardSchedulerServiceOptions {
   /**
    * FSRS target recall probability (`0.0`–`1.0`), the {@link AppSettings}
    * `defaultDesiredRetention` (T011) read by the live service. A first-class input:
@@ -121,7 +121,7 @@ function toFsrsStateEnum(state: FsrsState): State {
 function fromFsrsStateEnum(state: State): FsrsState {
   // FSRS_STATES is ordered to match the numeric `State` enum exactly.
   const mapped = FSRS_STATES[state];
-  if (!mapped) throw new Error(`SchedulerService: unknown ts-fsrs State ${String(state)}`);
+  if (!mapped) throw new Error(`CardSchedulerService: unknown ts-fsrs State ${String(state)}`);
   return mapped;
 }
 
@@ -154,11 +154,11 @@ export function formatInterval(days: number): string {
   return `${Math.round((days / 365) * 10) / 10}y`;
 }
 
-export class SchedulerService {
+export class CardSchedulerService {
   private readonly engine: FSRS;
   private readonly retention: number;
 
-  constructor(options: SchedulerServiceOptions) {
+  constructor(options: CardSchedulerServiceOptions) {
     this.retention = options.desiredRetention;
     const params = generatorParameters({
       request_retention: options.desiredRetention,

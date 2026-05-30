@@ -15,7 +15,7 @@
  * import from here. FSRS lands in a sibling module in M7 and stays behind its own
  * adapter boundary: the `ts-fsrs` `State`/`Rating`/`Card` runtime vocabulary is
  * mapped to our own and never leaks. The ONE deliberate exception is the optional,
- * compile-time-only `SchedulerServiceOptions.params: Partial<FSRSParameters>` — a
+ * compile-time-only `CardSchedulerServiceOptions.params: Partial<FSRSParameters>` — a
  * documented escape hatch for the T080 FSRS-parameter optimization. It is a typed
  * seam, not a runtime enum leak; callers that do not optimize parameters never touch
  * a `ts-fsrs` type.
@@ -47,12 +47,12 @@ export {
   sourceIntervalDays,
 } from "./attention-scheduler";
 export {
+  CardSchedulerService,
+  type CardSchedulerServiceOptions,
   formatInterval,
   type IntervalPreview,
   type ReviewOutcome,
   SCHEDULER_REVIEW_RATINGS,
-  SchedulerService,
-  type SchedulerServiceOptions,
 } from "./card-scheduler";
 export { addDays, MS_PER_DAY } from "./date-util";
 export { isLeech, LEECH_LAPSE_THRESHOLD } from "./leech";

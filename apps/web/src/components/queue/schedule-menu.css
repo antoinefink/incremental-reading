@@ -1,0 +1,91 @@
+/*
+ * ScheduleMenu styles (T028/T030) — the explicit reschedule popover.
+ *
+ * Token-only (no hard-coded colors/spacing): the popover reuses the surface/border/
+ * shadow tokens the rest of the queue uses, and the trigger reuses the `qitem__act`
+ * icon-button styling so it sits flush in the row's action cluster.
+ */
+
+.schedmenu {
+  position: relative;
+  display: inline-flex;
+}
+
+.schedmenu__pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 184px;
+  padding: var(--s-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.schedmenu__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease);
+}
+.schedmenu__item:hover {
+  background: var(--surface-2);
+}
+
+.schedmenu__manual {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 6px 4px 2px;
+  margin-top: 2px;
+  border-top: 1px solid var(--border-faint);
+}
+.schedmenu__date {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+}
+.schedmenu__apply {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.schedmenu__apply:hover {
+  opacity: 0.92;
+}
+.schedmenu__apply:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

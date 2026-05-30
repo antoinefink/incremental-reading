@@ -233,19 +233,11 @@ export class ExtractService {
   }
 
   /**
-   * Count how many times this extract has been postponed, by scanning its
-   * `reschedule_element` ops for the `postpone` marker. Read-only; this is the
-   * schema-churn-free postpone counter the attention scheduler/analytics read.
+   * Count how many times this extract has been postponed — delegates to the ONE
+   * canonical {@link OperationLogRepository.countPostpones} (the schema-churn-free
+   * marker scan), so the marker shape lives in a single place.
    */
   countPostpones(id: ElementId): number {
-    return new OperationLogRepository(this.db)
-      .listForElement(id)
-      .filter(
-        (op) =>
-          op.opType === "reschedule_element" &&
-          typeof op.payload === "object" &&
-          op.payload !== null &&
-          (op.payload as { postpone?: unknown }).postpone === true,
-      ).length;
+    return new OperationLogRepository(this.db).countPostpones(id);
   }
 }

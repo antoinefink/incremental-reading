@@ -617,6 +617,100 @@ describe("DbService", () => {
   });
 
   // -------------------------------------------------------------------------
+  // queue.schedule (T028) — explicit tomorrow / next-week / next-month / manual.
+  // -------------------------------------------------------------------------
+
+  it("scheduleQueueItem pins an attention item to an explicit future return (T028)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+
+    const extract = svc.repos.elements.create({
+      type: "extract",
+      status: "active",
+      stage: "raw_extract",
+      priority: 0.625,
+      title: "Schedulable extract",
+      dueAt: "2020-01-01T00:00:00.000Z",
+    });
+
+    const before = Date.now();
+    const res = svc.scheduleQueueItem({ id: extract.id, choice: { kind: "nextWeek" } });
+    expect(res.intervalDays).toBe(7);
+    expect(Date.parse(res.dueAt)).toBeGreaterThan(before);
+    // It recedes from the due set (a future date), so no in-place row comes back.
+    expect(res.item).toBeNull();
+
+    // Persisted: status `scheduled`, the new due ~7 days out.
+    const persisted = svc.repos.elements.findById(extract.id);
+    expect(persisted?.status).toBe("scheduled");
+    expect(persisted?.dueAt).toBe(res.dueAt);
+    const days = Math.round((Date.parse(res.dueAt) - before) / 86_400_000);
+    expect(days).toBe(7);
+
+    svc.close();
+  });
+
+  it("scheduleQueueItem normalizes a manual date to canonical ISO (T028)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+
+    const extract = svc.repos.elements.create({
+      type: "extract",
+      status: "active",
+      stage: "raw_extract",
+      priority: 0.625,
+      title: "Manually scheduled extract",
+    });
+
+    const res = svc.scheduleQueueItem({
+      id: extract.id,
+      choice: { kind: "manual", date: "2026-07-01T09:00:00Z" },
+    });
+    expect(res.dueAt).toBe("2026-07-01T09:00:00.000Z");
+    expect(svc.repos.elements.findById(extract.id)?.status).toBe("scheduled");
+
+    svc.close();
+  });
+
+  it("scheduleQueueItem REJECTS a card — cards schedule on FSRS, not the attention seam (T028)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const { extractId } = seedSourceAndExtract(svc);
+    const { card } = svc.createCard({
+      extractId,
+      kind: "qa",
+      prompt: "What is intelligence?",
+      answer: "Skill-acquisition efficiency.",
+    });
+    expect(() => svc.scheduleQueueItem({ id: card.id, choice: { kind: "tomorrow" } })).toThrow(
+      /card/i,
+    );
+    svc.close();
+  });
+
+  it("an explicitly-scheduled item survives a full close + reopen (T028 restart analogue)", () => {
+    const first = new DbService();
+    first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const extract = first.repos.elements.create({
+      type: "extract",
+      status: "active",
+      stage: "raw_extract",
+      priority: 0.625,
+      title: "Durably scheduled",
+      dueAt: "2020-01-01T00:00:00.000Z",
+    });
+    const { dueAt } = first.scheduleQueueItem({ id: extract.id, choice: { kind: "nextMonth" } });
+    first.close();
+
+    const second = new DbService();
+    second.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const reopened = second.repos.elements.findById(extract.id);
+    expect(reopened?.status).toBe("scheduled");
+    expect(reopened?.dueAt).toBe(dueAt);
+    second.close();
+  });
+
+  // -------------------------------------------------------------------------
   // cards.create (T032) — author a card from an extract (the M6 keystone).
   // -------------------------------------------------------------------------
 

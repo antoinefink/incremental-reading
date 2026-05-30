@@ -587,6 +587,58 @@ export interface QueueActResult {
   readonly undo: QueueActUndo | null;
 }
 
+// ---------------------------------------------------------------------------
+// queue.schedule()  (T028/T030 — explicit tomorrow / next-week / next-month / manual)
+// ---------------------------------------------------------------------------
+
+/**
+ * The EXPLICIT (non-heuristic) attention-scheduling surface (T028). Where
+ * `queue.act` `postpone` recedes a non-card item by the HEURISTIC interval, this
+ * lets the user pin an item to a precise return: **tomorrow / next week / next
+ * month / a manual date**. T028's roadmap "Done when" requires this capability; it
+ * runs through the `SchedulerService.scheduleAt` apply seam (the attention half),
+ * which computes the new `due_at` with the pure `AttentionScheduler.scheduleForChoice`
+ * and persists it via `ElementRepository.reschedule` (`reschedule_element`, status →
+ * `scheduled`) in ONE transaction — NO new op type (the closed 15-op set is
+ * unchanged).
+ *
+ * THE TWO-SCHEDULER SPLIT (load-bearing): this is for non-card ATTENTION items only.
+ * A `card` is REJECTED main-side (cards schedule on FSRS — `review.grade`, T037 —
+ * never the attention heuristic), so the renderer only offers this control on
+ * sources / topics / extracts / tasks. There is still no generic `db.query`.
+ *
+ * `choice` is a discriminated union so the main side rejects an unknown intent at
+ * the boundary; `manual` carries an ISO-8601 date (validated/normalized main-side).
+ */
+export const QueueScheduleRequestSchema = z.object({
+  /** The due (or any non-card attention) element id to schedule explicitly. */
+  id: ElementIdSchema,
+  choice: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("tomorrow") }),
+    z.object({ kind: z.literal("nextWeek") }),
+    z.object({ kind: z.literal("nextMonth") }),
+    z.object({
+      kind: z.literal("manual"),
+      /** The chosen return date, ISO-8601 (normalized to canonical ISO main-side). */
+      date: z.string().trim().min(1).max(64),
+    }),
+  ]),
+});
+export type QueueScheduleRequest = z.infer<typeof QueueScheduleRequestSchema>;
+
+export interface QueueScheduleResult {
+  /**
+   * The REFRESHED queue row after scheduling, or `null` when the item is no longer
+   * due (the usual case — a future schedule recedes it from the due set) or the id
+   * was unknown.
+   */
+  readonly item: QueueItemSummary | null;
+  /** The new `due_at` the item was scheduled to (ISO-8601). */
+  readonly dueAt: string;
+  /** The interval (in days) from "now" the chosen schedule resolved to. */
+  readonly intervalDays: number;
+}
+
 /**
  * Undo a removing queue action (T030) — the snackbar's "Undo". The renderer echoes
  * back the {@link QueueActUndo} recipe the prior {@link QueueActResult} handed it; the
@@ -1472,7 +1524,7 @@ export interface CardsMarkLeechResult {
  * The active-recall review surface (T037). `/review` loads the due-card deck
  * (FSRS `due_at ≤ now`, soonest first), reveals the answer, shows the four grade
  * buttons with next-interval previews, and on a grade records the response time +
- * reschedules the card via the FSRS `SchedulerService` → `ReviewRepository`. The
+ * reschedules the card via the FSRS `CardSchedulerService` → `ReviewRepository`. The
  * three commands keep the renderer thin: it holds ONLY UI/session state (deck
  * cursor, revealed flag, the reveal→grade timer) — never FSRS math, never SQL.
  *
@@ -2201,6 +2253,13 @@ export interface AppApi {
      */
     act(request: QueueActRequest): Promise<QueueActResult>;
     /**
+     * Schedule a non-card attention item for an EXPLICIT return (T028) — tomorrow /
+     * next week / next month / a manual date — through the attention-scheduler apply
+     * seam (`reschedule_element`, status → `scheduled`). Cards are rejected (FSRS
+     * schedules cards). One transaction + the existing op; no new op type.
+     */
+    schedule(request: QueueScheduleRequest): Promise<QueueScheduleResult>;
+    /**
      * Undo a removing queue action (T030) — restore a soft-deleted row or re-set the
      * prior status (done/dismiss). One transaction + the correct existing op.
      */
@@ -2297,12 +2356,12 @@ export interface AppApi {
     sessionNext(request?: ReviewSessionNextRequest): Promise<ReviewSessionNextResult>;
     /**
      * Preview the four next intervals for a card's grade buttons (T037) — calls
-     * `SchedulerService.previewIntervals`. PURE: mutates nothing.
+     * `CardSchedulerService.previewIntervals`. PURE: mutates nothing.
      */
     preview(request: ReviewPreviewRequest): Promise<ReviewPreviewResult>;
     /**
      * Grade a card (T037) — FSRS reschedule + a durable `review_logs` row, in ONE
-     * transaction via `SchedulerService.gradeCard` → `ReviewRepository.recordReview`,
+     * transaction via `CardSchedulerService.gradeCard` → `ReviewRepository.recordReview`,
      * logging `add_review_log`. Records the response time. Cards only.
      */
     grade(request: ReviewGradeRequest): Promise<ReviewGradeResult>;

@@ -1,5 +1,5 @@
 /**
- * SchedulerService (FSRS) tests (T036).
+ * CardSchedulerService (FSRS) tests (T036).
  *
  * The CARD half of the two-scheduler split. These pin the FSRS wrapper's contract
  * from a FIXED clock with fuzzing OFF (deterministic intervals), asserting:
@@ -25,14 +25,14 @@ import type {
 } from "@interleave/core";
 import { FSRS_STATES, REVIEW_RATINGS } from "@interleave/core";
 import { describe, expect, it } from "vitest";
-import { formatInterval, SchedulerService } from "./card-scheduler";
+import { CardSchedulerService, formatInterval } from "./card-scheduler";
 import { MS_PER_DAY } from "./date-util";
 
 const CARD_ID = "card-1" as ElementId;
 const NOW = "2026-06-15T00:00:00.000Z" as IsoTimestamp;
 
-function service(desiredRetention = 0.9): SchedulerService {
-  return new SchedulerService({ desiredRetention, enableFuzz: false });
+function service(desiredRetention = 0.9): CardSchedulerService {
+  return new CardSchedulerService({ desiredRetention, enableFuzz: false });
 }
 
 /** A hand-built `review`-state card (matured), for the ordering/lapse assertions. */
@@ -56,7 +56,7 @@ function intervalDays(now: IsoTimestamp, dueAt: IsoTimestamp): number {
   return (Date.parse(dueAt) - Date.parse(now)) / MS_PER_DAY;
 }
 
-describe("SchedulerService.newCardState", () => {
+describe("CardSchedulerService.newCardState", () => {
   it("produces a fresh, un-due `new` state with zero counters", () => {
     const state = service().newCardState(CARD_ID);
     expect(state.elementId).toBe(CARD_ID);
@@ -68,7 +68,7 @@ describe("SchedulerService.newCardState", () => {
   });
 });
 
-describe("SchedulerService.gradeCard — new card", () => {
+describe("CardSchedulerService.gradeCard — new card", () => {
   it("grading Good advances a brand-new card to a real state with reps:1, due>now", () => {
     const fresh = service().newCardState(CARD_ID);
     const outcome = service().gradeCard(fresh, "good", NOW, 1500);
@@ -96,7 +96,7 @@ describe("SchedulerService.gradeCard — new card", () => {
   });
 });
 
-describe("SchedulerService.gradeCard — graduation across the persistence round-trip", () => {
+describe("CardSchedulerService.gradeCard — graduation across the persistence round-trip", () => {
   // This drives the SAME path the repository uses between grades: each grade's
   // ReviewOutcome is folded back into a fresh ReviewState (carrying `learningSteps`,
   // mirroring `fromFsrsCard(toFsrsCard(...))`), then re-graded. Regression guard for
@@ -104,7 +104,7 @@ describe("SchedulerService.gradeCard — graduation across the persistence round
   // `learning` and is rescheduled in minutes forever, never reaching `review`.
   function applyOutcome(
     prev: ReviewState,
-    outcome: ReturnType<SchedulerService["gradeCard"]>,
+    outcome: ReturnType<CardSchedulerService["gradeCard"]>,
   ): ReviewState {
     return {
       ...prev,
@@ -167,7 +167,7 @@ describe("SchedulerService.gradeCard — graduation across the persistence round
   });
 });
 
-describe("SchedulerService.gradeCard — review card lapse + ordering", () => {
+describe("CardSchedulerService.gradeCard — review card lapse + ordering", () => {
   it("grading Again increments lapses and shortens the interval vs Good/Easy", () => {
     const svc = service();
     const card = reviewStateCard();
@@ -199,7 +199,7 @@ describe("SchedulerService.gradeCard — review card lapse + ordering", () => {
   });
 });
 
-describe("SchedulerService.previewIntervals", () => {
+describe("CardSchedulerService.previewIntervals", () => {
   it("returns four outcomes with non-decreasing intervals across again→hard→good→easy", () => {
     const card = reviewStateCard();
     const preview = service().previewIntervals(card, NOW);
@@ -235,7 +235,7 @@ describe("SchedulerService.previewIntervals", () => {
   });
 });
 
-describe("SchedulerService adapter round-trip", () => {
+describe("CardSchedulerService adapter round-trip", () => {
   it("fromFsrsCard(toFsrsCard(state)) is stable for a review card", () => {
     const svc = service();
     const card = reviewStateCard();
@@ -263,7 +263,7 @@ describe("SchedulerService adapter round-trip", () => {
   });
 });
 
-describe("SchedulerService desired retention is a first-class input", () => {
+describe("CardSchedulerService desired retention is a first-class input", () => {
   it("higher desiredRetention yields shorter intervals (Good on a review card)", () => {
     const card = reviewStateCard();
     const low = service(0.85).gradeCard(card, "good", NOW, 1000);
@@ -280,7 +280,7 @@ describe("SchedulerService desired retention is a first-class input", () => {
   });
 });
 
-describe("SchedulerService never leaks ts-fsrs types", () => {
+describe("CardSchedulerService never leaks ts-fsrs types", () => {
   it("gradeCard outputs only our FsrsState/ReviewRating vocabulary", () => {
     const outcome = service().gradeCard(service().newCardState(CARD_ID), "good", NOW, 1000);
     // States are our lowercase strings, not the numeric ts-fsrs enum.

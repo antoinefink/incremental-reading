@@ -2,7 +2,7 @@
  * FSRS grade-path integration (T036).
  *
  * Exercises the persistence seam end to end against a TEMPORARY, fully-migrated
- * in-memory `better-sqlite3` DB: the FSRS `SchedulerService` (`@interleave/scheduler`)
+ * in-memory `better-sqlite3` DB: the FSRS `CardSchedulerService` (`@interleave/scheduler`)
  * computes a `ReviewOutcome` and `ReviewRepository.recordReview` PERSISTS it. This is
  * the contract T037's `review.grade` IPC composes. It asserts:
  *
@@ -20,7 +20,7 @@
 import type { BlockId, ElementId, Priority } from "@interleave/core";
 import type { DbHandle } from "@interleave/db";
 import { elements, operationLog, reviewLogs, reviewStates } from "@interleave/db";
-import { SchedulerService } from "@interleave/scheduler";
+import { CardSchedulerService } from "@interleave/scheduler";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CardService } from "./card-service";
@@ -71,11 +71,11 @@ afterEach(() => {
   handle.sqlite.close();
 });
 
-describe("FSRS grade path: SchedulerService → ReviewRepository.recordReview", () => {
+describe("FSRS grade path: CardSchedulerService → ReviewRepository.recordReview", () => {
   it("persists the advanced review_states, one review_logs row, advances elements.due_at, logs add_review_log", () => {
     const { cardId } = seedCard();
     const review = new ReviewRepository(handle.db);
-    const scheduler = new SchedulerService({ desiredRetention: 0.9, enableFuzz: false });
+    const scheduler = new CardSchedulerService({ desiredRetention: 0.9, enableFuzz: false });
 
     // A newly authored card is parked un-due (`new`, dueAt null) — M6 did no FSRS.
     const before = review.findReviewState(cardId);
@@ -128,7 +128,7 @@ describe("FSRS grade path: SchedulerService → ReviewRepository.recordReview", 
   it("grading Again on a graded card increments lapses and appends a second log row", () => {
     const { cardId } = seedCard();
     const review = new ReviewRepository(handle.db);
-    const scheduler = new SchedulerService({ desiredRetention: 0.9, enableFuzz: false });
+    const scheduler = new CardSchedulerService({ desiredRetention: 0.9, enableFuzz: false });
 
     // First grade Good to leave the `new` state.
     const s0 = review.findReviewState(cardId);
@@ -151,7 +151,7 @@ describe("FSRS grade path: SchedulerService → ReviewRepository.recordReview", 
   it("graduates a card from learning to review across repeated Good grades (learning-step cursor persists)", () => {
     const { cardId } = seedCard();
     const review = new ReviewRepository(handle.db);
-    const scheduler = new SchedulerService({ desiredRetention: 0.9, enableFuzz: false });
+    const scheduler = new CardSchedulerService({ desiredRetention: 0.9, enableFuzz: false });
 
     // Drive the real recordReview loop: read state, grade Good, persist, advance the
     // clock to the new due time, repeat. Regression guard for the learning-step reset

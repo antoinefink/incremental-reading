@@ -325,20 +325,13 @@ export class InspectorQuery {
   }
 
   /**
-   * How many times an attention element has been postponed (T024) — counted from
-   * its `reschedule_element` ops carrying the `postpone` marker. Read-only; this is
-   * the schema-churn-free postpone counter the `SchedulerChip` shows.
+   * How many times an attention element has been postponed (T024) — delegates to
+   * the ONE canonical {@link OperationLogRepository.countPostpones} (the
+   * schema-churn-free counter the `SchedulerChip` shows), shared across the four
+   * former copies so the marker shape lives in a single place.
    */
   private countPostpones(id: ElementId): number {
-    return this.repos.operationLog
-      .listForElement(id)
-      .filter(
-        (op) =>
-          op.opType === "reschedule_element" &&
-          typeof op.payload === "object" &&
-          op.payload !== null &&
-          (op.payload as { postpone?: unknown }).postpone === true,
-      ).length;
+    return this.repos.operationLog.countPostpones(id);
   }
 }
 

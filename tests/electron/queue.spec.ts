@@ -387,3 +387,96 @@ test("the due queue survives an app restart (items still scheduled)", async () =
 
   await app.close();
 });
+
+test("the queue.schedule bridge command exists (explicit attention scheduling) (T028)", async () => {
+  const app = await launchApp(dataDir);
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  const surface = await page.evaluate(() => {
+    const api = window.appApi as unknown as {
+      queue?: { schedule?: unknown };
+      db?: { query?: unknown };
+    };
+    return {
+      hasSchedule: typeof api?.queue?.schedule === "function",
+      hasQuery: typeof api?.db?.query === "function",
+    };
+  });
+  expect(surface.hasSchedule).toBe(true);
+  expect(surface.hasQuery).toBe(false);
+
+  await app.close();
+});
+
+test("the schedule menu on an attention row pins a new explicit 'next week' due (T028)", async () => {
+  const app = await launchApp(dataDir);
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  // Self-clock to the extract's CURRENT due so it reads as due and its row renders
+  // its action cluster (which hosts the schedule menu — attention rows only). This
+  // proves the renderer → window.appApi.queue.schedule → attention apply seam path
+  // is fully reachable end to end (the gap the audit flagged).
+  const extractId = await findExtractId(page);
+  const currentDue = await page.evaluate(async (id) => {
+    const api = window.appApi as unknown as {
+      inspector: {
+        get(req: { id: string }): Promise<{ data: { element: { dueAt: string | null } } | null }>;
+      };
+    };
+    const res = await api.inspector.get({ id });
+    return res.data?.element.dueAt ?? null;
+  }, extractId);
+  if (!currentDue) throw new Error("seeded extract has no due_at");
+
+  await openQueue(page, currentDue);
+  const row = page.locator(`[data-testid="queue-item"][data-element-id="${extractId}"]`);
+  await expect(row).toBeVisible();
+  // The schedule menu is shown ONLY for non-card attention rows (cards use FSRS).
+  await expect(row.getByTestId("schedule-menu-trigger")).toBeVisible();
+
+  // Capture the server-side "now" the schedule will measure from (the apply seam
+  // uses the live clock, not the URL `asOf`), so the +7d assertion is exact.
+  const nowBefore = await page.evaluate(() => Date.now());
+
+  // Open the row's schedule menu and pick "Next week".
+  await row.getByTestId("schedule-menu-trigger").click();
+  await expect(page.getByTestId("schedule-menu-pop").first()).toBeVisible();
+  await row.getByTestId("schedule-nextWeek").click();
+
+  // No navigation happens on a schedule action.
+  expect(new URL(page.url()).pathname).toBe("/queue");
+
+  // The extract is now `scheduled` ~7 days from the server clock (read back through
+  // the bridge — the UI control really drove the attention apply seam).
+  await expect
+    .poll(async () =>
+      page.evaluate(async (id) => {
+        const api = window.appApi as unknown as {
+          inspector: {
+            get(req: { id: string }): Promise<{
+              data: { element: { dueAt: string | null; status: string } } | null;
+            }>;
+          };
+        };
+        const res = await api.inspector.get({ id });
+        return res.data?.element.status ?? null;
+      }, extractId),
+    )
+    .toBe("scheduled");
+
+  const newDueAt = await page.evaluate(async (id) => {
+    const api = window.appApi as unknown as {
+      inspector: {
+        get(req: { id: string }): Promise<{ data: { element: { dueAt: string | null } } | null }>;
+      };
+    };
+    const res = await api.inspector.get({ id });
+    return res.data?.element.dueAt ?? null;
+  }, extractId);
+  const days = Math.round((Date.parse(newDueAt as string) - nowBefore) / 86_400_000);
+  expect(days).toBe(7);
+
+  await app.close();
+});
