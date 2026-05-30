@@ -677,6 +677,9 @@ export function ExtractView() {
             key={`${id ?? "none"}:${builder.tab}`}
             extractId={id}
             extractPriority={element?.priority ?? 0.5}
+            // The card inherits a source location iff the extract has one — feeds the
+            // T035 "missing source" quality check. The renderer ships only the boolean.
+            hasSource={inspector?.location != null || inspector?.source != null}
             seedBody={doc.plainText}
             initialTab={builder.tab}
             {...(builder.clozeText !== undefined ? { initialClozeText: builder.clozeText } : {})}

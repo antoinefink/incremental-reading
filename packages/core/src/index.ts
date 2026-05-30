@@ -22,6 +22,23 @@ export const CORE_PACKAGE = "@interleave/core" as const;
 // before value exports and alphabetizes by module, so per-block comments are
 // kept minimal; the authoritative docs live on each declaration in its module.
 
+// Card-quality heuristics — pure domain checks for the `qc` checklist (./card-quality).
+export type {
+  CardQualityCheck,
+  CardQualityCheckId,
+  CardQualityInput,
+  CardQualityReport,
+  CardQualitySeverity,
+  ClozeQualityInput,
+  QaQualityInput,
+} from "./card-quality";
+export {
+  ANSWER_MAX_CHARS,
+  CLOZE_MAX_WORDS,
+  evaluateCardQuality,
+  MAX_CLOZE_DELETIONS,
+  PROMPT_MAX_CHARS,
+} from "./card-quality";
 // Cloze parse/serialize/preview — structured-metadata source of truth (./cloze).
 export type {
   ClozeDeletion,

@@ -12,8 +12,11 @@
  *    `@interleave/core` `renderClozePrompt` helper (NOT ad-hoc regex here);
  *  - a live `cardprev` preview that shows the front and toggles to the back / reveals
  *    cloze answers (Space, mirroring the kit's `Kbd ␣`);
- *  - the `qc` quality-checklist CONTAINER (the heuristics land in T035 — this task
- *    renders the shell only);
+ *  - the `qc` quality-checklist (T035): the `@interleave/core` `evaluateCardQuality`
+ *    heuristics run live as the user types and render as `ok` / `warn` / `block` rows
+ *    (the component calls the pure domain function — it holds NO heuristic logic). A
+ *    `block`-severity check (empty Q&A side, no cloze deletion) disables Create;
+ *    `warn`s are advisory and never block;
  *  - the A/B/C/D priority chips (default = the extract's label) + the FSRS
  *    `SchedulerChip` (FSRS side; schedule values are previews/`—` until M7);
  *  - a `Create Q&A card` / `Create cloze card` block button.
@@ -35,7 +38,13 @@
  * FSRS rotation in M7.
  */
 
-import { canonicalizeCloze, parseCloze, renderClozePrompt } from "@interleave/core";
+import {
+  type CardQualityInput,
+  canonicalizeCloze,
+  evaluateCardQuality,
+  parseCloze,
+  renderClozePrompt,
+} from "@interleave/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "../components/Icon";
 import { priorityLabel } from "../components/inspector/primitives";
@@ -51,6 +60,13 @@ export interface CardBuilderProps {
   readonly extractId: string;
   /** The extract's numeric priority — the default A/B/C/D chip selection. */
   readonly extractPriority: number;
+  /**
+   * Whether the extract carries a source location the card will inherit (lineage to
+   * source). Feeds the T035 "missing source" quality check; defaults to `false` so a
+   * lineage-less card warns. The renderer derives this from the inspector payload —
+   * it ships only the boolean, never resolves the location itself.
+   */
+  readonly hasSource?: boolean;
   /**
    * Seed text for the answer / cloze body (usually the extract's atomic
    * statement). The user edits both fields freely from here.
@@ -75,6 +91,7 @@ export interface CardBuilderProps {
 export function CardBuilder({
   extractId,
   extractPriority,
+  hasSource = false,
   seedBody,
   initialTab = "qa",
   initialClozeText,
@@ -109,10 +126,22 @@ export function CardBuilder({
     setPriority(defaultLabel);
   }, [defaultLabel]);
 
-  const qaValid = front.trim().length > 0 && back.trim().length > 0;
-  // A cloze is authorable once it has at least one deletion (a coarse boundary — the
-  // rich quality gate is T035). `clozeCount` is computed below; reference it lazily.
-  const canCreate = tab === "qa" ? qaValid : parseCloze(cloze).clozeCount > 0;
+  // The card-quality report (T035) runs live on every edit. The component holds NO
+  // heuristic logic — it calls the pure `@interleave/core` `evaluateCardQuality` and
+  // renders the ordered `ok` / `warn` / `block` rows as the `qc` checklist. A
+  // `block`-severity check (empty Q&A side / no cloze deletion) gates Create; `warn`s
+  // are advisory and never block (the card-quality rule: warnings inform).
+  const quality = useMemo(() => {
+    const input: CardQualityInput =
+      tab === "qa"
+        ? { kind: "qa", prompt: front, answer: back, hasSource }
+        : { kind: "cloze", cloze, hasSource };
+    return evaluateCardQuality(input);
+  }, [tab, front, back, cloze, hasSource]);
+
+  // Create is allowed with warnings; only a `block`-severity check (the hollow-card
+  // set) disables it. This is the create-time precondition M7's activation reuses.
+  const canCreate = !quality.hasBlocker;
 
   // The Q&A preview face: front, toggling to back on reveal.
   const previewFace = useMemo(() => {
@@ -345,13 +374,23 @@ export function CardBuilder({
           </>
         )}
 
-        {/* Quality checks — the container; the heuristics + rows land in T035. */}
+        {/* Quality checks (T035) — `evaluateCardQuality` runs live; each row is an
+            `ok` / `warn` / `block` from the pure core heuristic. `block` rows disable
+            Create; `warn` rows are advisory. */}
         <div className="insp-sec cb-quality" data-testid="cb-quality">
           <div className="insp-sec__title">Quality checks</div>
           <div className="cb-quality__rows">
-            <div className="dimmed cb-quality__pending">
-              Quality checks land with the next step.
-            </div>
+            {quality.checks.map((c) => (
+              <div
+                key={c.id}
+                className={`qc qc--${c.severity}`}
+                data-testid={`cb-qc-${c.id}`}
+                data-severity={c.severity}
+              >
+                <Icon name={c.severity === "ok" ? "checkCircle" : "warning"} size={14} />
+                {c.message}
+              </div>
+            ))}
           </div>
         </div>
 

@@ -387,8 +387,37 @@
   gap: 5px;
 }
 
-.cb-quality__pending {
-  font-size: var(--t-xs);
+/* Quality-check rows (T035) — `ok` / `warn` / `block`, mirroring the design kit's
+   `.qc`. `block` is the hollow-card hard gate, styled with the danger tokens. */
+.qc {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--t-sm);
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+}
+
+.qc svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-top: 1px;
+}
+
+.qc--ok {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.qc--warn {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.qc--block {
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .cb-prio-row {

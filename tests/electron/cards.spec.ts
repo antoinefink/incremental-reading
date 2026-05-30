@@ -22,7 +22,8 @@
  * Observed BOTH through the UI (the builder + the lineage tree) and the typed
  * bridge (`inspector.get` for the persisted card + its review state).
  *
- * T034 (cloze) + T035 (quality warnings) extend this spec when they land.
+ * T034 (cloze) extends this with a multi-cloze round-trip; T035 adds the quality
+ * checklist step (an empty card blocks Create; an over-long prompt warns).
  */
 
 import { expect, type Page, test } from "@playwright/test";
@@ -148,7 +149,17 @@ test("authoring a Q&A card from an extract persists it with lineage and survives
   await expect(page.getByTestId("cb-qa-front")).toBeVisible();
   expect(new URL(page.url()).pathname).toContain(`/extract/${extractId}`);
 
-  // (b) AUTHOR — fill the Q&A fields and create.
+  // (a2) QUALITY (T035) — an empty Q&A is a hollow card: a `block` row + Create is
+  // disabled; an over-long prompt is an advisory `warn` row that does NOT block.
+  await expect(page.getByTestId("cb-qc-empty")).toHaveAttribute("data-severity", "block");
+  await expect(page.getByTestId("cb-create")).toBeDisabled();
+  await page.getByTestId("cb-qa-front").fill("Q? ".padEnd(180, "x"));
+  await page.getByTestId("cb-qa-back").fill("A short answer.");
+  await expect(page.getByTestId("cb-qc-prompt-too-long")).toHaveAttribute("data-severity", "warn");
+  // The hollow blocker is gone (both fields filled) → Create is enabled despite the warn.
+  await expect(page.getByTestId("cb-create")).toBeEnabled();
+
+  // (b) AUTHOR — fill the Q&A fields with a clean prompt and create.
   await page.getByTestId("cb-qa-front").fill("How does Chollet define intelligence?");
   await page
     .getByTestId("cb-qa-back")

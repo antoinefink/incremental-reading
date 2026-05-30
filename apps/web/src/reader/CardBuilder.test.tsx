@@ -197,3 +197,53 @@ describe("CardBuilder — Cloze tab (T034)", () => {
     expect(h.onToast).toHaveBeenCalledWith("Cloze card created");
   });
 });
+
+describe("CardBuilder — quality checks (T035)", () => {
+  it("renders the qc rows and updates them as fields change", () => {
+    renderBuilder({ hasSource: true, seedBody: "" });
+    // Empty Q&A → a `block` "empty" row; source attached → an `ok` source row.
+    expect(screen.getByTestId("cb-qc-empty")).toHaveAttribute("data-severity", "block");
+    expect(screen.getByTestId("cb-qc-missing-source")).toHaveAttribute("data-severity", "ok");
+
+    // Fill both fields → the empty blocker clears to ok.
+    fireEvent.change(screen.getByTestId("cb-qa-front"), { target: { value: "What is X?" } });
+    fireEvent.change(screen.getByTestId("cb-qa-back"), { target: { value: "A short answer." } });
+    expect(screen.getByTestId("cb-qc-empty")).toHaveAttribute("data-severity", "ok");
+  });
+
+  it("warns 'missing source' when the extract has no source location", () => {
+    renderBuilder({ hasSource: false });
+    expect(screen.getByTestId("cb-qc-missing-source")).toHaveAttribute("data-severity", "warn");
+  });
+
+  it("warns on an over-long prompt without blocking Create", () => {
+    renderBuilder({ hasSource: true });
+    fireEvent.change(screen.getByTestId("cb-qa-front"), {
+      target: { value: "Q?".padEnd(200, "x") },
+    });
+    fireEvent.change(screen.getByTestId("cb-qa-back"), { target: { value: "A." } });
+    expect(screen.getByTestId("cb-qc-prompt-too-long")).toHaveAttribute("data-severity", "warn");
+    // A warning is advisory — Create stays enabled.
+    expect(screen.getByTestId("cb-create")).not.toBeDisabled();
+  });
+
+  it("disables Create while a block-severity check is present and re-enables when fixed", () => {
+    renderBuilder({ hasSource: true, seedBody: "" });
+    const create = screen.getByTestId("cb-create");
+    expect(create).toBeDisabled(); // empty Q&A → block
+    fireEvent.change(screen.getByTestId("cb-qa-front"), { target: { value: "What is X?" } });
+    fireEvent.change(screen.getByTestId("cb-qa-back"), { target: { value: "A short answer." } });
+    expect(create).not.toBeDisabled();
+  });
+
+  it("flags 'multiple clozes' as a warning on the Cloze tab", () => {
+    renderBuilder({
+      initialTab: "cloze",
+      hasSource: true,
+      initialClozeText: "Memory moves from the {{c1::hippocampus}} to the {{c2::neocortex}}.",
+    });
+    expect(screen.getByTestId("cb-qc-multiple-clozes")).toHaveAttribute("data-severity", "warn");
+    // Two deletions is still authorable (warnings never block).
+    expect(screen.getByTestId("cb-create")).not.toBeDisabled();
+  });
+});
