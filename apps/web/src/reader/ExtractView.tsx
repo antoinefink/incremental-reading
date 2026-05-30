@@ -376,8 +376,10 @@ export function ExtractView() {
     }
   }, [selection.location, onSubExtract, toast]);
 
-  // Keyboard while the toolbar is open: E → sub-extract (mirrors the reader's T019
-  // capture-phase handler so a bare letter is not typed into the contentEditable).
+  // Keyboard while the toolbar is open: E → sub-extract, C → cloze (T048 — the
+  // SAME `onSelectionAction` the toolbar buttons call, opening the cloze builder
+  // pre-wrapped from the selection). Mirrors the reader's T019 capture-phase
+  // handler so a bare letter is not typed into the contentEditable.
   useEffect(() => {
     if (!desktop || !selection.position) return;
     function onKey(e: KeyboardEvent) {
@@ -388,6 +390,9 @@ export function ExtractView() {
       if (k === "e") {
         e.preventDefault();
         onSelectionAction("extract");
+      } else if (k === "c") {
+        e.preventDefault();
+        onSelectionAction("cloze");
       }
     }
     window.addEventListener("keydown", onKey, true);

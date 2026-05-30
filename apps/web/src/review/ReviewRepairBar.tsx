@@ -21,7 +21,7 @@
  * preload bridge; the main process owns the transaction + the `operation_log` op.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../components/Icon";
 import { TypeIcon } from "../components/inspector/primitives";
 import { appApi, type CardEditSummary, type ReviewCardView } from "../lib/appApi";
@@ -152,6 +152,30 @@ export function ReviewRepairBar({
       setSaving(false);
     }
   }, [busy, saving, card.id, card.leech, onCardUpdated]);
+
+  // Keyboard repairs (T048) — `E` opens the inline editor, `S` suspends. These run
+  // the SAME `openEditor` / `suspend` handlers the on-screen repair buttons call (no
+  // second mutation path); the cheat sheet documents them as review-scope keys.
+  // Suppressed while typing in a field (so editing the prompt/answer is unaffected)
+  // and while the inline editor is already open. Space + 1–4 stay in `ReviewScreen`.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+      if (editing) return;
+      const k = e.key.toLowerCase();
+      if (k === "e") {
+        e.preventDefault();
+        openEditor();
+      } else if (k === "s") {
+        e.preventDefault();
+        void suspend();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editing, openEditor, suspend]);
 
   const disabled = busy || saving;
 

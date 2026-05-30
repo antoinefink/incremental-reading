@@ -37,6 +37,7 @@ import {
   type QueueListResult,
   type SchedulerSignals,
 } from "../../lib/appApi";
+import { useActiveScope } from "../../shell/activeScope";
 import { useSelection } from "../../shell/selection";
 import { jitterOrder } from "./jitter";
 import "./queue.css";
@@ -253,7 +254,12 @@ export function ProcessQueue() {
     }
   }, [current, navigate, select]);
 
-  // Keyboard-first controls — the loop's core keys (the full catalog is T048).
+  // Keyboard-first controls — the loop's core keys, registered in the single
+  // shortcut registry (T048) and bound here through the SAME `appApi` path as the
+  // buttons. While the loop is live it owns the keys it shares with the global
+  // shell handler (`o`/`+`/`-`), so the shell DEFERS them (see `activeScope`).
+  const loopActive = desktop && !done;
+  useActiveScope("queue", loopActive);
   useProcessShortcuts(
     {
       next: skip,
@@ -265,7 +271,7 @@ export function ProcessQueue() {
       lower: () => void act("lower"),
       open,
     },
-    desktop && !done,
+    loopActive,
   );
 
   if (!desktop) {

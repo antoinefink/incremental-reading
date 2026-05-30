@@ -192,6 +192,17 @@ const appApi: AppApi = {
   backups: {
     create: () => ipcRenderer.invoke(IPC_CHANNELS.backupsCreate),
   },
+  menu: {
+    // Receive-only subscription (T048): the native Help → "Keyboard shortcuts"
+    // menu item sends `menu:showShortcuts`; we forward a payload-free callback and
+    // return an unsubscribe fn. No generic listener is exposed — only this one
+    // named event, and the renderer never gets the raw `ipcRenderer`/`event`.
+    onShowShortcuts: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC_CHANNELS.menuShowShortcuts, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.menuShowShortcuts, listener);
+    },
+  },
 };
 
 contextBridge.exposeInMainWorld("appApi", appApi);

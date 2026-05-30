@@ -65,6 +65,11 @@ export const IPC_CHANNELS = {
   analyticsGet: "analytics:get",
   balanceGet: "balance:get",
   backupsCreate: "backups:create",
+  // One-way main → renderer event (T048): the native Help → "Keyboard shortcuts"
+  // menu item asks the renderer to open the in-app cheat sheet. This is a SEND
+  // channel (main → renderer), not an `invoke` handler — the preload exposes a
+  // narrow receive-only subscription, never a generic listener.
+  menuShowShortcuts: "menu:showShortcuts",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

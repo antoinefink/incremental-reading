@@ -13,6 +13,7 @@
  * when those screens land in later milestones.
  */
 import type { IconName } from "../components/Icon";
+import { CHEAT_GROUP_ORDER, type PaletteActionId, paletteShortcuts, SHORTCUTS } from "./shortcuts";
 
 /** A primary or secondary sidebar entry. */
 export type NavItem = {
@@ -50,13 +51,30 @@ export const SECONDARY_NAV: readonly NavItem[] = [
   { id: "settings", label: "Settings", icon: "settings", to: "/settings" },
 ];
 
-/** A command-palette entry. */
+/**
+ * Context passed to a palette item's `when` gate so context-scoped action
+ * commands (e.g. "Open source", "Raise priority") only appear when they apply.
+ * Pure UI state — no domain data.
+ */
+export interface CommandContext {
+  /** Whether an element is currently selected in the shell (T010 selection). */
+  readonly hasSelection: boolean;
+}
+
+/**
+ * A command-palette entry (T004, extended in T048).
+ *
+ * An entry may navigate (`to`), dispatch a screen `event`, run a registry-backed
+ * ACTION (`actionId`, T048 — the palette's "do something" commands), or any
+ * combination (e.g. "Start review" navigates to `/review`; "Search" navigates AND
+ * runs the search action). `to` is optional now that action-only commands exist.
+ */
 export type CommandItem = {
   readonly group: string;
   readonly icon: IconName;
   readonly label: string;
-  /** Route to navigate to when chosen. */
-  readonly to: string;
+  /** Route to navigate to when chosen (optional for action-only commands). */
+  readonly to?: string;
   /** Optional keyboard hint rendered on the right. */
   readonly kbd?: readonly string[];
   /**
@@ -66,6 +84,18 @@ export type CommandItem = {
    * `/inbox` AND opens its New-source modal. The detail is `undefined`.
    */
   readonly event?: string;
+  /**
+   * Optional registry-backed ACTION id (T048). When set, the palette runs the
+   * shell's matching handler, which dispatches the SAME typed `window.appApi`
+   * command (or navigation) as the on-screen button — no second mutation path.
+   */
+  readonly actionId?: PaletteActionId;
+  /**
+   * Optional visibility gate (T048). When present, the palette only shows the item
+   * if it returns `true` for the current context (e.g. context-scoped actions show
+   * only when an element is selected).
+   */
+  readonly when?: (ctx: CommandContext) => boolean;
 };
 
 /** CustomEvent name the inbox listens for to open its New-source modal (⌘K). */
@@ -79,8 +109,39 @@ export const NEW_SOURCE_EVENT = "interleave:new-source";
 export const UNDO_EVENT = "interleave:undo";
 
 /**
- * ⌘K catalogue — mirrors the kit's CMDK_ITEMS. "Create"/"Session" entries land
- * on their nearest route for now (real actions arrive with their features).
+ * Action entries DERIVED from the single shortcut registry (T048) — the palette's
+ * "do something" commands (Open source, Open parent, Raise/Lower priority, Start
+ * review, Search). Each carries the registry's `actionId` so `CommandPalette`'s
+ * `runItem` dispatches the SAME `window.appApi`-backed handler as the on-screen
+ * button (no second mutation path). Context-scoped actions are gated by `when` so
+ * they only appear when an element is selected. Built from the registry so the
+ * palette can never drift from the documented shortcuts.
+ */
+const ACTION_COMMAND_ITEMS: readonly CommandItem[] = paletteShortcuts().map((s) => {
+  const p = s.palette;
+  // Only the element-targeted actions are context-scoped; nav/session ones are
+  // always available.
+  const contextScoped =
+    p?.actionId === "open-source" ||
+    p?.actionId === "open-parent" ||
+    p?.actionId === "raise-priority" ||
+    p?.actionId === "lower-priority";
+  const item: CommandItem = {
+    group: p?.group ?? "Actions",
+    icon: (p?.icon ?? "play") as IconName,
+    label: s.label,
+    kbd: s.keys,
+    ...(p?.to ? { to: p.to } : {}),
+    ...(p?.actionId ? { actionId: p.actionId } : {}),
+    ...(contextScoped ? { when: (ctx: CommandContext) => ctx.hasSelection } : {}),
+  };
+  return item;
+});
+
+/**
+ * ⌘K catalogue — the kit's navigation/create commands PLUS the registry-derived
+ * ACTION entries (T048). "Go to"/"Create" navigate (and optionally open a modal);
+ * the action entries run a typed command via `actionId`.
  */
 export const COMMAND_ITEMS: readonly CommandItem[] = [
   { group: "Go to", icon: "queue", label: "Daily Queue", to: "/queue", kbd: ["G", "Q"] },
@@ -105,9 +166,7 @@ export const COMMAND_ITEMS: readonly CommandItem[] = [
     to: "/inbox",
     event: NEW_SOURCE_EVENT,
   },
-  { group: "Session", icon: "play", label: "Start daily session", to: "/review" },
-  { group: "Session", icon: "review", label: "Review-only mode", to: "/review" },
-  { group: "Session", icon: "bookmark", label: "Reading-only mode", to: "/queue" },
+  ...ACTION_COMMAND_ITEMS,
 ];
 
 /**
@@ -132,47 +191,16 @@ export type CheatGroup = {
   readonly rows: readonly (readonly [string, readonly string[]])[];
 };
 
-/** `?` cheat-sheet contents — mirrors the kit's CHEAT table. */
-export const CHEAT_SHEET: readonly CheatGroup[] = [
-  {
-    group: "Navigation",
-    rows: [
-      ["Command palette", ["⌘", "K"]],
-      ["Undo last action", ["⌘", "Z"]],
-      ["Go to Queue", ["G", "Q"]],
-      ["Go to Review", ["G", "R"]],
-      ["Go to Library", ["G", "L"]],
-      ["This cheat sheet", ["?"]],
-    ],
-  },
-  {
-    group: "Reading",
-    rows: [
-      ["Extract selection", ["E"]],
-      ["Cloze selection", ["C"]],
-      ["Highlight", ["H"]],
-      ["Set read-point", ["␣"]],
-      ["Mark processed", ["M"]],
-    ],
-  },
-  {
-    group: "Review",
-    rows: [
-      ["Reveal answer", ["␣"]],
-      ["Grade Again → Easy", ["1", "4"]],
-      ["Edit card", ["E"]],
-      ["Open source", ["O"]],
-      ["Suspend", ["S"]],
-    ],
-  },
-  {
-    group: "Triage",
-    rows: [
-      ["Activate", ["1"]],
-      ["Read soon", ["2"]],
-      ["Save for later", ["3"]],
-      ["Archive", ["4"]],
-      ["Delete", ["6"]],
-    ],
-  },
-];
+/**
+ * `?` cheat-sheet contents — DERIVED from the single shortcut registry (T048), so
+ * the documentation can never drift from the real handlers. Each registry entry
+ * becomes a `[label, keys]` row under its group; groups render in
+ * `CHEAT_GROUP_ORDER`. (Before T048 this was a hand-maintained literal that could
+ * silently disagree with what was actually bound.)
+ */
+export const CHEAT_SHEET: readonly CheatGroup[] = CHEAT_GROUP_ORDER.map((group) => ({
+  group,
+  rows: SHORTCUTS.filter((s) => s.group === group).map(
+    (s) => [s.label, s.keys] as readonly [string, readonly string[]],
+  ),
+})).filter((g) => g.rows.length > 0);

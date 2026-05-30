@@ -2398,4 +2398,13 @@ export interface AppApi {
      */
     create(): Promise<BackupsCreateResult>;
   };
+  readonly menu: {
+    /**
+     * Subscribe to the native Help → "Keyboard shortcuts" (⌘/) menu item (T048).
+     * A one-way main → renderer event so the native menu opens the in-app cheat
+     * sheet. Returns an unsubscribe fn. This is the ONLY receive-only bridge method
+     * — it carries no payload and exposes no generic listener.
+     */
+    onShowShortcuts(callback: () => void): () => void;
+  };
 }

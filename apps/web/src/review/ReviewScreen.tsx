@@ -38,6 +38,7 @@ import {
   type SchedulerSignals,
 } from "../lib/appApi";
 import { useNavigateToLocation } from "../reader/navigateToLocation";
+import { useActiveScope } from "../shell/activeScope";
 import { Kbd } from "../shell/Kbd";
 import { useSelection } from "../shell/selection";
 import { ReviewRepairBar } from "./ReviewRepairBar";
@@ -285,6 +286,12 @@ export function ReviewScreen() {
     void loadNext();
   }, [loadNext]);
 
+  // While a card is in front of the user the review surface OWNS the keyboard
+  // (Space + 1–4, plus `e`/`o`/`s` repairs); the global shell handler defers its
+  // overlapping element-action keys (`o`/`+`/`-`/`u`) so it never double-fires
+  // during a session (see `activeScope`).
+  useActiveScope("review", desktop && !done);
+
   // Keyboard: Space reveals; 1–4 grade. Ignored while focus is in an input/textarea
   // (exactly as the prototype's `onKey`).
   useEffect(() => {
@@ -292,9 +299,18 @@ export function ReviewScreen() {
     function onKey(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.code === "Space") {
         e.preventDefault();
         if (!revealed) void reveal();
+        return;
+      }
+      // `o` → open the originating source (lineage jump) — the SAME `openSource`
+      // the repair bar's "Open source" button calls (T022/T048). Available before
+      // or after reveal so the user can ground a card without leaving review.
+      if (e.key === "o" || e.key === "O") {
+        e.preventDefault();
+        openSource();
         return;
       }
       if (revealed) {
@@ -307,7 +323,7 @@ export function ReviewScreen() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [desktop, done, revealed, reveal, grade]);
+  }, [desktop, done, revealed, reveal, grade, openSource]);
 
   if (!desktop) {
     return (

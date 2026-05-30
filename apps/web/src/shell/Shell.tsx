@@ -33,8 +33,10 @@ import { CheatSheet } from "./CheatSheet";
 import { CommandPalette } from "./CommandPalette";
 import { Kbd } from "./Kbd";
 import { type NavItem, PRIMARY_NAV, SECONDARY_NAV, UNDO_EVENT } from "./nav";
-import { SelectionProvider } from "./selection";
+import { SelectionProvider, useSelection } from "./selection";
 import "./shell.css";
+import type { PaletteActionId } from "./shortcuts";
+import { useGlobalActions } from "./useGlobalActions";
 import { useShellShortcuts } from "./useShellShortcuts";
 
 /** Whether a sidebar entry is the active route (longest-prefix, exact for "/"). */
@@ -231,9 +233,17 @@ function StatusBar() {
   );
 }
 
-export function Shell() {
+/**
+ * The shell's interactive body. Lives INSIDE `SelectionProvider` so the global
+ * shortcuts + the `⌘K` palette can act on the current selection (T048 — open
+ * source / open parent / raise·lower priority operate on the selected element via
+ * `useGlobalActions`, calling the SAME typed commands as the inspector buttons).
+ */
+function ShellInner() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { selectedId } = useSelection();
+  const globalActions = useGlobalActions();
 
   const [commandOpen, setCommandOpen] = useState(false);
   const [cheatOpen, setCheatOpen] = useState(false);
@@ -242,6 +252,39 @@ export function Shell() {
 
   const onNavigate = (to: string) => {
     void navigate({ to });
+  };
+
+  /**
+   * Run a registry-backed palette/shortcut ACTION (T048). This is the single map
+   * from the closed `PaletteActionId` set to the shared handlers — both the `⌘K`
+   * palette and (for `cheat-sheet`) the menus route through here, and the element
+   * actions delegate to `useGlobalActions` (same `window.appApi` commands as the
+   * inspector buttons). No domain logic here — pure dispatch.
+   */
+  const runAction = (actionId: PaletteActionId) => {
+    switch (actionId) {
+      case "open-source":
+        globalActions.openSource();
+        break;
+      case "open-parent":
+        globalActions.openParent();
+        break;
+      case "raise-priority":
+        globalActions.raisePriority();
+        break;
+      case "lower-priority":
+        globalActions.lowerPriority();
+        break;
+      case "search":
+        globalActions.search();
+        break;
+      case "start-review":
+        // The palette item already navigated to /review via its `to`; nothing more.
+        break;
+      case "cheat-sheet":
+        setCheatOpen(true);
+        break;
+    }
   };
 
   /**
@@ -268,6 +311,14 @@ export function Shell() {
       });
   };
 
+  // The native Help → "Keyboard shortcuts" (⌘/) menu item opens the in-app cheat
+  // sheet via the narrow `menu.onShowShortcuts` bridge event (T048). No-op outside
+  // the desktop shell.
+  useEffect(() => {
+    if (!isDesktop()) return;
+    return appApi.onMenuShowShortcuts(() => setCheatOpen(true));
+  }, []);
+
   const onToggleTheme = () => {
     const next = applyToggleTheme();
     setTheme(next);
@@ -285,41 +336,59 @@ export function Shell() {
     toggleCheatSheet: () => setCheatOpen((o) => !o),
     onNavigate,
     onUndo,
+    onSearch: globalActions.search,
+    onOpenSource: globalActions.openSource,
+    onOpenParent: globalActions.openParent,
+    onRaisePriority: globalActions.raisePriority,
+    onLowerPriority: globalActions.lowerPriority,
   });
 
   return (
-    <SelectionProvider>
-      <div className="app-shell">
-        <Sidebar
-          pathname={pathname}
-          theme={theme}
-          onToggleTheme={onToggleTheme}
-          onOpenCheat={() => setCheatOpen(true)}
-        />
+    <div className="app-shell">
+      <Sidebar
+        pathname={pathname}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
+        onOpenCheat={() => setCheatOpen(true)}
+      />
 
-        <div className="shell-main">
-          <Topbar onOpenCommand={() => setCommandOpen(true)} />
-          <main className="shell-page">
-            <Outlet />
-          </main>
-          <StatusBar />
-        </div>
-
-        <Inspector />
-
-        <CommandPalette
-          open={commandOpen}
-          onClose={() => setCommandOpen(false)}
-          onNavigate={onNavigate}
-        />
-        <CheatSheet open={cheatOpen} onClose={() => setCheatOpen(false)} />
-        {/* Global undo toast (T044) — confirms the ⌘Z command-level undo. */}
-        <Snackbar
-          message={undoToast}
-          onClose={() => setUndoToast(null)}
-          testId="shell-undo-snackbar"
-        />
+      <div className="shell-main">
+        <Topbar onOpenCommand={() => setCommandOpen(true)} />
+        <main className="shell-page">
+          <Outlet />
+        </main>
+        <StatusBar />
       </div>
+
+      <Inspector />
+
+      <CommandPalette
+        open={commandOpen}
+        onClose={() => setCommandOpen(false)}
+        onNavigate={onNavigate}
+        onAction={runAction}
+        hasSelection={selectedId !== null}
+      />
+      <CheatSheet open={cheatOpen} onClose={() => setCheatOpen(false)} />
+      {/* Global undo toast (T044) — confirms the ⌘Z command-level undo. */}
+      <Snackbar
+        message={undoToast}
+        onClose={() => setUndoToast(null)}
+        testId="shell-undo-snackbar"
+      />
+    </div>
+  );
+}
+
+/**
+ * Persistent app shell — provides the selection context, then renders the
+ * interactive body (`ShellInner`) inside it so the global shortcuts + palette can
+ * act on the selected element (T048).
+ */
+export function Shell() {
+  return (
+    <SelectionProvider>
+      <ShellInner />
     </SelectionProvider>
   );
 }

@@ -56,10 +56,19 @@ describe("shell nav config", () => {
       expect(VALID_ROUTES).toContain(item.to);
     }
     for (const item of COMMAND_ITEMS) {
-      expect(VALID_ROUTES).toContain(item.to);
+      // Action-only commands (T048) carry no `to`; only validate when one is set.
+      if (item.to !== undefined) expect(VALID_ROUTES).toContain(item.to);
     }
     for (const to of Object.values(GOTO_MAP)) {
       expect(VALID_ROUTES).toContain(to);
+    }
+  });
+
+  it("every command item carries a route, an action, or a screen event (T048)", () => {
+    for (const item of COMMAND_ITEMS) {
+      const runnable =
+        item.to !== undefined || item.actionId !== undefined || item.event !== undefined;
+      expect(runnable).toBe(true);
     }
   });
 

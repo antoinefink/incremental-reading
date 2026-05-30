@@ -168,7 +168,7 @@ Detailed specs: [`tasks/M1-foundations.md`](./tasks/M1-foundations.md)
 
 ## M10 — Keyboard, E2E & ship MVP as Electron desktop (T048–T050)
 
-- [ ] **T048 — Keyboard shortcuts & command palette** · _deps: T031, T037, T021_
+- [x] **T048 — Keyboard shortcuts & command palette** · done · _deps: T031, T037, T021_
   Done when: shortcuts exist for next-item, extract, cloze, postpone, done, delete, raise/lower priority, search, open-parent, open-source, and command palette; the main workflow is mouse-free. Shortcuts invoke commands through the **same typed `window.appApi` path** as the UI buttons (no separate mutation path).
 - [ ] **T049 — MVP end-to-end tests** · _deps: T048, T047_
   Done when: Playwright runs against the **Electron app** where feasible and covers import → activate → read → extract → convert-to-card → review → reschedule → search → backup, plus a **restart-app → verify-persistence** step proving data survives an app restart.
@@ -318,6 +318,7 @@ overload management, semantic search, AI, media, reliability, scale.
 
 Record notable completions / decisions here as tasks land (newest first).
 
+- 2026-05-30 - T048 Keyboard shortcuts & command palette - done. The main workflow is now mouse-free: scoped shortcuts (next-item, extract, cloze, postpone, done, delete, raise/lower priority, search, open-parent, open-source) plus a command palette invoke commands through the same typed `window.appApi` path as the UI buttons, with a native Electron menu wired up. Shortcuts/scope/global-actions live in `apps/web/src/shell/` (`shortcuts.ts`, `activeScope.ts`, `useGlobalActions.ts`, `useShellShortcuts.ts`, `CommandPalette.tsx`) and the native menu in `apps/desktop/src/main/menu.ts`. Covered by Vitest (`shortcuts.test.ts`, `CommandPalette.test.tsx`, `useShellShortcuts.test.tsx`, `nav.test.ts`, `contract.test.ts`) and the Playwright spec (`tests/electron/keyboard.spec.ts`).
 - 2026-05-30 - T047 Backup / export - done. Backup creates a restore-ready zip (SQLite db + asset vault + manifest) behind the Electron/IPC boundary, exposed through the typed `window.appApi` surface so the renderer never touches the filesystem directly. Covered by Vitest (`backup-manifest.test.ts`, `backup-service.test.ts`, `contract.test.ts`, `db-service.test.ts`) and the Playwright spec (`tests/electron/backup.spec.ts`).
 - 2026-05-30 - T046 Import/process balance warnings - done. A balance banner warns when imports outpace processing: the import/process rates are computed behind the Electron/IPC boundary (`packages/core/balance.ts`, `packages/local-db/balance-query.ts`) and read through the typed `window.appApi` surface, with a `BalanceBanner` shown on inbox/analytics so the renderer never touches the DB directly. Covered by Vitest (`balance.test.ts`, `balance-query.test.ts`, `BalanceBanner.test.tsx`, `contract.test.ts`, `db-service.test.ts`) and the Playwright spec (`tests/electron/balance.spec.ts`).
 - 2026-05-30 - T045 Basic analytics - done. A new analytics view surfaces daily reviews, due cards/topics, new cards/extracts, deletions, leeches, and 30-day retention, computed behind the Electron/IPC boundary and read through the typed `window.appApi` surface so the renderer never touches the DB directly.

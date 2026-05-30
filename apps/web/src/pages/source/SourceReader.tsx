@@ -46,6 +46,7 @@ import { Prio, SchedulerChip, Status } from "../../components/inspector/primitiv
 import { appApi, type InspectorData, isDesktop } from "../../lib/appApi";
 import { SelectionToolbar, type SelectionToolbarAction } from "../../reader/SelectionToolbar";
 import { useTextSelection } from "../../reader/useTextSelection";
+import { useActiveScope } from "../../shell/activeScope";
 import { Kbd } from "../../shell/Kbd";
 import { useSelection } from "../../shell/selection";
 import { ProcessedSpanButtons } from "./ProcessedSpanButtons";
@@ -165,6 +166,13 @@ export function SourceReader() {
     await appApi.actOnQueueItem({ id, action: { kind: "delete" } });
     void navigate({ to: "/queue" });
   }, [id, navigate]);
+
+  // The reader OWNS its keyboard surface (`E`/`C`/`H` on a selection, `␣` for the
+  // read-point); register the reader scope so the global shell handler defers its
+  // overlapping single-letter element actions (`o`/`u`/`+`/`-`) while reading —
+  // the reader has its own "Open original" + the inspector raise/lower controls
+  // (T048, see `activeScope`).
+  useActiveScope("reader", desktop);
 
   const doc = useDocument(id);
   const rp = useReadPoint(id);

@@ -1417,6 +1417,10 @@ export interface AppApi {
   readonly backups: {
     create(): Promise<BackupsCreateResult>;
   };
+  readonly menu: {
+    /** Subscribe to the native Help → "Keyboard shortcuts" menu item (T048). */
+    onShowShortcuts(callback: () => void): () => void;
+  };
 }
 
 declare global {
@@ -1737,5 +1741,14 @@ export const appApi = {
    */
   createBackup(): Promise<BackupsCreateResult> {
     return requireAppApi().backups.create();
+  },
+  /**
+   * Subscribe to the native Help → "Keyboard shortcuts" (⌘/) menu item (T048). The
+   * shell calls this to open the in-app cheat sheet from the menu bar. Returns an
+   * unsubscribe fn; a no-op outside the desktop shell.
+   */
+  onMenuShowShortcuts(callback: () => void): () => void {
+    if (!isDesktop() || !window.appApi?.menu) return () => {};
+    return window.appApi.menu.onShowShortcuts(callback);
   },
 } as const;

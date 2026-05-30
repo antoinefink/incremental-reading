@@ -17,6 +17,7 @@ import path from "node:path";
 import { app, BrowserWindow } from "electron";
 import { DbService } from "./db-service";
 import { registerIpcHandlers } from "./ipc";
+import { installApplicationMenu } from "./menu";
 import { resolveMigrationsDir } from "./migrations";
 import { resolveNativeBinding } from "./native-binding";
 import { initAppPaths } from "./paths";
@@ -73,7 +74,12 @@ function bootstrap(): void {
     registerRendererProtocol(rendererDir);
   }
 
-  // 5) Secure window.
+  // 5) Native application menu (T048) — standard macOS menu + Edit clipboard roles
+  //    (so the editor chords work) + Help → "Keyboard shortcuts" (⌘/) opening the
+  //    in-app cheat sheet via a one-way main → renderer event.
+  installApplicationMenu();
+
+  // 6) Secure window.
   createMainWindow({ distDir, devServerUrl });
 }
 
