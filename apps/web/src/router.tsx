@@ -2,25 +2,30 @@
  * Application router (T003, shell wired in T004) — code-based, fully typed
  * TanStack Router.
  *
- * Eight routes are defined here, each rendered inside the persistent app shell:
- *   /            home (daily queue / command center landing)
- *   /inbox       import & triage
- *   /queue       due queue
- *   /source/$id  source reader (typed dynamic param)
- *   /extract/$id extract review mode (T024 — typed dynamic param)
- *   /review      active-recall review session
- *   /search      library / search
- *   /settings    local settings
+ * Twelve routes are defined here, each rendered inside the persistent app shell:
+ *   /                    home (daily queue / command center landing)
+ *   /inbox               import & triage
+ *   /queue               due queue
+ *   /process             focused one-at-a-time process session (T031)
+ *   /source/$id          source reader (typed dynamic param)
+ *   /extract/$id         extract review mode (T024 — typed dynamic param)
+ *   /review              active-recall review session
+ *   /maintenance/leeches leech cleanup (T040)
+ *   /search              library / search
+ *   /trash               soft-deleted elements (T044)
+ *   /analytics           learning-health snapshot (T045)
+ *   /settings            local settings
  *
- * Code-based routing (vs the file-based codegen plugin) keeps the scaffold
- * explicit and dependency-light while the screens are still placeholders. The
- * root route renders the `Shell` (sidebar / command bar / work area / inspector
- * / status bar + ⌘K, ?, g-nav) once; every route's content paints in its
- * <Outlet/>.
+ * Code-based routing (vs the file-based codegen plugin) keeps the route tree
+ * explicit and dependency-light. The root route renders the `Shell` (sidebar /
+ * command bar / work area / inspector / status bar + ⌘K, ?, g-nav) once; every
+ * route's content paints in its <Outlet/>. Only `/` is still a `Placeholder`
+ * (the Home command center is unbuilt); every other route mounts its real
+ * screen.
  *
- * No domain logic here — routes render placeholders; data wiring lands after
- * the Electron shell + native SQLite (T007) and the repositories (T008), reached
- * through the typed `window.appApi` bridge.
+ * No domain logic here — each screen reads/writes its own data through the typed
+ * `window.appApi` bridge (Electron main + native SQLite); the router only maps
+ * paths to components.
  */
 import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import { AnalyticsScreen } from "./analytics/AnalyticsScreen";
@@ -71,7 +76,7 @@ const queueRoute = createRoute({
  * `queue.act` / `elements.setPriority` surface as the list (no new mutation path),
  * advancing the cursor after every action so the user processes ten mixed
  * sources/extracts/cards without returning to a list. Lives on its own `/process`
- * route so the `/review` placeholder stays reserved for the M7 review session.
+ * route, kept distinct from `/review` (the FSRS active-recall review session).
  */
 const processRoute = createRoute({
   getParentRoute: () => rootRoute,

@@ -118,6 +118,16 @@ vi.mock("../../shell/selection", () => ({
   useSelection: () => ({ selectedId: null, select: h.selectSpy }),
 }));
 
+// The seeded daily jitter (T029) is a presentation collaborator that reorders the
+// queue by the calendar day — its shuffle is covered by `jitter.test.ts`. Stub it to
+// the identity here so this test exercises ONLY the loop's cursor wiring against the
+// deterministic input order (card-1 → source-1 → extract-1), instead of depending on
+// today's wall-clock seed (which would make these assertions flaky day to day).
+vi.mock("./jitter", () => ({
+  jitterOrder: <T,>(rows: readonly T[]): T[] => [...rows],
+  daySeed: () => "2026-01-01",
+}));
+
 import { ProcessQueue } from "./ProcessQueue";
 
 beforeEach(() => {

@@ -6,9 +6,9 @@
  *
  *   ┌────────────┬───────────────────────────────┬──────────────┐
  *   │  Sidebar   │  Topbar (command bar · ⌘K)    │  Inspector   │
- *   │  brand     ├───────────────────────────────┤  (placeholder│
- *   │  nav       │  Work area (route <Outlet/>)   │   for T010)  │
- *   │  Organize  │                               │              │
+ *   │  brand     ├───────────────────────────────┤  (selected   │
+ *   │  nav       │  Work area (route <Outlet/>)   │   element ·  │
+ *   │  Organize  │                               │   lineage)   │
  *   │  streak    ├───────────────────────────────┤              │
  *   │  user chip │  Status bar (shortcut hints)  │              │
  *   └────────────┴───────────────────────────────┴──────────────┘
@@ -16,7 +16,8 @@
  * Layout dims come exclusively from the design tokens (--sidebar-w /
  * --inspector-w / --topbar-h) via shell.css; no hard-coded px. The shell hosts
  * the ⌘K command palette, the ? cheat sheet, and g+letter navigation. The
- * right inspector is a placeholder container now (T010 fills it).
+ * right inspector (T010) renders the selected element's metadata + actionable
+ * lineage, driven by the shared selection context.
  *
  * No domain logic lives here: navigation goes through TanStack Router and the
  * nav/command catalogues are static config.
@@ -265,8 +266,9 @@ function Topbar({ onOpenCommand }: { onOpenCommand: () => void }) {
  * The local asset vault the desktop app persists into. Typed with the real
  * `@interleave/core` vocabulary so the renderer references the vault root by its
  * canonical name — and demonstrably never resolves a raw filesystem path itself
- * (path resolution belongs to the Electron main process; T007). Real status
- * (open/migrated) will arrive from `window.appApi` once the shell lands.
+ * (path resolution belongs to the Electron main process; T007). Live DB/vault
+ * status (open/migrated) is read through `appApi.db.getStatus()` in the
+ * DesktopStatusPanel on /settings; this constant only labels the status bar.
  */
 const VAULT_ROOT: VaultRoot = "assets";
 const VAULT_DB_PATH: LocalVaultPath = { root: VAULT_ROOT, relativePath: "app.sqlite" };
