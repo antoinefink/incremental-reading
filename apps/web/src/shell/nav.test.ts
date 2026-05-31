@@ -31,8 +31,9 @@ const VALID_ROUTES = new Set([
 ]);
 
 describe("shell nav config", () => {
-  it("matches the kit's five primary + the Organize entries", () => {
+  it("leads with Home, then the kit's five primary + the Organize entries", () => {
     expect(PRIMARY_NAV.map((n) => n.label)).toEqual([
+      "Home",
       "Queue",
       "Inbox",
       "Library",
@@ -83,10 +84,18 @@ describe("shell nav config", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("covers the load-bearing goto shortcuts (q/r/l)", () => {
+  it("covers the load-bearing goto shortcuts (h/q/r/l)", () => {
+    expect(GOTO_MAP.h).toBe("/");
     expect(GOTO_MAP.q).toBe("/queue");
     expect(GOTO_MAP.r).toBe("/review");
     expect(GOTO_MAP.l).toBe("/search");
+  });
+
+  it("exposes a 'Go to Home command center' command pointing at `/`", () => {
+    const home = COMMAND_ITEMS.find((c) => c.to === "/");
+    expect(home).toBeDefined();
+    expect(home?.group).toBe("Go to");
+    expect(home?.kbd).toEqual(["G", "H"]);
   });
 
   it("provides a non-empty cheat sheet with key rows", () => {
@@ -146,6 +155,15 @@ describe("nav active-state exclusivity (resolveActiveNavId)", () => {
     expect(resolveActiveNavId("/source/abc")).toBeNull();
     expect(resolveActiveNavId("/extract/abc")).toBeNull();
     expect(resolveActiveNavId("/process")).toBeNull();
-    expect(resolveActiveNavId("/")).toBeNull();
+  });
+
+  it("on `/` highlights EXACTLY the Home entry (its canonical owner)", () => {
+    // Home owns `/` (canonical). The exact `pathname === "/"` branch matches only
+    // Home, and every other `to` is a longer/different prefix, so `/` never collides.
+    expect(resolveActiveNavId("/")).toBe("home");
+    expect(activeCount("/")).toBe(1);
+    // The deeper routes still resolve to their own owners — `/` does not leak.
+    expect(resolveActiveNavId("/queue")).toBe("queue");
+    expect(resolveActiveNavId("/search")).toBe("search");
   });
 });

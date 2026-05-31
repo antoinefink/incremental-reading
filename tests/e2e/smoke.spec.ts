@@ -77,8 +77,11 @@ test("the sidebar highlights exactly one nav item — and on /search it is Searc
   await expect(page.getByTestId("nav-concepts")).not.toHaveAttribute("aria-current", "page");
   await expect(activeNav).toHaveCount(1);
 
-  // Each uniquely-owned route highlights exactly its own entry.
+  // Each uniquely-owned route highlights exactly its own entry — including the new
+  // `/` home command center (its canonical owner, nav-home), so the index no longer
+  // highlights nothing.
   for (const [route, testId] of [
+    ["/", "nav-home"],
     ["/queue", "nav-queue"],
     ["/inbox", "nav-inbox"],
     ["/review", "nav-review"],

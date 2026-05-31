@@ -19,9 +19,8 @@
  * Code-based routing (vs the file-based codegen plugin) keeps the route tree
  * explicit and dependency-light. The root route renders the `Shell` (sidebar /
  * command bar / work area / inspector / status bar + ⌘K, ?, g-nav) once; every
- * route's content paints in its <Outlet/>. Only `/` is still a `Placeholder`
- * (the Home command center is unbuilt); every other route mounts its real
- * screen.
+ * route's content paints in its <Outlet/>. Every route — including `/` (the Home
+ * command center) — mounts its real screen.
  *
  * No domain logic here — each screen reads/writes its own data through the typed
  * `window.appApi` bridge (Electron main + native SQLite); the router only maps
@@ -32,8 +31,8 @@ import { AnalyticsScreen } from "./analytics/AnalyticsScreen";
 import { DesktopStatusPanel } from "./components/DesktopStatusPanel";
 import { LibraryScreen } from "./library/LibraryScreen";
 import { LeechCleanup } from "./maintenance/LeechCleanup";
+import { HomeScreen } from "./pages/home/HomeScreen";
 import { InboxScreen } from "./pages/inbox/InboxScreen";
-import { Placeholder } from "./pages/Placeholder";
 import { ProcessQueue } from "./pages/queue/ProcessQueue";
 import { QueueScreen } from "./pages/queue/QueueScreen";
 import { Settings } from "./pages/Settings";
@@ -45,17 +44,18 @@ import { TrashScreen } from "./trash/TrashScreen";
 
 const rootRoute = createRootRoute({ component: Shell });
 
+/**
+ * Home command center (T-home) — the real `/` index, replacing the Placeholder. A
+ * read-only landing dashboard that orients the user at a glance (greeting + due/est,
+ * BudgetMeter + at-risk metrics, streak + retention, a compact top-due preview, the
+ * reviews-per-day spark, quick-nav tiles) and routes INTO the interactive surfaces
+ * (/process, /queue, /review, /inbox). It composes the existing typed reads
+ * `queue.list` + `analytics.get`; no new bridge surface, no domain logic in React.
+ */
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  component: () => (
-    <Placeholder
-      routeId="home"
-      icon="layers"
-      title="Home"
-      body="Your daily command center. The queue, streak, and next actions land here."
-    />
-  ),
+  component: HomeScreen,
 });
 
 const inboxRoute = createRoute({

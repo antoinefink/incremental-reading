@@ -48,6 +48,11 @@ export type NavItem = {
  * `useNavBadges`) — no hardcoded counts.
  */
 export const PRIMARY_NAV: readonly NavItem[] = [
+  // Home command center (the `/` landing dashboard). Canonical owner of `/`, so the
+  // route highlights EXCLUSIVELY — `resolveActiveNavId` matches `to === "/"` only via
+  // the exact `pathname === "/"` branch, and the longest-prefix rule guarantees it
+  // never collides with any deeper route. The `layers` glyph is the shell brand mark.
+  { id: "home", label: "Home", icon: "layers", to: "/", canonical: true },
   { id: "queue", label: "Queue", icon: "queue", to: "/queue", liveBadge: true },
   { id: "inbox", label: "Inbox", icon: "inbox", to: "/inbox", liveBadge: true },
   { id: "library", label: "Library", icon: "library", to: "/search" },
@@ -78,8 +83,9 @@ export const ALL_NAV: readonly NavItem[] = [...PRIMARY_NAV, ...SECONDARY_NAV];
  * exclusivity contract is unit-testable.
  *
  * Rules:
- *  - The home route `/` only matches an entry whose `to` is exactly `/` (there is
- *    no such nav entry today, so `/` resolves to `null` — nothing highlighted).
+ *  - The home route `/` only matches an entry whose `to` is exactly `/` (the Home
+ *    entry), so `/` resolves to `home` — and never to a deeper route, since every
+ *    other `to` is a longer/different prefix.
  *  - Otherwise an entry matches when the pathname equals its `to` or is a child
  *    of it (`${to}/…`) — so `/maintenance/leeches` activates Leeches, and a
  *    future `/search/abc` would still activate the search owner.
@@ -221,6 +227,7 @@ const ACTION_COMMAND_ITEMS: readonly CommandItem[] = paletteShortcuts().map((s) 
  * the action entries run a typed command via `actionId`.
  */
 export const COMMAND_ITEMS: readonly CommandItem[] = [
+  { group: "Go to", icon: "layers", label: "Home command center", to: "/", kbd: ["G", "H"] },
   { group: "Go to", icon: "queue", label: "Daily Queue", to: "/queue", kbd: ["G", "Q"] },
   { group: "Go to", icon: "inbox", label: "Inbox triage", to: "/inbox", kbd: ["G", "I"] },
   { group: "Go to", icon: "review", label: "Review session", to: "/review", kbd: ["G", "R"] },
@@ -248,11 +255,12 @@ export const COMMAND_ITEMS: readonly CommandItem[] = [
 
 /**
  * `g`+letter quick-navigation map (pressing `g` then the letter). Matches the
- * kit: q→queue, i→inbox, r→review, l→library, c→concepts, a→analytics,
+ * kit: h→home, q→queue, i→inbox, r→review, l→library, c→concepts, a→analytics,
  * s→settings. Library/concepts share `/search` until they split out; analytics
- * has its own `/analytics` route (T045).
+ * has its own `/analytics` route (T045); home is the `/` landing command center.
  */
 export const GOTO_MAP: Readonly<Record<string, string>> = {
+  h: "/",
   q: "/queue",
   i: "/inbox",
   r: "/review",

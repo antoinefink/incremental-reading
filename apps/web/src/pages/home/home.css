@@ -1,0 +1,200 @@
+/**
+ * Home command-center styles (Daily Queue landing dashboard).
+ *
+ * The Home screen REUSES the queue chrome (`.q-page`/`.q-pad`/`.q-head`/`.q-panel`/
+ * `.q-overload`/`.q-metrics`/`.sessionbar`/`.q-empty`) and the analytics chrome
+ * (`.an-metrics`/`.an-metric`/`.an-panel`/`.an-spark`/`.an-banner`) — both imported
+ * by `HomeScreen`. This thin sheet adds ONLY the surfaces unique to the command
+ * center: the streak+retention banner, the read-only top-due preview rows, the
+ * "see full queue" link, and the quick-navigation tile grid. Token-driven — no
+ * hard-coded colors, no hard-coded spacing (light + dark follow the tokens).
+ */
+
+/* ---------- Streak + retention banner ---------- */
+.home-streak {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: color-mix(in oklch, var(--warn) 7%, var(--surface));
+  color: var(--text);
+  margin-bottom: var(--s-4);
+}
+.home-streak__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--warn);
+}
+.home-streak__n {
+  font-weight: 650;
+  font-size: var(--t-md);
+  letter-spacing: -0.01em;
+}
+.home-streak__l {
+  font-size: var(--t-sm);
+  color: var(--text-2);
+}
+
+/* ---------- Secondary session links (Open queue / Review) ---------- */
+.home-sessionbar__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 550;
+  cursor: pointer;
+  transition: all var(--fast) var(--ease);
+}
+.home-sessionbar__link:hover {
+  border-color: var(--text-3);
+  color: var(--text);
+}
+
+/* ---------- Section heading (shared by preview + tiles) ---------- */
+.home-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: var(--s-3);
+}
+.home-section__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.home-section__title {
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.home-section__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 550;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--r-sm);
+}
+.home-section__link:hover {
+  color: var(--text);
+}
+
+/* ---------- Read-only top-due preview rows (slim qitem variant) ---------- */
+.home-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.home-prow {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--s-4);
+  align-items: center;
+  padding: 10px var(--s-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  text-align: left;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  position: relative;
+  transition: all var(--fast) var(--ease);
+}
+.home-prow:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+.home-prow--protected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: var(--r-full);
+  background: var(--prio-a);
+}
+.home-prow__main {
+  min-width: 0;
+}
+.home-prow__title {
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.home-prow__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-top: 3px;
+  flex-wrap: wrap;
+}
+.home-prow__action {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+/* ---------- Quick-navigation tiles ---------- */
+.home-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--s-3);
+}
+.home-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--s-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--fast) var(--ease);
+}
+.home-tile:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+.home-tile__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.home-tile__label {
+  font-size: var(--t-sm);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.home-tile__sub {
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+}

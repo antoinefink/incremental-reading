@@ -43,6 +43,7 @@ import {
 import { useSelection } from "../../shell/selection";
 import "./queue.css";
 import { jitterOrder } from "./jitter";
+import { actionFor, DueBadge, titleFor } from "./queueRow";
 
 /** The non-open queue actions a row exposes, with their icon + label (T030). */
 type RowActionKind = QueueActAction["kind"];
@@ -89,36 +90,6 @@ const STATUS_FILTERS: readonly {
   { id: "active", label: "Active", statuses: ["active", "pending", "inbox"] },
   { id: "scheduled", label: "Scheduled", statuses: ["scheduled"] },
 ];
-
-/** A due-state badge (overdue / today / soon) — distinct from the lifecycle `Status`. */
-function DueBadge({ item }: { item: QueueItemSummary }) {
-  const cls =
-    item.due === "overdue" ? "badge--overdue" : item.due === "today" ? "badge--due" : "badge--soft";
-  return (
-    <span className={`badge ${cls}`} data-testid="queue-due-badge">
-      {item.dueLabel}
-    </span>
-  );
-}
-
-/** The per-row title with the kit's type prefix ("Extract · …", "Q&A · …"). */
-function titleFor(item: QueueItemSummary): string {
-  if (item.type === "card") {
-    const prefix = item.cardType === "cloze" ? "Cloze · " : "Q&A · ";
-    return prefix + item.title.replace(/\{\{(.+?)\}\}/, "[…]");
-  }
-  if (item.type === "extract") return `Extract · ${item.title}`;
-  if (item.type === "topic") return `Topic · ${item.title}`;
-  return item.title;
-}
-
-/** The open-action icon + label per type (the `next-action` affordance). */
-function actionFor(item: QueueItemSummary): { icon: IconName; label: string } {
-  if (item.type === "card") return { icon: "brain", label: "Review" };
-  if (item.type === "source") return { icon: "eye", label: "Read" };
-  if (item.type === "extract") return { icon: "extract", label: "Process" };
-  return { icon: "return", label: "Open" };
-}
 
 /** One queue row (the kit's `qitem`). */
 function QueueItem({
