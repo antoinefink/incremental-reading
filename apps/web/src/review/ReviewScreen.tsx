@@ -146,6 +146,13 @@ export function ReviewScreen() {
   const [done, setDone] = useState(false);
   const [startMs] = useState(() => Date.now());
   const [endMs, setEndMs] = useState<number | null>(null);
+  // The source-context drawer is owned here so the leech banner's "Add context"
+  // action and the repair bar's "Add context" button drive the same drawer.
+  const [contextDrawerOpen, setContextDrawerOpen] = useState(false);
+  // The number of cards removed from the live deck WITHOUT a grade (suspend/delete).
+  // The progress bar's denominator subtracts these so a completed session reaches
+  // 100% even when some cards were repaired away rather than reviewed.
+  const [removed, setRemoved] = useState(0);
 
   // The set of card ids already reviewed this session — passed to `session.next`
   // so the deck advances.
@@ -158,9 +165,14 @@ export function ReviewScreen() {
   // When the current card was revealed, for the reveal→grade response time.
   const revealAtRef = useRef<number | null>(null);
 
-  /** Load the next due card (excluding the already-seen set; burying recent siblings). */
-  const loadNext = useCallback(async () => {
-    if (!isDesktop()) return;
+  /**
+   * Load the next due card (excluding the already-seen set; burying recent
+   * siblings). Returns `true` on success and `false` if the read failed, so the
+   * grade path can clear the just-graded card on a post-grade advance failure
+   * (otherwise it would stay on screen and be re-gradable).
+   */
+  const loadNext = useCallback(async (): Promise<boolean> => {
+    if (!isDesktop()) return false;
     try {
       const recent = recentSiblingGroupRef.current;
       const res = await appApi.reviewSessionNext({
@@ -171,6 +183,7 @@ export function ReviewScreen() {
       setError(null);
       setRevealed(false);
       setPreviews(null);
+      setContextDrawerOpen(false);
       revealAtRef.current = null;
       if (!res.card) {
         setCard(null);
@@ -183,7 +196,7 @@ export function ReviewScreen() {
           setDone(true);
           setEndMs(Date.now());
         }
-        return;
+        return true;
       }
       setCard(res.card);
       setRemaining(res.remaining);
@@ -193,8 +206,10 @@ export function ReviewScreen() {
       // it so an unrelated card never suppresses anything.
       recentSiblingGroupRef.current = res.card.siblingGroupId;
       select(res.card.id);
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      return false;
     }
   }, [asOf, select]);
 
@@ -224,6 +239,11 @@ export function ReviewScreen() {
   const grade = useCallback(
     async (rating: ReviewRating) => {
       if (!card || !revealed || busy || !isDesktop()) return;
+      // Guard against double-grading the same card: once a card has been recorded
+      // in the exclude set it has a durable `review_logs` row + an advanced FSRS
+      // state, so a second grade (e.g. after a transient advance failure left it on
+      // screen) must not write a second log / advance FSRS twice.
+      if (excludeRef.current.includes(card.id)) return;
       setBusy(true);
       // Reveal→grade response time; fall back to 0 if the reveal timestamp is lost.
       const responseMs = revealAtRef.current ? Math.max(0, Date.now() - revealAtRef.current) : 0;
@@ -234,15 +254,30 @@ export function ReviewScreen() {
           responseMs,
           ...(asOf ? { asOf } : {}),
         });
-        excludeRef.current = [...excludeRef.current, card.id];
-        setReviewed((r) => r + 1);
-        setGraded((g) => [...g, rating]);
-        await loadNext();
       } catch (e) {
+        // The grade itself failed — nothing was recorded; leave the card in place
+        // so the user can retry the same grade.
         setError(e instanceof Error ? e.message : String(e));
-      } finally {
         setBusy(false);
+        return;
       }
+      // The grade is durable. Record it locally, then advance. If the advance fails
+      // (a transient IPC error), the just-graded card must NOT stay on screen — that
+      // would let the user grade it a second time — so clear it (the next
+      // `loadNext`/restart re-reads the deck minus this excluded card). The
+      // `excludeRef` guard above is the hard backstop against a double review_logs
+      // row; clearing the card is the UX so the stale card is never re-presented.
+      excludeRef.current = [...excludeRef.current, card.id];
+      setReviewed((r) => r + 1);
+      setGraded((g) => [...g, rating]);
+      const advanced = await loadNext();
+      if (!advanced) {
+        setCard(null);
+        setRevealed(false);
+        setPreviews(null);
+        revealAtRef.current = null;
+      }
+      setBusy(false);
     },
     [card, revealed, busy, asOf, loadNext],
   );
@@ -256,6 +291,9 @@ export function ReviewScreen() {
   const advancePastCurrent = useCallback(async () => {
     if (!card) return;
     excludeRef.current = [...excludeRef.current, card.id];
+    // Removed-without-a-grade: shrink the progress denominator so the bar still
+    // reaches 100% at completion (suspend/delete don't count as reviews).
+    setRemoved((n) => n + 1);
     await loadNext();
   }, [card, loadNext]);
 
@@ -280,6 +318,7 @@ export function ReviewScreen() {
     recentSiblingGroupRef.current = null;
     setReviewed(0);
     setGraded([]);
+    setRemoved(0);
     setDone(false);
     setEndMs(null);
     setTotal(0);
@@ -346,7 +385,9 @@ export function ReviewScreen() {
 
   const reviewedCount = reviewed;
   const leftCount = done ? 0 : remaining + (card ? 1 : 0);
-  const progressTotal = total || reviewedCount + leftCount;
+  // Cards removed without a grade (suspend/delete) shrink the denominator so the
+  // bar still fills to 100% at completion — they're repairs, not reviews.
+  const progressTotal = Math.max(reviewedCount, (total || reviewedCount + leftCount) - removed);
   const progressPct = progressTotal === 0 ? 0 : (reviewedCount / progressTotal) * 100;
 
   return (
@@ -455,6 +496,17 @@ export function ReviewScreen() {
                     Consider rewriting it, adding context, or splitting the fact.
                   </div>
                 </div>
+                <div className="banner__actions">
+                  <button
+                    type="button"
+                    className="banner__action"
+                    data-testid="review-leech-add-context"
+                    onClick={() => setContextDrawerOpen(true)}
+                  >
+                    <Icon name="context" size={14} />
+                    Add context
+                  </button>
+                </div>
               </div>
             ) : null}
 
@@ -538,6 +590,8 @@ export function ReviewScreen() {
                 setCard((c) => (c && c.id === updated.id ? { ...c, ...updated } : c))
               }
               onCardRemoved={advancePastCurrent}
+              drawerOpen={contextDrawerOpen}
+              onDrawerOpenChange={setContextDrawerOpen}
             />
           </div>
         ) : (

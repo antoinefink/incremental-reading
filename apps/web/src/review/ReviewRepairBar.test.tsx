@@ -15,6 +15,7 @@
  */
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CardEditSummary, ReviewCardView } from "../lib/appApi";
 
@@ -103,16 +104,28 @@ function summary(overrides: Partial<CardEditSummary> = {}): CardEditSummary {
   };
 }
 
-function renderBar(card: ReviewCardView = QA_CARD, busy = false) {
-  return render(
+/**
+ * The source-context drawer is controlled by the parent (`ReviewScreen`); this tiny
+ * harness owns that state so the bar behaves exactly as it does in the app (one
+ * drawer, lifted open/close).
+ */
+function Harness({ card, busy }: { card: ReviewCardView; busy: boolean }) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  return (
     <ReviewRepairBar
       card={card}
       busy={busy}
       onOpenSource={h.onOpenSource}
       onCardUpdated={h.onCardUpdated}
       onCardRemoved={h.onCardRemoved}
-    />,
+      drawerOpen={drawerOpen}
+      onDrawerOpenChange={setDrawerOpen}
+    />
   );
+}
+
+function renderBar(card: ReviewCardView = QA_CARD, busy = false) {
+  return render(<Harness card={card} busy={busy} />);
 }
 
 beforeEach(() => {
@@ -228,5 +241,63 @@ describe("ReviewRepairBar", () => {
     expect(drawer).toHaveTextContent("On the Measure of Intelligence");
     fireEvent.click(screen.getByTestId("review-drawer-open-source"));
     expect(h.onOpenSource).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks a non-leech card as a leech via appApi.markLeechCard (stays in the deck)", async () => {
+    h.markLeechCard.mockResolvedValue({ card: summary({ leech: true }) });
+    renderBar();
+    expect(screen.getByTestId("review-repair-leech")).toHaveTextContent(/mark leech/i);
+
+    fireEvent.click(screen.getByTestId("review-repair-leech"));
+
+    await waitFor(() =>
+      expect(h.markLeechCard).toHaveBeenCalledWith({ cardId: "card-qa", leech: true }),
+    );
+    await waitFor(() =>
+      expect(h.onCardUpdated).toHaveBeenCalledWith(expect.objectContaining({ leech: true })),
+    );
+    // Marking a leech does NOT advance the session (the card stays).
+    expect(h.onCardRemoved).not.toHaveBeenCalled();
+  });
+
+  it("un-leeches an already-leech card after remediation", async () => {
+    h.markLeechCard.mockResolvedValue({ card: summary({ leech: false }) });
+    renderBar({ ...QA_CARD, leech: true });
+    expect(screen.getByTestId("review-repair-leech")).toHaveTextContent(/^leech$/i);
+
+    fireEvent.click(screen.getByTestId("review-repair-leech"));
+
+    await waitFor(() =>
+      expect(h.markLeechCard).toHaveBeenCalledWith({ cardId: "card-qa", leech: false }),
+    );
+    await waitFor(() =>
+      expect(h.onCardUpdated).toHaveBeenCalledWith(expect.objectContaining({ leech: false })),
+    );
+  });
+
+  it("keyboard `s` suspends and `e` opens the inline editor (review-scope repair keys)", async () => {
+    renderBar();
+
+    // `e` opens the inline editor (the SAME handler the Edit button calls).
+    fireEvent.keyDown(window, { key: "e" });
+    expect(await screen.findByTestId("review-edit")).toBeInTheDocument();
+
+    // While the editor is open the repair keys are suppressed (so `s` typed in the
+    // body never suspends mid-edit). Cancel, then `s` suspends + advances.
+    fireEvent.click(screen.getByTestId("review-edit-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("review-edit")).not.toBeInTheDocument());
+
+    fireEvent.keyDown(window, { key: "s" });
+    await waitFor(() => expect(h.suspendCard).toHaveBeenCalledWith({ cardId: "card-qa" }));
+    await waitFor(() => expect(h.onCardRemoved).toHaveBeenCalledTimes(1));
+  });
+
+  it("ignores repair keys while focus is in a textarea (typing the prompt is unaffected)", async () => {
+    renderBar();
+    fireEvent.click(screen.getByTestId("review-repair-edit"));
+    const prompt = await screen.findByTestId("review-edit-prompt");
+    // `s` typed into the prompt field must NOT suspend the card.
+    fireEvent.keyDown(prompt, { key: "s" });
+    expect(h.suspendCard).not.toHaveBeenCalled();
   });
 });

@@ -375,7 +375,7 @@
   z-index: 40;
   border: none;
   padding: 0;
-  background: var(--overlay, rgba(0, 0, 0, 0.32));
+  background: oklch(0.2 0.02 262 / 0.32);
   cursor: pointer;
 }
 .drawer {
@@ -444,7 +444,7 @@
   align-items: flex-start;
   gap: var(--s-3, 10px);
   padding: var(--s-3, 12px) var(--s-4, 14px);
-  border: 1px solid var(--warn-soft-bd, var(--border-strong));
+  border: 1px solid var(--warn);
   background: var(--warn-soft);
   border-radius: var(--r-md);
   margin-bottom: 12px;
@@ -464,6 +464,39 @@
   color: var(--text-2);
   font-size: var(--t-sm);
   margin-top: 2px;
+}
+.banner__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2, 6px);
+}
+/* Inline "Add context" affordance (kit `screen-review.jsx` leech banner) — a small
+   ghost button on the warn surface; the icon inherits the banner's warn tint. */
+.banner__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.banner__action:hover {
+  border-color: var(--text-3);
+}
+.banner__action svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-top: 0;
+  color: currentColor;
 }
 
 /* ---------- concept tag (kit `.concept-tag`) ---------- */

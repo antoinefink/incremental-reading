@@ -328,11 +328,8 @@
   background: currentColor;
 }
 
-/* extra status badges the queue uses */
-.badge--leech {
-  background: var(--warn-soft);
-  color: var(--warn);
-}
+/* extra status badge the queue uses (`badge--leech` is a shared primitive in
+   inspector.css). */
 .badge--stagnant {
   background: var(--warn-soft);
   color: var(--warn);

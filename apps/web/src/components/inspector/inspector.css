@@ -63,6 +63,12 @@
   background: var(--danger-soft);
   color: var(--danger);
 }
+/* Leech marker — owned here (shared primitive) so the review + maintenance
+   surfaces that import inspector.css style it without depending on queue.css. */
+.badge--leech {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
 
 /* priority badges */
 .prio {

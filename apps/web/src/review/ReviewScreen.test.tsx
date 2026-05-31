@@ -94,6 +94,13 @@ const h = vi.hoisted(() => {
     flagged: false,
     siblingGroupId: null,
   };
+  const leechCard: ReviewCardView = {
+    ...qaCard,
+    id: "card-leech",
+    leech: true,
+    lapses: 8,
+    schedulerSignals: { ...qaCard.schedulerSignals, lapses: 8 },
+  };
   return {
     navigateSpy: vi.fn(),
     selectSpy: vi.fn(),
@@ -102,8 +109,11 @@ const h = vi.hoisted(() => {
     reviewPreview: vi.fn(),
     reviewGrade: vi.fn(),
     getInspectorData: vi.fn(),
+    suspendCard: vi.fn(),
+    deleteCard: vi.fn(),
     qaCard,
     clozeCard,
+    leechCard,
   };
 });
 
@@ -117,6 +127,8 @@ vi.mock("../lib/appApi", async () => {
       reviewPreview: h.reviewPreview,
       reviewGrade: h.reviewGrade,
       getInspectorData: h.getInspectorData,
+      suspendCard: h.suspendCard,
+      deleteCard: h.deleteCard,
     },
   };
 });
@@ -151,6 +163,10 @@ function singleDeck(card: ReviewCardView): ReviewSessionNextResult {
 beforeEach(() => {
   vi.clearAllMocks();
   h.reviewPreview.mockResolvedValue({ intervals: PREVIEWS });
+  // Suspend/delete remove the current card from the live deck; the repair bar
+  // ignores their return value (it only awaits, then calls `onCardRemoved`).
+  h.suspendCard.mockResolvedValue({});
+  h.deleteCard.mockResolvedValue({});
   h.reviewGrade.mockResolvedValue({
     reviewLog: {
       id: "rl_1",
@@ -340,11 +356,249 @@ describe("ReviewScreen", () => {
     expect(screen.getByTestId("review-tally-easy")).toHaveTextContent("0");
   });
 
+  it("does not write a second review log when the same card is re-presented after grading", async () => {
+    // Guard against double-grading: once a card is recorded in the exclude set it
+    // has a durable `review_logs` row + an advanced FSRS state. If a stale read
+    // re-presents the just-graded card (e.g. a transient advance race), grading it
+    // a second time must be a no-op — no second `reviewGrade` / `review_logs` row.
+    h.reviewSessionNext
+      .mockResolvedValueOnce({ card: h.qaCard, remaining: 0, total: 1 })
+      // The advance re-reads the SAME card id (it has not yet dropped from the deck);
+      // the guard then swallows the second grade, so no further read is queued.
+      .mockResolvedValueOnce({ card: h.qaCard, remaining: 0, total: 1 });
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    fireEvent.click(screen.getByTestId("review-reveal"));
+    await screen.findByTestId("review-grades");
+    fireEvent.click(screen.getByTestId("review-grade-good"));
+
+    // The first grade is recorded once.
+    await waitFor(() => expect(h.reviewGrade).toHaveBeenCalledTimes(1));
+    // The advance re-presented the same card id (still on screen, re-gradable).
+    await waitFor(() =>
+      expect(screen.getByTestId("review-card")).toHaveAttribute("data-card-id", "card-qa"),
+    );
+
+    // Re-reveal and grade the re-presented card: the exclude-set guard short-circuits
+    // before any IPC, so no second log is written.
+    fireEvent.click(screen.getByTestId("review-reveal"));
+    await screen.findByTestId("review-grades");
+    fireEvent.click(screen.getByTestId("review-grade-again"));
+
+    // Still exactly one grade — the duplicate was swallowed by the guard.
+    await waitFor(() => expect(h.reviewSessionNext).toHaveBeenCalledTimes(2));
+    expect(h.reviewGrade).toHaveBeenCalledTimes(1);
+    expect(h.reviewGrade).toHaveBeenCalledWith(
+      expect.objectContaining({ cardId: "card-qa", rating: "good" }),
+    );
+  });
+
+  it("suspend/delete shrink the progress denominator so a repaired-away session still reaches 100%", async () => {
+    // A two-card deck: grade the first (counts as a review), then SUSPEND the second
+    // (removed without a grade). The completion summary must show full progress even
+    // though only one of the two cards was actually reviewed — suspend/delete are
+    // repairs, not reviews, so they shrink the denominator.
+    h.reviewSessionNext
+      .mockResolvedValueOnce({ card: h.qaCard, remaining: 1, total: 2 })
+      .mockResolvedValueOnce({ card: { ...h.clozeCard, id: "card-2" }, remaining: 0, total: 1 })
+      .mockResolvedValueOnce({ card: null, remaining: 0, total: 0 });
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    fireEvent.click(screen.getByTestId("review-reveal"));
+    await screen.findByTestId("review-grades");
+    fireEvent.click(screen.getByTestId("review-grade-good"));
+
+    // The second card surfaces; before any repair the bar shows "1 reviewed · 1 left".
+    await waitFor(() =>
+      expect(screen.getByTestId("review-card")).toHaveAttribute("data-card-id", "card-2"),
+    );
+    expect(screen.getByTestId("review-progress")).toHaveTextContent("1 reviewed · 1 left");
+    const filledBefore = document.querySelector<HTMLElement>(".pbar__fill");
+    // 1 of 2 → the bar is half full while the second card is still pending.
+    expect(filledBefore?.style.width).toBe("50%");
+
+    // Suspend the second card: it leaves the deck WITHOUT a grade.
+    fireEvent.click(screen.getByTestId("review-repair-suspend"));
+    await waitFor(() => expect(h.suspendCard).toHaveBeenCalledTimes(1));
+
+    // The deck is exhausted → completion summary. Only one card was reviewed, but the
+    // bar reaches 100% because the suspended card was subtracted from the denominator.
+    await screen.findByTestId("review-summary");
+    expect(screen.getByTestId("review-summary")).toHaveTextContent("1 card reviewed");
+    const filledAfter = document.querySelector<HTMLElement>(".pbar__fill");
+    expect(filledAfter?.style.width).toBe("100%");
+  });
+
   it("shows the no-cards-due state for an empty deck (not the completion summary)", async () => {
     h.reviewSessionNext.mockResolvedValue({ card: null, remaining: 0, total: 0 });
     render(<ReviewScreen />);
     await screen.findByTestId("review-empty");
     expect(screen.getByText(/no cards due/i)).toBeInTheDocument();
     expect(screen.queryByTestId("review-summary")).not.toBeInTheDocument();
+  });
+
+  it("surfaces a leech card with the leech banner + lapse badge (T040)", async () => {
+    h.reviewSessionNext.mockResolvedValue(singleDeck(h.leechCard));
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    // The leech banner is shown (the T040 "surface the leech in review" deliverable).
+    const banner = screen.getByTestId("review-leech-banner");
+    expect(banner).toHaveTextContent(/keeps lapsing/i);
+    // The leech lapse badge renders with the lapse count + the warn `badge--leech` class.
+    const badge = screen.getByText(/leech · 8 lapses/i);
+    expect(badge).toHaveClass("badge--leech");
+    // The banner exposes the kit's inline "Add context" remediation action.
+    expect(screen.getByTestId("review-leech-add-context")).toBeInTheDocument();
+  });
+
+  it("does NOT show the leech banner for a non-leech card", async () => {
+    h.reviewSessionNext.mockResolvedValue(singleDeck(h.qaCard));
+    render(<ReviewScreen />);
+    await screen.findByTestId("review-card");
+    expect(screen.queryByTestId("review-leech-banner")).not.toBeInTheDocument();
+  });
+
+  it("the leech banner's Add context opens the source-context drawer", async () => {
+    h.reviewSessionNext.mockResolvedValue(singleDeck(h.leechCard));
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    expect(screen.queryByTestId("review-context-drawer")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("review-leech-add-context"));
+    expect(await screen.findByTestId("review-context-drawer")).toBeInTheDocument();
+  });
+
+  it("keyboard: Space reveals, then 1–4 grade the revealed card", async () => {
+    h.reviewSessionNext
+      .mockResolvedValueOnce(singleDeck(h.qaCard))
+      .mockResolvedValueOnce({ card: null, remaining: 0, total: 0 });
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    // 1–4 are inert before reveal (no grade until the answer is shown).
+    fireEvent.keyDown(window, { key: "3", code: "Digit3" });
+    expect(h.reviewGrade).not.toHaveBeenCalled();
+
+    // Space reveals.
+    fireEvent.keyDown(window, { key: " ", code: "Space" });
+    await screen.findByTestId("review-grades");
+
+    // `3` grades Good.
+    fireEvent.keyDown(window, { key: "3", code: "Digit3" });
+    await waitFor(() => expect(h.reviewGrade).toHaveBeenCalledTimes(1));
+    expect(h.reviewGrade).toHaveBeenCalledWith(
+      expect.objectContaining({ cardId: "card-qa", rating: "good" }),
+    );
+  });
+
+  it("keyboard grades are ignored while focus is in a textarea", async () => {
+    h.reviewSessionNext.mockResolvedValue(singleDeck(h.qaCard));
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    fireEvent.click(screen.getByTestId("review-reveal"));
+    await screen.findByTestId("review-grades");
+
+    // Open the inline editor, then a `3` typed in its textarea must NOT grade.
+    fireEvent.click(screen.getByTestId("review-repair-edit"));
+    const prompt = await screen.findByTestId("review-edit-prompt");
+    fireEvent.keyDown(prompt, { key: "3", code: "Digit3" });
+    expect(h.reviewGrade).not.toHaveBeenCalled();
+  });
+
+  it("keyboard: `o` resolves the card's location via lineage and jumps to source (T022/T048)", async () => {
+    // The load-bearing actionable-lineage jump-back: pressing `o` resolves the
+    // card's full source location (block ids/offsets) via `getInspectorData` then
+    // calls `navigateToLocation` with it — card → location → source, no SQL in the
+    // renderer. The repair-bar button delegates to the SAME `openSource` resolver.
+    const location = {
+      label: "¶ 4",
+      selectedText: "Intelligence is a measure of skill-acquisition efficiency…",
+      page: null,
+      sourceElementId: "src-1",
+      blockIds: ["blk-7", "blk-8"],
+      startOffset: 12,
+      endOffset: 40,
+    };
+    h.reviewSessionNext.mockResolvedValue(singleDeck(h.qaCard));
+    h.getInspectorData.mockResolvedValue({
+      data: { location },
+    });
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    // The jump works before reveal (ground a card without leaking the answer).
+    fireEvent.keyDown(window, { key: "o", code: "KeyO" });
+
+    await waitFor(() => expect(h.getInspectorData).toHaveBeenCalledWith({ id: "card-qa" }));
+    await waitFor(() => expect(h.navigateToLocationSpy).toHaveBeenCalledWith(location));
+    // Pressing `o` is a navigation convenience — it never grades.
+    expect(h.reviewGrade).not.toHaveBeenCalled();
+  });
+
+  it("a failed grade shows the error, leaves the card in place, and stays retryable", async () => {
+    // When `reviewGrade` rejects nothing is recorded: the same card stays on screen
+    // (its `review_logs` row was never written), the error renders in `review-error`,
+    // and the exclude set is NOT advanced — so the user can retry the SAME grade and
+    // have it succeed the second time.
+    h.reviewSessionNext
+      .mockResolvedValueOnce(singleDeck(h.qaCard))
+      // Once the retry succeeds, the deck empties → completion summary.
+      .mockResolvedValueOnce({ card: null, remaining: 0, total: 0 });
+    h.reviewGrade.mockRejectedValueOnce(new Error("write failed"));
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    fireEvent.click(screen.getByTestId("review-reveal"));
+    await screen.findByTestId("review-grades");
+
+    // First grade fails: the error surfaces and the card stays put (re-gradable).
+    fireEvent.click(screen.getByTestId("review-grade-good"));
+    await waitFor(() => expect(h.reviewGrade).toHaveBeenCalledTimes(1));
+    expect(await screen.findByTestId("review-error")).toHaveTextContent("write failed");
+    // The same card is still on screen — nothing advanced.
+    expect(screen.getByTestId("review-card")).toHaveAttribute("data-card-id", "card-qa");
+    // No further read was queued (the deck did not advance past this card).
+    expect(h.reviewSessionNext).toHaveBeenCalledTimes(1);
+
+    // Retry the SAME grade: this time it resolves, the card is recorded, and the
+    // session advances to the completion summary.
+    fireEvent.click(screen.getByTestId("review-grade-good"));
+    await waitFor(() => expect(h.reviewGrade).toHaveBeenCalledTimes(2));
+    await screen.findByTestId("review-summary");
+  });
+
+  it("the completion summary's `Review again` restarts the session from the top", async () => {
+    // Grade a single-card deck to reach the summary, then `Review again` must clear
+    // the per-grade tally + denominator and re-read the due deck (a fresh
+    // `session.next`), dropping the summary back to a live card.
+    h.reviewSessionNext
+      .mockResolvedValueOnce(singleDeck(h.qaCard))
+      // Deck empties → completion summary.
+      .mockResolvedValueOnce({ card: null, remaining: 0, total: 0 })
+      // Restart re-reads the deck and surfaces the card again.
+      .mockResolvedValueOnce(singleDeck(h.qaCard));
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    fireEvent.click(screen.getByTestId("review-reveal"));
+    await screen.findByTestId("review-grades");
+    fireEvent.click(screen.getByTestId("review-grade-good"));
+
+    // The summary shows one card reviewed + the Good tally at 1.
+    await screen.findByTestId("review-summary");
+    expect(screen.getByTestId("review-summary")).toHaveTextContent("1 card reviewed");
+    expect(screen.getByTestId("review-tally-good")).toHaveTextContent("1");
+
+    // Restart: a fresh deck read fires, the summary is gone, and a live card shows.
+    fireEvent.click(screen.getByTestId("review-restart"));
+    await waitFor(() => expect(h.reviewSessionNext).toHaveBeenCalledTimes(3));
+    await screen.findByTestId("review-card");
+    expect(screen.queryByTestId("review-summary")).not.toBeInTheDocument();
+    // The progress denominator/tally reset: 0 reviewed again.
+    expect(screen.getByTestId("review-progress")).toHaveTextContent("0 reviewed · 1 left");
   });
 });

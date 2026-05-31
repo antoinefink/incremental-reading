@@ -42,6 +42,13 @@ interface ReviewRepairBarProps {
   readonly onCardUpdated: (patch: ReviewCardPatch) => void;
   /** Remove the current card from the deck + advance (suspend/delete). */
   readonly onCardRemoved: () => void | Promise<void>;
+  /**
+   * Source-context drawer open state, lifted to the parent so the leech banner's
+   * "Add context" affordance (kit `screen-review.jsx`) opens the SAME drawer this
+   * row's "Add context" button does — one drawer, one trigger.
+   */
+  readonly drawerOpen: boolean;
+  readonly onDrawerOpenChange: (open: boolean) => void;
 }
 
 /** Map a `CardEditSummary` onto the patch the parent applies to the in-flight card. */
@@ -63,9 +70,10 @@ export function ReviewRepairBar({
   onOpenSource,
   onCardUpdated,
   onCardRemoved,
+  drawerOpen,
+  onDrawerOpenChange,
 }: ReviewRepairBarProps) {
   const [editing, setEditing] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -272,7 +280,7 @@ export function ReviewRepairBar({
           type="button"
           className="rv-repair__btn"
           data-testid="review-repair-context"
-          onClick={() => setDrawerOpen(true)}
+          onClick={() => onDrawerOpenChange(true)}
         >
           <Icon name="context" size={14} />
           Add context
@@ -328,7 +336,7 @@ export function ReviewRepairBar({
             className="drawer-overlay"
             aria-label="Close source context"
             data-testid="review-drawer-overlay"
-            onClick={() => setDrawerOpen(false)}
+            onClick={() => onDrawerOpenChange(false)}
           />
           <aside className="drawer" data-testid="review-context-drawer">
             <div className="drawer__head">
@@ -337,7 +345,7 @@ export function ReviewRepairBar({
                 type="button"
                 className="rv-repair__btn"
                 data-testid="review-drawer-close"
-                onClick={() => setDrawerOpen(false)}
+                onClick={() => onDrawerOpenChange(false)}
               >
                 <Icon name="x" size={15} />
               </button>
@@ -359,7 +367,7 @@ export function ReviewRepairBar({
                 data-testid="review-drawer-open-source"
                 disabled={!card.sourceLocationLabel}
                 onClick={() => {
-                  setDrawerOpen(false);
+                  onDrawerOpenChange(false);
                   onOpenSource();
                 }}
               >
