@@ -34,7 +34,11 @@ afterEach(() => {
 
 describe("resolveMigrationsDir", () => {
   it("prefers the copy staged next to the compiled main (dist/drizzle)", () => {
-    const distDir = path.join(root, "dist");
+    // Nest `dist` as deep as the real apps/desktop/dist so the workspace fallback
+    // (../../../packages/db/drizzle) resolves INSIDE this temp root rather than
+    // escaping to the filesystem root (/packages/db/drizzle → EACCES on Linux CI,
+    // where os.tmpdir() is the shallow /tmp). Tests below already do this.
+    const distDir = path.join(root, "apps", "desktop", "dist");
     fs.mkdirSync(distDir, { recursive: true });
     const staged = makeMigrationsFolder(path.join(distDir, "drizzle"));
     // Also create the workspace fallback so we prove ordering, not just presence.
