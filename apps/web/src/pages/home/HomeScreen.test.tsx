@@ -9,9 +9,15 @@
  *    reviews-per-day spark render from the mocked `getAnalytics`;
  *  - the empty "Queue clear" state shows when `counts.all === 0`;
  *  - the streak banner is hidden when `dayStreak === 0`;
- *  - the leech maintenance banner shows ONLY when `leeches > 0`;
+ *  - the leech maintenance banner shows ONLY when `leeches > 0`, and clicking it
+ *    routes to /maintenance/leeches;
  *  - "Start session" navigates to /process and a top-due preview row navigates to
- *    the right element route (source → /source/$id, extract → /extract/$id);
+ *    the right element route, RESPECTING the FSRS-vs-attention split (source →
+ *    /source/$id, extract → /extract/$id, card → /review, topic/task → /process);
+ *  - a failed read shows the error line + a calm "—" placeholder (never fabricated
+ *    zeros / a false "Queue clear" empty state);
+ *  - the `asOf` clock is forwarded to BOTH reads and into /process;
+ *  - a global undo (UNDO_EVENT) re-reads both sources so the dashboard stays live;
  *  - the non-desktop fallback still exposes data-testid="route-home" (the smoke E2E
  *    route marker).
  *
@@ -22,6 +28,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AnalyticsGetResult, QueueItemSummary, QueueListResult } from "../../lib/appApi";
+
+/**
+ * The global-undo event name HomeScreen listens on. We use the literal here (rather
+ * than importing `UNDO_EVENT` from `../../shell/nav`) to keep this mock-heavy suite's
+ * module graph minimal; it is the same stable string `shell/nav` exports and the
+ * shell dispatches, and a test below asserts the dashboard re-reads when it fires.
+ */
+const UNDO_EVENT = "interleave:undo";
 
 const h = vi.hoisted(() => {
   const sourceRow: QueueItemSummary = {
@@ -72,20 +86,73 @@ const h = vi.hoisted(() => {
     due: "today",
     dueLabel: "Due today",
   };
+  // A due TOPIC — an attention-scheduled element. Clicking it must route into the
+  // one-at-a-time /process loop (NOT the FSRS /review session, which has no card to
+  // show), preserving the load-bearing FSRS-vs-attention split.
+  const topicRow: QueueItemSummary = {
+    id: "topic-1",
+    type: "topic",
+    status: "active",
+    stage: "rough_topic",
+    priority: 0.5,
+    title: "Reinforcement learning fundamentals",
+    dueAt: "2026-05-30T07:00:00.000Z",
+    scheduler: "attention",
+    schedulerSignals: {
+      kind: "attention",
+      retrievability: null,
+      stability: null,
+      stage: "rough_topic",
+      postponed: 0,
+    },
+    sourceTitle: null,
+    author: null,
+    concept: null,
+    cardType: null,
+    protected: false,
+    due: "today",
+    dueLabel: "Due today",
+  };
+  // A due CARD — an FSRS-scheduled element. Clicking it must route into the FSRS
+  // active-recall /review session (cards ONLY ride the FSRS seam).
+  const cardRow: QueueItemSummary = {
+    id: "card-1",
+    type: "card",
+    status: "active",
+    stage: "active_card",
+    priority: 0.75,
+    title: "What does FSRS schedule?",
+    dueAt: "2026-05-30T05:00:00.000Z",
+    scheduler: "fsrs",
+    schedulerSignals: {
+      kind: "fsrs",
+      retrievability: 0.82,
+      stability: 12.4,
+      stage: "active_card",
+      postponed: 0,
+    },
+    sourceTitle: "The Bitter Lesson",
+    author: null,
+    concept: null,
+    cardType: "qa",
+    protected: false,
+    due: "overdue",
+    dueLabel: "Overdue",
+  };
   const queue: QueueListResult = {
-    items: [sourceRow, extractRow],
+    items: [sourceRow, extractRow, topicRow, cardRow],
     counts: {
-      all: 2,
-      card: 0,
+      all: 4,
+      card: 1,
       source: 1,
       extract: 1,
-      topic: 0,
+      topic: 1,
       task: 0,
       highPriority: 1,
-      overdue: 1,
+      overdue: 2,
       protected: 1,
     },
-    budget: { used: 2, target: 30 },
+    budget: { used: 4, target: 30 },
   };
   const analytics: AnalyticsGetResult = {
     asOf: "2026-05-30T18:00:00.000Z",
@@ -114,14 +181,18 @@ const h = vi.hoisted(() => {
     // Flipped per-test so the non-desktop fallback can be exercised without a
     // module reset (the global mock delegates `isDesktop` to this spy).
     isDesktop: vi.fn(() => true),
+    // The loosely-typed route search; per-test override drives the `asOf` clock.
+    search: vi.fn(() => ({}) as { asOf?: string }),
     sourceRow,
     extractRow,
+    topicRow,
+    cardRow,
   };
 });
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => h.navigateSpy,
-  useSearch: () => ({}),
+  useSearch: () => h.search(),
 }));
 
 vi.mock("../../lib/appApi", async () => {
@@ -138,6 +209,7 @@ import { HomeScreen } from "./HomeScreen";
 beforeEach(() => {
   vi.clearAllMocks();
   h.isDesktop.mockReturnValue(true);
+  h.search.mockReturnValue({});
   h.listQueue.mockResolvedValue(h.queue);
   h.getAnalytics.mockResolvedValue(h.analytics);
 });
@@ -146,11 +218,11 @@ describe("HomeScreen", () => {
   it("renders the due counts + budget from the mocked listQueue", async () => {
     render(<HomeScreen />);
     expect(await screen.findByTestId("home-due-today")).toBeTruthy();
-    expect(screen.getByTestId("home-due-today").textContent).toBe("2");
-    expect(screen.getByTestId("home-overdue-count").textContent).toBe("1");
+    expect(screen.getByTestId("home-due-today").textContent).toBe("4");
+    expect(screen.getByTestId("home-overdue-count").textContent).toBe("2");
     expect(screen.getByTestId("home-protected-count").textContent).toBe("1");
     // The budget gauge renders used / target from the read.
-    expect(screen.getByTestId("budget-meter").textContent).toContain("2");
+    expect(screen.getByTestId("budget-meter").textContent).toContain("4");
     expect(screen.getByTestId("budget-meter").textContent).toContain("30");
   });
 
@@ -174,7 +246,7 @@ describe("HomeScreen", () => {
     render(<HomeScreen />);
     await screen.findByTestId("home-preview");
     const rows = screen.getAllByTestId("home-preview-row");
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(4);
     // No actionable queue controls leak into the preview.
     expect(screen.queryByTestId("queue-actions")).toBeNull();
   });
@@ -212,18 +284,31 @@ describe("HomeScreen", () => {
     expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/process", search: {} });
   });
 
-  it("a top-due preview row navigates to its element route (source → reader, extract → view)", async () => {
+  it("a top-due preview row navigates per type, respecting the FSRS-vs-attention split", async () => {
     render(<HomeScreen />);
     await screen.findByTestId("home-preview");
     const rows = screen.getAllByTestId("home-preview-row");
-    const sourceRow = rows.find((r) => r.getAttribute("data-element-id") === "source-1");
-    const extractRow = rows.find((r) => r.getAttribute("data-element-id") === "extract-1");
+    const rowFor = (id: string) =>
+      rows.find((r) => r.getAttribute("data-element-id") === id) as HTMLElement;
 
-    fireEvent.click(sourceRow as HTMLElement);
+    // source → reader, extract → extract view (their own surfaces).
+    fireEvent.click(rowFor("source-1"));
     expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/source/$id", params: { id: "source-1" } });
 
-    fireEvent.click(extractRow as HTMLElement);
+    fireEvent.click(rowFor("extract-1"));
     expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/extract/$id", params: { id: "extract-1" } });
+
+    // card → the FSRS active-recall review session (cards ONLY).
+    fireEvent.click(rowFor("card-1"));
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/review" });
+
+    // topic (an attention element) → the one-at-a-time /process loop, NOT /review —
+    // sending an attention-scheduled element into the card review would land on an
+    // empty deck and cross the load-bearing two-scheduler boundary.
+    h.navigateSpy.mockClear();
+    fireEvent.click(rowFor("topic-1"));
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/process", search: {} });
+    expect(h.navigateSpy).not.toHaveBeenCalledWith({ to: "/review" });
   });
 
   it("'See full queue' navigates to /queue", async () => {
@@ -231,6 +316,99 @@ describe("HomeScreen", () => {
     await screen.findByTestId("home-see-queue");
     fireEvent.click(screen.getByTestId("home-see-queue"));
     expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/queue" });
+  });
+
+  it("the leech maintenance nudge navigates to /maintenance/leeches", async () => {
+    render(<HomeScreen />);
+    const banner = await screen.findByTestId("home-banner-leeches");
+    fireEvent.click(banner);
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/maintenance/leeches" });
+  });
+
+  it("renders the error branch and does NOT fabricate zeros when a read fails", async () => {
+    h.listQueue.mockRejectedValue(new Error("bridge down"));
+    h.getAnalytics.mockRejectedValue(new Error("bridge down"));
+    render(<HomeScreen />);
+    const err = await screen.findByTestId("home-error");
+    expect(err.textContent).toContain("bridge down");
+    // A failed read shows a calm "—" placeholder, never a fabricated "0 due today".
+    expect(screen.getByTestId("home-due-today").textContent).toBe("—");
+    expect(screen.getByTestId("metric-due").textContent).toContain("—");
+    // The "Queue clear" empty state must NOT show on a failed read (queue is null,
+    // not an empty due set).
+    expect(screen.queryByTestId("home-empty")).toBeNull();
+  });
+
+  it("treats a failed analytics read as UNKNOWN, not zero, for the Review link and danger class", async () => {
+    // Queue resolves but analytics fails: dueCards is unknown, NOT a real 0. The
+    // analytics-derived affordances must behave as "unknown" (Review link hidden, no
+    // danger emphasis) rather than "zero" — matching the em-dash metric-value treatment.
+    h.getAnalytics.mockRejectedValue(new Error("analytics down"));
+    render(<HomeScreen />);
+    await screen.findByTestId("home-error");
+
+    // The Due-cards metric value is the calm em-dash (analytics unknown)…
+    expect(screen.getByTestId("metric-due").textContent).toContain("—");
+    // …and its danger emphasis is dropped as UNKNOWN, not asserted as a genuine 0 — the
+    // first half of the self-contradiction this fix closes (em-dash value + 0-treated class).
+    expect(screen.getByTestId("metric-due").className).not.toContain("an-metric--danger");
+    // The session-bar Review quick-link is hidden (unknown), not silently dropped as 0 due —
+    // the second half of that same contradiction.
+    expect(screen.queryByTestId("home-open-review")).toBeNull();
+  });
+
+  it("shows the Review quick-link with danger emphasis when analytics loaded with due cards", async () => {
+    // Sanity check the positive path the gate must preserve: a successful analytics read
+    // with dueCards > 0 still surfaces the Review link AND the danger class.
+    render(<HomeScreen />);
+    expect(await screen.findByTestId("home-open-review")).toBeTruthy();
+    expect(screen.getByTestId("metric-due").className).toContain("an-metric--danger");
+  });
+
+  it("hides the Review quick-link and danger class when analytics loaded with zero due cards", async () => {
+    // A genuine 0 (analytics resolved, dueCards === 0) also hides the link and drops the
+    // danger class — distinct from the failed-read path above but identical presentation.
+    h.getAnalytics.mockResolvedValue({ ...h.analytics, dueCards: 0 });
+    render(<HomeScreen />);
+    await screen.findByTestId("home-due-today");
+    expect(screen.queryByTestId("home-open-review")).toBeNull();
+    expect(screen.getByTestId("metric-due").className).not.toContain("an-metric--danger");
+    // Value is a real 0 here (not an em-dash), since analytics loaded.
+    expect(screen.getByTestId("metric-due").textContent).toContain("0");
+  });
+
+  it("forwards the asOf clock to /process and to BOTH reads", async () => {
+    const asOf = "2031-01-01T12:00:00.000Z";
+    h.search.mockReturnValue({ asOf });
+    render(<HomeScreen />);
+    await screen.findByTestId("home-due-today");
+
+    // Both reads are date-scoped by the same clock the dashboard renders.
+    expect(h.listQueue).toHaveBeenCalledWith({ asOf });
+    expect(h.getAnalytics).toHaveBeenCalledWith({ asOf });
+
+    // Start session carries the clock so the /process loop reads the SAME due set.
+    fireEvent.click(screen.getByTestId("home-start-session"));
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/process", search: { asOf } });
+
+    // An attention preview row (the topic) also carries the clock into /process.
+    const rows = screen.getAllByTestId("home-preview-row");
+    const topic = rows.find((r) => r.getAttribute("data-element-id") === "topic-1") as HTMLElement;
+    fireEvent.click(topic);
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/process", search: { asOf } });
+  });
+
+  it("re-reads both sources when a global undo fires (UNDO_EVENT)", async () => {
+    render(<HomeScreen />);
+    await screen.findByTestId("home-due-today");
+    // The initial load reads each source once.
+    expect(h.listQueue).toHaveBeenCalledTimes(1);
+    expect(h.getAnalytics).toHaveBeenCalledTimes(1);
+
+    // A global undo elsewhere should refresh the live dashboard numbers.
+    window.dispatchEvent(new Event(UNDO_EVENT));
+    await waitFor(() => expect(h.listQueue).toHaveBeenCalledTimes(2));
+    expect(h.getAnalytics).toHaveBeenCalledTimes(2);
   });
 });
 

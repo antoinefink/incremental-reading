@@ -200,15 +200,24 @@ export function HomeScreen() {
 
   const onOpen = useCallback(
     (item: QueueItemSummary) => {
+      // Per-type routing that respects the load-bearing FSRS-vs-attention split:
+      //  - source  → the reader; extract → the extract view (their own surfaces);
+      //  - card    → the FSRS active-recall review session (cards ONLY);
+      //  - every OTHER due attention type (topic / task / synthesis_note) → the
+      //    one-at-a-time /process loop (carrying `asOf`), NOT /review — sending an
+      //    attention-scheduled element into the card review session would land on an
+      //    empty deck and cross the two-scheduler boundary.
       if (item.type === "source") {
         void navigate({ to: "/source/$id", params: { id: item.id } });
       } else if (item.type === "extract") {
         void navigate({ to: "/extract/$id", params: { id: item.id } });
-      } else {
+      } else if (item.type === "card") {
         void navigate({ to: "/review" });
+      } else {
+        void navigate({ to: "/process", search: asOf ? { asOf } : {} });
       }
     },
-    [navigate],
+    [navigate, asOf],
   );
 
   const startSession = useCallback(() => {
@@ -236,8 +245,23 @@ export function HomeScreen() {
     );
   }
 
+  // Whether each independent read actually resolved. The two reads (listQueue +
+  // getAnalytics) are awaited together but reported through a single `error`; gating
+  // each panel on its own source being present means a failed read shows a calm "—"
+  // placeholder (next to the error line) instead of a fabricated `0` ("0 due today"
+  // reads as a real empty queue, which a failed read is NOT).
+  const hasQueue = queue !== null;
+  const hasAnalytics = analytics !== null;
+  /** Render a metric value: the number when its source loaded, else an em-dash. */
+  const num = (present: boolean, value: number | undefined): string =>
+    present ? String(value ?? 0) : "—";
+
   const counts = queue?.counts;
   const dueCount = counts?.all ?? 0;
+  // `est. N min` is a shared heuristic (≈2 min/item, 8-min floor) mirroring the
+  // Daily Queue (`QueueScreen`), so the two surfaces show the SAME estimate — it is
+  // labelled "est." and is the only arithmetic here; everything else is pre-computed
+  // by the bridge.
   const estMin = Math.max(8, dueCount * 2);
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long",
@@ -258,7 +282,9 @@ export function HomeScreen() {
           <div>
             <h1 className="q-title">{greeting()}</h1>
             <p className="q-sub" data-testid="home-subtitle">
-              {today} · {dueCount} item{dueCount === 1 ? "" : "s"} due · est. {estMin} min
+              {hasQueue
+                ? `${today} · ${dueCount} item${dueCount === 1 ? "" : "s"} due · est. ${estMin} min`
+                : today}
             </p>
           </div>
         </div>
@@ -282,7 +308,7 @@ export function HomeScreen() {
           <div className="q-metrics">
             <div className="q-metric">
               <span className="q-metric__v" data-testid="home-due-today">
-                {counts?.all ?? 0}
+                {num(hasQueue, counts?.all)}
               </span>
               <span className="q-metric__l">due today</span>
             </div>
@@ -291,13 +317,13 @@ export function HomeScreen() {
                 className={`q-metric__v${counts?.overdue ? " q-metric__v--danger" : ""}`}
                 data-testid="home-overdue-count"
               >
-                {counts?.overdue ?? 0}
+                {num(hasQueue, counts?.overdue)}
               </span>
               <span className="q-metric__l">overdue</span>
             </div>
             <div className="q-metric">
               <span className="q-metric__v" data-testid="home-protected-count">
-                {counts?.protected ?? 0}
+                {num(hasQueue, counts?.protected)}
               </span>
               <span className="q-metric__l">protected</span>
             </div>
@@ -339,7 +365,11 @@ export function HomeScreen() {
             <Icon name="queue" size={14} />
             Open queue
           </button>
-          {(analytics?.dueCards ?? 0) > 0 ? (
+          {/* Gated on `hasAnalytics` (not just `> 0`): when the analytics read FAILS the
+              due-card count is unknown, not a real zero, so the Review affordance hides as
+              "unknown" rather than silently vanishing as if there were genuinely no cards —
+              consistent with the em-dash metric values. */}
+          {hasAnalytics && (analytics?.dueCards ?? 0) > 0 ? (
             <button
               type="button"
               className="home-sessionbar__link"
@@ -358,22 +388,24 @@ export function HomeScreen() {
         {/* Today's-status metric tiles (analytics chrome). */}
         <div className="an-metrics an-metrics--sm" style={{ marginBottom: 14 }}>
           <div
-            className={`an-metric an-metric--sm${(analytics?.dueCards ?? 0) > 0 ? " an-metric--danger" : ""}`}
+            className={`an-metric an-metric--sm${
+              hasAnalytics && (analytics?.dueCards ?? 0) > 0 ? " an-metric--danger" : ""
+            }`}
             data-testid="metric-due"
           >
-            <span className="an-metric__val">{analytics?.dueCards ?? 0}</span>
+            <span className="an-metric__val">{num(hasAnalytics, analytics?.dueCards)}</span>
             <span className="an-metric__label">Due cards</span>
           </div>
           <div className="an-metric an-metric--sm" data-testid="metric-topics">
-            <span className="an-metric__val">{analytics?.dueTopics ?? 0}</span>
+            <span className="an-metric__val">{num(hasAnalytics, analytics?.dueTopics)}</span>
             <span className="an-metric__label">Due topics</span>
           </div>
           <div className="an-metric an-metric--sm" data-testid="metric-new-cards">
-            <span className="an-metric__val">{analytics?.newCards ?? 0}</span>
+            <span className="an-metric__val">{num(hasAnalytics, analytics?.newCards)}</span>
             <span className="an-metric__label">New cards</span>
           </div>
           <div className="an-metric an-metric--sm" data-testid="metric-new-extracts">
-            <span className="an-metric__val">{analytics?.newExtracts ?? 0}</span>
+            <span className="an-metric__val">{num(hasAnalytics, analytics?.newExtracts)}</span>
             <span className="an-metric__label">New extracts</span>
           </div>
         </div>
@@ -399,7 +431,7 @@ export function HomeScreen() {
               ))}
             </div>
           </div>
-        ) : dueCount === 0 && !loading ? (
+        ) : hasQueue && dueCount === 0 && !loading ? (
           <div className="q-panel">
             <div className="q-empty" data-testid="home-empty">
               <div className="q-empty__icon">

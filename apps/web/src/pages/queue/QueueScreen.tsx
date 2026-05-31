@@ -298,16 +298,23 @@ export function QueueScreen() {
   const onOpen = useCallback(
     (item: QueueItemSummary) => {
       select(item.id);
+      // Per-type routing that respects the load-bearing FSRS-vs-attention split:
+      //  - source  → the reader; extract → the extract view (their own surfaces);
+      //  - card    → the FSRS active-recall review session (cards ONLY);
+      //  - every OTHER due attention type (topic / task / synthesis_note) → the
+      //    one-at-a-time /process loop (carrying `asOf`), NOT /review — an
+      //    attention-scheduled element has no card to grade in the review session.
       if (item.type === "source") {
         void navigate({ to: "/source/$id", params: { id: item.id } });
       } else if (item.type === "extract") {
         void navigate({ to: "/extract/$id", params: { id: item.id } });
-      } else {
-        // Cards route to the review surface (full grading lands with M7/T037).
+      } else if (item.type === "card") {
         void navigate({ to: "/review" });
+      } else {
+        void navigate({ to: "/process", search: asOf ? { asOf } : {} });
       }
     },
-    [navigate, select],
+    [navigate, select, asOf],
   );
 
   const startSession = useCallback(() => {

@@ -18,7 +18,15 @@ import { Icon, type IconName } from "../../components/Icon";
 import { Stage } from "../../components/inspector/primitives";
 import type { QueueItemSummary } from "../../lib/appApi";
 
-/** The per-row title with the kit's type prefix ("Extract · …", "Q&A · …"). */
+/**
+ * The per-row title with the kit's type prefix ("Extract · …", "Q&A · …").
+ *
+ * Only the types whose bare title would be ambiguous get a prefix: card
+ * ("Q&A · …" / "Cloze · …"), extract ("Extract · …"), and topic ("Topic · …").
+ * source / task / synthesis_note return their title bare — their content already
+ * reads as a title, and the per-row meta line (`metaFor`) carries the type label,
+ * so prefixing them too would be redundant.
+ */
 export function titleFor(item: QueueItemSummary): string {
   if (item.type === "card") {
     const prefix = item.cardType === "cloze" ? "Cloze · " : "Q&A · ";
