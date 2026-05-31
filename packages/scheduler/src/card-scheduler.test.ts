@@ -235,6 +235,32 @@ describe("CardSchedulerService.previewIntervals", () => {
   });
 });
 
+describe("CardSchedulerService — invalid `now` clock guard", () => {
+  // A malformed clock must throw, NOT silently propagate an `Invalid Date` into the
+  // resulting card's `due` (which the repository would persist into review_states /
+  // elements.due_at / the append-only review_logs). This mirrors the attention-side
+  // `scheduleManual` guard; the IPC contract rejects it too (defense in depth).
+  for (const bad of ["not-a-date", "", "yesterday", "now"]) {
+    it(`gradeCard throws on now="${bad}" instead of producing an Invalid Date`, () => {
+      const card = reviewStateCard();
+      expect(() => service().gradeCard(card, "good", bad as IsoTimestamp, 1000)).toThrow(
+        /invalid clock/i,
+      );
+    });
+
+    it(`previewIntervals throws on now="${bad}"`, () => {
+      const card = reviewStateCard();
+      expect(() => service().previewIntervals(card, bad as IsoTimestamp)).toThrow(/invalid clock/i);
+    });
+  }
+
+  it("a valid ISO clock still grades to a parseable due date", () => {
+    const card = reviewStateCard();
+    const outcome = service().gradeCard(card, "good", NOW, 1000);
+    expect(Number.isNaN(Date.parse(outcome.nextDueAt))).toBe(false);
+  });
+});
+
 describe("CardSchedulerService adapter round-trip", () => {
   it("fromFsrsCard(toFsrsCard(state)) is stable for a review card", () => {
     const svc = service();

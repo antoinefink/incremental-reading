@@ -976,11 +976,27 @@ describe("DbService — review session (T037)", () => {
     const res = svc.reviewSessionNext({ asOf: ASOF });
     expect(res.total).toBeGreaterThanOrEqual(1);
     expect(res.card).not.toBeNull();
+    const card = res.card;
+    if (!card) throw new Error("no card");
     // The deck is FSRS cards only — never an extract/source.
-    expect(res.card?.kind === "qa" || res.card?.kind === "cloze").toBe(true);
-    // The card ships its answer + lineage so reveal needs no round-trip.
-    expect(res.card?.schedulerSignals.kind).toBe("fsrs");
-    expect(typeof res.card?.prompt).toBe("string");
+    expect(card.kind === "qa" || card.kind === "cloze").toBe(true);
+    expect(card.schedulerSignals.kind).toBe("fsrs");
+    expect(typeof card.prompt).toBe("string");
+    expect(card.prompt.length).toBeGreaterThan(0);
+    // The load-bearing M7 contract: the reveal payload + lineage RIDE with the
+    // card so reveal needs no DB round-trip. A Q&A card ships a non-empty
+    // `answer`; a cloze card ships non-empty `cloze` text. Whichever it is, the
+    // card carries its source lineage (resolved sourceRef + provenance title).
+    if (card.kind === "qa") {
+      expect(typeof card.answer).toBe("string");
+      expect((card.answer ?? "").length).toBeGreaterThan(0);
+    } else {
+      expect(typeof card.cloze).toBe("string");
+      expect((card.cloze ?? "").length).toBeGreaterThan(0);
+    }
+    // Source lineage rides with the card (card → source location → source).
+    expect(card.sourceRef).not.toBeNull();
+    expect(card.sourceTitle).not.toBeNull();
 
     svc.close();
   });
@@ -1109,6 +1125,33 @@ describe("DbService — review session (T037)", () => {
     expect(() =>
       svc.reviewGrade({ cardId: extract?.id ?? "", rating: "good", responseMs: 100, asOf: ASOF }),
     ).toThrow();
+    svc.close();
+  });
+
+  it("reviewGrade throws on a garbage asOf clock — never persists an Invalid Date", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const cardId = seededDueCardId(svc);
+
+    const beforeState = svc.repos.review.findReviewState(cardId as never);
+    const beforeLogs = svc.repos.review.listReviewLogs(cardId as never).length;
+
+    // The IPC contract rejects this; the scheduler-side `toClock` guard is the
+    // matching defense so even a bypassed call can never write an Invalid Date.
+    for (const asOf of ["not-a-date", "", "yesterday"]) {
+      expect(() => svc.reviewGrade({ cardId, rating: "good", responseMs: 100, asOf })).toThrow();
+    }
+
+    // Nothing was mutated: no Invalid Date in review_states/elements.due_at, no log row.
+    const afterState = svc.repos.review.findReviewState(cardId as never);
+    expect(afterState?.dueAt).toBe(beforeState?.dueAt);
+    expect(afterState?.reps).toBe(beforeState?.reps);
+    expect(svc.repos.review.listReviewLogs(cardId as never).length).toBe(beforeLogs);
+    const cardEl = svc.repos.elements.findById(cardId as never);
+    // A valid (or null) due date — never the literal "Invalid Date".
+    expect(cardEl?.dueAt === null || !Number.isNaN(Date.parse(cardEl?.dueAt ?? ""))).toBe(true);
+
     svc.close();
   });
 
@@ -1440,10 +1483,25 @@ describe("DbService — review session (T037)", () => {
       .get() as { id: string } | undefined;
     expect(extract).toBeDefined();
     const id = extract?.id ?? "";
+    const opCount = () =>
+      (
+        svc.raw.sqlite
+          .prepare("SELECT COUNT(*) AS n FROM operation_log WHERE element_id = ?")
+          .get(id) as { n: number }
+      ).n;
+    const opsBefore = opCount();
+
     expect(() => svc.updateCard({ cardId: id, prompt: "x", answer: "y" })).toThrow();
     expect(() => svc.suspendCard({ cardId: id })).toThrow();
     expect(() => svc.deleteCard({ cardId: id })).toThrow();
+    expect(() => svc.markLeechCard({ cardId: id, leech: true })).toThrow();
     expect(() => svc.flagCard({ cardId: "el_missing", flagged: true })).toThrow();
+    expect(() => svc.markLeechCard({ cardId: "el_missing", leech: true })).toThrow();
+
+    // The rejected markLeech must NOT leak a mutation or an op-log entry: the up-front
+    // card-ness guard rolls back before any write, so the extract's `update_element`
+    // op count is unchanged (no `{ isLeech }` op for a non-card).
+    expect(opCount()).toBe(opsBefore);
     svc.close();
   });
 

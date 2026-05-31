@@ -431,6 +431,14 @@ export class ReviewRepository {
    * element + its `cards` row after the change.
    */
   setCardLeech(cardElementId: ElementId, leech: boolean): CardWithElement {
+    // Guard card-ness up front (like CardEditService.requireCard) so a non-card /
+    // unknown id is rejected with a clear error BEFORE any mutation or op-log entry
+    // is issued — rather than relying on a blind UPDATE matching zero rows and a
+    // post-hoc "missing after update" throw to roll the transaction back.
+    const existing = this.findCardById(cardElementId);
+    if (existing?.element.type !== "card" || existing.element.deletedAt) {
+      throw new Error(`ReviewRepository.setCardLeech: card ${cardElementId} not found`);
+    }
     return this.db.transaction((tx) => {
       tx.update(cards).set({ isLeech: leech }).where(eq(cards.elementId, cardElementId)).run();
       const updatedAt = nowIso();

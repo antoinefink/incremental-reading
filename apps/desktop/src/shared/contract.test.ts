@@ -39,9 +39,11 @@ import {
   InboxTriageRequestSchema,
   InspectorGetRequestSchema,
   IPC_CHANNELS,
+  IsoTimestampInputSchema,
   LibraryBrowseRequestSchema,
   LineageGetRequestSchema,
   QueueActRequestSchema,
+  QueueListRequestSchema,
   QueueScheduleRequestSchema,
   QueueUndoRequestSchema,
   ReadPointGetRequestSchema,
@@ -419,6 +421,64 @@ describe("Review session schemas (T037)", () => {
       ReviewGradeRequestSchema.parse({ cardId: "el_1", rating: "good", responseMs: -1 }),
     ).toThrow();
     expect(() => ReviewGradeRequestSchema.parse({ rating: "good", responseMs: 1 })).toThrow();
+  });
+
+  it("grade rejects a non-parseable asOf clock (no Invalid Date can reach FSRS)", () => {
+    // A garbage / empty asOf must be rejected at the boundary, NOT flow through
+    // `request.asOf ?? now` into the FSRS grade path where it would persist an
+    // Invalid Date into review_states/elements.due_at/the append-only review_logs.
+    for (const asOf of ["", "now", "yesterday", "not-a-date", "   "]) {
+      expect(() =>
+        ReviewGradeRequestSchema.parse({ cardId: "el_1", rating: "good", responseMs: 1, asOf }),
+      ).toThrow();
+    }
+    // A real ISO timestamp still parses (and is trimmed).
+    expect(
+      ReviewGradeRequestSchema.parse({
+        cardId: "el_1",
+        rating: "good",
+        responseMs: 1,
+        asOf: "  2027-06-01T12:00:00.000Z  ",
+      }).asOf,
+    ).toBe("2027-06-01T12:00:00.000Z");
+  });
+
+  it("session.next and preview reject a non-parseable asOf clock", () => {
+    expect(() => ReviewSessionNextRequestSchema.parse({ asOf: "garbage" })).toThrow();
+    expect(() => ReviewPreviewRequestSchema.parse({ cardId: "el_1", asOf: "" })).toThrow();
+  });
+});
+
+describe("IsoTimestampInputSchema (asOf clock guard)", () => {
+  it("accepts a parseable ISO timestamp and trims it", () => {
+    expect(IsoTimestampInputSchema.parse("2027-06-01T12:00:00.000Z")).toBe(
+      "2027-06-01T12:00:00.000Z",
+    );
+    expect(IsoTimestampInputSchema.parse("  2027-06-01T12:00:00.000Z  ")).toBe(
+      "2027-06-01T12:00:00.000Z",
+    );
+  });
+
+  it("rejects empty, whitespace, and unparseable values", () => {
+    for (const bad of ["", "   ", "now", "yesterday", "not-a-date", "2027-13-99"]) {
+      expect(() => IsoTimestampInputSchema.parse(bad)).toThrow();
+    }
+  });
+
+  it("rejects an over-long value (bounded length)", () => {
+    expect(() =>
+      IsoTimestampInputSchema.parse(`2027-06-01T12:00:00.000Z${" ".repeat(64)}x`),
+    ).toThrow();
+  });
+});
+
+describe("QueueListRequestSchema asOf guard", () => {
+  it("accepts a parseable asOf and rejects a garbage one", () => {
+    expect(QueueListRequestSchema.parse({ asOf: "2027-06-01T12:00:00.000Z" }).asOf).toBe(
+      "2027-06-01T12:00:00.000Z",
+    );
+    expect(() => QueueListRequestSchema.parse({ asOf: "" })).toThrow();
+    expect(() => QueueListRequestSchema.parse({ asOf: "soon" })).toThrow();
   });
 });
 

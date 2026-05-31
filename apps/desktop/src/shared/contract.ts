@@ -347,6 +347,26 @@ export interface ConceptInspectorSummary {
 export const ElementIdSchema = z.string().min(1).max(128);
 
 /**
+ * An optional "clock" the renderer may pass to override the main-side `now` (the
+ * `asOf` instant used by the due reads and the FSRS grade path). It must be a
+ * NON-EMPTY string that `Date.parse` can actually turn into a valid timestamp —
+ * an empty/garbage value (`""`, `"now"`, `"yesterday"`) is rejected at the IPC
+ * boundary BEFORE it can reach the scheduler, so a malformed clock can never be
+ * persisted as an `Invalid Date` into `review_states`/`elements.due_at`/the
+ * append-only `review_logs` (CLAUDE.md: never trust the renderer; do not silently
+ * destroy user data). Length is bounded (defense against absurd inputs) and the
+ * value is trimmed before parsing.
+ */
+export const IsoTimestampInputSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .refine((value) => !Number.isNaN(Date.parse(value)), {
+    message: "must be a parseable ISO-8601 timestamp",
+  });
+
+/**
  * The four coarse priority labels the UI exposes (numeric mapping lives in core).
  * Defined here (before the inspector/elements sections that reference it) so the
  * universal `elements.setPriority` command (T027) and the inbox triage
@@ -506,7 +526,7 @@ export interface QueueCounts {
 
 export const QueueListRequestSchema = z.object({
   /** "Now" the due reads compare against (ISO-8601); defaults to the server clock. */
-  asOf: z.string().trim().max(64).optional(),
+  asOf: IsoTimestampInputSchema.optional(),
   /** Keep only these element types. */
   types: z.array(z.enum(ELEMENT_TYPES)).optional(),
   /** Keep only rows that are a member of this concept, by concept NAME (T041). */
@@ -1630,7 +1650,7 @@ export const ReviewSessionNextRequestSchema = z.object({
    */
   burySiblings: z.boolean().optional(),
   /** "Now" the due read compares against (ISO-8601); defaults to the server clock. */
-  asOf: z.string().trim().max(64).optional(),
+  asOf: IsoTimestampInputSchema.optional(),
 });
 export type ReviewSessionNextRequest = z.infer<typeof ReviewSessionNextRequestSchema>;
 
@@ -1659,7 +1679,7 @@ export const ReviewPreviewRequestSchema = z.object({
   /** The card id to preview the four next intervals for. */
   cardId: ElementIdSchema,
   /** "Now" the previews compare against (ISO-8601); defaults to the server clock. */
-  asOf: z.string().trim().max(64).optional(),
+  asOf: IsoTimestampInputSchema.optional(),
 });
 export type ReviewPreviewRequest = z.infer<typeof ReviewPreviewRequestSchema>;
 
@@ -1676,7 +1696,7 @@ export const ReviewGradeRequestSchema = z.object({
   /** The measured reveal→grade response time in ms (persisted on `review_logs`). */
   responseMs: z.number().int().min(0).max(86_400_000),
   /** "Now" the grade is recorded at (ISO-8601); defaults to the server clock. */
-  asOf: z.string().trim().max(64).optional(),
+  asOf: IsoTimestampInputSchema.optional(),
 });
 export type ReviewGradeRequest = z.infer<typeof ReviewGradeRequestSchema>;
 

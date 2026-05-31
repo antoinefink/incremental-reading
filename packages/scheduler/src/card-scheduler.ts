@@ -184,6 +184,24 @@ export class CardSchedulerService {
   }
 
   /**
+   * Parse the `now` clock into a valid `Date`, throwing on an unparseable value.
+   * `ts-fsrs`'s `next`/`repeat` accept an `Invalid Date` silently and propagate it
+   * into the resulting card's `due`, which would then be persisted as an
+   * `Invalid Date` into `review_states`/`elements.due_at`/the append-only
+   * `review_logs` — corrupting durable FSRS state. The IPC contract already rejects
+   * a malformed `asOf`; this is the matching defense at the scheduler boundary
+   * (mirrors `scheduleManual`'s `Number.isNaN(ms)` guard on the attention side) so
+   * NO caller can ever feed FSRS a bad clock.
+   */
+  private toClock(now: IsoTimestamp): Date {
+    const ms = Date.parse(now);
+    if (Number.isNaN(ms)) {
+      throw new Error(`CardSchedulerService: invalid clock "${String(now)}"`);
+    }
+    return new Date(ms);
+  }
+
+  /**
    * Adapt our persisted {@link ReviewState} → a `ts-fsrs` `Card` at time `now`.
    * `due`/`last_review` become `Date`s; the lowercase state becomes the numeric
    * enum. The FSRS short-term `learning_steps` cursor is read FROM our persisted
@@ -243,9 +261,10 @@ export class CardSchedulerService {
    * is `0`) still reports its true 10m/1d/etc. spacing and the four are ordered.
    */
   previewIntervals(state: ReviewState, now: IsoTimestamp): Record<ReviewRating, IntervalPreview> {
+    const clock = this.toClock(now);
     const card = this.toFsrsCard(state, now);
-    const nowMs = Date.parse(now);
-    const record = this.engine.repeat(card, new Date(now));
+    const nowMs = clock.getTime();
+    const record = this.engine.repeat(card, clock);
     const build = (rating: ReviewRating): IntervalPreview => {
       const next = record[toFsrsRating(rating)].card;
       const dueIso = next.due.toISOString() as IsoTimestamp;
@@ -275,8 +294,9 @@ export class CardSchedulerService {
     now: IsoTimestamp,
     responseMs: number,
   ): ReviewOutcome {
+    const clock = this.toClock(now);
     const card = this.toFsrsCard(state, now);
-    const { card: next } = this.engine.next(card, new Date(now), toFsrsRating(rating));
+    const { card: next } = this.engine.next(card, clock, toFsrsRating(rating));
     return {
       rating,
       reviewedAt: now,
