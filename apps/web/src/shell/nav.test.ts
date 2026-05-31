@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { iconNames } from "../components/Icon";
-import { CHEAT_SHEET, COMMAND_ITEMS, GOTO_MAP, PRIMARY_NAV, SECONDARY_NAV } from "./nav";
+import {
+  ALL_NAV,
+  CHEAT_SHEET,
+  COMMAND_ITEMS,
+  GOTO_MAP,
+  PRIMARY_NAV,
+  resolveActiveNavId,
+  SECONDARY_NAV,
+} from "./nav";
 
 /**
  * Unit tests (T004) — guard the static shell navigation config without
@@ -8,8 +16,6 @@ import { CHEAT_SHEET, COMMAND_ITEMS, GOTO_MAP, PRIMARY_NAV, SECONDARY_NAV } from
  * icon is a real mapped icon, the goto map and command palette agree on
  * routes), so a typo can't silently break the chrome.
  */
-
-const ALL_NAV = [...PRIMARY_NAV, ...SECONDARY_NAV];
 
 /** The nav-reachable routes registered in router.tsx (the only valid destinations). */
 const VALID_ROUTES = new Set([
@@ -92,5 +98,54 @@ describe("shell nav config", () => {
         expect(keys.length).toBeGreaterThan(0);
       }
     }
+  });
+});
+
+describe("nav active-state exclusivity (resolveActiveNavId)", () => {
+  /** Count the entries the sidebar would render highlighted for `pathname`. */
+  const activeCount = (pathname: string) =>
+    ALL_NAV.filter((n) => n.id === resolveActiveNavId(pathname)).length;
+
+  it("activates AT MOST one nav item on every nav route", () => {
+    const routes = ["/", ...ALL_NAV.map((n) => n.to)];
+    for (const route of [...new Set(routes)]) {
+      // Never two-or-more highlighted at once (the original Library/Search/Concepts bug).
+      expect(activeCount(route)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("activates exactly one nav item on each entry's own route (except shared ones)", () => {
+    // Routes uniquely owned by a single entry must light up exactly that entry.
+    const sharedRoutes = new Set(["/search"]);
+    for (const item of ALL_NAV) {
+      if (sharedRoutes.has(item.to)) continue;
+      expect(resolveActiveNavId(item.to)).toBe(item.id);
+      expect(activeCount(item.to)).toBe(1);
+    }
+  });
+
+  it("on /search highlights ONLY Search — not Library or Concepts (the reported bug)", () => {
+    // Library (/search), Search (/search, canonical), Concepts (/search) all share
+    // the route; exactly one — the canonical owner, Search — must be active.
+    expect(resolveActiveNavId("/search")).toBe("search");
+    expect(activeCount("/search")).toBe(1);
+    expect(resolveActiveNavId("/search")).not.toBe("library");
+    expect(resolveActiveNavId("/search")).not.toBe("concepts");
+  });
+
+  it("activates a nav item for its child routes (longest-prefix), not shallow ones", () => {
+    // A child path of Leeches activates Leeches, and the deeper `/maintenance/leeches`
+    // owner beats any shallower `/maintenance` match.
+    expect(resolveActiveNavId("/maintenance/leeches")).toBe("leeches");
+    expect(resolveActiveNavId("/search/some-id")).toBe("search");
+    expect(activeCount("/search/some-id")).toBe(1);
+  });
+
+  it("highlights nothing for routes no nav item owns", () => {
+    // The reader / process routes are not sidebar destinations.
+    expect(resolveActiveNavId("/source/abc")).toBeNull();
+    expect(resolveActiveNavId("/extract/abc")).toBeNull();
+    expect(resolveActiveNavId("/process")).toBeNull();
+    expect(resolveActiveNavId("/")).toBeNull();
   });
 });

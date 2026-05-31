@@ -22,7 +22,7 @@
  * nav/command catalogues are static config.
  */
 import type { LocalVaultPath, VaultRoot } from "@interleave/core";
-import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { Link, Outlet, useLinkProps, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { BackupPrompt, runBackup } from "../components/BackupPrompt";
 import { Icon } from "../components/Icon";
@@ -34,7 +34,7 @@ import { toggleTheme as applyToggleTheme, getStoredTheme, type Theme } from "../
 import { CheatSheet } from "./CheatSheet";
 import { CommandPalette } from "./CommandPalette";
 import { Kbd } from "./Kbd";
-import { type NavItem, PRIMARY_NAV, SECONDARY_NAV, UNDO_EVENT } from "./nav";
+import { type NavItem, PRIMARY_NAV, resolveActiveNavId, SECONDARY_NAV, UNDO_EVENT } from "./nav";
 import { SelectionProvider, useSelection } from "./selection";
 import "./shell.css";
 import type { PaletteActionId } from "./shortcuts";
@@ -43,32 +43,49 @@ import { type NavBadgeCounts, useNavBadges } from "./useNavBadges";
 import { useShellIdentity } from "./useShellIdentity";
 import { useShellShortcuts } from "./useShellShortcuts";
 
-/** Whether a sidebar entry is the active route (longest-prefix, exact for "/"). */
-function isActive(pathname: string, to: string): boolean {
-  if (to === "/") return pathname === "/";
-  return pathname === to || pathname.startsWith(`${to}/`);
-}
-
 function NavButton({
   item,
-  pathname,
+  active,
   badges,
 }: {
   item: NavItem;
-  pathname: string;
+  /**
+   * Whether THIS entry is the single active one — resolved once per render by
+   * `resolveActiveNavId` (by item identity), so exactly one entry highlights even
+   * when several share a route (Library / Search / Concepts → `/search`).
+   */
+  active: boolean;
   badges: NavBadgeCounts;
 }) {
-  const active = isActive(pathname, item.to);
   // Live count for this entry (Queue / Inbox / Review), read from window.appApi
   // via useNavBadges — not a hardcoded placeholder. Hidden until loaded and when
   // the count is 0 (a calm sidebar shows no empty "0" pills).
   const count = item.liveBadge ? badges[item.id as keyof NavBadgeCounts] : undefined;
+  // We render the full TanStack Link behaviour (navigation, preload, accessible
+  // anchor) via useLinkProps, but OVERRIDE its built-in active markers. The Link
+  // auto-stamps `aria-current="page"` + `data-status="active"` + an `active` class
+  // on EVERY anchor whose `to` matches the URL — and those win over our own props
+  // because the library spreads them last. Library / Search / Concepts all share
+  // `/search`, so that would light up (and announce "current page" for) all three.
+  // Instead we strip the auto markers and drive them from the single resolved
+  // `active` flag (resolveActiveNavId), so exactly one entry is active in the DOM.
+  const {
+    className: _c,
+    "aria-current": _a,
+    "data-status": _d,
+    // `type`/`disabled` are not valid anchor attributes — the real <Link> strips
+    // them before rendering its <a>; mirror that so we emit a clean anchor.
+    type: _t,
+    disabled: _disabled,
+    ...linkProps
+  } = useLinkProps({ to: item.to }) as Record<string, unknown>;
   return (
-    <Link
-      to={item.to}
+    <a
+      {...linkProps}
       data-testid={`nav-${item.id}`}
       className={active ? "shell-nav__item shell-nav__item--on" : "shell-nav__item"}
       aria-current={active ? "page" : undefined}
+      data-status={active ? "active" : undefined}
     >
       <Icon name={item.icon} size={17} />
       {item.label}
@@ -77,7 +94,7 @@ function NavButton({
           {count}
         </span>
       )}
-    </Link>
+    </a>
   );
 }
 
@@ -101,6 +118,10 @@ function Sidebar({
   // Live Queue / Inbox / Review count badges from window.appApi (queue.list /
   // inbox.list), not hardcoded numbers. Empty (every badge hidden) outside desktop.
   const badges = useNavBadges();
+  // The SINGLE active nav entry for this route, resolved by item identity (not a
+  // shared-route prefix test). Library / Search / Concepts all point at `/search`,
+  // but only the canonical owner (Search) lights up there — exactly one highlight.
+  const activeId = resolveActiveNavId(pathname);
 
   // Close the user menu on a click outside the chip/menu, or on Escape.
   useEffect(() => {
@@ -133,11 +154,11 @@ function Sidebar({
 
       <nav className="shell-nav" aria-label="Primary">
         {PRIMARY_NAV.map((item) => (
-          <NavButton key={item.id} item={item} pathname={pathname} badges={badges} />
+          <NavButton key={item.id} item={item} active={item.id === activeId} badges={badges} />
         ))}
         <div className="shell-nav__label">Organize</div>
         {SECONDARY_NAV.map((item) => (
-          <NavButton key={item.id} item={item} pathname={pathname} badges={badges} />
+          <NavButton key={item.id} item={item} active={item.id === activeId} badges={badges} />
         ))}
       </nav>
 

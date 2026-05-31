@@ -30,6 +30,15 @@ export type NavItem = {
    * reflects the real due/inbox counts rather than a hardcoded placeholder.
    */
   readonly liveBadge?: boolean;
+  /**
+   * Whether THIS entry is the canonical owner of its `to` route when several
+   * entries point at the same path. Library / Search / Concepts all currently
+   * resolve to `/search`; only the canonical owner (Search) lights up there, so
+   * the active-state stays exclusive (exactly one item highlighted). See
+   * `resolveActiveNavId`. When a route has no canonical owner, the first matching
+   * entry wins.
+   */
+  readonly canonical?: boolean;
 };
 
 /**
@@ -43,7 +52,9 @@ export const PRIMARY_NAV: readonly NavItem[] = [
   { id: "inbox", label: "Inbox", icon: "inbox", to: "/inbox", liveBadge: true },
   { id: "library", label: "Library", icon: "library", to: "/search" },
   { id: "review", label: "Review", icon: "review", to: "/review", liveBadge: true },
-  { id: "search", label: "Search", icon: "search", to: "/search" },
+  // Canonical owner of `/search`: Library and Concepts also point here until they
+  // split out, but only Search highlights when on `/search` (see resolveActiveNavId).
+  { id: "search", label: "Search", icon: "search", to: "/search", canonical: true },
 ];
 
 /** Secondary "Organize" group — Concepts, Analytics, Settings in the kit. */
@@ -57,6 +68,57 @@ export const SECONDARY_NAV: readonly NavItem[] = [
   { id: "trash", label: "Trash", icon: "trash", to: "/trash" },
   { id: "settings", label: "Settings", icon: "settings", to: "/settings" },
 ];
+
+/** Every sidebar entry, primary then secondary, in render order. */
+export const ALL_NAV: readonly NavItem[] = [...PRIMARY_NAV, ...SECONDARY_NAV];
+
+/**
+ * Resolve the SINGLE active sidebar entry for a given pathname — returns its
+ * `id`, or `null` when no entry owns the route. Pure (no React, no DOM) so the
+ * exclusivity contract is unit-testable.
+ *
+ * Rules:
+ *  - The home route `/` only matches an entry whose `to` is exactly `/` (there is
+ *    no such nav entry today, so `/` resolves to `null` — nothing highlighted).
+ *  - Otherwise an entry matches when the pathname equals its `to` or is a child
+ *    of it (`${to}/…`) — so `/maintenance/leeches` activates Leeches, and a
+ *    future `/search/abc` would still activate the search owner.
+ *  - The BEST (longest `to`) match wins, so nested routes beat shallow ones.
+ *  - When several entries tie on the same `to` (Library / Search / Concepts all
+ *    point at `/search`), the `canonical` entry wins; absent a canonical owner,
+ *    the first entry in render order wins. This guarantees AT MOST ONE active id
+ *    per render — fixing the bug where all three `/search` entries highlighted.
+ */
+export function resolveActiveNavId(pathname: string): string | null {
+  let best: NavItem | null = null;
+  for (const item of ALL_NAV) {
+    const matches =
+      item.to === "/"
+        ? pathname === "/"
+        : pathname === item.to || pathname.startsWith(`${item.to}/`);
+    if (!matches) continue;
+    if (best === null) {
+      best = item;
+      continue;
+    }
+    // Longer `to` = more specific route, always wins.
+    if (item.to.length > best.to.length) {
+      best = item;
+      continue;
+    }
+    // Same `to` (shared route): the canonical owner wins; otherwise keep the
+    // earlier (render-order) entry so resolution is deterministic.
+    if (
+      item.to.length === best.to.length &&
+      item.to === best.to &&
+      item.canonical &&
+      !best.canonical
+    ) {
+      best = item;
+    }
+  }
+  return best?.id ?? null;
+}
 
 /**
  * Context passed to a palette item's `when` gate so context-scoped action

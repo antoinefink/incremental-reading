@@ -61,6 +61,34 @@ test("navigates between routes via the sidebar", async ({ page }) => {
   await expect(page.getByTestId("route-review")).toBeVisible();
 });
 
+test("the sidebar highlights exactly one nav item — and on /search it is Search, not Library/Concepts", async ({
+  page,
+}) => {
+  // Regression for the active-state bug: Library, Search and Concepts all point
+  // at /search, so a per-item prefix test lit up all three. Active-state is now
+  // resolved by item identity (resolveActiveNavId), so exactly one item carries
+  // aria-current="page" on every route.
+  const activeNav = page.locator('.shell-nav [aria-current="page"]');
+
+  // On /search the canonical owner (Search) is the only highlighted entry.
+  await page.goto("/search");
+  await expect(page.getByTestId("nav-search")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByTestId("nav-library")).not.toHaveAttribute("aria-current", "page");
+  await expect(page.getByTestId("nav-concepts")).not.toHaveAttribute("aria-current", "page");
+  await expect(activeNav).toHaveCount(1);
+
+  // Each uniquely-owned route highlights exactly its own entry.
+  for (const [route, testId] of [
+    ["/queue", "nav-queue"],
+    ["/inbox", "nav-inbox"],
+    ["/review", "nav-review"],
+  ] as const) {
+    await page.goto(route);
+    await expect(page.getByTestId(testId)).toHaveAttribute("aria-current", "page");
+    await expect(activeNav).toHaveCount(1);
+  }
+});
+
 test("routes are reachable by keyboard (g + letter navigation)", async ({ page }) => {
   await page.goto("/");
 
