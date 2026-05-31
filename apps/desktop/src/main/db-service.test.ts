@@ -1812,6 +1812,105 @@ describe("DbService — review session (T037)", () => {
 
     svc.close();
   });
+
+  // -------------------------------------------------------------------------
+  // library.browse()  (Library route — facet-driven browse-everything read)
+  // -------------------------------------------------------------------------
+
+  it("library.browse lists ALL live elements with no facets + per-facet counts (no keyword)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    const { items, counts } = svc.libraryBrowse({});
+    // The browse-first default returns the whole live collection (no keyword needed).
+    expect(items.length).toBeGreaterThan(0);
+    expect(counts.all).toBe(items.length);
+    // The seed includes a source, extracts, and cards — all surface.
+    const types = new Set(items.map((r) => r.type));
+    expect(types).toContain("source");
+    expect(types).toContain("extract");
+    expect(types).toContain("card");
+    // The inbox source (status `inbox`) is also browsable (search would never return it).
+    expect(counts.byStatus.inbox ?? 0).toBeGreaterThan(0);
+  });
+
+  it("library.browse enriches each row like a search/queue row (scheduler, due, concept, refblock)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    const { items } = svc.libraryBrowse({});
+    for (const r of items) {
+      expect(["A", "B", "C", "D"]).toContain(r.priorityLabel);
+      // The load-bearing scheduler split: cards are FSRS, everything else attention.
+      expect(r.scheduler.kind).toBe(r.type === "card" ? "fsrs" : "attention");
+      expect(["overdue", "today", "soon"]).toContain(r.due);
+      expect(r.dueLabel.length).toBeGreaterThan(0);
+    }
+    // An extract/card carries its owning source (the refblock provenance).
+    const extract = items.find((r) => r.type === "extract");
+    expect(extract?.sourceTitle).toBe("On the Measure of Intelligence");
+  });
+
+  it("library.browse Zod-validates the payload and narrows by type / status / priority / concept", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    // Type facet.
+    const onlyCards = svc.libraryBrowse({ types: ["card"] }).items;
+    expect(onlyCards.length).toBeGreaterThan(0);
+    expect(onlyCards.every((r) => r.type === "card")).toBe(true);
+
+    // Status facet — the seeded inbox source narrows to `inbox`.
+    const inbox = svc.libraryBrowse({ statuses: ["inbox"] }).items;
+    expect(inbox.length).toBeGreaterThan(0);
+    expect(inbox.every((r) => r.status === "inbox")).toBe(true);
+
+    // Priority facet — A-band only.
+    const aBand = svc.libraryBrowse({ priorityLabel: "A" }).items;
+    expect(aBand.every((r) => r.priorityLabel === "A")).toBe(true);
+
+    // Concept facet — assign the seeded source to a fresh concept, then narrow.
+    const all = svc.libraryBrowse({}).items;
+    const sourceRow = all.find((r) => r.type === "source");
+    expect(sourceRow).toBeDefined();
+    const concept = svc.repos.concepts.createConcept({ name: "Browse Topic" });
+    svc.repos.concepts.assignConcept(sourceRow?.id as never, concept.id);
+    const byConcept = svc.libraryBrowse({ conceptId: concept.id }).items;
+    expect(byConcept.map((r) => r.id)).toEqual([sourceRow?.id]);
+  });
+
+  it("library.browse survives a close + reopen (restart analogue) and excludes soft-deleted", () => {
+    const first = new DbService();
+    first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(first.seedIfEmpty()).toBe(true);
+    const before = first
+      .libraryBrowse({})
+      .items.map((r) => r.id)
+      .sort();
+    expect(before.length).toBeGreaterThan(0);
+    first.close();
+
+    // Reopen the SAME file — the browse re-lists the persisted elements.
+    const second = new DbService();
+    second.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const after = second
+      .libraryBrowse({})
+      .items.map((r) => r.id)
+      .sort();
+    expect(after).toEqual(before);
+
+    // Soft-deleting a row drops it from the next browse.
+    const sourceId = second.libraryBrowse({ types: ["source"] }).items[0]?.id ?? "";
+    expect(sourceId).not.toBe("");
+    second.repos.elements.softDelete(sourceId as never);
+    const afterDelete = second.libraryBrowse({}).items.map((r) => r.id);
+    expect(afterDelete).not.toContain(sourceId);
+
+    second.close();
+  });
 });
 
 // ---------------------------------------------------------------------------

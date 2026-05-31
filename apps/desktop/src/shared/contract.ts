@@ -1945,6 +1945,96 @@ export interface SearchQueryResult {
 }
 
 // ---------------------------------------------------------------------------
+// library.browse()  (Library route — the facet-driven browse-everything read)
+// ---------------------------------------------------------------------------
+
+/**
+ * The browsable element types the Library route lists (every distillation type
+ * EXCEPT `concept`, which is a FACET column, and `media_fragment`, which has no
+ * MVP reader target). Unlike {@link SearchableTypeSchema} (FTS-indexed only),
+ * this includes `topic`/`synthesis_note`/`task` — the types keyword search can
+ * never return — which is the whole point of a dedicated browse surface.
+ */
+export const LibraryBrowseTypeSchema = z.enum([
+  "source",
+  "extract",
+  "card",
+  "topic",
+  "synthesis_note",
+  "task",
+]);
+export type LibraryBrowseType = z.infer<typeof LibraryBrowseTypeSchema>;
+
+/**
+ * The facet-driven browse request. Every facet is OPTIONAL — with none set the
+ * Library lists ALL live elements (the browse-first default that distinguishes it
+ * from keyword search, which returns `[]` for an empty query). Facets narrow by
+ * type / concept membership / priority band / lifecycle status; the main process
+ * runs the read in {@link LibraryQuery} (no keyword, no FTS).
+ */
+export const LibraryBrowseRequestSchema = z.object({
+  /** Keep only these browsable element types. */
+  types: z.array(LibraryBrowseTypeSchema).optional(),
+  /** Keep only members of this concept (by concept id) — the `concept_membership` facet. */
+  conceptId: ElementIdSchema.optional(),
+  /** Keep only elements whose priority maps to this A/B/C/D band. */
+  priorityLabel: PriorityLabelSchema.optional(),
+  /** Keep only these lifecycle statuses. */
+  statuses: z.array(z.enum(ELEMENT_STATUSES)).optional(),
+  /** Cap the result count (1..500; defaults main-side). */
+  limit: z.number().int().min(1).max(500).optional(),
+});
+export type LibraryBrowseRequest = z.infer<typeof LibraryBrowseRequestSchema>;
+
+/**
+ * One browsed element row — the Library `result` row + selection detail. Reuses
+ * the SAME enrichment the search row carries (priority label, concept, source
+ * provenance/location, the FSRS-vs-attention {@link SchedulerSignals}, the due
+ * state/label) so a Library row reads identically to a search/queue row. Unlike
+ * a search hit it carries NO `snippet`/`score` (there is no keyword to match).
+ */
+export interface LibraryItem {
+  readonly id: string;
+  readonly type: LibraryBrowseType;
+  readonly title: string;
+  /** Numeric priority (0..1) + its A/B/C/D label, for the row badge. */
+  readonly priority: number;
+  readonly priorityLabel: PriorityLabelInput;
+  readonly status: string;
+  readonly stage: string;
+  /** The concept this element is a member of, by name; `null` when none. */
+  readonly concept: string | null;
+  /** Owning source title (provenance) for the row's refblock; `null` when none. */
+  readonly sourceTitle: string | null;
+  /** Human-readable source location label ("Definition · ¶1"); `null` when none. */
+  readonly sourceLocationLabel: string | null;
+  /** Next-attention/review time (ISO), for the detail; `null` when none. */
+  readonly dueAt: string | null;
+  /** The load-bearing FSRS-vs-attention scheduler signals for the detail chip. */
+  readonly scheduler: SchedulerSignals;
+  /** How due the element is now (overdue / today / soon), for the detail badge. */
+  readonly due: QueueDueState;
+  /** A short human due label ("Overdue", "Due today", "in 3d", "Scheduled"). */
+  readonly dueLabel: string;
+}
+
+/** Per-facet counts over the UNFILTERED live browse universe (for facet labels). */
+export interface LibraryBrowseCounts {
+  readonly all: number;
+  /** Per browsable type (one entry per {@link LibraryBrowseTypeSchema} value). */
+  readonly byType: Readonly<Record<string, number>>;
+  /** Per priority band A/B/C/D. */
+  readonly byPriority: Readonly<Record<string, number>>;
+  /** Per lifecycle status. */
+  readonly byStatus: Readonly<Record<string, number>>;
+}
+
+export interface LibraryBrowseResult {
+  readonly items: readonly LibraryItem[];
+  readonly counts: LibraryBrowseCounts;
+}
+
+// ---------------------------------------------------------------------------
 // trash.list() / trash.restore() / trash.purge() / trash.empty()  (T044)
 // ---------------------------------------------------------------------------
 
@@ -2419,6 +2509,16 @@ export interface AppApi {
      * never issues SQL — it calls this typed command.
      */
     query(request: SearchQueryRequest): Promise<SearchQueryResult>;
+  };
+  readonly library: {
+    /**
+     * The facet-driven "browse everything" read behind `/library`. DISTINCT from
+     * `search.query`: it takes NO keyword and lists ALL live elements by default,
+     * narrowing only by the type/concept/priority/status facets — and it covers
+     * `topic`/`synthesis_note`/`task`, which the FTS-backed search never returns.
+     * Read-only (appends no op).
+     */
+    browse(request?: LibraryBrowseRequest): Promise<LibraryBrowseResult>;
   };
   readonly readPoints: {
     /** Load an element's read-point (resume position), or `null` (T017). */

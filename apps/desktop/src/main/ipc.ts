@@ -44,6 +44,7 @@ import {
   InspectorGetRequestSchema,
   InspectorListRequestSchema,
   IPC_CHANNELS,
+  LibraryBrowseRequestSchema,
   LineageGetRequestSchema,
   QueueActRequestSchema,
   QueueListRequestSchema,
@@ -330,6 +331,11 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.searchQuery, (_event, rawRequest: unknown) => {
     const request = SearchQueryRequestSchema.parse(rawRequest);
     return dbService.search(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.libraryBrowse, (_event, rawRequest: unknown) => {
+    const request = LibraryBrowseRequestSchema.parse(rawRequest ?? {});
+    return dbService.libraryBrowse(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.readPointGet, (_event, rawRequest: unknown) => {

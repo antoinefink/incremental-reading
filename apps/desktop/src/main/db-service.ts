@@ -49,6 +49,8 @@ import {
   ExtractService,
   InboxQuery,
   InspectorQuery,
+  type LibraryBrowseFilters,
+  LibraryQuery,
   LineageQuery,
   nowIso,
   QueueActionService,
@@ -122,6 +124,9 @@ import type {
   InspectorGetResult,
   InspectorListResult,
   LeechSummary,
+  LibraryBrowseRequest,
+  LibraryBrowseResult,
+  LibraryItem,
   LineageGetResult,
   QueueActRequest,
   QueueActResult,
@@ -174,6 +179,7 @@ export class DbService {
   private inspector: InspectorQuery | null = null;
   private lineage: LineageQuery | null = null;
   private queue: QueueQuery | null = null;
+  private library: LibraryQuery | null = null;
   private inboxQuery: InboxQuery | null = null;
   private queueAction: QueueActionService | null = null;
   private extraction: ExtractionService | null = null;
@@ -222,6 +228,10 @@ export class DbService {
     this.inspector = new InspectorQuery(this.repositories);
     this.lineage = new LineageQuery(this.repositories);
     this.queue = new QueueQuery(this.repositories);
+    // The facet-driven browse-all read behind `/library` (distinct from search):
+    // lists ALL live elements narrowed by type/concept/priority/status facets,
+    // including topic/synthesis_note/task which the FTS index never covers.
+    this.library = new LibraryQuery(this.handle.db, this.repositories);
     this.queueAction = new QueueActionService(this.handle.db);
     this.inboxQuery = new InboxQuery(this.repositories);
     this.extraction = new ExtractionService(this.handle.db);
@@ -258,6 +268,7 @@ export class DbService {
     this.inspector = null;
     this.lineage = null;
     this.queue = null;
+    this.library = null;
     this.queueAction = null;
     this.inboxQuery = null;
     this.extraction = null;
@@ -1597,7 +1608,7 @@ export class DbService {
       // Source provenance + location for the row's refblock. For a `source` hit
       // the element IS the source; for an extract/card, resolve the owning source
       // and the card's/extract's source-location anchor.
-      const { sourceTitle, sourceLocationLabel } = this.refMetaForElement(element.id, hit.type);
+      const { sourceTitle, sourceLocationLabel } = this.refMetaForElement(element.id);
 
       // Scheduler chip + due badge for the selection detail (kit parity). Reuse the
       // SAME builders the inspector + queue use so the chip/due read identically:
@@ -1640,6 +1651,88 @@ export class DbService {
     return { results };
   }
 
+  // -------------------------------------------------------------------------
+  // library.browse()  (Library route — the facet-driven browse-everything read)
+  // -------------------------------------------------------------------------
+
+  /** Read-only library browse query layer, bound to the open database. */
+  private get libraryQuery(): LibraryQuery {
+    if (!this.library) {
+      throw new Error("DbService: database is not open");
+    }
+    return this.library;
+  }
+
+  /**
+   * The facet-driven "browse everything" read behind `/library`. DISTINCT from
+   * {@link search}: it takes NO keyword and lists ALL live elements by default,
+   * narrowing only by the type/concept/priority/status facets — and it covers
+   * `topic`/`synthesis_note`/`task`, which the FTS-backed search can never return.
+   *
+   * {@link LibraryQuery} does the live-elements read + ordering + per-facet counts
+   * (no SQL/ranking in the renderer); here each returned id is enriched with the
+   * SAME fields a search/queue row carries — priority label, concept, source
+   * provenance/location (the refblock), the FSRS-vs-attention {@link SchedulerSignals},
+   * and the due state/label — by reusing the inspector/queue/refblock builders, so
+   * a Library row reads identically to a search/queue row (no duplicated scheduling
+   * math). Read-only (appends no op).
+   */
+  libraryBrowse(request: LibraryBrowseRequest): LibraryBrowseResult {
+    const filters: LibraryBrowseFilters = {
+      ...(request.types ? { types: request.types } : {}),
+      ...(request.conceptId ? { conceptId: request.conceptId as ElementId } : {}),
+      ...(request.priorityLabel ? { priorityLabel: request.priorityLabel } : {}),
+      ...(request.statuses ? { statuses: request.statuses } : {}),
+      ...(request.limit !== undefined ? { limit: request.limit } : {}),
+    };
+    const { items: elements, counts } = this.libraryQuery.browse(filters);
+
+    const items: LibraryItem[] = [];
+    for (const element of elements) {
+      // The owning-source provenance + location for the row's refblock (shared
+      // T043 resolver — a source references itself; extract/card reference their
+      // owning source + location anchor).
+      const { sourceTitle, sourceLocationLabel } = this.refMetaForElement(element.id);
+
+      // The load-bearing scheduler chip + due badge — reuse the SAME builders the
+      // inspector + queue use so the chip/due read identically across surfaces. Both
+      // are best-effort: a row that vanished mid-read degrades to a calm attention
+      // "Scheduled" default rather than dropping out of the browse.
+      const inspectorData = this.inspectorQuery.get(element.id);
+      const summary = this.queueQuery.summaryFor(element.id);
+      const scheduler = inspectorData?.scheduler ?? {
+        kind: "attention" as const,
+        retrievability: null,
+        stability: null,
+        difficulty: null,
+        reps: null,
+        lapses: null,
+        fsrsState: null,
+        stage: element.stage,
+        postponed: 0,
+        lastProcessedAt: element.updatedAt ?? null,
+      };
+
+      items.push({
+        id: element.id,
+        type: element.type as LibraryItem["type"],
+        title: element.title,
+        priority: element.priority,
+        priorityLabel: priorityToLabel(element.priority),
+        status: element.status,
+        stage: element.stage,
+        concept: this.conceptForElement(element.id),
+        sourceTitle,
+        sourceLocationLabel,
+        dueAt: summary?.dueAt ?? element.dueAt ?? null,
+        scheduler,
+        due: summary?.due ?? "soon",
+        dueLabel: summary?.dueLabel ?? "Scheduled",
+      });
+    }
+    return { items, counts };
+  }
+
   /**
    * Resolve the source title + location label for a search row's refblock through
    * the ONE shared {@link resolveSourceRef} (the same T043 resolver the inspector,
@@ -1649,10 +1742,10 @@ export class DbService {
    * falls back to its `cards.source_location_id`). A soft-deleted/missing source
    * degrades to `null` (a calm "no source"), never a broken reference.
    */
-  private refMetaForElement(
-    id: ElementId,
-    _type: "source" | "extract" | "card",
-  ): { sourceTitle: string | null; sourceLocationLabel: string | null } {
+  private refMetaForElement(id: ElementId): {
+    sourceTitle: string | null;
+    sourceLocationLabel: string | null;
+  } {
     const ref = resolveSourceRef(this.repos, id);
     return {
       sourceTitle: ref?.sourceTitle ?? null,

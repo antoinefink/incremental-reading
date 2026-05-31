@@ -2,7 +2,7 @@
  * Application router (T003, shell wired in T004) — code-based, fully typed
  * TanStack Router.
  *
- * Twelve routes are defined here, each rendered inside the persistent app shell:
+ * Thirteen routes are defined here, each rendered inside the persistent app shell:
  *   /                    home (daily queue / command center landing)
  *   /inbox               import & triage
  *   /queue               due queue
@@ -11,7 +11,8 @@
  *   /extract/$id         extract review mode (T024 — typed dynamic param)
  *   /review              active-recall review session
  *   /maintenance/leeches leech cleanup (T040)
- *   /search              library / search
+ *   /search              library / search (keyword FTS5)
+ *   /library             browse-everything facet surface
  *   /trash               soft-deleted elements (T044)
  *   /analytics           learning-health snapshot (T045)
  *   /settings            local settings
@@ -29,6 +30,7 @@
 import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import { AnalyticsScreen } from "./analytics/AnalyticsScreen";
 import { DesktopStatusPanel } from "./components/DesktopStatusPanel";
+import { BrowseScreen } from "./library/BrowseScreen";
 import { LibraryScreen } from "./library/LibraryScreen";
 import { LeechCleanup } from "./maintenance/LeechCleanup";
 import { HomeScreen } from "./pages/home/HomeScreen";
@@ -136,6 +138,21 @@ const searchRoute = createRoute({
 });
 
 /**
+ * Library (Library route) — the facet-driven browse-everything surface. Distinct
+ * from `/search` (keyword-driven FTS5 that returns `[]` for an empty query):
+ * `/library` DEFAULTS to listing ALL live elements and narrows by FACETS
+ * (type/concept/priority/status), covering topic/synthesis_note/task that keyword
+ * search can never return. The whole list comes from the typed
+ * `window.appApi.library.browse` command (`LibraryQuery` does the SQL/ordering/
+ * counts/enrichment); the renderer holds no SQL or scheduling logic.
+ */
+const libraryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/library",
+  component: BrowseScreen,
+});
+
+/**
  * Trash view (T044) — soft-deleted elements collect here and can be restored (to
  * their prior lifecycle status, lineage intact) or permanently deleted with
  * confirmation. Reads `appApi.listTrash()` (read-only) and drives Restore / Purge /
@@ -197,6 +214,7 @@ const routeTree = rootRoute.addChildren([
   reviewRoute,
   leechCleanupRoute,
   searchRoute,
+  libraryRoute,
   trashRoute,
   analyticsRoute,
   settingsRoute,

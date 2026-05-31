@@ -97,6 +97,15 @@ export {
   schedulerKindForType,
 } from "./inspector-query";
 export {
+  LIBRARY_STATUSES,
+  LIBRARY_TYPES,
+  type LibraryBrowseCounts,
+  type LibraryBrowseData,
+  type LibraryBrowseFilters,
+  type LibraryPriorityLabel,
+  LibraryQuery,
+} from "./library-query";
+export {
   type LineageData,
   type LineageNode,
   LineageQuery,

@@ -25,6 +25,7 @@ const VALID_ROUTES = new Set([
   "/review",
   "/maintenance/leeches",
   "/search",
+  "/library",
   "/trash",
   "/analytics",
   "/settings",
@@ -88,7 +89,8 @@ describe("shell nav config", () => {
     expect(GOTO_MAP.h).toBe("/");
     expect(GOTO_MAP.q).toBe("/queue");
     expect(GOTO_MAP.r).toBe("/review");
-    expect(GOTO_MAP.l).toBe("/search");
+    // Library now has its own dedicated browse route.
+    expect(GOTO_MAP.l).toBe("/library");
   });
 
   it("exposes a 'Go to Home command center' command pointing at `/`", () => {
@@ -133,13 +135,31 @@ describe("nav active-state exclusivity (resolveActiveNavId)", () => {
     }
   });
 
+  it("on /library highlights ONLY Library — never Search or Concepts", () => {
+    // Library owns its OWN dedicated route now; it must light up exclusively there.
+    expect(resolveActiveNavId("/library")).toBe("library");
+    expect(activeCount("/library")).toBe(1);
+    expect(resolveActiveNavId("/library")).not.toBe("search");
+    expect(resolveActiveNavId("/library")).not.toBe("concepts");
+  });
+
   it("on /search highlights ONLY Search — not Library or Concepts (the reported bug)", () => {
-    // Library (/search), Search (/search, canonical), Concepts (/search) all share
-    // the route; exactly one — the canonical owner, Search — must be active.
+    // Search (/search, canonical) and Concepts (/search) share the route; Library
+    // no longer does. Exactly one — the canonical owner, Search — must be active,
+    // and it must NOT resolve to Library (which now owns /library).
     expect(resolveActiveNavId("/search")).toBe("search");
     expect(activeCount("/search")).toBe(1);
     expect(resolveActiveNavId("/search")).not.toBe("library");
     expect(resolveActiveNavId("/search")).not.toBe("concepts");
+  });
+
+  it("resolves /library and /search to DISTINCT owners (no triple-highlight regression)", () => {
+    // The two surfaces are kept apart: /library → Library, /search → Search. This
+    // is the core guarantee the dedicated Library route adds.
+    expect(resolveActiveNavId("/library")).toBe("library");
+    expect(resolveActiveNavId("/search")).toBe("search");
+    expect(activeCount("/library")).toBe(1);
+    expect(activeCount("/search")).toBe(1);
   });
 
   it("activates a nav item for its child routes (longest-prefix), not shallow ones", () => {

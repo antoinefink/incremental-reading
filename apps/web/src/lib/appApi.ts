@@ -1225,6 +1225,58 @@ export interface SearchQueryResult {
 }
 
 // ---------------------------------------------------------------------------
+// library.browse()  (Library route — the facet-driven browse-everything read)
+// ---------------------------------------------------------------------------
+
+/** The browsable element types the Library route lists (NOT only the FTS types). */
+export type LibraryBrowseType = "source" | "extract" | "card" | "topic" | "synthesis_note" | "task";
+
+/**
+ * The facet-driven browse request — every facet OPTIONAL. With none set, the
+ * Library lists ALL live elements (the browse-first default that distinguishes
+ * it from keyword search). No keyword field exists here on purpose.
+ */
+export interface LibraryBrowseRequest {
+  readonly types?: readonly LibraryBrowseType[];
+  readonly conceptId?: string;
+  readonly priorityLabel?: PriorityLabel;
+  readonly statuses?: readonly string[];
+  readonly limit?: number;
+}
+
+/** One browsed element row — the Library `result` row + selection detail. */
+export interface LibraryItem {
+  readonly id: string;
+  readonly type: LibraryBrowseType;
+  readonly title: string;
+  readonly priority: number;
+  readonly priorityLabel: PriorityLabel;
+  readonly status: string;
+  readonly stage: string;
+  readonly concept: string | null;
+  readonly sourceTitle: string | null;
+  readonly sourceLocationLabel: string | null;
+  readonly dueAt: string | null;
+  /** The load-bearing FSRS-vs-attention scheduler signals for the detail chip. */
+  readonly scheduler: SchedulerSignals;
+  readonly due: QueueDueState;
+  readonly dueLabel: string;
+}
+
+/** Per-facet counts over the UNFILTERED live browse universe (for facet labels). */
+export interface LibraryBrowseCounts {
+  readonly all: number;
+  readonly byType: Readonly<Record<string, number>>;
+  readonly byPriority: Readonly<Record<string, number>>;
+  readonly byStatus: Readonly<Record<string, number>>;
+}
+
+export interface LibraryBrowseResult {
+  readonly items: readonly LibraryItem[];
+  readonly counts: LibraryBrowseCounts;
+}
+
+// ---------------------------------------------------------------------------
 // trash.* / undo.*  (T044 — deletion, trash & undo)
 // ---------------------------------------------------------------------------
 
@@ -1434,6 +1486,9 @@ export interface AppApi {
   };
   readonly search: {
     query(request: SearchQueryRequest): Promise<SearchQueryResult>;
+  };
+  readonly library: {
+    browse(request?: LibraryBrowseRequest): Promise<LibraryBrowseResult>;
   };
   readonly readPoints: {
     get(request: ReadPointGetRequest): Promise<ReadPointGetResult>;
@@ -1734,6 +1789,17 @@ export const appApi = {
    */
   searchQuery(request: SearchQueryRequest): Promise<SearchQueryResult> {
     return requireAppApi().search.query(request);
+  },
+  /**
+   * The facet-driven "browse everything" read behind `/library`. DISTINCT from
+   * `searchQuery`: it takes NO keyword and lists ALL live elements by default,
+   * narrowing only by the type/concept/priority/status facets — and it covers
+   * topic/synthesis_note/task, which the FTS-backed search never returns. Each row
+   * carries the same scheduler/due/concept/refblock fields as a search/queue row.
+   * Read-only.
+   */
+  libraryBrowse(request?: LibraryBrowseRequest): Promise<LibraryBrowseResult> {
+    return requireAppApi().library.browse(request);
   },
   /** Load an element's read-point (resume position), or `null` (T017). */
   getReadPoint(request: ReadPointGetRequest): Promise<ReadPointGetResult> {

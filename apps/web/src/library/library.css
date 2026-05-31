@@ -50,6 +50,14 @@
   flex: 1;
 }
 
+/* calm "N elements" count summary in the browse top bar */
+.lib-count {
+  font-size: var(--t-sm);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* segmented Results / Map tabs */
 .lib-seg {
   display: inline-flex;

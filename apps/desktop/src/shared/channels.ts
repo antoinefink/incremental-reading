@@ -56,6 +56,7 @@ export const IPC_CHANNELS = {
   tagsAdd: "tags:add",
   tagsRemove: "tags:remove",
   searchQuery: "search:query",
+  libraryBrowse: "library:browse",
   readPointGet: "readPoint:get",
   readPointSet: "readPoint:set",
   trashList: "trash:list",

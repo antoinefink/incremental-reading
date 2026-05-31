@@ -38,6 +38,7 @@ import {
   InboxTriageRequestSchema,
   InspectorGetRequestSchema,
   IPC_CHANNELS,
+  LibraryBrowseRequestSchema,
   LineageGetRequestSchema,
   QueueActRequestSchema,
   QueueScheduleRequestSchema,
@@ -109,6 +110,7 @@ describe("IPC channels", () => {
         "tags:add",
         "tags:remove",
         "search:query",
+        "library:browse",
         "readPoint:get",
         "readPoint:set",
         "trash:list",
@@ -1129,6 +1131,51 @@ describe("Search request schema (T042)", () => {
     expect(() => SearchQueryRequestSchema.parse({ q: "x", limit: 999 })).toThrow();
     expect(() => SearchQueryRequestSchema.parse({ q: "x".repeat(513) })).toThrow();
     expect(() => SearchQueryRequestSchema.parse({})).toThrow();
+  });
+});
+
+describe("Library browse request schema (Library route)", () => {
+  it("accepts an EMPTY request (the browse-first default — no keyword required)", () => {
+    // Unlike search, an empty request is valid and means "browse everything".
+    expect(LibraryBrowseRequestSchema.parse({})).toEqual({});
+  });
+
+  it("accepts the type/concept/priority/status/limit facets", () => {
+    expect(
+      LibraryBrowseRequestSchema.parse({
+        types: ["source", "topic", "synthesis_note", "task"],
+        conceptId: "el_c",
+        priorityLabel: "A",
+        statuses: ["active", "inbox"],
+        limit: 100,
+      }),
+    ).toEqual({
+      types: ["source", "topic", "synthesis_note", "task"],
+      conceptId: "el_c",
+      priorityLabel: "A",
+      statuses: ["active", "inbox"],
+      limit: 100,
+    });
+  });
+
+  it("covers the non-FTS browsable types that search rejects (topic/synthesis_note/task)", () => {
+    // These are exactly the types keyword search cannot return — browse must accept them.
+    expect(LibraryBrowseRequestSchema.parse({ types: ["topic"] }).types).toEqual(["topic"]);
+    expect(LibraryBrowseRequestSchema.parse({ types: ["synthesis_note"] }).types).toEqual([
+      "synthesis_note",
+    ]);
+    expect(LibraryBrowseRequestSchema.parse({ types: ["task"] }).types).toEqual(["task"]);
+  });
+
+  it("rejects a non-element type, a bad priority label, a bad status, and an out-of-range limit", () => {
+    // `concept` is NOT browsable (it is a facet column), and `media_fragment` has no
+    // MVP reader target — both are outside the browse enum.
+    expect(() => LibraryBrowseRequestSchema.parse({ types: ["concept"] })).toThrow();
+    expect(() => LibraryBrowseRequestSchema.parse({ types: ["media_fragment"] })).toThrow();
+    expect(() => LibraryBrowseRequestSchema.parse({ priorityLabel: "Z" })).toThrow();
+    expect(() => LibraryBrowseRequestSchema.parse({ statuses: ["not-a-status"] })).toThrow();
+    expect(() => LibraryBrowseRequestSchema.parse({ limit: 0 })).toThrow();
+    expect(() => LibraryBrowseRequestSchema.parse({ limit: 999 })).toThrow();
   });
 });
 

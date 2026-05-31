@@ -43,6 +43,7 @@ import type {
   InboxGetRequest,
   InboxTriageRequest,
   InspectorGetRequest,
+  LibraryBrowseRequest,
   LineageGetRequest,
   QueueActRequest,
   QueueListRequest,
@@ -171,6 +172,10 @@ const appApi: AppApi = {
   },
   search: {
     query: (request: SearchQueryRequest) => ipcRenderer.invoke(IPC_CHANNELS.searchQuery, request),
+  },
+  library: {
+    browse: (request?: LibraryBrowseRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.libraryBrowse, request ?? {}),
   },
   readPoints: {
     get: (request: ReadPointGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.readPointGet, request),

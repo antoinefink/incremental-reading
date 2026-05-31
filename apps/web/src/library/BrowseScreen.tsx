@@ -1,21 +1,25 @@
 /**
- * Library & Search screen (T042) — local full-text search + a read-only concept map.
+ * Library screen (`/library`) — the browse-everything surface.
  *
- * Rebuilt from the design kit (`design/kit/app/screen-library.jsx`) for the React
- * 19 renderer: a search input, Results/Map segmented tabs, the left `filterbar`
- * (type / concept / priority + stubbed maintenance rows), grouped + query-
- * highlighted `result` rows, a selection detail panel with the source `refblock`
- * and open-in-context, and the read-only `ConceptGraph` map tab.
+ * DISTINCT from `/search` (LibraryScreen, keyword-driven FTS5 that returns `[]`
+ * for an empty query): Library DEFAULTS to listing ALL live elements and narrows
+ * by FACETS — type / concept / priority / status — with no keyword required. It
+ * covers `topic`/`synthesis_note`/`task` too, which keyword search can never
+ * return. Rebuilt from the design kit (`design/kit/app/screen-library.jsx`) for
+ * the React 19 renderer, reusing the SAME `library.css` markup (filterbar /
+ * result rows / lib-detail / lib-map) and the inspector primitives.
  *
- * Architecture (non-negotiable): UI only. All search runs in SQLite FTS5 behind
- * the typed `window.appApi.search.query` command (sanitization, `bm25` ranking,
- * concept/tag filtering all live main-side in `SearchRepository`); the concept
- * list comes from `appApi.listConcepts()`. The renderer holds no SQL, no ranking,
- * and no index logic. Typing debounces the query; an empty query clears results.
+ * Architecture (non-negotiable): UI only. The browse read runs MAIN-side in
+ * `LibraryQuery` behind the typed `window.appApi.library.browse` command (the
+ * SQL, ordering, per-facet counts, and scheduler/due/concept/refblock enrichment
+ * all live there). The concept list comes from `appApi.listConcepts()`. The
+ * renderer holds no SQL, no ranking, no scheduling math — it toggles facet state
+ * and re-runs the bridge read; an optional inline title filter narrows the
+ * already-fetched payload client-side (never a second FTS call).
  */
 
 import { useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "../components/Icon";
 import {
   ConceptTag,
@@ -30,80 +34,74 @@ import {
   appApi,
   type ConceptNode,
   isDesktop,
-  type SearchableType,
-  type SearchResult,
+  type LibraryBrowseRequest,
+  type LibraryBrowseType,
+  type LibraryItem,
 } from "../lib/appApi";
 import { ConceptGraph } from "./components/ConceptGraph";
 import "./library.css";
 
 type Tab = "results" | "map";
 
-/** The three searchable types, in display order, with their group titles. */
-const TYPE_GROUPS: readonly { type: SearchableType; title: string }[] = [
+/** The six browsable types, in display order, with their group/section titles. */
+const TYPE_GROUPS: readonly { type: LibraryBrowseType; title: string }[] = [
   { type: "source", title: "Sources" },
   { type: "extract", title: "Extracts" },
   { type: "card", title: "Cards" },
+  { type: "topic", title: "Topics" },
+  { type: "synthesis_note", title: "Synthesis notes" },
+  { type: "task", title: "Tasks" },
 ];
 
 const PRIORITIES = ["A", "B", "C", "D"] as const;
 type PriorityLetter = (typeof PRIORITIES)[number];
 
+/** The status facets, in display order (matching the kit's lifecycle order). */
+const STATUSES: readonly { value: string; label: string }[] = [
+  { value: "active", label: "Active" },
+  { value: "scheduled", label: "Scheduled" },
+  { value: "inbox", label: "Inbox" },
+  { value: "pending", label: "Pending" },
+  { value: "done", label: "Done" },
+  { value: "suspended", label: "Suspended" },
+];
+
 /** A due-state badge (overdue / today / soon) — matches the queue's `DueBadge`. */
-function DueBadge({ result }: { result: SearchResult }) {
+function DueBadge({ item }: { item: LibraryItem }) {
   const cls =
-    result.due === "overdue"
-      ? "badge--overdue"
-      : result.due === "today"
-        ? "badge--due"
-        : "badge--soft";
+    item.due === "overdue" ? "badge--overdue" : item.due === "today" ? "badge--due" : "badge--soft";
   return (
     <span className={`badge ${cls}`} data-testid="library-detail-due">
-      {result.dueLabel}
+      {item.dueLabel}
     </span>
   );
 }
 
-/** Render `text` with the first case-insensitive occurrence of `q` wrapped in <em>. */
-function highlight(text: string, q: string): React.ReactNode {
-  const term = q.trim();
-  if (term.length === 0) return text;
-  const i = text.toLowerCase().indexOf(term.toLowerCase());
-  if (i < 0) return text;
-  return (
-    <>
-      {text.slice(0, i)}
-      <em>{text.slice(i, i + term.length)}</em>
-      {text.slice(i + term.length)}
-    </>
-  );
-}
-
-export function LibraryScreen() {
+export function BrowseScreen() {
   const desktop = isDesktop();
   const navigate = useNavigate();
 
   const [tab, setTab] = useState<Tab>("results");
-  const [rawQuery, setRawQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [typeFilter, setTypeFilter] = useState<SearchableType | null>(null);
+  // Facet state — each drives a query param and re-runs the browse read.
+  const [typeFilter, setTypeFilter] = useState<LibraryBrowseType | null>(null);
   const [conceptFilter, setConceptFilter] = useState<string | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<PriorityLetter | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  // An OPTIONAL inline "filter by title" box — narrows the already-fetched payload
+  // client-side (never an FTS call; Library browses, it does not keyword-search).
+  const [titleFilter, setTitleFilter] = useState("");
 
-  const [results, setResults] = useState<readonly SearchResult[]>([]);
+  const [items, setItems] = useState<readonly LibraryItem[]>([]);
+  const [counts, setCounts] = useState<{
+    all: number;
+    byType: Readonly<Record<string, number>>;
+    byPriority: Readonly<Record<string, number>>;
+    byStatus: Readonly<Record<string, number>>;
+  }>({ all: 0, byType: {}, byPriority: {}, byStatus: {} });
   const [concepts, setConcepts] = useState<readonly ConceptNode[]>([]);
   const [selId, setSelId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Debounce the raw input into the query that actually hits the bridge.
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setDebouncedQuery(rawQuery), 150);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [rawQuery]);
 
   // Load the concept list once (filterbar + map).
   useEffect(() => {
@@ -114,34 +112,24 @@ export function LibraryScreen() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
-  // Run the search whenever the query or the type/concept filters change.
+  // Run the facet-driven browse whenever a facet changes. With no facets set this
+  // lists EVERYTHING (the browse-first default) — no keyword required.
   useEffect(() => {
     if (!isDesktop()) return;
-    const q = debouncedQuery.trim();
-    if (q.length === 0) {
-      // DEFERRED (vs the kit's "show all when no query"): the M8 spec scopes
-      // `search.query` to KEYWORD search over the FTS5 index and explicitly
-      // returns [] for an empty query — so an empty-query "browse by concept /
-      // type / priority facet" is intentionally not wired here. A future
-      // browse-by-facet path (so a map-node click populates Results without a
-      // keyword) would add a member-listing bridge surface backed by the existing
-      // `ConceptRepository.elementsForConcept` / the queue concept filter — out of
-      // scope for the keyword-search milestone, tracked as a follow-up.
-      setResults([]);
-      setLoading(false);
-      return;
-    }
     let cancelled = false;
     setLoading(true);
+    const request: LibraryBrowseRequest = {
+      ...(typeFilter ? { types: [typeFilter] } : {}),
+      ...(conceptFilter ? { conceptId: conceptFilter } : {}),
+      ...(priorityFilter ? { priorityLabel: priorityFilter } : {}),
+      ...(statusFilter ? { statuses: [statusFilter] } : {}),
+    };
     void appApi
-      .searchQuery({
-        q,
-        ...(typeFilter ? { type: typeFilter } : {}),
-        ...(conceptFilter ? { conceptId: conceptFilter } : {}),
-      })
+      .libraryBrowse(request)
       .then((res) => {
         if (cancelled) return;
-        setResults(res.results);
+        setItems(res.items);
+        setCounts(res.counts);
         setError(null);
       })
       .catch((e) => {
@@ -153,68 +141,75 @@ export function LibraryScreen() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery, typeFilter, conceptFilter]);
+  }, [typeFilter, conceptFilter, priorityFilter, statusFilter]);
 
-  // Priority narrowing is applied client-side over the ranked results (priority
-  // is on every result; the FTS query layer already did the heavy filtering).
-  const visible = useMemo(
-    () => (priorityFilter ? results.filter((r) => r.priorityLabel === priorityFilter) : results),
-    [results, priorityFilter],
-  );
+  // The optional inline title narrowing happens entirely client-side over the
+  // already-fetched browse payload (case-insensitive substring on the title).
+  const visible = useMemo(() => {
+    const t = titleFilter.trim().toLowerCase();
+    if (t.length === 0) return items;
+    return items.filter((r) => r.title.toLowerCase().includes(t));
+  }, [items, titleFilter]);
 
   const selected = useMemo(() => visible.find((r) => r.id === selId) ?? null, [visible, selId]);
 
-  // Keep a valid selection as results change.
+  // Keep a valid selection as the list changes.
   useEffect(() => {
     if (selId && !visible.some((r) => r.id === selId)) setSelId(null);
   }, [visible, selId]);
 
   const open = useCallback(
-    (r: SearchResult) => {
-      if (r.type === "source") void navigate({ to: "/source/$id", params: { id: r.id } });
-      else if (r.type === "extract") void navigate({ to: "/extract/$id", params: { id: r.id } });
-      else void navigate({ to: "/review" });
+    (r: LibraryItem) => {
+      // Open each type in its inspector/reader target. Sources/topics open the
+      // source reader; extracts open the extract view; everything that lives under
+      // review (cards) opens the review session. Synthesis notes/tasks (no MVP
+      // dedicated reader yet) open their owning source when one exists, else stay put.
+      if (r.type === "source" || r.type === "topic") {
+        void navigate({ to: "/source/$id", params: { id: r.id } });
+      } else if (r.type === "extract") {
+        void navigate({ to: "/extract/$id", params: { id: r.id } });
+      } else if (r.type === "card") {
+        void navigate({ to: "/review" });
+      } else if (r.sourceTitle) {
+        // synthesis_note / task with a known source — open the reader on its lineage root.
+        void navigate({ to: "/source/$id", params: { id: r.id } });
+      }
     },
     [navigate],
   );
 
-  const conceptCount = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const c of concepts) m.set(c.id, c.memberCount);
-    return m;
-  }, [concepts]);
-
   if (!desktop) {
     return (
-      <div className="lib-shell" data-testid="route-search">
+      <div className="lib-shell" data-testid="route-library">
         <div className="lib-empty">
           <div className="lib-empty__icon">
             <Icon name="library" size={26} />
           </div>
-          <h1 className="lib-empty__title">Library & Search</h1>
-          <p className="lib-empty__body">
-            Open the Electron app to search across your whole collection.
-          </p>
+          <h1 className="lib-empty__title">Library</h1>
+          <p className="lib-empty__body">Open the Electron app to browse your whole collection.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="lib-shell" data-testid="route-search">
+    <div className="lib-shell" data-testid="route-library">
       <div className="lib-topbar">
+        {/* Browse-first: a calm count summary + an optional title narrow, NOT the
+            prominent free-text FTS input that /search leads with. */}
         <div className="lib-searchbar">
-          <Icon name="search" size={15} />
+          <Icon name="filter" size={15} />
           <input
             type="search"
-            data-testid="library-search-input"
-            value={rawQuery}
-            onChange={(e) => setRawQuery(e.target.value)}
-            placeholder="Search sources, extracts, cards, concepts…"
-            // biome-ignore lint/a11y/noAutofocus: search is the screen's primary action
-            autoFocus
+            data-testid="library-title-filter"
+            value={titleFilter}
+            onChange={(e) => setTitleFilter(e.target.value)}
+            placeholder="Filter by title…"
           />
         </div>
+        <span className="lib-count" data-testid="library-count">
+          {counts.all} element{counts.all === 1 ? "" : "s"}
+        </span>
         <div className="lib-grow" />
         <div className="lib-seg" role="tablist">
           <button
@@ -256,6 +251,7 @@ export function LibraryScreen() {
               >
                 <TypeIcon type={g.type} />
                 <span>{g.title}</span>
+                <span className="filter-opt__count">{counts.byType[g.type] ?? 0}</span>
               </button>
             ))}
           </div>
@@ -290,11 +286,30 @@ export function LibraryScreen() {
               >
                 <span className={`prio-dot prio-dot--${p.toLowerCase()}`} />
                 <span>Priority {p}</span>
+                <span className="filter-opt__count">{counts.byPriority[p] ?? 0}</span>
               </button>
             ))}
           </div>
 
-          {/* Maintenance "smart" filters are M9/M17 analytics — shown but disabled. */}
+          <div className="filter-group">
+            <div className="filter-group__title">Status</div>
+            {STATUSES.map((s) => (
+              <button
+                key={s.value}
+                type="button"
+                className={`filter-opt${statusFilter === s.value ? " filter-opt--on" : ""}`}
+                data-testid={`library-filter-status-${s.value}`}
+                onClick={() => setStatusFilter((cur) => (cur === s.value ? null : s.value))}
+              >
+                <span className="prio-dot" style={{ background: "var(--text-3)" }} />
+                <span>{s.label}</span>
+                <span className="filter-opt__count">{counts.byStatus[s.value] ?? 0}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Maintenance "smart" filters are M9/M17 analytics — shown but disabled,
+              exactly as the search screen does. */}
           <div className="filter-group">
             <div className="filter-group__title">Maintenance</div>
             {[
@@ -324,28 +339,19 @@ export function LibraryScreen() {
                     {error}
                   </p>
                 ) : null}
-                {debouncedQuery.trim().length === 0 ? (
-                  <div className="lib-empty" data-testid="library-prompt">
-                    <div className="lib-empty__icon">
-                      <Icon name="search" size={26} />
-                    </div>
-                    <h2 className="lib-empty__title">Search your collection</h2>
-                    <p className="lib-empty__body">
-                      Find any source, extract, or card by title, body, prompt, answer, or tag.
-                    </p>
-                  </div>
-                ) : loading && visible.length === 0 ? (
+                {loading && visible.length === 0 ? (
                   <p className="lib-loading" data-testid="library-loading">
-                    Searching…
+                    Loading…
                   </p>
                 ) : visible.length === 0 ? (
                   <div className="lib-empty" data-testid="library-empty">
                     <div className="lib-empty__icon">
-                      <Icon name="search" size={26} />
+                      <Icon name="library" size={26} />
                     </div>
-                    <h2 className="lib-empty__title">No matches for “{debouncedQuery.trim()}”</h2>
+                    <h2 className="lib-empty__title">Nothing here yet</h2>
                     <p className="lib-empty__body">
-                      Try a different term, or clear the type/concept/priority filters.
+                      No elements match these facets. Clear the type/concept/priority/status filters
+                      to see your whole collection.
                     </p>
                   </div>
                 ) : (
@@ -371,20 +377,14 @@ export function LibraryScreen() {
                             onDoubleClick={() => open(r)}
                           >
                             <div style={{ minWidth: 0 }}>
-                              <div className="result__title">
-                                {highlight(r.title, debouncedQuery)}
-                              </div>
+                              <div className="result__title">{r.title}</div>
                               <div className="result__meta">
                                 {r.concept ? <ConceptTag name={r.concept} /> : null}
                                 {r.sourceTitle ? <span>{r.sourceTitle}</span> : null}
                                 {r.sourceLocationLabel ? (
                                   <span>{r.sourceLocationLabel}</span>
                                 ) : null}
-                                {r.snippet ? (
-                                  <span className="result__snippet">
-                                    {highlight(r.snippet, debouncedQuery)}
-                                  </span>
-                                ) : null}
+                                <span>{r.dueLabel}</span>
                               </div>
                             </div>
                             <Prio priority={r.priority} />
@@ -412,19 +412,10 @@ export function LibraryScreen() {
                   {/* The load-bearing scheduler split + due status, matching the
                       kit's detail panel (Prio / ConceptTag / SchedulerChip / Status). */}
                   <SchedulerChip scheduler={selected.scheduler} />
-                  {selected.dueAt ? <DueBadge result={selected} /> : null}
+                  {selected.dueAt ? <DueBadge item={selected} /> : null}
                 </div>
-                {selected.snippet ? (
-                  <div className="refblock" data-testid="library-detail-snippet">
-                    {selected.snippet}
-                  </div>
-                ) : null}
-                {/* Source reference (T043) — the shared RefBlock so the library
-                    reads a source reference the same way the inspector/review do.
-                    A `source` hit references itself (just its title); an extract/card
-                    shows its originating source title + location. The search payload
-                    carries title + location (T042); URL/author/date are resolved in
-                    the inspector when the element is opened. */}
+                {/* Source reference (T043) — the shared RefBlock so the library reads
+                    a source reference the same way the inspector/review do. */}
                 {selected.sourceTitle ? (
                   <RefBlock
                     ref={{
@@ -497,7 +488,7 @@ export function LibraryScreen() {
                   </div>
                   <div className="lib-map__concept-counts">
                     <span>
-                      <b>{conceptCount.get(c.id) ?? 0}</b> members
+                      <b>{c.memberCount}</b> members
                     </span>
                     <span>
                       <b>{c.childCount}</b> children

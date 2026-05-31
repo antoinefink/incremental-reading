@@ -7,10 +7,10 @@
  * so it lives in a plain module the shell components import (keeping the JSX
  * lean and the data testable in isolation).
  *
- * Routes here mirror the seven typed routes registered in `router.tsx`. Items
- * the kit lists that do not have a route yet (Library, Concepts, Analytics)
- * point at the closest existing route so the shell stays whole; they re-point
- * when those screens land in later milestones.
+ * Routes here mirror the typed routes registered in `router.tsx`. Library now has
+ * its own dedicated `/library` browse surface (it is the canonical owner there);
+ * Concepts still points at the closest existing route (`/search`) until it splits
+ * out, re-pointing when that screen lands in a later milestone.
  */
 import type { IconName } from "../components/Icon";
 import { CHEAT_GROUP_ORDER, type PaletteActionId, paletteShortcuts, SHORTCUTS } from "./shortcuts";
@@ -32,11 +32,11 @@ export type NavItem = {
   readonly liveBadge?: boolean;
   /**
    * Whether THIS entry is the canonical owner of its `to` route when several
-   * entries point at the same path. Library / Search / Concepts all currently
-   * resolve to `/search`; only the canonical owner (Search) lights up there, so
-   * the active-state stays exclusive (exactly one item highlighted). See
-   * `resolveActiveNavId`. When a route has no canonical owner, the first matching
-   * entry wins.
+   * entries point at the same path. Library owns its own `/library`; Search and
+   * Concepts both resolve to `/search`, where only the canonical owner (Search)
+   * lights up — so the active-state stays exclusive (exactly one item
+   * highlighted). See `resolveActiveNavId`. When a route has no canonical owner,
+   * the first matching entry wins.
    */
   readonly canonical?: boolean;
 };
@@ -55,10 +55,14 @@ export const PRIMARY_NAV: readonly NavItem[] = [
   { id: "home", label: "Home", icon: "layers", to: "/", canonical: true },
   { id: "queue", label: "Queue", icon: "queue", to: "/queue", liveBadge: true },
   { id: "inbox", label: "Inbox", icon: "inbox", to: "/inbox", liveBadge: true },
-  { id: "library", label: "Library", icon: "library", to: "/search" },
+  // Library now has its OWN dedicated browse-everything route (`/library`) and is
+  // its sole canonical owner, so it highlights EXCLUSIVELY there — no longer
+  // sharing the `/search` highlight with Search/Concepts (the triple-highlight bug
+  // fixed in ac73484 stays fixed: distinct routes resolve to distinct owners).
+  { id: "library", label: "Library", icon: "library", to: "/library", canonical: true },
   { id: "review", label: "Review", icon: "review", to: "/review", liveBadge: true },
-  // Canonical owner of `/search`: Library and Concepts also point here until they
-  // split out, but only Search highlights when on `/search` (see resolveActiveNavId).
+  // Canonical owner of `/search`: Concepts also points at `/search` until it splits
+  // out, but only Search highlights when on `/search` (see resolveActiveNavId).
   { id: "search", label: "Search", icon: "search", to: "/search", canonical: true },
 ];
 
@@ -90,10 +94,11 @@ export const ALL_NAV: readonly NavItem[] = [...PRIMARY_NAV, ...SECONDARY_NAV];
  *    of it (`${to}/…`) — so `/maintenance/leeches` activates Leeches, and a
  *    future `/search/abc` would still activate the search owner.
  *  - The BEST (longest `to`) match wins, so nested routes beat shallow ones.
- *  - When several entries tie on the same `to` (Library / Search / Concepts all
- *    point at `/search`), the `canonical` entry wins; absent a canonical owner,
- *    the first entry in render order wins. This guarantees AT MOST ONE active id
- *    per render — fixing the bug where all three `/search` entries highlighted.
+ *  - When several entries tie on the same `to` (Search / Concepts both point at
+ *    `/search`), the `canonical` entry wins; absent a canonical owner, the first
+ *    entry in render order wins. This guarantees AT MOST ONE active id per render
+ *    — fixing the bug where multiple `/search` entries highlighted. Library now
+ *    owns its own `/library`, so it resolves uniquely to `library`.
  */
 export function resolveActiveNavId(pathname: string): string | null {
   let best: NavItem | null = null;
@@ -231,7 +236,7 @@ export const COMMAND_ITEMS: readonly CommandItem[] = [
   { group: "Go to", icon: "queue", label: "Daily Queue", to: "/queue", kbd: ["G", "Q"] },
   { group: "Go to", icon: "inbox", label: "Inbox triage", to: "/inbox", kbd: ["G", "I"] },
   { group: "Go to", icon: "review", label: "Review session", to: "/review", kbd: ["G", "R"] },
-  { group: "Go to", icon: "library", label: "Library & search", to: "/search", kbd: ["G", "L"] },
+  { group: "Go to", icon: "library", label: "Library", to: "/library", kbd: ["G", "L"] },
   { group: "Go to", icon: "concepts", label: "Concept map", to: "/search", kbd: ["G", "C"] },
   { group: "Go to", icon: "settings", label: "Settings", to: "/settings", kbd: ["G", "S"] },
   { group: "Create", icon: "link", label: "Import from URL…", to: "/inbox" },
@@ -256,15 +261,16 @@ export const COMMAND_ITEMS: readonly CommandItem[] = [
 /**
  * `g`+letter quick-navigation map (pressing `g` then the letter). Matches the
  * kit: h→home, q→queue, i→inbox, r→review, l→library, c→concepts, a→analytics,
- * s→settings. Library/concepts share `/search` until they split out; analytics
- * has its own `/analytics` route (T045); home is the `/` landing command center.
+ * s→settings. Library now has its OWN `/library` browse route (g l → /library);
+ * Concepts still shares `/search` until it splits out; analytics has its own
+ * `/analytics` route (T045); home is the `/` landing command center.
  */
 export const GOTO_MAP: Readonly<Record<string, string>> = {
   h: "/",
   q: "/queue",
   i: "/inbox",
   r: "/review",
-  l: "/search",
+  l: "/library",
   c: "/search",
   a: "/analytics",
   s: "/settings",
