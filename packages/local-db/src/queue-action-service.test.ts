@@ -194,6 +194,9 @@ describe("QueueActionService.act", () => {
     const service = new QueueActionService(handle.db);
 
     // The card has an FSRS review_states row; the extract has NONE (attention only).
+    const elements = new ElementRepository(handle.db);
+    const priorCardStatus = elements.findById(cardId)?.status;
+    expect(priorCardStatus).toBe("pending"); // un-scheduled, freshly-authored card
     expect(
       handle.db.select().from(reviewStates).where(eq(reviewStates.elementId, cardId)).get(),
     ).toBeTruthy();
@@ -216,6 +219,13 @@ describe("QueueActionService.act", () => {
     // The element's dueAt mirrors the FSRS due so the queue (which reads
     // review_states.due_at for cards) picks it up.
     expect(res.element.dueAt).toBe(state?.dueAt);
+
+    // The card's ELEMENT status is PRESERVED — the thin defer must NOT smear the
+    // attention-side `scheduled` status onto an FSRS card (the two-scheduler split).
+    // A card lives in the card-lifecycle vocabulary (active/pending/suspended).
+    expect(res.element.status).toBe(priorCardStatus);
+    expect(res.element.status).not.toBe("scheduled");
+    expect(elements.findById(cardId)?.status).toBe(priorCardStatus);
 
     // The extract still has NO FSRS row after the card was postponed.
     expect(

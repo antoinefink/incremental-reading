@@ -140,6 +140,23 @@ describe("SchedulerService.rescheduleForAction", () => {
     expect(() => service.rescheduleForAction(card.id, "extract")).toThrow(/card/i);
   });
 
+  it("a topic on a fresh DB (unconfigured setting) uses the 7d default, not the by-priority band", () => {
+    // No setting is written — the row does not exist. The service must resolve the
+    // canonical DEFAULT_APP_SETTINGS.defaultTopicIntervalDays (7), NOT fall through
+    // to the by-priority band (which for a C topic would be 30d, for an A topic 1d).
+    const elementsRepo = new ElementRepository(handle.db);
+    const topic = elementsRepo.create({
+      type: "topic",
+      status: "active",
+      stage: "rough_topic",
+      priority: 0.375, // band C → by-priority would be 30d
+      title: "An unconfigured topic",
+    });
+    const service = new SchedulerService(handle.db);
+    const { intervalDays } = service.rescheduleForAction(topic.id, "rewrite");
+    expect(intervalDays).toBe(7); // the canonical default, not the 30d C-band
+  });
+
   it("consumes the global defaultTopicIntervalDays setting for a topic", () => {
     new SettingsRepository(handle.db).set("scheduler.defaultTopicIntervalDays", 14);
     const elementsRepo = new ElementRepository(handle.db);

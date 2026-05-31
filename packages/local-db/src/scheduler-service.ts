@@ -5,7 +5,8 @@
  * attention item (`source`/`topic`/`extract`/`task`/`synthesis_note`) should return;
  * this service is the only thing that PERSISTS that decision. It reads the element
  * + the data the scheduler needs off the op log (postpone count, last action) and
- * the settings (the global `defaultTopicIntervalDays` for topics), computes the new
+ * the validated settings (the global `defaultTopicIntervalDays` for topics, which
+ * defaults to 7d on a fresh DB), computes the new
  * `due_at`, and writes it through {@link ElementRepository.reschedule}
  * (`reschedule_element`, status → `scheduled`) in ONE transaction.
  *
@@ -19,7 +20,6 @@
  */
 
 import type { Element, ElementId, IsoTimestamp } from "@interleave/core";
-import { SETTINGS_KEYS } from "@interleave/core";
 import type { InterleaveDatabase } from "@interleave/db";
 import {
   nextDueAt,
@@ -83,14 +83,21 @@ export class SchedulerService {
   /**
    * Build the pure scheduler's {@link Schedulable} descriptor from an element +
    * the data it needs off the op log/settings. `lastSeenAt` derives from the
-   * element's `updatedAt` (the last time it was touched); the topic interval
-   * setting is supplied so a `topic` consumes it rather than orphaning it.
+   * element's `updatedAt` (the last time it was touched) and is supplied as a
+   * RESERVED field — `nextDueAt` does not consume it for the MVP (intervals are
+   * measured forward from `now`). The topic interval setting is supplied so a
+   * `topic` consumes it rather than orphaning it.
+   *
+   * The topic interval is read through the VALIDATED app-settings surface
+   * ({@link SettingsRepository.getAppSettings}) — NOT the raw key — so an unwritten
+   * key on a fresh DB resolves to the canonical `defaultTopicIntervalDays` default
+   * (7d, `DEFAULT_APP_SETTINGS`) instead of `null` (which would silently drop the
+   * topic onto the by-priority band). This mirrors how the queue's budget gauge
+   * reads `getAppSettings().dailyReviewBudget`.
    */
   private toSchedulable(element: Element, lastAction?: SchedulerAction): Schedulable {
     const defaultTopicIntervalDays =
-      element.type === "topic"
-        ? (this.settings.get<number>(SETTINGS_KEYS.defaultTopicIntervalDays) ?? null)
-        : null;
+      element.type === "topic" ? this.settings.getAppSettings().defaultTopicIntervalDays : null;
     return {
       type: element.type,
       stage: element.stage,

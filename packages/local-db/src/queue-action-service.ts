@@ -159,10 +159,11 @@ export class QueueActionService {
   /**
    * Thin FSRS defer (M5): push a card's `review_states.due_at` + the element's
    * `dueAt` forward by {@link CARD_DEFER_DAYS}, in ONE transaction, logging
-   * `reschedule_element` (the existing op; status → `scheduled`). This is NOT full
-   * FSRS grade-driven rescheduling — that lands in T036/T037 (M7), which replaces
-   * this. The attention scheduler is never touched for a card; no review LOG is
-   * written (a postpone is not a graded review).
+   * `reschedule_element` (the existing op). The card's element STATUS is left
+   * untouched (cards live in active/pending/suspended, never the attention-side
+   * `scheduled`). This is NOT full FSRS grade-driven rescheduling — that lands in
+   * T036/T037 (M7), which replaces this. The attention scheduler is never touched for
+   * a card; no review LOG is written (a postpone is not a graded review).
    *
    * TODO(T036/M7): replace this thin defer with FSRS grade-driven rescheduling.
    */
@@ -179,7 +180,14 @@ export class QueueActionService {
       // Capture the FSRS due PRE-IMAGE in the `reschedule_element` op so command-level
       // undo restores BOTH `elements.due_at` and `review_states.due_at` (otherwise the
       // card would stay out of the FSRS due queue after undo — T044).
-      return this.elements.rescheduleWithin(tx, id, nextDue, "scheduled", {
+      //
+      // PRESERVE the card's status (pass no `status`): a card lives in the
+      // card-lifecycle vocabulary (active/pending/suspended), NOT the attention
+      // lifecycle's `scheduled`. Flipping it to `scheduled` would smear the
+      // attention-side status onto an FSRS item and muddy the two-scheduler split.
+      // The card's schedule lives on `review_states.due_at`; its element status is
+      // untouched by this thin defer.
+      return this.elements.rescheduleWithin(tx, id, nextDue, undefined, {
         postpone: true,
         cardDefer: true,
         prevReviewDueAt,

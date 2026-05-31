@@ -261,6 +261,21 @@ describe("nextDueAt (heuristic + action override)", () => {
     expect(done.intervalDays).toBeGreaterThan(productive.intervalDays);
     expect(done.intervalDays).toBe(60); // B done window
   });
+
+  it("lastSeenAt is RESERVED — it does NOT change the interval for the MVP", () => {
+    // The interval is measured forward from `now`; lastSeenAt has zero effect today.
+    // Pin that contract so a future heuristic that consumes it must update this test.
+    const base = nextDueAt({ type: "source", priority: B }, NOW);
+    const recent = nextDueAt({ type: "source", priority: B, lastSeenAt: NOW }, NOW);
+    const ancient = nextDueAt(
+      { type: "source", priority: B, lastSeenAt: "2000-01-01T00:00:00.000Z" },
+      NOW,
+    );
+    expect(recent.intervalDays).toBe(base.intervalDays);
+    expect(ancient.intervalDays).toBe(base.intervalDays);
+    expect(recent.dueAt).toBe(base.dueAt);
+    expect(ancient.dueAt).toBe(base.dueAt);
+  });
 });
 
 describe("explicit choices: tomorrow / next week / next month", () => {

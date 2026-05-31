@@ -99,7 +99,16 @@ export interface Schedulable {
   readonly stage?: DistillationStage | null;
   /** Numeric priority `0.0`–`1.0` (the by-priority band + within-band ordering). */
   readonly priority: Priority;
-  /** When the item was last seen/processed (derives from `updatedAt`/last reschedule). */
+  /**
+   * When the item was last seen/processed (derives from `updatedAt`/last reschedule).
+   *
+   * RESERVED — deliberately NOT consumed by `nextDueAt` for the MVP. All intervals
+   * are measured forward from `now` (the boring, deterministic choice), so this axis
+   * has zero effect on the output today. It is captured on the descriptor so a future
+   * iteration can clamp/extend the interval by how recently the item was processed
+   * WITHOUT a descriptor-shape change. Do not present it as a contributing input until
+   * a heuristic actually reads it (and a test pins the behaviour).
+   */
   readonly lastSeenAt?: IsoTimestamp | null;
   /** How many times the item has been postponed (read from `reschedule_element` ops). */
   readonly postponeCount?: number;
@@ -257,10 +266,13 @@ function heuristicIntervalDays(input: Schedulable): number {
 
 /**
  * Compute the next attention `due_at` for a non-card element from priority, stage,
- * last-seen, last action, and postpone count. The action override (postpone/done)
- * takes precedence; otherwise the by-stage (extract) / by-priority (source/topic)
- * heuristic applies. ALWAYS measured from `now` (the service passes the clock), so
- * the returned date is deterministic for a fixed clock.
+ * last action, and postpone count. The action override (postpone/done) takes
+ * precedence; otherwise the by-stage (extract) / by-priority (source/topic) heuristic
+ * applies. ALWAYS measured from `now` (the service passes the clock), so the returned
+ * date is deterministic for a fixed clock.
+ *
+ * NOTE: `input.lastSeenAt` is RESERVED and not consumed here for the MVP — every
+ * interval is measured forward from `now`. See {@link Schedulable.lastSeenAt}.
  *
  * This is the attention half ONLY — it never produces FSRS state and is never called
  * for a `card`.
