@@ -61,6 +61,11 @@ export type ThemePreference = (typeof THEMES)[number];
  *   multiple. Higher = less sensitive. Read by the pure `judgeBalance` rule.
  * - `keyboardLayout` — default shortcut bindings (T048).
  * - `theme` — light/dark UI preference.
+ * - `displayName` — the local vault owner's name shown in the shell's user chip
+ *   (and the source of the avatar initials). Empty by default (a brand-new vault
+ *   has no name yet — the UI degrades to the neutral "Local vault" identity); the
+ *   user sets it in `/settings`. There is no server account — this is purely the
+ *   on-device identity label, persisted like any other setting.
  */
 export interface AppSettings {
   readonly dailyReviewBudget: number;
@@ -73,6 +78,7 @@ export interface AppSettings {
   readonly importBalanceFactor: number;
   readonly keyboardLayout: KeyboardLayout;
   readonly theme: ThemePreference;
+  readonly displayName: string;
 }
 
 /**
@@ -90,6 +96,7 @@ export const SETTINGS_KEYS = {
   importBalanceFactor: "balance.importFactor",
   keyboardLayout: "ui.keyboardLayout",
   theme: "ui.theme",
+  displayName: "ui.displayName",
 } as const satisfies Record<keyof AppSettings, string>;
 
 /**
@@ -108,6 +115,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   importBalanceFactor: DEFAULT_IMPORT_BALANCE_FACTOR,
   keyboardLayout: "qwerty",
   theme: "dark",
+  displayName: "",
 };
 
 /** Inclusive UI bounds for the daily review budget slider. */
@@ -131,6 +139,9 @@ export const DESIRED_RETENTION_MAX = 0.97;
 
 /** The topic-interval presets the UI offers (in days). */
 export const TOPIC_INTERVAL_OPTIONS = [3, 7, 14, 30] as const;
+
+/** Maximum length of the local vault owner's display name (chars). */
+export const DISPLAY_NAME_MAX = 64;
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -198,6 +209,12 @@ export function coerceSettingValue<K extends keyof AppSettings>(
       return (isKeyboardLayout(raw) ? raw : fallback) as AppSettings[K];
     case "theme":
       return (isThemePreference(raw) ? raw : fallback) as AppSettings[K];
+    case "displayName":
+      // Trim + cap; a non-string (or whitespace-only) yields the empty default,
+      // so a corrupt/legacy value can never reach the shell's user chip.
+      return (
+        typeof raw === "string" ? raw.trim().slice(0, DISPLAY_NAME_MAX) : fallback
+      ) as AppSettings[K];
     default:
       return fallback;
   }
@@ -238,6 +255,7 @@ export function appSettingsFromStored(stored: Readonly<Record<string, unknown>>)
     ),
     keyboardLayout: coerceSettingValue("keyboardLayout", stored[SETTINGS_KEYS.keyboardLayout]),
     theme: coerceSettingValue("theme", stored[SETTINGS_KEYS.theme]),
+    displayName: coerceSettingValue("displayName", stored[SETTINGS_KEYS.displayName]),
   };
 }
 

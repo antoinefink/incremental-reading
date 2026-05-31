@@ -35,6 +35,12 @@ interface RendererAppApi {
     get(req?: { key?: string }): Promise<{ settings: Record<string, unknown> }>;
     update(req: { key: string; value: unknown }): Promise<{ key: string; value: unknown }>;
   };
+  queue: {
+    list(req?: unknown): Promise<{ counts: { all: number; card: number } }>;
+  };
+  inbox: {
+    list(): Promise<{ items: readonly unknown[] }>;
+  };
 }
 declare global {
   interface Window {
@@ -227,6 +233,61 @@ test("the Settings screen renders the desktop status panel from the bridge", asy
   // The write button persists through the bridge and reflects back.
   await page.getByTestId("persist-button").click();
   await expect(page.getByTestId("persisted-value")).toContainText("checked-");
+
+  await app.close();
+});
+
+test("the sidebar count badges are hidden on a fresh empty vault (no fake placeholders)", async () => {
+  // A dedicated, EMPTY data dir (not seeded): nothing is due / in the inbox, so
+  // the Queue / Inbox / Review badges must NOT render — the old hardcoded
+  // 42 / 4 / 28 placeholders are gone.
+  const emptyDir = makeDataDir();
+  const app = await launchApp(emptyDir);
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  await expect(page.getByTestId("nav-queue")).toBeVisible();
+  await expect(page.getByTestId("nav-queue-badge")).toHaveCount(0);
+  await expect(page.getByTestId("nav-inbox-badge")).toHaveCount(0);
+  await expect(page.getByTestId("nav-review-badge")).toHaveCount(0);
+
+  await app.close();
+});
+
+test("the sidebar count badges reflect the LIVE queue.list / inbox.list counts (no hardcoding)", async () => {
+  // Seed the demo collection so there is real due/inbox data, then prove each
+  // rendered badge equals the count the bridge returns — i.e. it is wired to the
+  // real window.appApi source, not a literal.
+  const seededDir = makeDataDir();
+  const app = await launchApp(seededDir, { seedOnEmpty: true });
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  const counts = await inRenderer(page, async () => {
+    const queue = await window.appApi?.queue.list();
+    const inbox = await window.appApi?.inbox.list();
+    return {
+      all: queue?.counts.all ?? 0,
+      card: queue?.counts.card ?? 0,
+      inbox: inbox?.items.length ?? 0,
+    };
+  });
+
+  // A seeded vault has at least something due + in the inbox (guards against the
+  // badges silently reading 0 for every nav entry).
+  expect(counts.all + counts.inbox).toBeGreaterThan(0);
+
+  async function expectBadge(id: string, n: number) {
+    const badge = page.getByTestId(`nav-${id}-badge`);
+    if (n > 0) {
+      await expect(badge).toHaveText(String(n));
+    } else {
+      await expect(badge).toHaveCount(0);
+    }
+  }
+  await expectBadge("queue", counts.all);
+  await expectBadge("inbox", counts.inbox);
+  await expectBadge("review", counts.card);
 
   await app.close();
 });

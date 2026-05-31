@@ -89,6 +89,13 @@ export interface AppSettings {
   readonly importBalanceFactor: number;
   readonly keyboardLayout: KeyboardLayout;
   readonly theme: ThemePreference;
+  /**
+   * The local vault owner's display name shown in the shell's user chip (and the
+   * source of the avatar initials). Empty by default — the UI degrades to the
+   * neutral "Local vault" identity; the user sets it in `/settings`. There is no
+   * server account; this is purely the on-device identity label.
+   */
+  readonly displayName: string;
 }
 
 export interface SettingsGetAllResult {

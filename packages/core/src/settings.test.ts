@@ -40,6 +40,7 @@ describe("AppSettings defaults", () => {
       importBalanceFactor: "balance.importFactor",
       keyboardLayout: "ui.keyboardLayout",
       theme: "ui.theme",
+      displayName: "ui.displayName",
     });
   });
 
@@ -87,6 +88,14 @@ describe("coerceSettingValue", () => {
     );
     expect(coerceSettingValue("theme", "light")).toBe("light");
     expect(coerceSettingValue("theme", "sepia")).toBe(DEFAULT_APP_SETTINGS.theme);
+  });
+
+  it("trims + caps the display name, else falls back to empty (shell identity)", () => {
+    expect(coerceSettingValue("displayName", "Ada Lovelace")).toBe("Ada Lovelace");
+    expect(coerceSettingValue("displayName", "  Ada  ")).toBe("Ada");
+    expect(coerceSettingValue("displayName", "x".repeat(80))).toBe("x".repeat(64));
+    expect(coerceSettingValue("displayName", 42)).toBe(DEFAULT_APP_SETTINGS.displayName);
+    expect(coerceSettingValue("displayName", null)).toBe("");
   });
 
   it("keeps a real boolean for burySiblings, else falls back to the default", () => {
@@ -137,6 +146,7 @@ describe("stored ↔ model round-trip", () => {
       [SETTINGS_KEYS.importBalanceFactor]: 2.5,
       [SETTINGS_KEYS.keyboardLayout]: "dvorak",
       [SETTINGS_KEYS.theme]: "light",
+      [SETTINGS_KEYS.displayName]: "Ada Lovelace",
     };
     expect(appSettingsFromStored(stored)).toEqual({
       dailyReviewBudget: 120,
@@ -149,6 +159,7 @@ describe("stored ↔ model round-trip", () => {
       importBalanceFactor: 2.5,
       keyboardLayout: "dvorak",
       theme: "light",
+      displayName: "Ada Lovelace",
     });
   });
 
@@ -172,6 +183,7 @@ describe("stored ↔ model round-trip", () => {
       importBalanceFactor: 2,
       keyboardLayout: "vim" as const,
       theme: "light" as const,
+      displayName: "Ada Lovelace",
     };
     const reloaded = appSettingsFromStored(settingsPatchToStored(original));
     expect(reloaded).toEqual(original);

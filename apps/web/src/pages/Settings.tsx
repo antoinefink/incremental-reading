@@ -24,6 +24,7 @@ import {
   isDesktop,
   type ThemePreference,
 } from "../lib/appApi";
+import { SETTINGS_CHANGED_EVENT } from "../shell/nav";
 import { applyTheme } from "../theme";
 
 /** Human-readable byte size for the backup toast. */
@@ -51,7 +52,11 @@ const FALLBACK_SETTINGS: AppSettings = {
   importBalanceFactor: 1.5,
   keyboardLayout: "qwerty",
   theme: "dark",
+  displayName: "",
 };
+
+/** Max length of the display name (mirrors `@interleave/core` `DISPLAY_NAME_MAX`). */
+const DISPLAY_NAME_MAX = 64;
 
 const PRIORITY_LABELS = ["A", "B", "C", "D"] as const;
 type PriorityLabel = (typeof PRIORITY_LABELS)[number];
@@ -234,6 +239,9 @@ export function Settings() {
       applyTheme(confirmed.theme);
       setSavedAt(new Date().toISOString());
       setError(null);
+      // Tell settings-reading shell chrome (the sidebar identity chip) to re-read
+      // the change live — no remount required.
+      window.dispatchEvent(new CustomEvent(SETTINGS_CHANGED_EVENT));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -404,6 +412,21 @@ export function Settings() {
       </SectionPanel>
 
       <SectionPanel title="Interface">
+        <SettingRow
+          label="Display name"
+          hint="Shown in the sidebar. Local to this vault — there is no account."
+        >
+          <input
+            type="text"
+            data-testid="setting-display-name"
+            value={s.displayName}
+            maxLength={DISPLAY_NAME_MAX}
+            placeholder="Local vault"
+            onChange={(e) => void patch({ displayName: e.target.value })}
+            className="w-48 rounded-md border border-border bg-surface px-2.5 py-1 text-sm text-text placeholder:text-text-3 focus:outline-none focus:ring-2 focus:ring-accent"
+          />
+        </SettingRow>
+
         <SettingRow label="Theme" hint="Light or dark.">
           <Segmented
             name="setting-theme"

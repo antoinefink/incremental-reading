@@ -483,6 +483,14 @@ describe("SettingsPatchSchema (T011)", () => {
     expect(SettingsPatchSchema.parse({ burySiblings: true })).toEqual({ burySiblings: true });
     expect(() => SettingsPatchSchema.parse({ burySiblings: "no" })).toThrow();
   });
+
+  it("accepts a display name, rejects an over-long one (shell identity)", () => {
+    expect(SettingsPatchSchema.parse({ displayName: "Ada Lovelace" })).toEqual({
+      displayName: "Ada Lovelace",
+    });
+    expect(SettingsPatchSchema.parse({ displayName: "" })).toEqual({ displayName: "" });
+    expect(() => SettingsPatchSchema.parse({ displayName: "x".repeat(65) })).toThrow();
+  });
 });
 
 describe("SettingsUpdateManyRequestSchema (T011)", () => {

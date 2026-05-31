@@ -350,6 +350,7 @@ describe("DbService", () => {
       importBalanceFactor: 1.5,
       keyboardLayout: "dvorak",
       theme: "light",
+      displayName: "",
     });
     second.close();
   });

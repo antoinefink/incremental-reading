@@ -23,19 +23,26 @@ export type NavItem = {
   readonly icon: IconName;
   /** Destination route path (a registered TanStack Router path). */
   readonly to: string;
-  /** Optional count badge (static placeholder until queue/inbox data lands). */
-  readonly badge?: number;
+  /**
+   * Whether this entry shows a LIVE count badge (Queue / Inbox / Review). The
+   * value is NOT stored here — it is read at render time from `window.appApi`
+   * (`useNavBadges`: queue.list / inbox.list), keyed by `id`, so the badge always
+   * reflects the real due/inbox counts rather than a hardcoded placeholder.
+   */
+  readonly liveBadge?: boolean;
 };
 
 /**
  * Primary nav, shown above the "Organize" divider — matches the kit's first
- * five entries (Queue, Inbox, Library, Review, Search).
+ * five entries (Queue, Inbox, Library, Review, Search). Queue / Inbox / Review
+ * carry a LIVE count badge wired to real `window.appApi` data (see
+ * `useNavBadges`) — no hardcoded counts.
  */
 export const PRIMARY_NAV: readonly NavItem[] = [
-  { id: "queue", label: "Queue", icon: "queue", to: "/queue", badge: 42 },
-  { id: "inbox", label: "Inbox", icon: "inbox", to: "/inbox", badge: 4 },
+  { id: "queue", label: "Queue", icon: "queue", to: "/queue", liveBadge: true },
+  { id: "inbox", label: "Inbox", icon: "inbox", to: "/inbox", liveBadge: true },
   { id: "library", label: "Library", icon: "library", to: "/search" },
-  { id: "review", label: "Review", icon: "review", to: "/review", badge: 28 },
+  { id: "review", label: "Review", icon: "review", to: "/review", liveBadge: true },
   { id: "search", label: "Search", icon: "search", to: "/search" },
 ];
 
@@ -107,6 +114,14 @@ export const NEW_SOURCE_EVENT = "interleave:new-source";
  * detail is `undefined`; listeners just re-fetch.
  */
 export const UNDO_EVENT = "interleave:undo";
+
+/**
+ * CustomEvent name the /settings screen dispatches after a setting is persisted,
+ * so shell chrome that reads settings (the sidebar's identity chip) can re-read
+ * the change live without waiting for a remount. The detail is `undefined`;
+ * listeners just re-fetch through the bridge.
+ */
+export const SETTINGS_CHANGED_EVENT = "interleave:settings-changed";
 
 /**
  * Action entries DERIVED from the single shortcut registry (T048) — the palette's

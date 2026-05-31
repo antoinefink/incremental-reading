@@ -126,6 +126,51 @@ test("changing a setting persists and SURVIVES a full app restart", async () => 
   await second.close();
 });
 
+test("the sidebar user chip reflects the display-name setting + survives restart", async () => {
+  // A dedicated data dir so the name change is isolated from the other tests.
+  const nameDir = makeDataDir();
+
+  const first = await launchApp(nameDir);
+  const firstPage = await first.firstWindow();
+  await firstPage.waitForLoadState("domcontentloaded");
+
+  // A fresh vault has no name yet: the chip degrades to the neutral local-vault
+  // identity (NOT a hardcoded persona) and the streak chip is hidden (no reviews).
+  await expect(firstPage.getByTestId("user-chip-name")).toHaveText("Local vault");
+  await expect(firstPage.getByTestId("shell-streak")).toHaveCount(0);
+
+  // Opening the user menu shows the honest, non-interactive vault status (the old
+  // misleading "Local vault · synced" button is gone — sync is a later feature).
+  await firstPage.getByTestId("user-chip").click();
+  const vaultStatus = firstPage.getByTestId("shell-vault-status");
+  await expect(vaultStatus).toHaveText(/Local vault · offline-first/);
+  // It is a non-interactive status row, not a button/menuitem — nothing to click.
+  await expect(vaultStatus).toHaveJSProperty("tagName", "DIV");
+  await firstPage.keyboard.press("Escape");
+
+  // Set a name through the real /settings UI — it persists through the bridge.
+  await gotoSettings(firstPage);
+  await firstPage.getByTestId("setting-display-name").fill("Ada Lovelace");
+  await firstPage.getByTestId("setting-display-name").blur();
+  await expect(firstPage.getByTestId("settings-saved")).toBeVisible();
+
+  // The sidebar chip now shows the set name + derived avatar initials.
+  await expect(firstPage.getByTestId("user-chip-name")).toHaveText("Ada Lovelace");
+  await expect(firstPage.getByTestId("user-chip").locator(".shell-avatar")).toHaveText("AL");
+
+  await first.close();
+
+  // Relaunch the SAME data dir: the name was SQLite-backed, so the chip still
+  // shows it on boot — read through settings.getAll(), no hardcoded value.
+  const second = await launchApp(nameDir);
+  const secondPage = await second.firstWindow();
+  await secondPage.waitForLoadState("domcontentloaded");
+  await expect(secondPage.getByTestId("user-chip-name")).toHaveText("Ada Lovelace");
+  await expect(secondPage.getByTestId("user-chip").locator(".shell-avatar")).toHaveText("AL");
+
+  await second.close();
+});
+
 test("the theme setting is SQLite-backed and applied on boot after restart", async () => {
   // Use a dedicated data dir so this test's theme flip is isolated.
   const themeDir = makeDataDir();

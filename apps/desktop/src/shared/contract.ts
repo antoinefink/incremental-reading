@@ -22,6 +22,7 @@ import {
   DAILY_REVIEW_BUDGET_MIN,
   DESIRED_RETENTION_MAX,
   DESIRED_RETENTION_MIN,
+  DISPLAY_NAME_MAX,
   ELEMENT_STATUSES,
   ELEMENT_TYPES,
   IMPORT_BALANCE_FACTOR_MAX,
@@ -169,6 +170,8 @@ export const SettingsPatchSchema = z
     importBalanceFactor: z.number().min(IMPORT_BALANCE_FACTOR_MIN).max(IMPORT_BALANCE_FACTOR_MAX),
     keyboardLayout: z.enum(KEYBOARD_LAYOUTS),
     theme: z.enum(THEMES),
+    /** The local vault owner's display name (trimmed + capped main-side). */
+    displayName: z.string().max(DISPLAY_NAME_MAX),
   })
   .partial()
   .strict();

@@ -39,6 +39,8 @@ import { SelectionProvider, useSelection } from "./selection";
 import "./shell.css";
 import type { PaletteActionId } from "./shortcuts";
 import { useGlobalActions } from "./useGlobalActions";
+import { type NavBadgeCounts, useNavBadges } from "./useNavBadges";
+import { useShellIdentity } from "./useShellIdentity";
 import { useShellShortcuts } from "./useShellShortcuts";
 
 /** Whether a sidebar entry is the active route (longest-prefix, exact for "/"). */
@@ -47,8 +49,20 @@ function isActive(pathname: string, to: string): boolean {
   return pathname === to || pathname.startsWith(`${to}/`);
 }
 
-function NavButton({ item, pathname }: { item: NavItem; pathname: string }) {
+function NavButton({
+  item,
+  pathname,
+  badges,
+}: {
+  item: NavItem;
+  pathname: string;
+  badges: NavBadgeCounts;
+}) {
   const active = isActive(pathname, item.to);
+  // Live count for this entry (Queue / Inbox / Review), read from window.appApi
+  // via useNavBadges — not a hardcoded placeholder. Hidden until loaded and when
+  // the count is 0 (a calm sidebar shows no empty "0" pills).
+  const count = item.liveBadge ? badges[item.id as keyof NavBadgeCounts] : undefined;
   return (
     <Link
       to={item.to}
@@ -58,7 +72,11 @@ function NavButton({ item, pathname }: { item: NavItem; pathname: string }) {
     >
       <Icon name={item.icon} size={17} />
       {item.label}
-      {item.badge != null && <span className="shell-nav__badge">{item.badge}</span>}
+      {typeof count === "number" && count > 0 && (
+        <span className="shell-nav__badge" data-testid={`nav-${item.id}-badge`}>
+          {count}
+        </span>
+      )}
     </Link>
   );
 }
@@ -76,6 +94,13 @@ function Sidebar({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuWrapRef = useRef<HTMLDivElement>(null);
+  // Real local-vault identity + streak (settings.displayName + analytics), not a
+  // hardcoded persona/streak. Degrades to the neutral identity / hidden streak
+  // outside the desktop shell.
+  const { identity, streak } = useShellIdentity();
+  // Live Queue / Inbox / Review count badges from window.appApi (queue.list /
+  // inbox.list), not hardcoded numbers. Empty (every badge hidden) outside desktop.
+  const badges = useNavBadges();
 
   // Close the user menu on a click outside the chip/menu, or on Escape.
   useEffect(() => {
@@ -108,20 +133,26 @@ function Sidebar({
 
       <nav className="shell-nav" aria-label="Primary">
         {PRIMARY_NAV.map((item) => (
-          <NavButton key={item.id} item={item} pathname={pathname} />
+          <NavButton key={item.id} item={item} pathname={pathname} badges={badges} />
         ))}
         <div className="shell-nav__label">Organize</div>
         {SECONDARY_NAV.map((item) => (
-          <NavButton key={item.id} item={item} pathname={pathname} />
+          <NavButton key={item.id} item={item} pathname={pathname} badges={badges} />
         ))}
       </nav>
 
       <div className="shell-sidebar__foot">
-        <div className="shell-streak">
-          <Icon name="flame" size={13} />
-          <span className="shell-streak__n">128-day streak</span>
-          <span className="shell-streak__l">94%</span>
-        </div>
+        {streak && streak.dayStreak > 0 ? (
+          <div className="shell-streak" data-testid="shell-streak">
+            <Icon name="flame" size={13} />
+            <span className="shell-streak__n">{streak.dayStreak}-day streak</span>
+            {streak.retentionPct !== null ? (
+              <span className="shell-streak__l" data-testid="shell-streak-retention">
+                {streak.retentionPct}%
+              </span>
+            ) : null}
+          </div>
+        ) : null}
         <div className="shell-userchip-wrap" ref={menuWrapRef}>
           <button
             type="button"
@@ -131,10 +162,14 @@ function Sidebar({
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((o) => !o)}
           >
-            <span className="shell-avatar">AK</span>
+            <span className="shell-avatar" aria-hidden="true">
+              {identity.initials}
+            </span>
             <div className="flex flex-col">
-              <span className="shell-userchip__name">Ana Kestrel</span>
-              <span className="shell-userchip__sub">Local vault</span>
+              <span className="shell-userchip__name" data-testid="user-chip-name">
+                {identity.name}
+              </span>
+              <span className="shell-userchip__sub">{identity.sub}</span>
             </div>
             <Icon name="chevronDown" size={14} className="ml-auto text-text-3" />
           </button>
@@ -172,10 +207,13 @@ function Sidebar({
                 <Kbd keys="?" />
               </button>
               <hr className="shell-usermenu__sep" />
-              <button type="button" className="shell-usermenu__item" role="menuitem">
+              {/* Non-interactive status (not a menu action): the MVP is local-only,
+                  so this is honest "offline-first" copy, not a misleading "synced"
+                  button. Cloud sync is a later server-phase feature. */}
+              <div className="shell-usermenu__status" data-testid="shell-vault-status">
                 <Icon name="shield" size={14} />
-                <span className="shell-grow">Local vault · synced</span>
-              </button>
+                <span className="shell-grow">Local vault · offline-first</span>
+              </div>
             </div>
           )}
         </div>
