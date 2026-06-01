@@ -8,6 +8,11 @@ build/
 .tsbuild/
 out/
 
+# …but the desktop electron-builder buildResources dir holds SOURCE inputs (the app
+# icon), not build output — keep it tracked.
+!apps/desktop/build/
+!apps/desktop/build/**
+
 # Electron desktop: bundled main/preload + the vendored, Electron-ABI native copy
 # of better-sqlite3 (rebuilt by apps/desktop/scripts/vendor-native.mjs)
 apps/desktop/dist/

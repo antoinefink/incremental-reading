@@ -73,14 +73,37 @@ mac:
     - target: dmg
       arch:
         - arm64
-  # Code-signing + notarization are DEFERRED for the MVP (CLAUDE.md "macOS at
-  # minimum" = installs and runs locally). An unsigned build shows a Gatekeeper
-  # warning on first launch (right-click → Open). Stubs left for a later release
-  # task: set `identity` to the Developer ID and add an `afterSign` notarize hook.
+  # AD-HOC CODE SIGNING is REQUIRED, not optional, on Apple Silicon: the arm64
+  # kernel refuses to LOAD any executable without a VALID code signature, and
+  # electron-builder's bundle modifications (asar + resource staging) invalidate
+  # Electron's prebuilt linker ad-hoc seal. A bundle whose seal no longer matches
+  # its bytes is reported by Gatekeeper as "'Interleave' is damaged and can't be
+  # opened" (NOT the milder "unidentified developer" — and so NOT bypassable via
+  # right-click → Open; that path is also gone in macOS Sequoia).
+  #
+  # We do the ad-hoc re-sign in the `afterPack` hook (scripts/adhoc-sign.cjs),
+  # NOT here: electron-builder 25.1.8 treats `identity: "-"` as a NAMED keychain
+  # identity, fails to find it, and SKIPS signing — leaving the broken seal. So
+  # we keep electron-builder out of signing entirely (`identity: null`) and re-seal
+  # the packed bundle ourselves with `codesign --force --deep --sign -`. The app
+  # then launches on arm64 once the user strips quarantine
+  # (`xattr -dr com.apple.quarantine /Applications/Interleave.app` — see RELEASE.md).
+  #
+  # Real Developer ID signing + notarization (the no-xattr experience) is still
+  # DEFERRED to a later release task: set `identity` to the Developer ID, flip
+  # `hardenedRuntime: true` + add entitlements, and set `mac.notarize`.
   identity: null
-  # hardenedRuntime + entitlements are required for notarization; harmless unsigned.
+  # hardenedRuntime is meaningful only with a real Developer ID + notarization;
+  # keep it OFF for ad-hoc signing (combining the two makes the app fail to launch).
   hardenedRuntime: false
-  # icon: build/icon.icns   # add a real .icns for the final release
+  # App icon — the layered-squares Interleave mark (build/icon.icns, generated from
+  # brand/logo.pxd; see brand/). Replaces the default Electron atom icon.
+  icon: build/icon.icns
+
+# Re-seal the packed .app with a VALID ad-hoc signature (see the mac.identity note).
+# afterPack runs after the asar + resources are fully staged and BEFORE the DMG is
+# built, so the DMG captures the re-signed bundle.
+afterPack: scripts/adhoc-sign.cjs
 
 dmg:
   title: Interleave ${version}

@@ -55,11 +55,25 @@ INTERLEAVE_DIST_SKIP_BUILD=1 pnpm --filter @interleave/desktop dist
 
 ## Deferred (out of scope for the MVP — clearly stubbed)
 
-- **Code-signing + notarization** (`mac.identity: null`, `hardenedRuntime: false` in
-  `electron-builder.yml`). An unsigned build shows a Gatekeeper warning on first
-  launch — open it with **right-click → Open** (or `xattr -dr com.apple.quarantine
-  /Applications/Interleave.app`). Add a Developer ID `identity` + an `afterSign`
-  notarize hook for a real distribution release.
+- **Developer ID signing + notarization.** The build IS ad-hoc signed (the
+  `afterPack` hook `scripts/adhoc-sign.cjs` runs `codesign --force --deep --sign -`
+  and verifies the seal), which is **mandatory on Apple Silicon** — the arm64 kernel
+  refuses to load an executable with a missing/broken signature, and electron-builder's
+  packaging invalidates Electron's prebuilt seal. WITHOUT this hook the app shipped
+  with `Sealed Resources=none` / `Info.plist=not bound` and macOS reported
+  **"'Interleave' is damaged and can't be opened"** (this regressed v0.1.1's first
+  `.dmg`; `mac.identity: "-"` does NOT work in electron-builder 25.1.8 — it resolves
+  "-" as a named keychain identity, finds none, and skips signing).
+  Because the build is ad-hoc signed but **not notarized**, a downloaded copy is still
+  quarantined; the user clears it once after installing — **right-click → Open does
+  NOT work for a quarantined non-notarized app, and that menu item was removed in
+  macOS Sequoia**:
+  ```sh
+  xattr -dr com.apple.quarantine /Applications/Interleave.app
+  ```
+  For a zero-friction release, add a Developer ID `identity` + `hardenedRuntime: true`
+  + entitlements + `mac.notarize` (electron-builder 24+ notarizes via `notarytool` and
+  staples), which removes the `xattr` step.
 - **App icon** — the default Electron icon is used (`mac.icon` stub left in the
   config). Drop a real `build/icon.icns` for the final release.
 - **Windows / Linux targets**, **auto-update** (`electron-updater`), and a

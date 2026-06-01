@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/screenshots/logo.png" alt="Interleave logo" width="128" height="128" />
+</p>
+
 # Interleave
 
 A desktop-first, **local-first incremental reading** application. Import sources, read them
@@ -13,8 +17,15 @@ It is **not** a read-it-later app, **not** a generic note app, and **not** only 
 app. It is a long-term knowledge-processing system for people who import more than they can
 read and want to retain the small subset that truly matters.
 
-> **Download:** grab the macOS build from the [latest release](https://github.com/antoinefink/incremental-reading/releases).
-> The `.dmg` is currently **unsigned** — on first launch, right-click the app → **Open**.
+> **Download:** grab the macOS build (Apple Silicon / arm64) from the
+> [latest release](https://github.com/antoinefink/incremental-reading/releases).
+> The `.dmg` is **ad-hoc signed but not notarized**, so after dragging Interleave to
+> `/Applications`, clear the download quarantine once (right-click → Open does **not**
+> work for this):
+> ```sh
+> xattr -dr com.apple.quarantine /Applications/Interleave.app
+> ```
+> Then open it normally. (A fully signed + notarized build is a later release task.)
 
 ---
 
@@ -163,3 +174,6 @@ distillation, semantic search) is planned but not yet built.
 
 *A personal project by [@antoinefink](https://github.com/antoinefink). See [`docs/`](./docs/)
 and [`CLAUDE.md`](./CLAUDE.md) for the full design and build system.*
+
+*The Interleave logo was created with **ChatGPT Images 2.0**. Source + exports live in
+[`brand/`](./brand/).*
