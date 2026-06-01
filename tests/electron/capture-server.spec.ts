@@ -74,6 +74,31 @@ async function listInbox(page: Page): Promise<{ id: string; title: string }[]> {
   });
 }
 
+/** Read one inbox source's detail (numeric priority + `reasonAdded` provenance). */
+async function inboxGet(
+  page: Page,
+  id: string,
+): Promise<{ priority: number; reasonAdded: string | null } | null> {
+  return page.evaluate(async (elementId) => {
+    const api = window.appApi as unknown as {
+      inbox: {
+        get(req: { id: string }): Promise<{
+          detail: {
+            summary: { priority: number };
+            provenance: { reasonAdded: string | null };
+          } | null;
+        }>;
+      };
+    };
+    const { detail } = await api.inbox.get({ id: elementId });
+    if (!detail) return null;
+    return {
+      priority: detail.summary.priority,
+      reasonAdded: detail.provenance.reasonAdded,
+    };
+  }, id);
+}
+
 /**
  * POST a JSON body to the loopback server FROM THE NODE TEST PROCESS (not the
  * renderer), so we control the Authorization + Origin headers exactly like the
@@ -236,6 +261,18 @@ test("a token+Origin-authenticated selection capture lands an inbox source", asy
   expect(found).toBeTruthy();
   expect(found?.title).toBe("The Spacing Effect");
 
+  // T063: the chosen priority A maps to the high numeric priority, and the
+  // `reason_added` provenance carries BOTH the typed reason AND the folded-in
+  // blockContext anchor text (no `blockContext` column — see T062's decision).
+  const detail = await inboxGet(page, capturedId);
+  expect(detail).toBeTruthy();
+  // priorityFromLabel("A") === 0.875 (core's A/B/C/D → numeric mapping).
+  expect(detail?.priority).toBeCloseTo(0.875, 5);
+  expect(detail?.reasonAdded).toContain("core idea");
+  expect(detail?.reasonAdded).toContain(
+    "The classic forgetting curve shows retention falls off exponentially.",
+  );
+
   await app.close();
 });
 
@@ -275,6 +312,14 @@ test("the captured source survives an app restart; token + port stay stable", as
   const stillThere = after.find((i) => i.id === captured?.id);
   expect(stillThere).toBeTruthy();
   expect(stillThere?.title).toBe("The Spacing Effect");
+
+  // T063: the chosen priority + reason(+folded blockContext) survive the restart.
+  const detailAfter = await inboxGet(page2, stillThere?.id as string);
+  expect(detailAfter?.priority).toBeCloseTo(0.875, 5);
+  expect(detailAfter?.reasonAdded).toContain("core idea");
+  expect(detailAfter?.reasonAdded).toContain(
+    "The classic forgetting curve shows retention falls off exponentially.",
+  );
 
   await app2.close();
 });

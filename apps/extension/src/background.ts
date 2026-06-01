@@ -77,6 +77,10 @@ chrome.commands.onCommand.addListener((command) => {
     if (!tab) return;
     if (command === "save-page") await savePage(tab);
     else if (command === "save-selection") await saveSelection(tab, null);
+    else if (command === "open-panel" && tab.id && chrome.sidePanel?.open) {
+      // Open the richer T063 capture panel beside the page (priority + reason).
+      await chrome.sidePanel.open({ tabId: tab.id });
+    }
   })();
 });
 

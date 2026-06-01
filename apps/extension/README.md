@@ -41,7 +41,7 @@ The extension requests the minimum surface it needs:
 - `activeTab` + `scripting` — inject the page-scrape / selection-read **on demand
   into the active tab** when the user invokes a save (no standing content script).
 - `contextMenus` — the right-click "Save … to Interleave" entries.
-- `sidePanel` — the T063 side-panel capture UI.
+- `sidePanel` — the T063 side-panel capture UI (priority + reason, recent captures).
 - `storage` — persist the paired loopback port + recent-capture list.
 - `notifications` — show the capture success / failure / "app not running" toast.
 - `host_permissions: http://127.0.0.1/*` — POST captures to the loopback server only.
@@ -71,7 +71,14 @@ The extension's own runtime is verified once by hand with this checklist:
 6. **Save selection:** select text → right-click → **Save selection to
    Interleave** → expect a selection source in the inbox (its “why added”
    provenance carries the surrounding-text context anchor).
-7. **Not running / disabled:** disable capture in **Settings** → a save now shows
+7. **Side panel (T063):** action popup → **Open side panel** (or the “Open
+   Interleave panel” context-menu / command) → the panel opens beside the page.
+   Select text on the page → **Use current selection** → pick priority **A** →
+   type a **reason** → **Save selection** → expect a success status, the source
+   appearing in the panel’s **Recent captures**, and the desktop inbox source
+   carrying that **priority** and a **“why added”** holding the reason + the
+   folded-in surrounding-text anchor.
+8. **Not running / disabled:** disable capture in **Settings** → a save now shows
    **“App not running / capture disabled.”**
 
 ## Security / threat model (enforced by the desktop loopback server)

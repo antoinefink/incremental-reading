@@ -151,6 +151,19 @@ describe("shapeCapture", () => {
     if (shaped.kind === "selection") expect(shaped.reason).toBe("high value");
   });
 
+  it("defaults a selection's priority to C when the panel omits it (T063)", () => {
+    const shaped = shapeCapture({
+      kind: "selection",
+      url: "https://x.com/a",
+      selection: "the spacing effect",
+      reason: "panel reason",
+    });
+    expect(shaped.kind).toBe("selection");
+    expect(shaped.priority).toBe(DEFAULT_CAPTURE_PRIORITY);
+    expect(shaped.priority).toBe("C");
+    if (shaped.kind === "selection") expect(shaped.reason).toBe("panel reason");
+  });
+
   it("clamps an over-long reason to the schema cap (does not throw)", () => {
     const shaped = shapeCapture({
       kind: "selection",

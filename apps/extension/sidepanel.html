@@ -2,20 +2,252 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Interleave</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Interleave — Capture</title>
     <link rel="stylesheet" href="tokens.css" />
+    <!--
+      DESIGN-LANGUAGE REUSE, not renderer-component reuse: this panel runs in
+      Chrome's Side Panel, not the Electron renderer. It re-declares the design
+      tokens (tokens.css) and inlines lucide SVGs; it imports no apps/web React.
+    -->
     <style>
       body {
-        padding: 16px;
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .panel-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .panel-head svg {
+        width: 18px;
+        height: 18px;
+        color: var(--accent-text);
+        flex: none;
+      }
+      .tab-meta {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface-2);
+        padding: 9px 11px;
+      }
+      .tab-title {
+        font-weight: 600;
+        font-size: 13px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .tab-url {
+        color: var(--text-3);
+        font-size: 11px;
+        margin-top: 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .section-label {
+        font-weight: 600;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-3);
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .selection-box {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        padding: 10px 11px;
+        max-height: 132px;
+        overflow-y: auto;
+        font-size: 12.5px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .selection-box.empty {
+        color: var(--text-3);
+        font-style: italic;
+      }
+      .ghost {
+        font-size: 11px;
+        padding: 3px 8px;
+      }
+      .prio-group {
+        display: flex;
+        gap: 6px;
+        width: 100%;
+      }
+      .prio {
+        flex: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        width: auto;
+      }
+      .prio-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex: none;
+      }
+      .prio[data-prio="A"] .prio-dot {
+        background: var(--prio-a);
+      }
+      .prio[data-prio="B"] .prio-dot {
+        background: var(--prio-b);
+      }
+      .prio[data-prio="C"] .prio-dot {
+        background: var(--prio-c);
+      }
+      .prio[data-prio="D"] .prio-dot {
+        background: var(--prio-d);
+      }
+      #prio-hint {
+        display: block;
+        margin-top: 6px;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+      textarea#reason {
+        resize: vertical;
+        min-height: 52px;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+      }
+      .actions button {
+        flex: 1;
+      }
+      .status {
+        max-width: 100%;
+        word-break: break-word;
+      }
+      .recent-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 0;
+        border-top: 1px solid var(--border);
+        font-size: 12px;
+      }
+      .recent-row:first-child {
+        border-top: none;
+      }
+      .recent-kind {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        padding: 1px 6px;
+        border-radius: 4px;
+        flex: none;
+      }
+      .recent-kind--page {
+        background: var(--accent-soft);
+        color: var(--accent-text);
+      }
+      .recent-kind--selection {
+        background: var(--prio-c-soft);
+        color: var(--prio-c);
+      }
+      .recent-title {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .recent-when {
+        color: var(--text-3);
+        font-size: 11px;
+        flex: none;
+      }
+      .link {
+        background: none;
+        border: none;
+        color: var(--accent-text);
+        padding: 0;
+        font-size: 12px;
+        cursor: pointer;
+        text-decoration: underline;
       }
     </style>
   </head>
   <body>
-    <h1>Interleave</h1>
-    <p class="muted" id="panel-status">
-      The capture side panel arrives in the next update (T063). Use the toolbar popup to save the
-      page or a selection for now.
+    <div class="panel-head">
+      <!-- lucide "layers" (inlined SVG — the extension ships icons, not lucide-react) -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" />
+        <path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65" />
+        <path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65" />
+      </svg>
+      <h1>Capture to Interleave</h1>
+    </div>
+
+    <div class="tab-meta">
+      <div class="tab-title" id="tab-title">…</div>
+      <div class="tab-url" id="tab-url"></div>
+    </div>
+
+    <section>
+      <div class="section-label">
+        <span>Selection</span>
+        <button id="use-selection" class="ghost" type="button">Use current selection</button>
+      </div>
+      <div class="selection-box empty" id="selection-text"></div>
+    </section>
+
+    <section>
+      <div class="section-label">Priority</div>
+      <div class="prio-group" id="prio-group" role="group" aria-label="Priority">
+        <button class="prio" data-prio="A" type="button" aria-pressed="false">
+          <span class="prio-dot"></span>A
+        </button>
+        <button class="prio" data-prio="B" type="button" aria-pressed="false">
+          <span class="prio-dot"></span>B
+        </button>
+        <button class="prio" data-prio="C" type="button" aria-pressed="true">
+          <span class="prio-dot"></span>C
+        </button>
+        <button class="prio" data-prio="D" type="button" aria-pressed="false">
+          <span class="prio-dot"></span>D
+        </button>
+      </div>
+      <span id="prio-hint"></span>
+    </section>
+
+    <section>
+      <div class="section-label">Reason</div>
+      <textarea id="reason" placeholder="Why save this? (becomes the source's “why added”)"></textarea>
+    </section>
+
+    <div class="actions">
+      <button id="save-selection" class="primary" type="button" disabled>Save selection</button>
+      <button id="save-page" type="button">Save page</button>
+    </div>
+
+    <div class="status" id="status" hidden></div>
+
+    <section>
+      <div class="section-label">Recent captures</div>
+      <div id="recent-list"></div>
+    </section>
+
+    <p>
+      <button id="open-options" class="link" type="button">Options / pairing</button>
     </p>
+
     <script type="module" src="sidepanel.js"></script>
   </body>
 </html>

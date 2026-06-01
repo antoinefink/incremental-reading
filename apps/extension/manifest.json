@@ -50,6 +50,9 @@
         "mac": "Command+Shift+E"
       },
       "description": "Save the current selection to Interleave"
+    },
+    "open-panel": {
+      "description": "Open the Interleave capture side panel"
     }
   }
 }

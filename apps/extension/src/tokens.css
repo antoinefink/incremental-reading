@@ -6,9 +6,8 @@
  * `apps/web` React components or its Tailwind theme. Instead they re-declare the
  * canonical OKLCH tokens from `design/tokens.css` (IBM Plex, light + dark surfaces
  * + text) as local CSS variables. The A/B/C/D priority color tokens (and the
- * `.prio` chip styles below) are declared here but not yet referenced by any
- * T062 page — they are staged for the T063 side-panel priority chips that will
- * consume them. Keep these in sync with `design/tokens.css`; do not invent new
+ * `.prio` chip styles below) are consumed by the T063 side-panel priority chip
+ * group. Keep these in sync with `design/tokens.css`; do not invent new
  * colors here.
  */
 

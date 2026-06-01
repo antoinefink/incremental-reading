@@ -64,5 +64,15 @@ document.getElementById("save-selection")?.addEventListener("click", () => send(
 document.getElementById("open-options")?.addEventListener("click", () => {
   void chrome.runtime.openOptionsPage();
 });
+// Open the richer T063 capture panel (priority + reason) beside the page.
+document.getElementById("open-panel")?.addEventListener("click", () => {
+  void (async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id && chrome.sidePanel?.open) {
+      await chrome.sidePanel.open({ tabId: tab.id });
+      window.close();
+    }
+  })();
+});
 
 void init();
