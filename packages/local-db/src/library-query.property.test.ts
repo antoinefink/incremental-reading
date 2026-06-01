@@ -233,8 +233,10 @@ describe("LibraryQuery drill-down counts — property invariants", () => {
         const { liveConceptIds, filters } = buildWorld(world);
         const { items, counts } = library.browse(filters);
 
-        // (all) equals the matched (pre-limit) list. The default limit (200) is
-        // never hit at these world sizes, so items.length === matched count.
+        // (all) equals the RENDERED list (items.length, post-limit). The default
+        // limit (200) is never hit at these world sizes, so this also equals the full
+        // match count here; the dedicated limit-cap property below exercises the
+        // truncating case where the match set exceeds the cap.
         expect(counts.all).toBe(items.length);
 
         // byType: re-run with each type added (replacing the active type), assert the
@@ -320,8 +322,13 @@ describe("LibraryQuery drill-down counts — property invariants", () => {
     fc.assert(
       fc.property(worldArb, fc.integer({ min: 1, max: 20 }), (world, limit) => {
         const { filters } = buildWorld(world);
-        const items = library.browse({ ...filters, limit }).items;
+        const { items, counts } = library.browse({ ...filters, limit });
         expect(items.length).toBeLessThanOrEqual(limit);
+        // The top-line total always equals the RENDERED rows (post-limit), so the
+        // "N elements" label can never exceed the visible list — even with a tiny cap
+        // that truncates a larger match set. The per-facet counts stay pre-limit.
+        expect(counts.all).toBe(items.length);
+        expect(counts.all).toBeLessThanOrEqual(limit);
         for (let i = 1; i < items.length; i++) {
           const prev = items[i - 1];
           const cur = items[i];

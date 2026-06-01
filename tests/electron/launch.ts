@@ -18,19 +18,72 @@ import { type ElectronApplication, _electron as electron } from "@playwright/tes
 // `__dirname` is available here — avoid `import.meta.url`, which is ESM-only.
 const repoRoot = path.resolve(__dirname, "..", "..");
 const desktopDir = path.join(repoRoot, "apps", "desktop");
-const webDist = path.join(repoRoot, "apps", "web", "dist", "index.html");
+const webDir = path.join(repoRoot, "apps", "web");
+const packagesDir = path.join(repoRoot, "packages");
+const webDist = path.join(webDir, "dist", "index.html");
 const mainBundle = path.join(desktopDir, "dist", "main.cjs");
 const preloadBundle = path.join(desktopDir, "dist", "preload.cjs");
 
-/** Build the renderer + desktop bundle if the artifacts are missing. */
+/**
+ * The newest mtime (ms) of any `.ts`/`.tsx`/`.css` source under `roots`, or `0`
+ * when none exists. Skips dist/node_modules so we only see real source. Used to
+ * decide whether a built artifact is STALE — see {@link ensureBuilt}.
+ */
+function newestSourceMtime(roots: readonly string[]): number {
+  let newest = 0;
+  const skip = new Set(["dist", "node_modules", ".turbo"]);
+  const walk = (dir: string): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // a missing dir contributes nothing
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!skip.has(entry.name)) walk(full);
+      } else if (/\.(tsx?|css)$/.test(entry.name)) {
+        const m = fs.statSync(full).mtimeMs;
+        if (m > newest) newest = m;
+      }
+    }
+  };
+  for (const root of roots) walk(root);
+  return newest;
+}
+
+/** True when `artifact` is missing OR older than the newest source under `roots`. */
+function isStale(artifact: string, roots: readonly string[]): boolean {
+  if (!fs.existsSync(artifact)) return true;
+  return fs.statSync(artifact).mtimeMs < newestSourceMtime(roots);
+}
+
+/**
+ * Build the renderer + desktop bundle when the artifacts are missing OR STALE.
+ *
+ * A plain existence check is not enough: the desktop E2E launches the BUILT
+ * main.cjs + renderer dist, so if a source change (in the app src or any
+ * workspace packages src they bundle) post-dates the last build, the suite would
+ * silently exercise OLD code and "pass" against a bug that is already fixed in
+ * source. We therefore rebuild whenever the newest relevant source out-dates the
+ * artifact. Both builds are fast (esbuild bundle ~tens of ms; Vite renderer
+ * sub-second), so the staleness scan is cheap insurance for correctness.
+ */
 export function ensureBuilt(): void {
-  if (!fs.existsSync(webDist)) {
+  // The renderer bundles apps/web/src + the shared packages it imports.
+  if (isStale(webDist, [path.join(webDir, "src"), packagesDir])) {
     execFileSync("pnpm", ["--filter", "@interleave/web", "build"], {
       cwd: repoRoot,
       stdio: "inherit",
     });
   }
-  if (!fs.existsSync(mainBundle) || !fs.existsSync(preloadBundle)) {
+  // The main bundle compiles apps/desktop/src + the shared packages (db/core/
+  // local-db/scheduler) it bundles into a self-contained main.cjs.
+  const desktopStale =
+    isStale(mainBundle, [path.join(desktopDir, "src"), packagesDir]) ||
+    isStale(preloadBundle, [path.join(desktopDir, "src"), packagesDir]);
+  if (desktopStale) {
     execFileSync("pnpm", ["--filter", "@interleave/desktop", "build:bundle"], {
       cwd: repoRoot,
       stdio: "inherit",

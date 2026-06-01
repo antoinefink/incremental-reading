@@ -206,6 +206,23 @@ describe("LibraryQuery.browse", () => {
     expect(items.length).toBe(2);
   });
 
+  it("counts.all tracks the RENDERED rows (post-limit), never the larger match set", () => {
+    // Six live elements, but a cap of 2 — the top "N elements" label must read 2
+    // (the rows actually rendered), NOT 6, so the label can never exceed the list.
+    buildUniverse();
+    const capped = library.browse({ limit: 2 });
+    expect(capped.items.length).toBe(2);
+    expect(capped.counts.all).toBe(2);
+    // The per-facet (drill-down) counts stay PRE-limit — they describe what selecting
+    // that value would yield — so they are unaffected by the top-line cap.
+    expect(capped.counts.byType.source).toBe(1);
+    expect(capped.counts.byType.extract).toBe(1);
+    const sumByType = LIBRARY_TYPES.reduce((acc, t) => acc + (capped.counts.byType[t] ?? 0), 0);
+    expect(sumByType).toBe(6);
+    // With no cap the label equals the full match set again.
+    expect(library.browse().counts.all).toBe(6);
+  });
+
   it("computes per-type / per-priority / per-status counts with NO filters (universe totals)", () => {
     buildUniverse();
     // With no active filter, every dimension counts the whole live universe.

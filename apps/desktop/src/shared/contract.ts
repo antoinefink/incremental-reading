@@ -2108,10 +2108,12 @@ export interface LibraryItem {
  * OTHER currently-active filters but NOT its own selected value, so the number next
  * to any facet value V equals the number of result rows you get if V is selected
  * together with the other active filters (the count always matches the visible
- * list — the fix for the reported chip/list mismatch). `all` is the count matching
- * ALL active filters (= the returned `items` length before the optional title narrow).
+ * list — the fix for the reported chip/list mismatch). `all` is the count of the
+ * RENDERED rows (= the returned `items` length, post-limit, before the optional title
+ * narrow), so the top "N elements" label never exceeds the visible list at scale.
  */
 export interface LibraryBrowseCounts {
+  /** The rendered-row total: equals `items.length` (post-limit, pre-title-narrow). */
   readonly all: number;
   /** Per browsable type (one entry per {@link LibraryBrowseTypeSchema} value). */
   readonly byType: Readonly<Record<string, number>>;

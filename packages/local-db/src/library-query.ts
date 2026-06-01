@@ -88,7 +88,14 @@ export interface LibraryBrowseFilters {
  * the optional client-side title narrow).
  */
 export interface LibraryBrowseCounts {
-  /** Count matching ALL active filters (equals the returned `items` length, pre-limit). */
+  /**
+   * Count of the rows ACTUALLY shown — i.e. matching ALL active filters AND capped by
+   * `limit`. This is exactly `items.length` (before the optional client-side title
+   * narrow), so the top "N elements" label can NEVER exceed the rendered list even when
+   * the match set is larger than the cap. The per-facet `byType`/`byConcept`/`byPriority`/
+   * `byStatus` counts are pre-limit (drill-down: count == rows-if-V-selected); only this
+   * top-line total tracks the rendered list.
+   */
   readonly all: number;
   /** Per browsable type, ignoring the active type filter (but honouring the rest). */
   readonly byType: Readonly<Record<ElementType, number>>;
@@ -185,7 +192,9 @@ export class LibraryQuery {
       passesStatus,
       passesPriority,
       passesConcept,
-      matchedCount: matched.length,
+      // `all` tracks the RENDERED rows (post-limit), so the top "N elements" label can
+      // never exceed the visible list when the match set is larger than the cap.
+      shownCount: items.length,
     });
 
     return { items, counts };
@@ -212,7 +221,9 @@ export class LibraryQuery {
    * that `counts[dim][V]` equals the number of rows you'd get if V were selected
    * alongside the other active filters — so a chip count always matches the list.
    *
-   * `all` is the count matching ALL active filters (the rows shown, pre-limit).
+   * `all` is the count of the RENDERED rows (`items.length`, post-limit), so the
+   * top-line total never exceeds the visible list when the match set is larger than
+   * the cap.
    */
   private countFacets(
     universe: readonly Element[],
@@ -222,7 +233,7 @@ export class LibraryQuery {
       passesStatus: (el: Element) => boolean;
       passesPriority: (el: Element) => boolean;
       passesConcept: (el: Element) => boolean;
-      matchedCount: number;
+      shownCount: number;
     },
   ): LibraryBrowseCounts {
     const byType = Object.fromEntries(LIBRARY_TYPES.map((t) => [t, 0])) as Record<
@@ -263,6 +274,6 @@ export class LibraryQuery {
         }
       }
     }
-    return { all: p.matchedCount, byType, byConcept, byPriority, byStatus };
+    return { all: p.shownCount, byType, byConcept, byPriority, byStatus };
   }
 }

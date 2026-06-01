@@ -1316,6 +1316,7 @@ export interface LibraryItem {
  * element id — the filterbar concept chip MUST use this, not `ConceptNode.memberCount`.
  */
 export interface LibraryBrowseCounts {
+  /** The rendered-row total: equals `items.length` (post-limit, pre-title-narrow). */
   readonly all: number;
   readonly byType: Readonly<Record<string, number>>;
   readonly byConcept: Readonly<Record<string, number>>;
