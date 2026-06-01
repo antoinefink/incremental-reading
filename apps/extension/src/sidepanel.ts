@@ -241,8 +241,18 @@ saveSelectionBtn.addEventListener("click", () => dispatchSave("save-selection"))
 savePageBtn.addEventListener("click", () => dispatchSave("save-page"));
 openOptionsEl.addEventListener("click", () => void chrome.runtime.openOptionsPage());
 
-// Refresh the tab header when the user switches tabs while the panel is open.
-chrome.tabs.onActivated.addListener(() => void refreshTab());
+// A pinned selection belongs to the tab it was pulled from. If the user switches
+// tabs — or the active tab navigates — invalidate it and refresh the header, so a
+// save can never send tab A's text against tab B's source (a lineage mismatch).
+async function invalidateSelectionAndRefresh(): Promise<void> {
+  setSelection("");
+  await refreshTab();
+}
+
+chrome.tabs.onActivated.addListener(() => void invalidateSelectionAndRefresh());
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  if (changeInfo.url && tab.active) void invalidateSelectionAndRefresh();
+});
 
 async function init(): Promise<void> {
   renderPriority();
