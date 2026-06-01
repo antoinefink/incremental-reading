@@ -94,7 +94,10 @@ function openDb(): DbService {
 function makeRunner(svc: DbService, worker: WorkerHandle): JobRunner {
   return new JobRunner({
     jobsRepo: svc.repos.jobs,
-    applyHandlers: createJobApplyHandlers(() => svc.urlImportService),
+    applyHandlers: createJobApplyHandlers({
+      getUrlImportService: () => svc.urlImportService,
+      getAssetVaultService: () => svc.assetVaultService,
+    }),
     workerPath: "(unused)",
     fork: () => worker,
     retryBackoffBaseMs: 0,

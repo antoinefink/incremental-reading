@@ -135,7 +135,12 @@ function bootstrap(): void {
   //     service (the single SQLite writer stays main-owned).
   jobRunner = new JobRunner({
     jobsRepo: dbService.repos.jobs,
-    applyHandlers: createJobApplyHandlers(() => dbService.urlImportService),
+    applyHandlers: createJobApplyHandlers({
+      getUrlImportService: () => dbService.urlImportService,
+      // The asset-vault scaling service (T059) backs the `vault_verify`/`vault_gc`
+      // job types so a large-vault hash/walk runs OFF-MAIN on the runner.
+      getAssetVaultService: () => dbService.assetVaultService,
+    }),
     workerPath: path.join(distDir, "job-worker.cjs"),
   });
   jobRunner.start();

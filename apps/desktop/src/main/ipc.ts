@@ -81,6 +81,9 @@ import {
   TrashPurgeRequestSchema,
   TrashRestoreRequestSchema,
   UndoLastRequestSchema,
+  VaultCollectOrphansRequestSchema,
+  VaultFindOrphansRequestSchema,
+  VaultVerifyRequestSchema,
 } from "../shared/contract";
 import { BackupService } from "./backup-service";
 import type { CaptureController } from "./capture-controller";
@@ -538,6 +541,27 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
       fileCount: result.fileCount,
       schemaVersion: result.schemaVersion,
     };
+  });
+
+  // Asset-vault maintenance (T059) — all behind the typed surface. The renderer
+  // never resolves a raw path or reads/writes bytes; it gets only the typed report
+  // /counts. `verify` re-hashes stored bytes (streamed), `findOrphans` lists vault
+  // files no live `assets` row references, and `collectOrphans` removes ONLY
+  // confirmed orphan files (guarded by `confirm: true`). A handler that runs without
+  // an `assetsDir` (a contract-only test) throws clearly from the DbService accessor.
+  ipcMain.handle(IPC_CHANNELS.vaultVerify, async (_event, rawRequest: unknown) => {
+    VaultVerifyRequestSchema.parse(rawRequest);
+    return dbService.verifyVault();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.vaultFindOrphans, async (_event, rawRequest: unknown) => {
+    VaultFindOrphansRequestSchema.parse(rawRequest);
+    return dbService.findVaultOrphans();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.vaultCollectOrphans, async (_event, rawRequest: unknown) => {
+    const request = VaultCollectOrphansRequestSchema.parse(rawRequest);
+    return dbService.collectVaultOrphans(request);
   });
 
   // Jobs OBSERVE surface (T058) — read-only. `jobs.list` reads the current queue

@@ -69,6 +69,10 @@ import {
   type SourcesImportUrlResult,
   TagsAddRequestSchema,
   TagsRemoveRequestSchema,
+  VaultCollectOrphansRequestSchema,
+  type VaultCollectOrphansResult,
+  type VaultOrphansResult,
+  type VaultVerifyResult,
 } from "./contract";
 
 describe("IPC channels", () => {
@@ -141,6 +145,9 @@ describe("IPC channels", () => {
         "backups:create",
         "jobs:list",
         "jobs:updated",
+        "vault:verify",
+        "vault:findOrphans",
+        "vault:collectOrphans",
         "menu:showShortcuts",
         "menu:createBackup",
       ].sort(),
@@ -1413,6 +1420,46 @@ describe("Jobs observe schemas (T058)", () => {
     };
     const result: JobsListResult = { jobs: [summary] };
     expect(JSON.parse(JSON.stringify(result))).toEqual(result);
+  });
+});
+
+describe("Vault maintenance schemas (T059)", () => {
+  it("VaultCollectOrphansRequestSchema REJECTS a payload without confirm: true", () => {
+    expect(() => VaultCollectOrphansRequestSchema.parse({})).toThrow();
+    expect(() => VaultCollectOrphansRequestSchema.parse({ confirm: false })).toThrow();
+  });
+
+  it("VaultCollectOrphansRequestSchema accepts confirm:true with + without an allow-list", () => {
+    expect(VaultCollectOrphansRequestSchema.parse({ confirm: true })).toEqual({ confirm: true });
+    expect(
+      VaultCollectOrphansRequestSchema.parse({
+        confirm: true,
+        relativePaths: ["sources/s1/original.html", "media/x/original.bin"],
+      }),
+    ).toEqual({
+      confirm: true,
+      relativePaths: ["sources/s1/original.html", "media/x/original.bin"],
+    });
+  });
+
+  it("verify + orphans result types round-trip as plain JSON (orphan = { relativePath, size })", () => {
+    const verify: VaultVerifyResult = {
+      ok: 3,
+      mismatched: ["asset-1"],
+      missing: ["asset-2"],
+      extraFiles: ["media/stray/x.bin"],
+    };
+    const orphans: VaultOrphansResult = {
+      orphans: [{ relativePath: "media/stray/x.bin", size: 42 }],
+      totalBytes: 42,
+    };
+    const collect: VaultCollectOrphansResult = { removed: 1, freedBytes: 42 };
+    expect(JSON.parse(JSON.stringify(verify))).toEqual(verify);
+    expect(JSON.parse(JSON.stringify(orphans))).toEqual(orphans);
+    expect(JSON.parse(JSON.stringify(collect))).toEqual(collect);
+    // An orphan entry has NO `assetId`/`reason` field.
+    const [firstOrphan] = orphans.orphans;
+    expect(Object.keys(firstOrphan ?? {}).sort()).toEqual(["relativePath", "size"]);
   });
 });
 

@@ -14,6 +14,7 @@
  */
 
 import type { JobJsonValue } from "@interleave/core";
+import type { AssetVaultService } from "./asset-vault-service";
 import type { JobApplyHandlers } from "./job-runner";
 import type { UrlImportService } from "./url-import-service";
 
@@ -34,16 +35,65 @@ interface UrlImportFetchResult {
   readonly finalUrl: string;
 }
 
+/** Lazy accessors for the services the apply handlers compose (built against the open DB). */
+export interface JobApplyHandlerDeps {
+  /** The shared, fully-wired URL-import service (built against the open DB + vault). */
+  readonly getUrlImportService: () => UrlImportService;
+  /** The asset-vault scaling service (T059), for the `vault_verify`/`vault_gc` sweeps. */
+  readonly getAssetVaultService: () => AssetVaultService;
+}
+
 /**
- * Build the apply-handler registry. `getUrlImportService` lazily resolves the
- * shared, fully-wired `UrlImportService` (built against the open DB + vault), so
- * the runner never holds a half-wired service and the DB write happens here in
- * main.
+ * Build the apply-handler registry. The accessors lazily resolve the shared,
+ * fully-wired services (built against the open DB + vault), so the runner never
+ * holds a half-wired service and every DB write / vault sweep happens here in main.
+ *
+ * The `vault_verify` / `vault_gc` handlers (T059) run the I/O walk off the UI work
+ * by being scheduled through the runner, but their hash COMPUTE runs in main: the
+ * DB-FREE worker passes these job types straight through (it posts an empty result
+ * — there is no fetch/compute it can do without the DB + `assetsDir`), then THESE
+ * main-side handlers run the actual sweep through the `AssetVaultService` (which
+ * reads the asset rows + STREAMS the vault bytes, hashing chunk-by-chunk so no whole
+ * file is buffered, yielding to the event loop between chunks). They are read-only/
+ * idempotent: `vault_verify` reports, `vault_gc` here only SCANS for orphans (it
+ * returns the candidate set; the destructive `collectOrphans` stays a confirmable
+ * direct `vault.collectOrphans` command, never an unattended background deletion),
+ * so an at-least-once re-run is always safe.
+ *
+ * Inherent-to-the-invariants note (future hardening, NOT a bug): because the worker
+ * is DB-free it cannot read asset rows, so the verify/GC sweep must run here in main;
+ * the SHA-256 compute therefore executes on main's thread. Streamed I/O keeps memory
+ * flat and yields between chunks, but a multi-GB-vault verify still spends CPU on
+ * main. A later optimization could stream the vault bytes (whose paths main resolves)
+ * to the worker purely for hashing and return only the digest — keeping the DB write
+ * + single-writer connection in main while moving the CPU off it. Not done now: it is
+ * a cross-process redesign that no current invariant requires.
  */
-export function createJobApplyHandlers(
-  getUrlImportService: () => UrlImportService,
-): JobApplyHandlers {
+export function createJobApplyHandlers(deps: JobApplyHandlerDeps): JobApplyHandlers {
+  const { getUrlImportService, getAssetVaultService } = deps;
   return {
+    /** Re-hash stored bytes (streamed) and report integrity (read-only). */
+    vault_verify: async () => {
+      const report = await getAssetVaultService().verifyIntegrity();
+      return {
+        ok: report.ok,
+        mismatched: report.mismatched,
+        missing: report.missing,
+        extraFiles: report.extraFiles,
+      } as unknown as JobJsonValue;
+    },
+    /**
+     * SCAN for orphan vault files (read-only). It never deletes — surfacing the
+     * candidate set is the off-main work; the confirmable removal stays the direct
+     * `vault.collectOrphans` command (a destructive sweep is never unattended).
+     */
+    vault_gc: async () => {
+      const report = await getAssetVaultService().findOrphans();
+      return {
+        orphans: report.orphans,
+        totalBytes: report.totalBytes,
+      } as unknown as JobJsonValue;
+    },
     /**
      * Apply a fetched page: run the EXISTING Readability → sanitize → vault-write
      * → createSource transaction over the worker-supplied HTML. The fetch already

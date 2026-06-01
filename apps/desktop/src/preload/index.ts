@@ -70,6 +70,9 @@ import type {
   TagsRemoveRequest,
   TrashPurgeRequest,
   TrashRestoreRequest,
+  VaultCollectOrphansRequest,
+  VaultFindOrphansRequest,
+  VaultVerifyRequest,
 } from "../shared/contract";
 
 const appApi: AppApi = {
@@ -231,6 +234,16 @@ const appApi: AppApi = {
       ipcRenderer.on(IPC_CHANNELS.jobsUpdated, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.jobsUpdated, listener);
     },
+  },
+  vault: {
+    // Asset-vault maintenance (T059) — thin invokes. No raw path or byte ever
+    // crosses; the renderer gets only the typed report/counts. `collectOrphans` is
+    // guarded by `confirm: true` (validated again on the main side).
+    verify: (request?: VaultVerifyRequest) => ipcRenderer.invoke(IPC_CHANNELS.vaultVerify, request),
+    findOrphans: (request?: VaultFindOrphansRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.vaultFindOrphans, request),
+    collectOrphans: (request: VaultCollectOrphansRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.vaultCollectOrphans, request),
   },
   menu: {
     // Receive-only subscription (T048): the native Help → "Keyboard shortcuts"

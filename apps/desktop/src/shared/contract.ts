@@ -910,6 +910,62 @@ export interface JobsListResult {
 }
 
 // ---------------------------------------------------------------------------
+// vault.verify() / vault.findOrphans() / vault.collectOrphans()  (T059)
+// ---------------------------------------------------------------------------
+
+/**
+ * Vault integrity-verify request (T059) — currently no scope; a future scoped
+ * variant (e.g. one source) can extend this shape without a breaking change.
+ */
+export const VaultVerifyRequestSchema = z.void();
+export type VaultVerifyRequest = z.infer<typeof VaultVerifyRequestSchema>;
+
+/**
+ * The vault integrity report: counts of OK assets + the asset ids whose stored
+ * bytes hashed to a different value (`mismatched`) or whose file is gone
+ * (`missing`), plus on-disk vault files with no `assets` row (`extraFiles`,
+ * canonical relative paths). Read-only — verify reports, it never mutates.
+ */
+export interface VaultVerifyResult {
+  readonly ok: number;
+  readonly mismatched: readonly string[];
+  readonly missing: readonly string[];
+  readonly extraFiles: readonly string[];
+}
+
+/** Vault orphan-scan request (T059) — no scope; scans the whole `assetsDir`. */
+export const VaultFindOrphansRequestSchema = z.void();
+export type VaultFindOrphansRequest = z.infer<typeof VaultFindOrphansRequestSchema>;
+
+/**
+ * The orphan-scan result. Each orphan is a vault FILE (its canonical relative path
+ * + size) — the orphan unit is the unreferenced file, not a dangling asset row
+ * (the cascade FK makes a dangling row unreachable). There is no `reason`/`assetId`
+ * field: an orphan is by definition a file with no live asset row.
+ */
+export interface VaultOrphansResult {
+  readonly orphans: readonly { relativePath: string; size: number }[];
+  readonly totalBytes: number;
+}
+
+/**
+ * Collect (delete) confirmed orphan files (T059). `confirm: z.literal(true)` makes
+ * a destructive sweep impossible to trigger accidentally from the renderer; the
+ * optional `relativePaths` allow-list lets the UI confirm exactly the files
+ * `findOrphans` showed (keyed on the same relative-path orphan identity).
+ */
+export const VaultCollectOrphansRequestSchema = z.object({
+  confirm: z.literal(true),
+  relativePaths: z.array(z.string()).optional(),
+});
+export type VaultCollectOrphansRequest = z.infer<typeof VaultCollectOrphansRequestSchema>;
+
+export interface VaultCollectOrphansResult {
+  readonly removed: number;
+  readonly freedBytes: number;
+}
+
+// ---------------------------------------------------------------------------
 // capture.getPairing() / capture.regenerateToken() / capture.setEnabled()  (T062)
 // ---------------------------------------------------------------------------
 
@@ -2885,6 +2941,27 @@ export interface AppApi {
      * mirrors `menu.onShowShortcuts`, but its callback receives a `JobSummary`.
      */
     subscribe(callback: (summary: JobSummary) => void): () => void;
+  };
+  readonly vault: {
+    /**
+     * Verify the asset vault's integrity (T059) — re-hash every live asset's
+     * stored bytes (streamed) and report mismatched / missing files + extra files
+     * (vault bytes with no `assets` row). Read-only; runs on the local background
+     * runner for a large vault. The renderer never resolves a path or reads bytes.
+     */
+    verify(request?: VaultVerifyRequest): Promise<VaultVerifyResult>;
+    /**
+     * Find orphaned vault FILES (T059) — files under `assets/` that no live
+     * `assets` row references (the bytes a hard-purge's cascade left behind).
+     * Read-only; the candidate set for `collectOrphans`.
+     */
+    findOrphans(request?: VaultFindOrphansRequest): Promise<VaultOrphansResult>;
+    /**
+     * Remove confirmed orphan files (T059). Guarded by `confirm: true`; an optional
+     * `relativePaths` allow-list scopes removal to exactly the files the UI showed.
+     * Never deletes a file any live asset row references. Returns the counts freed.
+     */
+    collectOrphans(request: VaultCollectOrphansRequest): Promise<VaultCollectOrphansResult>;
   };
   readonly menu: {
     /**

@@ -15,7 +15,7 @@
  */
 
 import type { Asset, AssetId, AssetKind, ElementId, VaultRoot } from "@interleave/core";
-import { assets, type InterleaveDatabase } from "@interleave/db";
+import { assets, elements, type InterleaveDatabase } from "@interleave/db";
 import { and, eq } from "drizzle-orm";
 import { newAssetId, nowIso } from "./ids";
 import { rowToAsset } from "./mappers";
@@ -106,9 +106,79 @@ export class AssetRepository {
       .map(rowToAsset);
   }
 
-  /** Look up an asset by content hash (dedup / integrity), or `null`. */
+  /**
+   * Look up the FIRST asset by content hash (any-by-hash), or `null`. NOT
+   * liveness-aware — it can return a row whose owning element has been hard-purged
+   * (in practice unreachable, since the `assets.owning_element_id` FK cascades a
+   * purge to the asset row). For the T059 dedup-on-write decision use
+   * {@link findLiveByContentHash} instead, which joins `elements` to guarantee the
+   * reused bytes belong to a still-reachable owner.
+   */
   findByContentHash(contentHash: string): Asset | null {
     const row = this.db.select().from(assets).where(eq(assets.contentHash, contentHash)).get();
     return row ? rowToAsset(row) : null;
+  }
+
+  /**
+   * The liveness-aware dedup lookup (T059): the first asset row with this content
+   * hash whose owning `elements` row STILL EXISTS — i.e. reachable, NOT a phantom
+   * row whose element is gone. This is what {@link AssetVaultService.importAsset}'s
+   * content-hash dedup calls so the bytes it reuses are provably still referenced
+   * by a live row (the owner may be soft-deleted-but-restorable — that row is still
+   * present, so the file is still live and GC will not reclaim it).
+   *
+   * An INNER JOIN to `elements` enforces "the owning element exists": because the
+   * `assets.owning_element_id` FK cascades a hard-purge to the asset row, a hash
+   * row whose element is truly gone cannot exist today, so in practice this matches
+   * {@link findByContentHash}; the explicit join makes the "LIVE asset" wording
+   * backed by a signature and future-proofs it against any non-cascading delete.
+   */
+  findLiveByContentHash(contentHash: string): Asset | null {
+    const row = this.db
+      .select({ asset: assets })
+      .from(assets)
+      .innerJoin(elements, eq(assets.owningElementId, elements.id))
+      .where(eq(assets.contentHash, contentHash))
+      .get();
+    return row ? rowToAsset(row.asset) : null;
+  }
+
+  /** Every asset row (for the vault integrity-verify + orphan-GC sweep, T059). */
+  listAll(): Asset[] {
+    return this.db.select().from(assets).all().map(rowToAsset);
+  }
+
+  /**
+   * The set of `relative_path` values referenced by every live asset row UNDER A
+   * GIVEN `vaultRoot` (T059) — an asset whose owning element row still exists
+   * (`INNER JOIN elements`), which includes a soft-deleted-but-restorable owner (its
+   * row is still present, so its file is still referenced). This is the file-centric
+   * orphan GC's REFERENCE SET: a vault file is an orphan iff its canonical relative
+   * path is NOT in this set.
+   *
+   * Keyed on the COMPOSITE `(vault_root, relative_path)` — the predicate filters to
+   * the supplied `vaultRoot` (default `"assets"`, the only root that lives under
+   * `assetsDir`) so a row in a DIFFERENT root (`exports`/`backups`) that happens to
+   * share a `relative_path` with an `assets/` file can never falsely protect that
+   * file from GC. The walk is scoped to one root's tree, so the reference set must be
+   * scoped to the same root for an exact match. Today every asset row is
+   * `vault_root = "assets"`, so this is precise rather than merely conservative.
+   *
+   * Consistent with the shared-path dedup policy in {@link AssetVaultService}: two
+   * asset rows may share one `relative_path` (identical deduped bytes), so GC must
+   * only reclaim a file when NO live asset row references its path — exactly what a
+   * set-membership test answers. A path leaves this set only after the owning
+   * element is HARD-purged (`TrashRepository.purge`/`emptyTrash`), which cascades
+   * the asset row away while leaving the bytes on disk — that leftover file is the
+   * orphan.
+   */
+  referencedRelativePaths(vaultRoot: VaultRoot = "assets"): Set<string> {
+    const rows = this.db
+      .select({ relativePath: assets.relativePath })
+      .from(assets)
+      .innerJoin(elements, eq(assets.owningElementId, elements.id))
+      .where(eq(assets.vaultRoot, vaultRoot))
+      .all();
+    return new Set(rows.map((r) => r.relativePath));
   }
 }

@@ -573,6 +573,48 @@ export interface JobsListResult {
 }
 
 // ---------------------------------------------------------------------------
+// vault.* — asset-vault maintenance (T059). The renderer never resolves a raw
+// path or reads/writes bytes; it gets only the typed report/counts. The vault is
+// the canonical local store — there is NO app-facing S3.
+// ---------------------------------------------------------------------------
+
+/** The vault integrity report (T059). Read-only; verify reports, never mutates. */
+export interface VaultVerifyResult {
+  /** Count of live assets whose stored bytes hashed to the recorded hash. */
+  readonly ok: number;
+  /** Asset ids whose stored bytes hashed to a DIFFERENT value (corruption). */
+  readonly mismatched: readonly string[];
+  /** Asset ids whose referenced file is MISSING on disk. */
+  readonly missing: readonly string[];
+  /** On-disk vault files (canonical relative paths) with no `assets` row at all. */
+  readonly extraFiles: readonly string[];
+}
+
+/**
+ * The orphan-scan result (T059). Each orphan is a vault FILE (relative path +
+ * size) — the orphan unit is the unreferenced file, not a dangling asset row.
+ */
+export interface VaultOrphansResult {
+  readonly orphans: readonly { relativePath: string; size: number }[];
+  readonly totalBytes: number;
+}
+
+/**
+ * Remove confirmed orphan files (T059). `confirm: true` guards the destructive
+ * sweep; the optional `relativePaths` allow-list scopes removal to exactly the
+ * files `findOrphans` showed.
+ */
+export interface VaultCollectOrphansRequest {
+  readonly confirm: true;
+  readonly relativePaths?: readonly string[];
+}
+
+export interface VaultCollectOrphansResult {
+  readonly removed: number;
+  readonly freedBytes: number;
+}
+
+// ---------------------------------------------------------------------------
 // capture.* — browser-extension pairing (T062). The TRUSTED desktop renderer
 // reads/regenerates the pairing token + toggles the loopback capture server.
 // The token is displayed for the user to paste into the extension; it is never
@@ -1693,6 +1735,14 @@ export interface AppApi {
     /** Subscribe to runner job updates (T058); returns an unsubscribe fn. */
     subscribe(callback: (summary: JobSummary) => void): () => void;
   };
+  readonly vault: {
+    /** Verify asset-vault integrity (T059) — re-hash stored bytes; read-only. */
+    verify(): Promise<VaultVerifyResult>;
+    /** Find orphaned vault files (T059) — unreferenced bytes; read-only. */
+    findOrphans(): Promise<VaultOrphansResult>;
+    /** Remove confirmed orphan files (T059) — guarded by `confirm: true`. */
+    collectOrphans(request: VaultCollectOrphansRequest): Promise<VaultCollectOrphansResult>;
+  };
   readonly menu: {
     /** Subscribe to the native Help → "Keyboard shortcuts" menu item (T048). */
     onShowShortcuts(callback: () => void): () => void;
@@ -2087,6 +2137,38 @@ export const appApi = {
   subscribeJobs(callback: (summary: JobSummary) => void): () => void {
     if (!isDesktop() || !window.appApi?.jobs) return () => {};
     return window.appApi.jobs.subscribe(callback);
+  },
+  /**
+   * Verify the asset vault's integrity (T059) — re-hash every live asset's stored
+   * bytes (streamed) and report mismatched / missing / extra files. Read-only.
+   * Outside the desktop shell returns an empty OK report (no vault to verify).
+   */
+  verifyVault(): Promise<VaultVerifyResult> {
+    if (!isDesktop() || !window.appApi?.vault) {
+      return Promise.resolve({ ok: 0, mismatched: [], missing: [], extraFiles: [] });
+    }
+    return window.appApi.vault.verify();
+  },
+  /**
+   * Find orphaned vault FILES (T059) — files no live `assets` row references (the
+   * bytes a hard-purge's cascade left behind). Read-only; the candidate set the
+   * confirm dialog shows. Outside the desktop shell returns an empty set.
+   */
+  findVaultOrphans(): Promise<VaultOrphansResult> {
+    if (!isDesktop() || !window.appApi?.vault) {
+      return Promise.resolve({ orphans: [], totalBytes: 0 });
+    }
+    return window.appApi.vault.findOrphans();
+  },
+  /**
+   * Remove confirmed orphan files (T059) — guarded by `confirm: true`; never
+   * deletes a referenced file. Outside the desktop shell removes nothing.
+   */
+  collectVaultOrphans(request: VaultCollectOrphansRequest): Promise<VaultCollectOrphansResult> {
+    if (!isDesktop() || !window.appApi?.vault) {
+      return Promise.resolve({ removed: 0, freedBytes: 0 });
+    }
+    return window.appApi.vault.collectOrphans(request);
   },
   /**
    * Subscribe to the native Help → "Keyboard shortcuts" (⌘/) menu item (T048). The

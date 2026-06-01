@@ -175,7 +175,16 @@ import type {
   TrashRestoreRequest,
   TrashRestoreResult,
   UndoLastResult,
+  VaultCollectOrphansRequest,
+  VaultCollectOrphansResult,
+  VaultOrphansResult,
+  VaultVerifyResult,
 } from "../shared/contract";
+import {
+  AssetVaultService,
+  type OrphanReport,
+  type VaultIntegrityReport,
+} from "./asset-vault-service";
 import { type BackupCounts, resolveSchemaVersion } from "./backup-manifest";
 import {
   CAPTURE_ALLOWED_ORIGIN_KEY,
@@ -232,6 +241,13 @@ export class DbService {
    * M13's loopback capture server (via the {@link urlImportService} accessor).
    */
   private urlImport: UrlImportService | null = null;
+  /**
+   * The asset-vault scaling service (T059) — streamed write+hash, content-hash
+   * dedup, integrity verify, and file-centric orphan GC. Built lazily on first read
+   * (it needs the vault `assetsDir`, injected at open()), so a contract-only test
+   * that never touches the vault can still open the DB.
+   */
+  private assetVault: AssetVaultService | null = null;
   /** The vault asset-root, injected at open() time; required for URL import. */
   private assetsDir: string | null = null;
   /** DEV/E2E-only: permit loopback/private hosts in URL import (see open()). */
@@ -329,6 +345,7 @@ export class DbService {
     this.attentionScheduler = null;
     this.undoService = null;
     this.urlImport = null;
+    this.assetVault = null;
     this.assetsDir = null;
     this.allowLoopbackImport = false;
     this.migrated = false;
@@ -724,6 +741,72 @@ export class DbService {
       allowLoopback: this.allowLoopbackImport,
     });
     return this.urlImport;
+  }
+
+  /**
+   * The asset-vault scaling service (T059), lazily built on first read against the
+   * open DB + the vault `assetsDir` injected at {@link open}. Returns the SAME
+   * instance every call. Throws a clear error if `assetsDir` was not provided (a
+   * contract-only test that never touches the vault), rather than constructing a
+   * half-wired service — mirrors {@link urlImportService}.
+   */
+  get assetVaultService(): AssetVaultService {
+    if (this.assetVault) return this.assetVault;
+    const repositories = this.repos;
+    if (!this.assetsDir) {
+      throw new Error(
+        "DbService: vault maintenance requires an assets directory — call open() with { assetsDir }",
+      );
+    }
+    this.assetVault = new AssetVaultService({
+      db: this.require().db,
+      repositories,
+      assetsDir: this.assetsDir,
+    });
+    return this.assetVault;
+  }
+
+  /**
+   * Verify the asset vault's integrity (T059) — re-hash every live asset's stored
+   * bytes (streamed) and compare to the recorded `assets.content_hash`. Read-only;
+   * returns the renderer-safe report (asset ids + extra-file relative paths). The
+   * IPC handler delegates here; the renderer never resolves a path or reads bytes.
+   */
+  async verifyVault(): Promise<VaultVerifyResult> {
+    const report: VaultIntegrityReport = await this.assetVaultService.verifyIntegrity();
+    return {
+      ok: report.ok,
+      mismatched: report.mismatched,
+      missing: report.missing,
+      extraFiles: report.extraFiles,
+    };
+  }
+
+  /**
+   * Find orphaned vault FILES (T059) — files under `assets/` that no live `assets`
+   * row references (the bytes a hard-purge's cascade left behind). Read-only; the
+   * candidate set the confirm dialog shows before {@link collectVaultOrphans}.
+   */
+  async findVaultOrphans(): Promise<VaultOrphansResult> {
+    const report: OrphanReport = await this.assetVaultService.findOrphans();
+    return {
+      orphans: report.orphans.map((o) => ({ relativePath: o.relativePath, size: o.size })),
+      totalBytes: report.totalBytes,
+    };
+  }
+
+  /**
+   * Remove confirmed orphan files (T059) — guarded by `confirm: true`; the optional
+   * `relativePaths` allow-list scopes removal to exactly the files the UI showed.
+   * Never deletes a file any live asset row references (re-checked at removal time).
+   */
+  async collectVaultOrphans(
+    request: VaultCollectOrphansRequest,
+  ): Promise<VaultCollectOrphansResult> {
+    return this.assetVaultService.collectOrphans({
+      confirm: request.confirm,
+      ...(request.relativePaths ? { relativePaths: request.relativePaths } : {}),
+    });
   }
 
   // NOTE: URL import (T060) no longer has an inline `DbService.importFromUrl`

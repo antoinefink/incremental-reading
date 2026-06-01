@@ -60,9 +60,20 @@ async function dispatch(jobId: string, type: string, payload: unknown): Promise<
       case "url_import":
         await runUrlImport(jobId, payload as UrlImportPayload);
         return;
+      case "vault_verify":
+      case "vault_gc":
+        // The vault integrity-verify + orphan-scan (T059) are MAIN-side work: they
+        // read the asset rows + stream the vault bytes, which the DB-FREE worker
+        // cannot do. The worker is a pure pass-through here — it posts an empty
+        // result so the runner's MAIN-side apply handler runs the actual heavy
+        // hashing/walk OFF-MAIN. (Keeping them on the runner mechanism gives a slow
+        // large-vault sweep the same off-main scheduling + observe surface as any
+        // other job, without ever opening the DB in the worker.)
+        post({ kind: "result", jobId, data: null });
+        return;
       default:
-        // Reserved types (ocr/embed/ai/cleanup/vault_verify/vault_gc) have no
-        // worker dispatch yet — fail clearly so a mis-enqueue is visible.
+        // Reserved types (ocr/embed/ai/cleanup) have no worker dispatch yet — fail
+        // clearly so a mis-enqueue is visible.
         post({
           kind: "error",
           jobId,

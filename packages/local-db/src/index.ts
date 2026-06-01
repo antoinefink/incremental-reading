@@ -78,7 +78,7 @@ export {
   ExtractionService,
   rawExtractIntervalDays,
 } from "./extraction-service";
-export { newElementId, newJobId, newRowId, newSiblingGroupId, nowIso } from "./ids";
+export { newAssetId, newElementId, newJobId, newRowId, newSiblingGroupId, nowIso } from "./ids";
 export {
   type InboxItemDetail,
   type InboxItemSummary,

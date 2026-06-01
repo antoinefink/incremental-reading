@@ -82,6 +82,13 @@ export const IPC_CHANNELS = {
   // SEND channel (no `ipcMain.handle`); the preload exposes a narrow receive-only
   // subscription, never a generic listener.
   jobsUpdated: "jobs:updated",
+  // Asset-vault maintenance (T059) — all behind the typed surface, no raw paths.
+  // `vault:verify` re-hashes stored bytes; `vault:findOrphans` lists unreferenced
+  // vault files; `vault:collectOrphans` removes confirmed orphan files (guarded by
+  // `confirm: true`). The vault is the canonical local store — there is NO S3.
+  vaultVerify: "vault:verify",
+  vaultFindOrphans: "vault:findOrphans",
+  vaultCollectOrphans: "vault:collectOrphans",
   // One-way main → renderer event (T048): the native Help → "Keyboard shortcuts"
   // menu item asks the renderer to open the in-app cheat sheet. This is a SEND
   // channel (main → renderer), not an `invoke` handler — the preload exposes a
