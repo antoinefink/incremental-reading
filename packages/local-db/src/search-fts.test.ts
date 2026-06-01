@@ -10,6 +10,7 @@
 
 import type { DbHandle } from "@interleave/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ConceptRepository } from "./concept-repository";
 import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
 import { ReviewRepository } from "./review-repository";
@@ -24,6 +25,7 @@ describe("SearchRepository (FTS5, T042)", () => {
   let documents: DocumentRepository;
   let elementsRepo: ElementRepository;
   let review: ReviewRepository;
+  let conceptsRepo: ConceptRepository;
 
   beforeEach(() => {
     handle = createInMemoryDb();
@@ -32,6 +34,7 @@ describe("SearchRepository (FTS5, T042)", () => {
     documents = new DocumentRepository(handle.db);
     elementsRepo = new ElementRepository(handle.db);
     review = new ReviewRepository(handle.db);
+    conceptsRepo = new ConceptRepository(handle.db);
   });
 
   afterEach(() => {
@@ -258,6 +261,81 @@ describe("SearchRepository (FTS5, T042)", () => {
     });
     expect(search.search("quantum", { type: "source" }).map((h) => h.id)).toEqual([src.id]);
     expect(search.search("quantum", { type: "card" }).map((h) => h.id)).toEqual([card.element.id]);
+  });
+
+  describe("concept filter (canonical-substrate liveness/type, T041/T042)", () => {
+    /** Seed a source that matches "neuron" and is a member of a fresh concept. */
+    function seedSourceInConcept(conceptName: string) {
+      const concept = conceptsRepo.createConcept({ name: conceptName });
+      const { element: src } = sources.create({ title: "Neuron firing", priority: 0.5 });
+      documents.upsert({
+        elementId: src.id,
+        prosemirrorJson: { type: "doc", content: [] },
+        plainText: "the neuron body",
+      });
+      conceptsRepo.assignConcept(src.id, concept.id);
+      return { concept, src };
+    }
+
+    it("restricts a search to members of a live concept", () => {
+      const { concept, src } = seedSourceInConcept("Attention");
+      // A second matching source NOT in the concept must be excluded by the filter.
+      const { element: other } = sources.create({ title: "Neuron map", priority: 0.5 });
+      documents.upsert({
+        elementId: other.id,
+        prosemirrorJson: { type: "doc", content: [] },
+        plainText: "another neuron",
+      });
+
+      const unfiltered = search.search("neuron").map((h) => h.id);
+      expect(unfiltered).toEqual(expect.arrayContaining([src.id, other.id]));
+
+      const filtered = search.search("neuron", { conceptId: concept.id }).map((h) => h.id);
+      expect(filtered).toContain(src.id);
+      expect(filtered).not.toContain(other.id);
+    });
+
+    it("concept filter EXCLUDES members of a SOFT-DELETED concept (matches the canonical substrate)", () => {
+      // Regression: the conceptJoin used to enforce only MEMBER liveness, not the
+      // concept ENDPOINT, so a soft-deleted concept's members still surfaced — a
+      // cross-surface divergence from queue/Library (elementsForConcept of a dead
+      // concept is []). Assign while live, THEN soft-delete the concept element.
+      const { concept, src } = seedSourceInConcept("Attention");
+      expect(search.search("neuron", { conceptId: concept.id }).map((h) => h.id)).toContain(src.id);
+
+      elementsRepo.softDelete(concept.id);
+
+      // The member is still live and still matches an UNscoped query…
+      expect(search.search("neuron").map((h) => h.id)).toContain(src.id);
+      // …but filtering by the now-dead concept yields nothing (concept-endpoint
+      // liveness), exactly as ConceptRepository.elementsForConcept returns [].
+      expect(conceptsRepo.elementsForConcept(concept.id)).toEqual([]);
+      expect(search.search("neuron", { conceptId: concept.id })).toEqual([]);
+    });
+
+    it("concept filter ignores a corrupt edge whose `to` endpoint is a NON-concept element", () => {
+      // A raw addRelation (or legacy/imported data) can create a `concept_membership`
+      // edge pointing at a non-concept; the canonical substrate drops it. Search must
+      // too — the `ce.type = 'concept'` guard ensures a non-concept `to`-endpoint id
+      // never resolves any members.
+      const { element: src } = sources.create({ title: "Neuron stub", priority: 0.5 });
+      documents.upsert({
+        elementId: src.id,
+        prosemirrorJson: { type: "doc", content: [] },
+        plainText: "neuron body",
+      });
+      const { element: notAConcept } = sources.create({ title: "Not a concept", priority: 0.5 });
+      elementsRepo.addRelation({
+        fromElementId: src.id,
+        toElementId: notAConcept.id,
+        relationType: "concept_membership",
+      });
+
+      // Filtering by the non-concept id resolves no members (it is not a concept),
+      // mirroring elementsForConcept(non-concept) === [].
+      expect(conceptsRepo.elementsForConcept(notAConcept.id)).toEqual([]);
+      expect(search.search("neuron", { conceptId: notAConcept.id })).toEqual([]);
+    });
   });
 
   it("matches by prefix (typing the start of a word)", () => {

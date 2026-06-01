@@ -119,6 +119,64 @@ export class ConceptRepository {
   }
 
   /**
+   * Build the canonical `memberElementId -> Set<liveConceptId>` membership map in
+   * ONE pass — the single, reusable, NON-N+1 primitive every concept-membership
+   * read/count is built on (this method, `listConcepts`, `elementsForConcept`, and
+   * the drill-down faceted counts in {@link LibraryQuery}). It does exactly three
+   * reads regardless of how many concepts/members exist:
+   *
+   *  1. all live (`deleted_at IS NULL`) element ids — the endpoint liveness set;
+   *  2. the `type = 'concept'` subset of (1) — the live concept ids;
+   *  3. every `concept_membership` edge (`from = member`, `to = concept`).
+   *
+   * It then folds the edges into a map, keeping ONLY edges whose BOTH endpoints are
+   * live (a soft-deleted member or a soft-deleted concept drops out) and DEDUPing
+   * duplicate edges (the value is a `Set`, so re-assigning the same pair never
+   * double-counts). Callers can read members-of-a-concept by inverting, or
+   * concepts-of-a-member directly — without a per-row `findById` query.
+   */
+  liveMembershipMap(): Map<ElementId, Set<ElementId>> {
+    const liveElementIds = new Set(
+      this.db
+        .select({ id: elements.id })
+        .from(elements)
+        .where(isNull(elements.deletedAt))
+        .all()
+        .map((r) => r.id as ElementId),
+    );
+    const liveConceptIds = new Set(
+      this.db
+        .select({ id: elements.id })
+        .from(elements)
+        .where(and(eq(elements.type, "concept"), isNull(elements.deletedAt)))
+        .all()
+        .map((r) => r.id as ElementId),
+    );
+    const membershipRows = this.db
+      .select()
+      .from(elementRelations)
+      .where(eq(elementRelations.relationType, "concept_membership"))
+      .all();
+
+    // member element id -> set of LIVE concept ids it belongs to (Set dedups edges).
+    const byMember = new Map<ElementId, Set<ElementId>>();
+    for (const edge of membershipRows) {
+      const memberId = edge.fromElementId as ElementId;
+      const conceptId = edge.toElementId as ElementId;
+      // Both endpoints must be live: a soft-deleted member never counts, and a
+      // membership to a soft-deleted concept is dropped (matches `firstConceptName`).
+      if (!liveElementIds.has(memberId) || !liveConceptIds.has(conceptId)) continue;
+      let set = byMember.get(memberId);
+      if (!set) {
+        set = new Set<ElementId>();
+        byMember.set(memberId, set);
+      }
+      set.add(conceptId);
+    }
+    return byMember;
+  }
+
+  /**
    * All concepts as a flat list of {@link ConceptNode} (the renderer builds the
    * hierarchy from `parentConceptId`), each with its direct-child count and a
    * member count from the live `concept_membership` edges. Concepts whose element
@@ -147,32 +205,14 @@ export class ConceptRepository {
       }
     }
 
-    // Member counts: distinct LIVE elements with a `concept_membership` edge to the
-    // concept. The edge direction is `from = member element`, `to = concept`.
-    const memberCounts = new Map<ElementId, Set<ElementId>>();
-    const membershipRows = this.db
-      .select()
-      .from(elementRelations)
-      .where(eq(elementRelations.relationType, "concept_membership"))
-      .all();
-    const liveMemberIds = new Set(
-      this.db
-        .select({ id: elements.id })
-        .from(elements)
-        .where(isNull(elements.deletedAt))
-        .all()
-        .map((r) => r.id as ElementId),
-    );
-    for (const edge of membershipRows) {
-      const conceptId = edge.toElementId as ElementId;
-      const memberId = edge.fromElementId as ElementId;
-      if (!liveConceptIds.has(conceptId) || !liveMemberIds.has(memberId)) continue;
-      let set = memberCounts.get(conceptId);
-      if (!set) {
-        set = new Set<ElementId>();
-        memberCounts.set(conceptId, set);
+    // Member counts: invert the canonical membership map (member -> concepts) into
+    // per-concept member counts. Reusing the ONE primitive guarantees `memberCount`
+    // matches the drill-down `byConcept` counts (same dedup + soft-delete rules).
+    const memberCounts = new Map<ElementId, number>();
+    for (const conceptIds of this.liveMembershipMap().values()) {
+      for (const conceptId of conceptIds) {
+        memberCounts.set(conceptId, (memberCounts.get(conceptId) ?? 0) + 1);
       }
-      set.add(memberId);
     }
 
     return live.map((row) => {
@@ -182,7 +222,7 @@ export class ConceptRepository {
         name: row.name,
         parentConceptId: (row.parentConceptId as ElementId | null) ?? null,
         childCount: childCounts.get(id) ?? 0,
-        memberCount: memberCounts.get(id)?.size ?? 0,
+        memberCount: memberCounts.get(id) ?? 0,
       };
     });
   }
@@ -194,8 +234,14 @@ export class ConceptRepository {
    * (the existing edge is kept; no duplicate row, no second op).
    */
   assignConcept(elementId: ElementId, conceptId: ElementId): void {
-    const concept = this.findById(conceptId);
-    if (!concept) {
+    // Validate the concept by ELEMENT liveness, not just the side-table row: the
+    // `concepts` row survives a soft-delete of the concept element, so `findById`
+    // alone would let an edge to a dead concept be created. The whole read side
+    // (liveMembershipMap, elementsForConcept, byConcept counts, firstConceptName)
+    // already drops edges to dead concepts, so such an edge would be invisible — but
+    // we refuse to create it at all, keeping the write side consistent with reads.
+    const conceptEl = this.elementRepo.findById(conceptId);
+    if (!conceptEl || conceptEl.deletedAt || conceptEl.type !== "concept") {
       throw new Error(`ConceptRepository.assignConcept: concept ${conceptId} not found`);
     }
     // Idempotency: skip when the membership already exists.
@@ -223,14 +269,40 @@ export class ConceptRepository {
     this.elementRepo.removeRelation(edge.id as RelationId);
   }
 
-  /** The concepts an element is a member of (resolves the `concept_membership` edges). */
+  /**
+   * The LIVE concepts an element is a member of (resolves the `concept_membership`
+   * edges), deduped, in first-seen edge order.
+   *
+   * Liveness is enforced over the concept endpoint the SAME way as
+   * {@link liveMembershipMap} / {@link elementsForConcept} / {@link firstConceptName}:
+   * a soft-deleted concept never surfaces — so the inspector's "member of" list and
+   * the queue's concept-name filter agree with the Library drill-down counts (no
+   * read shows a deleted concept while another hides it). Liveness is resolved with
+   * ONE `findManyLive` over the candidate concept ids (NOT a `findById` per edge,
+   * which has no soft-delete check), keeping this a constant number of queries.
+   */
   conceptsForElement(elementId: ElementId): ConceptSummary[] {
     const conceptIds = this.elementRepo
       .listRelationsFrom(elementId)
       .filter((r) => r.relationType === "concept_membership")
       .map((r) => r.toElementId as ElementId);
+    if (conceptIds.length === 0) return [];
+
+    // One liveness read for all candidate concepts (a soft-deleted concept element
+    // drops out; the side-table `concepts` row survives a soft-delete, so a raw
+    // `findById` would wrongly include it).
+    const liveConceptIds = new Set(
+      this.elementRepo
+        .findManyLive(conceptIds)
+        .filter((el) => el.type === "concept")
+        .map((el) => el.id as ElementId),
+    );
+
     const out: ConceptSummary[] = [];
+    const seen = new Set<ElementId>();
     for (const id of conceptIds) {
+      if (seen.has(id) || !liveConceptIds.has(id)) continue;
+      seen.add(id);
       const summary = this.findById(id);
       if (summary) out.push(summary);
     }
@@ -240,24 +312,41 @@ export class ConceptRepository {
   /**
    * The NAME of the first LIVE concept an element is a member of (for the per-row
    * meta line on the queue / search rows / review face), or `null`. The ONE shared
-   * "first membership walk" — skips a membership whose concept element was
-   * soft-deleted, so a deleted concept never shows on a row.
+   * "first membership walk" — it scans the membership edges in row order and
+   * returns the FIRST whose concept element is live. A soft-deleted concept never
+   * shows on a row, and (the fix) a dead concept earlier in the edge list does NOT
+   * mask a live concept later in it — consistent with `liveMembershipMap`, where the
+   * element is still a member of the live concept.
    */
   firstConceptName(elementId: ElementId): string | null {
-    const membership = this.elementRepo
+    const memberships = this.elementRepo
       .listRelationsFrom(elementId)
-      .find((r) => r.relationType === "concept_membership");
-    if (!membership) return null;
-    const conceptEl = this.elementRepo.findById(membership.toElementId as ElementId);
-    return conceptEl && !conceptEl.deletedAt ? conceptEl.title : null;
+      .filter((r) => r.relationType === "concept_membership");
+    for (const membership of memberships) {
+      const conceptEl = this.elementRepo.findById(membership.toElementId as ElementId);
+      if (conceptEl && !conceptEl.deletedAt && conceptEl.type === "concept") {
+        return conceptEl.title;
+      }
+    }
+    return null;
   }
 
   /**
    * The LIVE element ids that are members of a concept (feeds concept filtering +
    * counts). Reads the `concept_membership` edges (`to = concept`) and keeps only
-   * members whose element is not soft-deleted.
+   * members whose element is not soft-deleted, deduped, in first-seen edge order.
+   *
+   * Liveness is resolved with ONE `deleted_at IS NULL` set read (NOT a `findById`
+   * per edge), so this stays a constant number of queries regardless of member
+   * count. The same soft-delete + dedup rules as {@link liveMembershipMap} apply —
+   * a soft-deleted concept yields `[]` (no live concept set hit), matching the
+   * member-count semantics so filtering and counts never disagree.
    */
   elementsForConcept(conceptId: ElementId): ElementId[] {
+    // A soft-deleted concept has no live members (mirrors `liveMembershipMap`).
+    const conceptEl = this.elementRepo.findById(conceptId);
+    if (!conceptEl || conceptEl.deletedAt || conceptEl.type !== "concept") return [];
+
     const edges = this.db
       .select()
       .from(elementRelations)
@@ -268,16 +357,21 @@ export class ConceptRepository {
         ),
       )
       .all();
+    if (edges.length === 0) return [];
+
+    // One liveness read for all candidate members (no per-edge `findById`).
+    const candidateIds = edges.map((e) => e.fromElementId as ElementId);
+    const liveIds = new Set(
+      this.elementRepo.findManyLive(candidateIds).map((el) => el.id as ElementId),
+    );
+
     const out: ElementId[] = [];
     const seen = new Set<ElementId>();
     for (const edge of edges) {
       const memberId = edge.fromElementId as ElementId;
-      if (seen.has(memberId)) continue;
-      const el = this.elementRepo.findById(memberId);
-      if (el && !el.deletedAt) {
-        seen.add(memberId);
-        out.push(memberId);
-      }
+      if (seen.has(memberId) || !liveIds.has(memberId)) continue;
+      seen.add(memberId);
+      out.push(memberId);
     }
     return out;
   }

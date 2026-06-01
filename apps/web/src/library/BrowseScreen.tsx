@@ -95,9 +95,10 @@ export function BrowseScreen() {
   const [counts, setCounts] = useState<{
     all: number;
     byType: Readonly<Record<string, number>>;
+    byConcept: Readonly<Record<string, number>>;
     byPriority: Readonly<Record<string, number>>;
     byStatus: Readonly<Record<string, number>>;
-  }>({ all: 0, byType: {}, byPriority: {}, byStatus: {} });
+  }>({ all: 0, byType: {}, byConcept: {}, byPriority: {}, byStatus: {} });
   const [concepts, setConcepts] = useState<readonly ConceptNode[]>([]);
   const [selId, setSelId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -268,7 +269,10 @@ export function BrowseScreen() {
                   onClick={() => setConceptFilter((cur) => (cur === c.id ? null : c.id))}
                 >
                   <ConceptTag name={c.name} />
-                  <span className="filter-opt__count">{c.memberCount}</span>
+                  {/* DRILL-DOWN count: members of this concept that also match the
+                      OTHER active facets (NOT the global memberCount) — so the chip
+                      number always matches the filtered result list. */}
+                  <span className="filter-opt__count">{counts.byConcept?.[c.id] ?? 0}</span>
                 </button>
               ))}
             </div>

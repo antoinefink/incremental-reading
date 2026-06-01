@@ -1970,6 +1970,34 @@ describe("DbService — review session (T037)", () => {
     expect(byConcept.map((r) => r.id)).toEqual([sourceRow?.id]);
   });
 
+  it("library.browse carries DRILL-DOWN byConcept counts that match the filtered list end-to-end", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    // Build a concept whose members span types: one source + one extract + one card.
+    const all = svc.libraryBrowse({}).items;
+    const source = all.find((r) => r.type === "source");
+    const extract = all.find((r) => r.type === "extract");
+    const card = all.find((r) => r.type === "card");
+    expect(source && extract && card).toBeTruthy();
+    const concept = svc.repos.concepts.createConcept({ name: "Drilldown" });
+    svc.repos.concepts.assignConcept(source?.id as never, concept.id);
+    svc.repos.concepts.assignConcept(extract?.id as never, concept.id);
+    svc.repos.concepts.assignConcept(card?.id as never, concept.id);
+
+    // No type filter: the chip count is the full 3 members (the Map volume).
+    const noFilter = svc.libraryBrowse({});
+    expect(noFilter.counts.byConcept[concept.id]).toBe(3);
+
+    // TYPE=Extracts: the drill-down chip count must equal the visible extract rows,
+    // AND equal the rows when the concept is ALSO selected (the hard invariant).
+    const withType = svc.libraryBrowse({ types: ["extract"] });
+    const intersection = svc.libraryBrowse({ types: ["extract"], conceptId: concept.id });
+    expect(withType.counts.byConcept[concept.id]).toBe(intersection.items.length);
+    expect(intersection.items.map((r) => r.id)).toEqual([extract?.id]);
+  });
+
   it("library.browse survives a close + reopen (restart analogue) and excludes soft-deleted", () => {
     const first = new DbService();
     first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });

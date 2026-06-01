@@ -2103,11 +2103,20 @@ export interface LibraryItem {
   readonly dueLabel: string;
 }
 
-/** Per-facet counts over the UNFILTERED live browse universe (for facet labels). */
+/**
+ * DRILL-DOWN faceted counts for the filterbar. Each dimension's counts respect ALL
+ * OTHER currently-active filters but NOT its own selected value, so the number next
+ * to any facet value V equals the number of result rows you get if V is selected
+ * together with the other active filters (the count always matches the visible
+ * list — the fix for the reported chip/list mismatch). `all` is the count matching
+ * ALL active filters (= the returned `items` length before the optional title narrow).
+ */
 export interface LibraryBrowseCounts {
   readonly all: number;
   /** Per browsable type (one entry per {@link LibraryBrowseTypeSchema} value). */
   readonly byType: Readonly<Record<string, number>>;
+  /** Per concept, keyed by concept element id (the drill-down concept-chip count). */
+  readonly byConcept: Readonly<Record<string, number>>;
   /** Per priority band A/B/C/D. */
   readonly byPriority: Readonly<Record<string, number>>;
   /** Per lifecycle status. */

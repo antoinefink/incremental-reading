@@ -1308,10 +1308,17 @@ export interface LibraryItem {
   readonly dueLabel: string;
 }
 
-/** Per-facet counts over the UNFILTERED live browse universe (for facet labels). */
+/**
+ * DRILL-DOWN faceted counts. Each dimension's counts respect ALL OTHER active
+ * filters but NOT its own value, so the number next to a facet value equals the
+ * rows you get when that value is selected alongside the other active filters
+ * (the count always matches the visible list). `byConcept` is keyed by concept
+ * element id — the filterbar concept chip MUST use this, not `ConceptNode.memberCount`.
+ */
 export interface LibraryBrowseCounts {
   readonly all: number;
   readonly byType: Readonly<Record<string, number>>;
+  readonly byConcept: Readonly<Record<string, number>>;
   readonly byPriority: Readonly<Record<string, number>>;
   readonly byStatus: Readonly<Record<string, number>>;
 }

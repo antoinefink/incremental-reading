@@ -159,6 +159,28 @@ describe("ConceptRepository.assignConcept / unassignConcept", () => {
     const extractId = makeExtract();
     expect(() => concepts.assignConcept(extractId, "nope" as ElementId)).toThrow(/concept/);
   });
+
+  it("rejects assigning to a SOFT-DELETED concept (write side honours element liveness, not the side-table row)", () => {
+    const extractId = makeExtract();
+    const concept = concepts.createConcept({ name: "Memory" });
+    // Soft-deleting the concept ELEMENT leaves the `concepts` side-table row alive,
+    // so a side-table `findById` still resolves it — but assignConcept must refuse,
+    // matching the read side (liveMembershipMap/elementsForConcept drop dead concepts).
+    elements.softDelete(concept.id);
+    expect(concepts.findById(concept.id)).not.toBeNull(); // side-table row survives
+    expect(() => concepts.assignConcept(extractId, concept.id)).toThrow(/concept/);
+    // No phantom edge was created (the write was rejected before addRelation).
+    expect(
+      elements.listRelationsFrom(extractId).filter((r) => r.relationType === "concept_membership"),
+    ).toHaveLength(0);
+  });
+
+  it("rejects assigning to a non-concept element id", () => {
+    const extractId = makeExtract();
+    const otherExtract = makeExtract("Other");
+    // An element id that is not a concept must be rejected (type guard on the write).
+    expect(() => concepts.assignConcept(extractId, otherExtract)).toThrow(/concept/);
+  });
 });
 
 describe("ConceptRepository membership reads", () => {
@@ -190,6 +212,84 @@ describe("ConceptRepository membership reads", () => {
 
     elements.softDelete(a);
     expect(concepts.elementsForConcept(concept.id)).toEqual([]);
+  });
+
+  it("conceptsForElement excludes soft-deleted concepts (matches liveMembershipMap / firstConceptName)", () => {
+    const a = makeExtract("A");
+    const dead = concepts.createConcept({ name: "Dead" });
+    const live = concepts.createConcept({ name: "Live" });
+    concepts.assignConcept(a, dead.id);
+    concepts.assignConcept(a, live.id);
+
+    // Before deletion: both surface.
+    expect(
+      concepts
+        .conceptsForElement(a)
+        .map((c) => c.name)
+        .sort(),
+    ).toEqual(["Dead", "Live"]);
+
+    // Soft-deleting the concept ELEMENT keeps the `concepts` side-table row alive, so
+    // a raw `findById` would still resolve it — but conceptsForElement must drop it,
+    // consistent with every other live-membership read.
+    elements.softDelete(dead.id);
+    const names = concepts.conceptsForElement(a).map((c) => c.name);
+    expect(names).toEqual(["Live"]);
+
+    // All membership reads agree: the dead concept appears in NONE of them.
+    expect(concepts.firstConceptName(a)).toBe("Live");
+    expect(concepts.liveMembershipMap().get(a)).toEqual(new Set([live.id]));
+  });
+
+  it("drops a concept_membership edge whose `to` endpoint is a NON-concept element (load-bearing liveness/type guard)", () => {
+    // assignConcept rejects a non-concept target at write time, but a RAW addRelation
+    // (used for duplicates) or legacy/imported data can still create a
+    // `concept_membership` edge pointing at a non-concept. The substrate's guard
+    // (liveMembershipMap keeps only edges whose `to` is in liveConceptIds, built with
+    // `type = 'concept' AND deleted_at IS NULL`) must drop such an edge from EVERY
+    // read so a corrupt row can never inflate a count or surface a phantom concept.
+    const memberId = makeExtract("Member");
+    const notAConceptId = makeExtract("Not a concept");
+
+    elements.addRelation({
+      fromElementId: memberId,
+      toElementId: notAConceptId,
+      relationType: "concept_membership",
+    });
+
+    // liveMembershipMap: the edge is excluded (its `to` endpoint is not a live concept).
+    expect(concepts.liveMembershipMap().get(memberId)).toBeUndefined();
+    // conceptsForElement: the non-concept `to` endpoint is not surfaced as a concept.
+    expect(concepts.conceptsForElement(memberId)).toEqual([]);
+    // elementsForConcept(non-concept) is [] (the id is not a live concept).
+    expect(concepts.elementsForConcept(notAConceptId)).toEqual([]);
+    // The byConcept-style member count (inversion of the map) counts it as 0 — there
+    // is no concept node for a non-concept id, so listConcepts never reports it.
+    expect(concepts.listConcepts().some((c) => c.id === notAConceptId)).toBe(false);
+    let memberCountForNonConcept = 0;
+    for (const set of concepts.liveMembershipMap().values()) {
+      if (set.has(notAConceptId)) memberCountForNonConcept += 1;
+    }
+    expect(memberCountForNonConcept).toBe(0);
+  });
+
+  it("conceptsForElement dedups duplicate membership edges (one summary per concept)", () => {
+    const a = makeExtract("A");
+    const concept = concepts.createConcept({ name: "Memory" });
+    // Raw duplicate edges (bypass assignConcept's idempotency) to exercise dedup.
+    elements.addRelation({
+      fromElementId: a,
+      toElementId: concept.id,
+      relationType: "concept_membership",
+    });
+    elements.addRelation({
+      fromElementId: a,
+      toElementId: concept.id,
+      relationType: "concept_membership",
+    });
+    const found = concepts.conceptsForElement(a);
+    expect(found).toHaveLength(1);
+    expect(found[0]?.id).toBe(concept.id);
   });
 });
 

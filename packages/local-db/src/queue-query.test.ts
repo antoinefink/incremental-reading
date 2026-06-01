@@ -220,6 +220,40 @@ describe("QueueQuery", () => {
     expect(queue.list({ asOf: NOW, filters: { concept: "Nope" } }).items).toHaveLength(0);
   });
 
+  it("filters by concept matching ANY membership, via the prebuilt non-N+1 matcher", () => {
+    const { extractId, sourceId } = buildDueSet();
+    // The extract joins TWO concepts; the concept filter must match on EITHER name
+    // (the matcher tests the element's full membership set, not just the first edge).
+    const cog = repos.concepts.createConcept({ name: "Cognition" });
+    const mem = repos.concepts.createConcept({ name: "Memory" });
+    repos.concepts.assignConcept(extractId, cog.id);
+    repos.concepts.assignConcept(extractId, mem.id);
+
+    expect(
+      queue.list({ asOf: NOW, filters: { concept: "Cognition" } }).items.map((i) => i.id),
+    ).toEqual([extractId]);
+    expect(
+      queue.list({ asOf: NOW, filters: { concept: "Memory" } }).items.map((i) => i.id),
+    ).toEqual([extractId]);
+    expect(
+      queue.list({ asOf: NOW, filters: { concept: "Cognition" } }).items.map((i) => i.id),
+    ).not.toContain(sourceId);
+  });
+
+  it("concept filter excludes members of a SOFT-DELETED concept (matcher honours live endpoints)", () => {
+    const { extractId } = buildDueSet();
+    const dead = repos.concepts.createConcept({ name: "Phantom" });
+    repos.concepts.assignConcept(extractId, dead.id);
+    // While live, the filter keeps the member…
+    expect(
+      queue.list({ asOf: NOW, filters: { concept: "Phantom" } }).items.map((i) => i.id),
+    ).toEqual([extractId]);
+    // …after soft-deleting the concept element, the named-concept set has no LIVE id,
+    // so the row drops out — consistent with the Library drill-down counts.
+    repos.elements.softDelete(dead.id);
+    expect(queue.list({ asOf: NOW, filters: { concept: "Phantom" } }).items).toHaveLength(0);
+  });
+
   it("filters by tag (T041) — keeps only elements carrying the tag", () => {
     const { extractId, qaCardId } = buildDueSet();
     repos.elements.addTag(extractId, "definitions");

@@ -193,11 +193,23 @@ export class SearchRepository {
 
     // Narrow to live elements (defensive `deleted_at IS NULL`), and apply the
     // optional concept-membership / tag filters from T041 in the query layer.
+    //
+    // The concept filter enforces concept-ENDPOINT liveness/type the SAME way as the
+    // canonical substrate (ConceptRepository.liveMembershipMap / elementsForConcept):
+    // the membership edge only counts when its `to` endpoint is a LIVE `concept`-type
+    // element. Without the `ce` join, search would surface members of a soft-deleted
+    // concept (or of a corrupt edge pointing at a non-concept), diverging from
+    // queue/Library, which both drop such edges. The `from`/member liveness is still
+    // enforced by the outer `JOIN elements e ... e.deleted_at IS NULL`.
     const conceptJoin = options.conceptId
       ? sql`JOIN element_relations cm
             ON cm.from_element_id = e.id
             AND cm.relation_type = 'concept_membership'
-            AND cm.to_element_id = ${options.conceptId}`
+            AND cm.to_element_id = ${options.conceptId}
+          JOIN elements ce
+            ON ce.id = cm.to_element_id
+            AND ce.deleted_at IS NULL
+            AND ce.type = 'concept'`
       : sql``;
     const tagJoin = options.tag
       ? sql`JOIN element_tags etf ON etf.element_id = e.id

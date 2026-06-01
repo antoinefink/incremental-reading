@@ -207,8 +207,14 @@ export class QueueQuery {
       protected: all.filter((r) => r.protected).length,
     };
 
+    // Pre-resolve concept membership ONCE (not per-row): when a concept-name filter
+    // is active, build the canonical `member -> Set<liveConceptId>` map a single time
+    // and the set of live concept ids carrying that name, so `matchesFilters` does a
+    // map lookup instead of a `conceptsForElement` query per row (no N+1).
+    const conceptMatch = filters.concept ? this.buildConceptMatcher(filters.concept) : null;
+
     // Apply filters, then sort priority desc, then due date asc (stable).
-    let rows = all.filter((r) => this.matchesFilters(r, filters));
+    let rows = all.filter((r) => this.matchesFilters(r, filters, conceptMatch));
     rows = this.sort(rows);
     if (options.limit !== undefined) rows = rows.slice(0, options.limit);
 
@@ -244,8 +250,39 @@ export class QueueQuery {
     });
   }
 
+  /**
+   * Resolve a concept-NAME filter to a reusable, non-N+1 membership matcher built in
+   * a CONSTANT number of reads (regardless of row count): the canonical
+   * `member -> Set<liveConceptId>` map ({@link ConceptRepository.liveMembershipMap})
+   * plus the set of LIVE concept ids carrying the filtered name. `matchesFilters`
+   * then tests a row by intersecting its membership set with the named-concept ids —
+   * no per-row `conceptsForElement` query. Matches ANY of an element's memberships
+   * (an element can join several concepts) with the SAME live/dedup semantics as the
+   * Library drill-down and the inspector.
+   */
+  private buildConceptMatcher(name: string): (elementId: ElementId) => boolean {
+    const membership = this.repos.concepts.liveMembershipMap();
+    // Live concept ids whose name matches the filter (a name need not be unique).
+    const namedConceptIds = new Set(
+      this.repos.concepts
+        .listConcepts()
+        .filter((c) => c.name === name)
+        .map((c) => c.id),
+    );
+    return (elementId) => {
+      const conceptIds = membership.get(elementId);
+      if (!conceptIds) return false;
+      for (const id of conceptIds) if (namedConceptIds.has(id)) return true;
+      return false;
+    };
+  }
+
   /** Whether a row passes the active type/concept/tag/status filters. */
-  private matchesFilters(row: QueueItemSummary, filters: QueueFilters): boolean {
+  private matchesFilters(
+    row: QueueItemSummary,
+    filters: QueueFilters,
+    conceptMatch: ((elementId: ElementId) => boolean) | null,
+  ): boolean {
     if (filters.types && filters.types.length > 0) {
       if (!filters.types.includes(row.type as ElementType)) return false;
     }
@@ -255,8 +292,8 @@ export class QueueQuery {
     if (filters.concept) {
       // Match against ANY of the element's concept memberships by name (T041), not
       // just the first one displayed on the row — an element can join several.
-      const names = this.repos.concepts.conceptsForElement(row.id as ElementId).map((c) => c.name);
-      if (!names.includes(filters.concept)) return false;
+      // Resolved once via the prebuilt matcher (no per-row query).
+      if (!conceptMatch?.(row.id as ElementId)) return false;
     }
     if (filters.tag) {
       // Tag filtering (T041): the element must carry the tag (filter in the repo

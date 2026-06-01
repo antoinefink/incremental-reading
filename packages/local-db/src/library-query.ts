@@ -78,14 +78,25 @@ export interface LibraryBrowseFilters {
   readonly limit?: number;
 }
 
-/** Per-facet counts over the UNFILTERED live browse universe (for the facet labels). */
+/**
+ * DRILL-DOWN faceted counts. Each dimension's counts respect ALL OTHER currently
+ * active filters but NOT its own selected value — so the number next to any facet
+ * value V equals the number of result rows you get if V is selected TOGETHER with
+ * the other already-active filters. (Previously these were over the unfiltered
+ * universe, which made a chip count never match the filtered list — the reported
+ * bug.) `all` is the count matching ALL active filters (= the rows shown, before
+ * the optional client-side title narrow).
+ */
 export interface LibraryBrowseCounts {
+  /** Count matching ALL active filters (equals the returned `items` length, pre-limit). */
   readonly all: number;
-  /** Per browsable type. */
+  /** Per browsable type, ignoring the active type filter (but honouring the rest). */
   readonly byType: Readonly<Record<ElementType, number>>;
-  /** Per priority band A/B/C/D. */
+  /** Per concept (keyed by concept element id), ignoring the active concept filter. */
+  readonly byConcept: Readonly<Record<string, number>>;
+  /** Per priority band A/B/C/D, ignoring the active priority filter. */
   readonly byPriority: Readonly<Record<LibraryPriorityLabel, number>>;
-  /** Per lifecycle status. */
+  /** Per lifecycle status, ignoring the active status filter. */
   readonly byStatus: Readonly<Record<string, number>>;
 }
 
@@ -108,12 +119,18 @@ export class LibraryQuery {
 
   /**
    * The facet-driven browse-all read. Reads the live browsable universe (every
-   * non-deleted element of a {@link LIBRARY_TYPES} type), computes the per-facet
-   * counts over that UNFILTERED universe, then narrows by the
+   * non-deleted element of a {@link LIBRARY_TYPES} type), narrows by the
    * type/status/priority/concept facets, orders by **priority desc then
-   * `updated_at` desc**, and caps by `limit`. With NO filters it returns
-   * everything (newest/priority-ranked) — the browse-first default that
-   * distinguishes Library from keyword search.
+   * `updated_at` desc**, caps by `limit`, and computes DRILL-DOWN faceted counts
+   * (each dimension respects every OTHER active filter but not its own value — see
+   * {@link LibraryBrowseCounts}). With NO filters it returns everything
+   * (newest/priority-ranked) — the browse-first default that distinguishes Library
+   * from keyword search.
+   *
+   * Performance: a single in-memory pass over the universe to match, plus one read
+   * of the live `concept_membership` edges (the shared
+   * {@link ConceptRepository.liveMembershipMap} — built ONCE, never per-concept), so
+   * concept matching/counting never becomes an N+1 over concepts.
    */
   browse(filters: LibraryBrowseFilters = {}): LibraryBrowseData {
     // The live browsable universe — every non-deleted element of a browsable type
@@ -128,15 +145,11 @@ export class LibraryQuery {
       .all()
       .map(rowToElement);
 
-    // Per-facet counts over the UNFILTERED universe (so facet labels show real totals).
-    const counts = this.countFacets(universe);
-
-    // Concept membership is resolved once (the live member ids for the picked
-    // concept) and matched as a set — reusing the canonical `elementsForConcept`
-    // walk so a member matches the SAME way it does in queue/search filtering.
-    const conceptMembers = filters.conceptId
-      ? new Set<ElementId>(this.repos.concepts.elementsForConcept(filters.conceptId))
-      : null;
+    // The canonical member->Set<liveConceptId> map, built ONCE (3 reads, deduped,
+    // both-endpoint liveness) — the SAME substrate queue/search filtering uses, so a
+    // member matches identically. Used for BOTH concept filtering and byConcept counts;
+    // no per-concept `elementsForConcept` loop.
+    const membership = this.repos.concepts.liveMembershipMap();
 
     const typeFilter =
       filters.types && filters.types.length > 0
@@ -146,20 +159,34 @@ export class LibraryQuery {
       filters.statuses && filters.statuses.length > 0
         ? new Set<ElementStatus>(filters.statuses)
         : null;
+    const { priorityLabel, conceptId } = filters;
 
-    const matched = universe.filter((el) => {
-      if (typeFilter && !typeFilter.has(el.type)) return false;
-      if (statusFilter && !statusFilter.has(el.status)) return false;
-      if (filters.priorityLabel && priorityToLabel(el.priority) !== filters.priorityLabel) {
-        return false;
-      }
-      if (conceptMembers && !conceptMembers.has(el.id)) return false;
-      return true;
-    });
+    // Per-dimension predicates: does an element pass the type / status / priority /
+    // concept facet? A `null` filter passes everything. These are composed so each
+    // facet dimension's count can OMIT its own predicate (drill-down semantics).
+    const passesType = (el: Element) => !typeFilter || typeFilter.has(el.type);
+    const passesStatus = (el: Element) => !statusFilter || statusFilter.has(el.status);
+    const passesPriority = (el: Element) =>
+      !priorityLabel || priorityToLabel(el.priority) === priorityLabel;
+    const passesConcept = (el: Element) =>
+      !conceptId || (membership.get(el.id)?.has(conceptId) ?? false);
+
+    // The result set: every active filter applied.
+    const matched = universe.filter(
+      (el) => passesType(el) && passesStatus(el) && passesPriority(el) && passesConcept(el),
+    );
 
     const ordered = this.order(matched);
     const limit = filters.limit ?? DEFAULT_LIMIT;
     const items = ordered.slice(0, limit);
+
+    const counts = this.countFacets(universe, membership, {
+      passesType,
+      passesStatus,
+      passesPriority,
+      passesConcept,
+      matchedCount: matched.length,
+    });
 
     return { items, counts };
   }
@@ -174,21 +201,68 @@ export class LibraryQuery {
     });
   }
 
-  /** Build the per-type / per-priority / per-status counts over the universe. */
-  private countFacets(universe: readonly Element[]): LibraryBrowseCounts {
+  /**
+   * Build the DRILL-DOWN per-type / per-concept / per-priority / per-status counts.
+   *
+   * For each dimension, an element contributes to a value V iff it passes EVERY
+   * OTHER active facet (the dimension's own predicate is omitted) AND its value for
+   * this dimension is V. So `byType[t]` counts elements that pass concept+status+
+   * priority and are of type `t`; `byConcept[c]` counts elements that pass
+   * type+status+priority and are a live member of `c`; etc. The HARD INVARIANT is
+   * that `counts[dim][V]` equals the number of rows you'd get if V were selected
+   * alongside the other active filters — so a chip count always matches the list.
+   *
+   * `all` is the count matching ALL active filters (the rows shown, pre-limit).
+   */
+  private countFacets(
+    universe: readonly Element[],
+    membership: ReadonlyMap<ElementId, ReadonlySet<ElementId>>,
+    p: {
+      passesType: (el: Element) => boolean;
+      passesStatus: (el: Element) => boolean;
+      passesPriority: (el: Element) => boolean;
+      passesConcept: (el: Element) => boolean;
+      matchedCount: number;
+    },
+  ): LibraryBrowseCounts {
     const byType = Object.fromEntries(LIBRARY_TYPES.map((t) => [t, 0])) as Record<
       ElementType,
       number
     >;
+    const byConcept: Record<string, number> = {};
     const byPriority: Record<LibraryPriorityLabel, number> = { A: 0, B: 0, C: 0, D: 0 };
     const byStatus: Record<string, number> = {};
     for (const status of LIBRARY_STATUSES) byStatus[status] = 0;
 
     for (const el of universe) {
-      byType[el.type] = (byType[el.type] ?? 0) + 1;
-      byPriority[priorityToLabel(el.priority)] += 1;
-      byStatus[el.status] = (byStatus[el.status] ?? 0) + 1;
+      const okType = p.passesType(el);
+      const okStatus = p.passesStatus(el);
+      const okPriority = p.passesPriority(el);
+      const okConcept = p.passesConcept(el);
+
+      // byType: drop the type predicate, require the rest.
+      if (okStatus && okPriority && okConcept) {
+        byType[el.type] = (byType[el.type] ?? 0) + 1;
+      }
+      // byPriority: drop the priority predicate, require the rest.
+      if (okType && okStatus && okConcept) {
+        byPriority[priorityToLabel(el.priority)] += 1;
+      }
+      // byStatus: drop the status predicate, require the rest.
+      if (okType && okPriority && okConcept) {
+        byStatus[el.status] = (byStatus[el.status] ?? 0) + 1;
+      }
+      // byConcept: drop the concept predicate, require the rest; count once per LIVE
+      // concept this element is a member of (the Set dedups duplicate edges already).
+      if (okType && okStatus && okPriority) {
+        const conceptIds = membership.get(el.id);
+        if (conceptIds) {
+          for (const conceptId of conceptIds) {
+            byConcept[conceptId] = (byConcept[conceptId] ?? 0) + 1;
+          }
+        }
+      }
     }
-    return { all: universe.length, byType, byPriority, byStatus };
+    return { all: p.matchedCount, byType, byConcept, byPriority, byStatus };
   }
 }

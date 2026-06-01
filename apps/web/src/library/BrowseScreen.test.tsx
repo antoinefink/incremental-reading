@@ -97,11 +97,17 @@ const h = vi.hoisted(() => {
     name: "Intelligence",
     parentConceptId: null,
     childCount: 0,
-    memberCount: 2,
+    // The GLOBAL member count (Map-tab volume) — deliberately DIFFERENT from the
+    // drill-down `byConcept` count below, so a test can prove the filterbar chip
+    // reads the filter-scoped count, not this global total.
+    memberCount: 9,
   };
   const counts = {
     all: 3,
     byType: { source: 1, extract: 0, card: 1, topic: 1, synthesis_note: 0, task: 0 },
+    // Drill-down per-concept counts (keyed by concept element id): the source + card
+    // are both members of "Intelligence" (concept-1), so its chip drill-down is 2.
+    byConcept: { "concept-1": 2 },
     byPriority: { A: 3, B: 0, C: 0, D: 0 },
     byStatus: { active: 2, scheduled: 1, inbox: 0, pending: 0, done: 0, suspended: 0 },
   };
@@ -252,6 +258,24 @@ describe("BrowseScreen", () => {
     expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/review" });
   });
 
+  it("the filterbar concept chip shows the DRILL-DOWN byConcept count, not the global memberCount", async () => {
+    render(<BrowseScreen />);
+    const chip = await screen.findByTestId("library-filter-concept-concept-1");
+    // byConcept["concept-1"] === 2 (filter-scoped); memberCount === 9 (global) — the
+    // chip must show 2 so its number always matches the filtered result list.
+    expect(within(chip).getByText("2")).toBeTruthy();
+    expect(within(chip).queryByText("9")).toBeNull();
+  });
+
+  it("the Map tab keeps the global memberCount volume (not filter-scoped)", async () => {
+    render(<BrowseScreen />);
+    await waitFor(() => expect(h.listConcepts).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId("library-tab-map"));
+    const map = await screen.findByTestId("library-map");
+    // The Map's "Concepts by volume" side keeps the true global total (9 members).
+    expect(within(map).getByText("9").textContent).toBe("9");
+  });
+
   it("renders the read-only ConceptGraph on the Map tab", async () => {
     render(<BrowseScreen />);
     await waitFor(() => expect(h.listConcepts).toHaveBeenCalled());
@@ -266,6 +290,7 @@ describe("BrowseScreen", () => {
       counts: {
         all: 0,
         byType: { source: 0, extract: 0, card: 0, topic: 0, synthesis_note: 0, task: 0 },
+        byConcept: { "concept-1": 0 },
         byPriority: { A: 0, B: 0, C: 0, D: 0 },
         byStatus: { active: 0, scheduled: 0, inbox: 0, pending: 0, done: 0, suspended: 0 },
       },
