@@ -480,3 +480,55 @@ test("the schedule menu on an attention row pins a new explicit 'next week' due 
 
   await app.close();
 });
+
+/**
+ * Layout regression (hardening): a long queue-row title must ellipsize inside its
+ * grid cell and NEVER overflow into the right-side action cluster (Prio / due badge
+ * / next-action pill). The title is a `<span class="qitem__title truncate">` — the
+ * Tailwind `truncate` utility only ellipsizes a BLOCK box, so `.qitem__main` is a
+ * flex column and `.qitem__title` is `display:block`. If that regresses (the title
+ * goes back to inline), the title box stretches to its full text width and its right
+ * edge runs straight through the action cluster — exactly what these bounding-box
+ * assertions catch. Deterministic: we inject a very long title into the first row,
+ * so the test does not depend on any particular seeded title length.
+ */
+test("a long queue-row title ellipsizes and never overlaps the action cluster (layout)", async () => {
+  const app = await launchApp(dataDir, { seedOnEmpty: true });
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  await openQueue(page, AS_OF);
+  const row = page.getByTestId("queue-item").first();
+  await expect(row).toBeVisible();
+
+  // Force a title far wider than the row so truncation MUST engage (independent of
+  // the seed). Layout truncation is a pure property of the rendered box, so setting
+  // the text directly is a faithful, deterministic probe of the CSS.
+  const longTitle = `OVERLAP-PROBE ${"verylongunbrokenword ".repeat(20)}END`;
+  const title = row.locator(".qitem__title");
+  await title.evaluate((el, t) => {
+    el.textContent = t;
+  }, longTitle);
+
+  // The title element is genuinely a truncating block: its rendered (client) width
+  // is far narrower than its content (scroll) width — i.e. the ellipsis is engaged.
+  const overflow = await title.evaluate((el) => ({
+    clientWidth: el.clientWidth,
+    scrollWidth: el.scrollWidth,
+  }));
+  expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth);
+  // (an inline <span> reports clientWidth === 0; a block truncating box is positive)
+  expect(overflow.clientWidth).toBeGreaterThan(0);
+
+  // No overlap: the title's RIGHT edge must not exceed the action cluster's LEFT
+  // edge. The grid gap leaves a small positive gap; we assert non-overlap (<= 0).
+  const titleBox = await title.boundingBox();
+  const actionBox = await row.locator(".qitem__action").boundingBox();
+  const actsBox = await row.getByTestId("queue-actions").boundingBox();
+  if (!titleBox || !actionBox || !actsBox) throw new Error("expected layout boxes");
+  expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(actionBox.x);
+  // …and likewise must not reach the in-place action buttons cluster.
+  expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(actsBox.x);
+
+  await app.close();
+});

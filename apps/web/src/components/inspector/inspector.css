@@ -99,9 +99,15 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  /* The editor lives in the inspector's fixed-width (296px) `meta-val` cell, so
+     it must wrap rather than overflow/clip: at narrow widths the band segment
+     drops below the steppers instead of pushing the "D" button + lower stepper
+     out of the panel. */
+  flex-wrap: wrap;
 }
 .prio-edit__seg {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 4px;
   /* Reset the browser's default <fieldset> chrome. */
   margin: 0;

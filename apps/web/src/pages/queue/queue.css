@@ -258,9 +258,18 @@
   background: var(--prio-a);
 }
 .qitem__main {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
 }
 .qitem__title {
+  /* Block-level so the `truncate` utility (overflow/text-overflow/white-space)
+     actually ellipsizes — on an inline <span> those properties are no-ops, and
+     the title would overflow its grid cell into the action cluster. */
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--t-md);
   font-weight: 600;
   color: var(--text);

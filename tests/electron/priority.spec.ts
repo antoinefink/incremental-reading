@@ -162,3 +162,65 @@ test("priority changes survive an app restart (persisted to SQLite)", async () =
 
   await app.close();
 });
+
+/**
+ * Layout regression (hardening): the inspector priority editor (A/B/C/D segment +
+ * raise/lower steppers) lives in the fixed-width (296px) inspector `meta-val` cell.
+ * It must WRAP, not clip — every band button (especially the last, "D") and both
+ * steppers must lie fully inside the inspector body's CONTENT box (the body box
+ * minus its horizontal padding). Before the fix the un-wrapped flex row pushed the
+ * "D" button + lower stepper past the panel edge (clipped). These bounding-box
+ * assertions are the durable proof the editor never overflows the fixed width.
+ */
+test("the priority editor fits fully inside the fixed-width inspector (no clip) (layout)", async () => {
+  const app = await launchApp(dataDir);
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  await selectByTitle(page, "On the Measure of Intelligence");
+  const editor = page.getByTestId("inspector-priority");
+  await expect(editor).toBeVisible();
+
+  // The editor's own scroll width must not exceed its client width (it wraps within
+  // its cell rather than overflowing it).
+  const editorOverflow = await editor.evaluate((el) => ({
+    clientWidth: el.clientWidth,
+    scrollWidth: el.scrollWidth,
+  }));
+  expect(editorOverflow.scrollWidth).toBeLessThanOrEqual(editorOverflow.clientWidth);
+
+  // The inspector body content box = body box inset by its computed L/R padding.
+  const body = page.locator(".shell-inspector__body");
+  const bodyBox = await body.boundingBox();
+  const pad = await body.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { left: parseFloat(cs.paddingLeft), right: parseFloat(cs.paddingRight) };
+  });
+  if (!bodyBox) throw new Error("expected inspector body box");
+  const contentLeft = bodyBox.x + pad.left;
+  const contentRight = bodyBox.x + bodyBox.width - pad.right;
+
+  // Every interactive control of the editor — both steppers + all four bands — must
+  // sit fully within [contentLeft, contentRight] (allowing a sub-pixel rounding eps).
+  const eps = 0.5;
+  const controls = [
+    "inspector-priority-raise",
+    "inspector-priority-lower",
+    "inspector-priority-A",
+    "inspector-priority-B",
+    "inspector-priority-C",
+    "inspector-priority-D",
+  ];
+  for (const testId of controls) {
+    const box = await page.getByTestId(testId).boundingBox();
+    if (!box) throw new Error(`expected box for ${testId}`);
+    expect(box.x, `${testId} left edge inside content box`).toBeGreaterThanOrEqual(
+      contentLeft - eps,
+    );
+    expect(box.x + box.width, `${testId} right edge inside content box`).toBeLessThanOrEqual(
+      contentRight + eps,
+    );
+  }
+
+  await app.close();
+});

@@ -135,9 +135,18 @@
   background: var(--prio-a);
 }
 .home-prow__main {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
 }
 .home-prow__title {
+  /* Block-level so the `truncate` utility actually ellipsizes — on an inline
+     <span> overflow/text-overflow/white-space are no-ops and the title would
+     overflow its grid cell into the action cluster. */
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--t-sm);
   font-weight: 600;
   color: var(--text);
