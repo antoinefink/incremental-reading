@@ -24,6 +24,7 @@ export const IPC_CHANNELS = {
   queueUndo: "queue:undo",
   lineageGet: "lineage:get",
   sourcesImportManual: "sources:importManual",
+  sourcesImportUrl: "sources:importUrl",
   inboxList: "inbox:list",
   inboxGet: "inbox:get",
   inboxTriage: "inbox:triage",

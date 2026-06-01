@@ -25,6 +25,7 @@
     "@electron/rebuild": "^4.0.4",
     "@interleave/core": "workspace:*",
     "@interleave/db": "workspace:*",
+    "@interleave/importers": "workspace:*",
     "@interleave/local-db": "workspace:*",
     "@interleave/scheduler": "workspace:*",
     "@interleave/testing": "workspace:*",

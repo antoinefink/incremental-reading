@@ -32,6 +32,7 @@ import {
 import { Kbd } from "../../shell/Kbd";
 import { NEW_SOURCE_EVENT } from "../../shell/nav";
 import { useSelection } from "../../shell/selection";
+import { ImportUrlModal } from "./ImportUrlModal";
 import { NewSourceModal } from "./NewSourceModal";
 
 /** Numeric priority `0.0`–`1.0` → coarse A/B/C/D label (mirrors core/priority). */
@@ -51,15 +52,19 @@ const PRIORITY_HINT: Record<PriorityLabelInput, string> = {
   D: "Someday · low cadence",
 };
 
-/** Import-strip options. Only "Paste text" / "Manual note" are wired in M2. */
+/**
+ * Import-strip options. "Paste text" / "Manual note" open the New-source modal;
+ * "Paste URL" (T060) opens the Import-from-URL modal. The rest stay disabled
+ * "coming soon" until their import paths land.
+ */
 const IMPORT_OPTS: {
   icon: IconName;
   label: string;
   hint: string;
-  /** When set, clicking opens the New-source modal; otherwise it is disabled. */
-  action?: "manual";
+  /** When set, clicking opens the matching modal; otherwise the chip is disabled. */
+  action?: "manual" | "url";
 }[] = [
-  { icon: "link", label: "Paste URL", hint: "Fetch & clean — coming soon" },
+  { icon: "link", label: "Paste URL", hint: "Fetch & clean the page", action: "url" },
   { icon: "paste", label: "Paste text", hint: "Plain text", action: "manual" },
   { icon: "upload", label: "Upload PDF / EPUB", hint: "Books & papers — coming soon" },
   { icon: "globe", label: "Browser capture", hint: "From the extension — coming soon" },
@@ -321,6 +326,7 @@ export function InboxScreen() {
   const [selId, setSelId] = useState<string | null>(null);
   const [detail, setDetail] = useState<InboxItemDetail | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [urlModalOpen, setUrlModalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Bumped after any list change (import / triage) so the balance banner re-reads
@@ -416,7 +422,7 @@ export function InboxScreen() {
   // Keyboard triage: 1 = activate, 3 = save for later, 6 = delete (ignore when a
   // field/modal is focused, matching the kit's 1–6 hints).
   useEffect(() => {
-    if (!desktop || modalOpen || !selId) return;
+    if (!desktop || modalOpen || urlModalOpen || !selId) return;
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
@@ -427,7 +433,7 @@ export function InboxScreen() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [desktop, modalOpen, selId, onTriage]);
+  }, [desktop, modalOpen, urlModalOpen, selId, onTriage]);
 
   // Open the New-source modal when the ⌘K command palette fires its event
   // ("Paste text as source…" / "New manual note…").
@@ -467,7 +473,13 @@ export function InboxScreen() {
         </div>
         <div className="flex flex-wrap gap-2.5">
           {IMPORT_OPTS.map((o) => {
-            const enabled = o.action === "manual";
+            const enabled = o.action === "manual" || o.action === "url";
+            const onClick =
+              o.action === "url"
+                ? () => setUrlModalOpen(true)
+                : o.action === "manual"
+                  ? () => setModalOpen(true)
+                  : undefined;
             return (
               <button
                 key={o.label}
@@ -475,7 +487,7 @@ export function InboxScreen() {
                 data-testid={`inbox-import-${o.label === "Manual note" ? "manual" : o.label.toLowerCase().replace(/[^a-z]+/g, "-")}`}
                 disabled={!enabled}
                 title={enabled ? undefined : "Coming soon"}
-                onClick={enabled ? () => setModalOpen(true) : undefined}
+                onClick={onClick}
                 className={
                   enabled
                     ? "flex items-center gap-2.5 rounded-md border border-border bg-surface px-3.5 py-2.5 text-left hover:border-border-strong"
@@ -566,6 +578,15 @@ export function InboxScreen() {
         onClose={() => setModalOpen(false)}
         onCreated={(id) => {
           setModalOpen(false);
+          void refresh(id);
+        }}
+      />
+
+      <ImportUrlModal
+        open={urlModalOpen}
+        onClose={() => setUrlModalOpen(false)}
+        onImported={(id) => {
+          setUrlModalOpen(false);
           void refresh(id);
         }}
       />

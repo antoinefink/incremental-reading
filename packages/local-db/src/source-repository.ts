@@ -21,6 +21,7 @@ import type {
   ElementId,
   ElementLocation,
   IsoTimestamp,
+  PlainTextConversion,
   Priority,
   Source,
   SourceLocationId,
@@ -43,6 +44,13 @@ import type { DbClient } from "./types";
 
 /** Provenance fields for a new source (all optional — manual imports omit most). */
 export interface CreateSourceInput {
+  /**
+   * Optional explicit element id, pre-minted by the caller (T060). The URL-import
+   * service mints the source id up front so the vault path
+   * `assets/sources/<source_id>/` is known before the row exists; passing it here
+   * makes the created element ADOPT it. Omitted ⇒ the element repo mints one.
+   */
+  readonly id?: ElementId;
   readonly title: string;
   readonly priority: Priority;
   readonly status?: Element["status"];
@@ -73,6 +81,15 @@ export interface SourceWithElement {
 export interface CreateSourceWithDocumentInput extends CreateSourceInput {
   /** Raw pasted body text; converted to plain text + ProseMirror JSON. Optional/empty allowed. */
   readonly body?: string | undefined;
+  /**
+   * A PRE-BUILT document conversion (T060). When supplied, the repository stores
+   * the given `doc`/`plainText`/`blocks` VERBATIM (no re-conversion) instead of
+   * running `plainTextToProseMirrorDoc(body)`. This keeps HTML→ProseMirror
+   * conversion in `@interleave/importers` (the layering rule — no editor/DOM work
+   * in `local-db`) while reusing the exact same atomic source+document transaction.
+   * `conversion` wins over `body` when both are present.
+   */
+  readonly conversion?: PlainTextConversion | undefined;
 }
 
 /** A source element + provenance + its created document body (T013). */
@@ -144,6 +161,7 @@ export class SourceRepository {
         title: input.title,
         parentId: null,
         sourceId: null,
+        ...(input.id ? { id: input.id } : {}),
       });
       const source: Source = {
         elementId: element.id,
@@ -180,8 +198,24 @@ export class SourceRepository {
    * rule — no ProseMirror building in the renderer).
    */
   createWithDocument(input: CreateSourceWithDocumentInput): SourceWithDocument {
-    const conversion = plainTextToProseMirrorDoc(input.body ?? "");
-    return this.db.transaction((tx) => {
+    return this.db.transaction((tx) => this.createWithDocumentWithin(tx, input));
+  }
+
+  /**
+   * Create a source + provenance + document body using an EXISTING transaction —
+   * the tx-composable seam (T060) that lets the URL-import service compose the
+   * source insert with its two `source_html` snapshot-asset inserts in ONE outer
+   * transaction (so a failure rolls them ALL back: no orphan source/asset/file).
+   * Mirrors {@link createExtractWithin}; the single-call {@link createWithDocument}
+   * just wraps this in its own `db.transaction`.
+   *
+   * When `input.conversion` is supplied it is stored verbatim (the importer
+   * already built it); otherwise the raw `body` is converted with
+   * `plainTextToProseMirrorDoc` (the manual-import path).
+   */
+  createWithDocumentWithin(tx: DbClient, input: CreateSourceWithDocumentInput): SourceWithDocument {
+    const conversion = input.conversion ?? plainTextToProseMirrorDoc(input.body ?? "");
+    {
       const element = this.elementsRepo.createWithin(tx, {
         type: "source",
         status: input.status ?? "inbox",
@@ -190,6 +224,7 @@ export class SourceRepository {
         title: input.title,
         parentId: null,
         sourceId: null,
+        ...(input.id ? { id: input.id } : {}),
       });
       const source: Source = {
         elementId: element.id,
@@ -253,7 +288,7 @@ export class SourceRepository {
         plainText: conversion.plainText,
         blockCount: conversion.blocks.length,
       };
-    });
+    }
   }
 
   /** Read a source (element + provenance) by element id, or `null`. */

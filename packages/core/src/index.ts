@@ -132,10 +132,25 @@ export {
 } from "./priority";
 // Plain-text → ProseMirror converter — deterministic, editor-free (./prosemirror).
 export type {
+  BlockIdAttrs,
   BlockIdMinter,
   PlainTextConversion,
   ProseMirrorBlock,
+  ProseMirrorBlockNode,
+  ProseMirrorBlockquoteNode,
+  ProseMirrorBlockType,
+  ProseMirrorBulletListNode,
+  ProseMirrorCodeBlockNode,
   ProseMirrorDoc,
+  ProseMirrorHardBreakNode,
+  ProseMirrorHeadingLevel,
+  ProseMirrorHeadingNode,
+  ProseMirrorHorizontalRuleNode,
+  ProseMirrorInlineNode,
+  ProseMirrorListItemNode,
+  ProseMirrorMark,
+  ProseMirrorMarkType,
+  ProseMirrorOrderedListNode,
   ProseMirrorParagraphNode,
   ProseMirrorTextNode,
 } from "./prosemirror";

@@ -22,7 +22,8 @@
       "!**/*.tsbuildinfo",
       "!pnpm-lock.yaml",
       "!design/kit",
-      "!design/tokens.css"
+      "!design/tokens.css",
+      "!**/__fixtures__"
     ]
   },
   "formatter": {

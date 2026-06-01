@@ -19,6 +19,7 @@ import { assets, type InterleaveDatabase } from "@interleave/db";
 import { and, eq } from "drizzle-orm";
 import { newAssetId, nowIso } from "./ids";
 import { rowToAsset } from "./mappers";
+import type { DbClient } from "./types";
 
 /** Metadata for a new asset (the bytes are written to the vault separately). */
 export interface CreateAssetInput {
@@ -38,12 +39,27 @@ export interface CreateAssetInput {
 export class AssetRepository {
   constructor(private readonly db: InterleaveDatabase) {}
 
-  /** Insert asset metadata and return the domain {@link Asset}. */
+  /**
+   * Insert asset metadata and return the domain {@link Asset}. Runs in its own
+   * single-statement transaction. For atomicity with an owning element's source
+   * insert (so a thrown error rolls BOTH back — no orphan asset row), use
+   * {@link createWithin} on the outer transaction instead.
+   */
   create(input: CreateAssetInput): Asset {
+    return this.db.transaction((tx) => this.createWithin(tx, input));
+  }
+
+  /**
+   * Insert asset metadata using an EXISTING transaction — the tx-composable seam
+   * (T060) that lets the URL-import service write the two `source_html` snapshot
+   * rows in the SAME transaction as the source + document insert, so a failure
+   * anywhere rolls them all back (no orphan source/asset/file). Mirrors
+   * {@link SourceRepository.createExtractWithin}: it inserts on the passed `tx`.
+   */
+  createWithin(tx: DbClient, input: CreateAssetInput): Asset {
     const id = newAssetId();
     const createdAt = nowIso();
-    this.db
-      .insert(assets)
+    tx.insert(assets)
       .values({
         id,
         owningElementId: input.owningElementId,
@@ -59,8 +75,8 @@ export class AssetRepository {
         createdAt,
       })
       .run();
-    const row = this.db.select().from(assets).where(eq(assets.id, id)).get();
-    if (!row) throw new Error("AssetRepository.create: asset row missing after insert");
+    const row = tx.select().from(assets).where(eq(assets.id, id)).get();
+    if (!row) throw new Error("AssetRepository.createWithin: asset row missing after insert");
     return rowToAsset(row);
   }
 

@@ -107,6 +107,13 @@ export interface LaunchOptions {
    * `{ showOnboarding: true }` to exercise the real first-run flow.
    */
   readonly showOnboarding?: boolean;
+  /**
+   * Permit URL import from a loopback host (T060). The URL-import E2E serves its
+   * article fixture from a `127.0.0.1` HTTP server, which the SSRF guard normally
+   * blocks; this sets `INTERLEAVE_ALLOW_LOOPBACK_IMPORT=1` (honored only in the
+   * unpackaged E2E build) so the test can reach it. Defaults off.
+   */
+  readonly allowLoopbackImport?: boolean;
 }
 
 /**
@@ -129,6 +136,7 @@ export async function launchApp(
       ...process.env,
       INTERLEAVE_DATA_DIR: dataDir,
       ...(options.seedOnEmpty ? { INTERLEAVE_SEED_ON_EMPTY: "1" } : {}),
+      ...(options.allowLoopbackImport ? { INTERLEAVE_ALLOW_LOOPBACK_IMPORT: "1" } : {}),
       // Suppress the first-run onboarding overlay unless a spec opts in, so it
       // never covers the UI in the feature specs (all start empty). See main/index.ts.
       ...(options.showOnboarding ? {} : { INTERLEAVE_SUPPRESS_ONBOARDING: "1" }),

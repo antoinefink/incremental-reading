@@ -64,6 +64,7 @@ import {
   SettingsUpdateManyRequestSchema,
   SettingsUpdateRequestSchema,
   SourcesImportManualRequestSchema,
+  SourcesImportUrlRequestSchema,
   TagsAddRequestSchema,
   TagsListRequestSchema,
   TagsRemoveRequestSchema,
@@ -173,6 +174,16 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.sourcesImportManual, (_event, rawRequest: unknown) => {
     const request = SourcesImportManualRequestSchema.parse(rawRequest);
     return dbService.importManualSource(request);
+  });
+
+  // URL import (T060) is ASYNC — it does network I/O in the main process (unlike
+  // the synchronous inbox handlers). Mirror the async backupsCreate handler: a
+  // thin adapter that only parses + awaits. The vault `assetsDir` was injected
+  // into the DB service at open() time (NOT threaded per-call), so the handler
+  // never sees a filesystem path.
+  ipcMain.handle(IPC_CHANNELS.sourcesImportUrl, async (_event, rawRequest: unknown) => {
+    const request = SourcesImportUrlRequestSchema.parse(rawRequest);
+    return dbService.importFromUrl(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.inboxList, () => {

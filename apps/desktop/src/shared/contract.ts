@@ -814,6 +814,37 @@ export interface SourcesImportManualResult {
   readonly item: InboxItemSummary;
 }
 
+/**
+ * Automatic URL import (T060). The renderer passes ONLY a URL (+ optional
+ * priority / reason); the MAIN process fetches the page, runs Readability,
+ * sanitizes + snapshots it to the vault, converts it to ProseMirror, and creates
+ * an `inbox` source. The renderer never fetches, never builds the doc, never
+ * touches the vault. `forceNewVersion` is reserved for T061's "import new version
+ * anyway" choice (it imports a second source even when a duplicate exists).
+ */
+export const SourcesImportUrlRequestSchema = z.object({
+  url: z.string().trim().min(1).max(2048),
+  /** Coarse A/B/C/D priority; defaults `C` main-side so new material never dominates. */
+  priority: PriorityLabelSchema.optional(),
+  reasonAdded: z.string().trim().max(2048).optional(),
+  /** T061: import a fresh source even if this canonical URL / content is already imported. */
+  forceNewVersion: z.boolean().optional(),
+});
+export type SourcesImportUrlRequest = z.infer<typeof SourcesImportUrlRequestSchema>;
+
+/**
+ * The discriminated URL-import result. T060 always returns the `"imported"` arm;
+ * T061 adds the `"duplicate"` arm to this SAME shape (so the result never has a
+ * breaking shape change). Defined discriminated from the start.
+ */
+export type SourcesImportUrlResult = {
+  readonly status: "imported";
+  /** The new source element id. */
+  readonly id: string;
+  /** The fresh inbox summary for the created source. */
+  readonly item: InboxItemSummary;
+};
+
 /** `inbox.list()` takes no arguments. */
 export const InboxListRequestSchema = z.void();
 
@@ -2501,6 +2532,8 @@ export interface AppApi {
   readonly sources: {
     /** Create a source in the `inbox` (T012; body lands with T013). */
     importManual(request: SourcesImportManualRequest): Promise<SourcesImportManualResult>;
+    /** Fetch + clean + snapshot a live URL into an `inbox` source (T060). */
+    importUrl(request: SourcesImportUrlRequest): Promise<SourcesImportUrlResult>;
   };
   readonly inbox: {
     /** Inbox-status source summaries (T012). */

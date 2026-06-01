@@ -58,6 +58,7 @@ import {
   SettingsUpdateManyRequestSchema,
   SettingsUpdateRequestSchema,
   SourcesImportManualRequestSchema,
+  SourcesImportUrlRequestSchema,
   TagsAddRequestSchema,
   TagsRemoveRequestSchema,
 } from "./contract";
@@ -81,6 +82,7 @@ describe("IPC channels", () => {
         "queue:undo",
         "lineage:get",
         "sources:importManual",
+        "sources:importUrl",
         "inbox:list",
         "inbox:get",
         "inbox:triage",
@@ -131,6 +133,42 @@ describe("IPC channels", () => {
       ].sort(),
     );
     expect(Object.values(IPC_CHANNELS)).not.toContain("db:query");
+  });
+});
+
+describe("SourcesImportUrlRequestSchema (T060)", () => {
+  it("accepts a minimal valid { url }", () => {
+    const parsed = SourcesImportUrlRequestSchema.parse({ url: "https://example.com/post" });
+    expect(parsed.url).toBe("https://example.com/post");
+    expect(parsed.priority).toBeUndefined();
+  });
+
+  it("accepts an optional priority, reason, and forceNewVersion", () => {
+    const parsed = SourcesImportUrlRequestSchema.parse({
+      url: "https://example.com/post",
+      priority: "A",
+      reasonAdded: "worth keeping",
+      forceNewVersion: true,
+    });
+    expect(parsed.priority).toBe("A");
+    expect(parsed.reasonAdded).toBe("worth keeping");
+    expect(parsed.forceNewVersion).toBe(true);
+  });
+
+  it("rejects an empty url", () => {
+    expect(() => SourcesImportUrlRequestSchema.parse({ url: "" })).toThrow();
+    expect(() => SourcesImportUrlRequestSchema.parse({ url: "   " })).toThrow();
+  });
+
+  it("rejects an oversize url (> 2048 chars)", () => {
+    const huge = `https://example.com/${"a".repeat(2100)}`;
+    expect(() => SourcesImportUrlRequestSchema.parse({ url: huge })).toThrow();
+  });
+
+  it("rejects an invalid priority label", () => {
+    expect(() =>
+      SourcesImportUrlRequestSchema.parse({ url: "https://example.com", priority: "Z" }),
+    ).toThrow();
   });
 });
 

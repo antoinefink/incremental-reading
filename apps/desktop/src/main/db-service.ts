@@ -163,6 +163,8 @@ import type {
   SettingValue,
   SourcesImportManualRequest,
   SourcesImportManualResult,
+  SourcesImportUrlRequest,
+  SourcesImportUrlResult,
   TagsAddRequest,
   TagsAddResult,
   TagsListResult,
@@ -177,6 +179,7 @@ import type {
   UndoLastResult,
 } from "../shared/contract";
 import { type BackupCounts, resolveSchemaVersion } from "./backup-manifest";
+import { UrlImportService } from "./url-import-service";
 
 export class DbService {
   private handle: DbHandle | null = null;
@@ -201,6 +204,18 @@ export class DbService {
    */
   private attentionScheduler: AttentionScheduleService | null = null;
   private undoService: UndoService | null = null;
+  /**
+   * The URL-import orchestrator (T060) — fetch + Readability + sanitize + vault
+   * snapshot + atomic source insert. Built lazily (it needs the vault `assetsDir`,
+   * injected at open() time) so a contract-only test that never imports a URL can
+   * still open the DB. The SAME built instance is shared by the IPC handler AND
+   * M13's loopback capture server (via the {@link urlImportService} accessor).
+   */
+  private urlImport: UrlImportService | null = null;
+  /** The vault asset-root, injected at open() time; required for URL import. */
+  private assetsDir: string | null = null;
+  /** DEV/E2E-only: permit loopback/private hosts in URL import (see open()). */
+  private allowLoopbackImport = false;
   private migrated = false;
 
   /** Whether the database handle is currently open. */
@@ -222,13 +237,22 @@ export class DbService {
    */
   open(
     dbPath: string,
-    options: { migrationsDir?: string | undefined; nativeBinding?: string | undefined } = {},
+    options: {
+      migrationsDir?: string | undefined;
+      nativeBinding?: string | undefined;
+      /** The asset-vault root (`<dataDir>/assets`) — required for URL import (T060). */
+      assetsDir?: string | undefined;
+      /** DEV/E2E-only: permit loopback/private hosts in URL import (the SSRF guard escape). */
+      allowLoopbackImport?: boolean | undefined;
+    } = {},
   ): void {
     if (this.handle) return;
     this.handle = options.nativeBinding
       ? openDatabase(dbPath, { nativeBinding: options.nativeBinding })
       : openDatabase(dbPath);
     migrateDatabase(this.handle.db, options.migrationsDir);
+    this.assetsDir = options.assetsDir ?? null;
+    this.allowLoopbackImport = options.allowLoopbackImport ?? false;
     this.repositories = createRepositories(this.handle.db);
     this.inspector = new InspectorQuery(this.repositories);
     this.lineage = new LineageQuery(this.repositories);
@@ -284,6 +308,9 @@ export class DbService {
     this.scheduler = null;
     this.attentionScheduler = null;
     this.undoService = null;
+    this.urlImport = null;
+    this.assetsDir = null;
+    this.allowLoopbackImport = false;
     this.migrated = false;
   }
 
@@ -623,6 +650,51 @@ export class DbService {
       throw new Error("DbService.importManualSource: created source not found in inbox");
     }
     return { id: element.id, item };
+  }
+
+  /**
+   * The shared URL-import service (T060), lazily built on first read against the
+   * open DB + the vault `assetsDir` injected at {@link open}. Returns the SAME
+   * built instance every call, so M13's `bootstrap()` can pass it into
+   * `startCaptureServer({ …, importService: dbService.urlImportService })` and the
+   * renderer IPC path + the loopback path share one fully-wired service. Throws a
+   * clear error if `assetsDir` was not provided (a contract-only test that never
+   * imports), rather than constructing a half-wired service.
+   */
+  get urlImportService(): UrlImportService {
+    if (this.urlImport) return this.urlImport;
+    const repositories = this.repos;
+    if (!this.assetsDir) {
+      throw new Error(
+        "DbService: URL import requires an assets directory — call open() with { assetsDir }",
+      );
+    }
+    this.urlImport = new UrlImportService({
+      db: this.require().db,
+      repositories,
+      assetsDir: this.assetsDir,
+      allowLoopback: this.allowLoopbackImport,
+    });
+    return this.urlImport;
+  }
+
+  /**
+   * Fetch + clean + snapshot a live URL into an `inbox` source (T060). ASYNC — it
+   * does network I/O. Delegates to the shared {@link urlImportService} so the IPC
+   * path and M13's loopback path produce identical sources. The discriminated
+   * result is the contract's {@link SourcesImportUrlResult} (T060 always
+   * `"imported"`; T061 adds `"duplicate"`).
+   */
+  async importFromUrl(request: SourcesImportUrlRequest): Promise<SourcesImportUrlResult> {
+    const result = await this.urlImportService.importFromUrl({
+      url: request.url,
+      ...(request.priority ? { priority: request.priority } : {}),
+      ...(request.reasonAdded !== undefined ? { reasonAdded: request.reasonAdded } : {}),
+      ...(request.forceNewVersion !== undefined
+        ? { forceNewVersion: request.forceNewVersion }
+        : {}),
+    });
+    return result;
   }
 
   /** Live inbox-status source summaries (T012). */

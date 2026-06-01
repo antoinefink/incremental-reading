@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Building a Review Queue — Lists, Quotes, and Code</title>
+  </head>
+  <body>
+    <article>
+      <h1>Building a Review Queue</h1>
+      <p>A good queue balances three concerns, summarized below.</p>
+      <h2>The three concerns</h2>
+      <ul>
+        <li>Priority — high-value material is protected first.</li>
+        <li>Recency — newly imported items must not dominate.</li>
+        <li>Stagnation — postponed items resurface deliberately.</li>
+      </ul>
+      <h3>An ordered procedure</h3>
+      <ol>
+        <li>Score each candidate by priority and due date.</li>
+        <li>Bury siblings so they are not shown back to back.</li>
+        <li>Cap the daily budget so overload never happens.</li>
+      </ol>
+      <blockquote>
+        <p>
+          The application succeeds when users can import too much material without
+          drowning.
+        </p>
+      </blockquote>
+      <p>The core selection looks like this:</p>
+      <pre><code>function next(candidates) {
+  return candidates.sort(byScore)[0];
+}</code></pre>
+      <hr />
+      <p>That is the whole loop, repeated every day.</p>
+    </article>
+  </body>
+</html>

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Article With Dangerous Tags</title>
+    <style>body { color: red; }</style>
+    <script>window.__tracked = true;</script>
+  </head>
+  <body>
+    <article>
+      <h1>Article With Dangerous Tags</h1>
+      <script>alert('xss in body');</script>
+      <p onclick="steal()">
+        This paragraph has an inline event handler that must be stripped, and a
+        <a href="javascript:alert(1)">javascript link</a> that must be dropped while
+        keeping a <a href="https://example.com/safe">safe link</a>.
+      </p>
+      <iframe src="https://evil.example.com/frame"></iframe>
+      <img src="https://tracker.example.com/pixel.gif" alt="tracking pixel" />
+      <p style="font-size: 40px">Styled paragraph whose style attribute is removed.</p>
+      <svg><circle cx="10" cy="10" r="5" /></svg>
+      <form action="/subscribe"><input name="email" /></form>
+      <p>A final clean paragraph survives intact.</p>
+    </article>
+  </body>
+</html>

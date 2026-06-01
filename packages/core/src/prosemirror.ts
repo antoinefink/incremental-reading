@@ -23,34 +23,143 @@
 
 import type { BlockId } from "./ids";
 
-/** A minimal ProseMirror text node. */
+/**
+ * The inline mark names the constrained editor schema permits (mirrors
+ * `@interleave/editor`'s `ALLOWED_MARK_NAMES`). Kept as plain string literals so
+ * `@interleave/core` stays editor-free.
+ */
+export type ProseMirrorMarkType = "bold" | "italic" | "link" | "code";
+
+/** A single inline mark on a text node (e.g. `{ type: "link", attrs: { href } }`). */
+export interface ProseMirrorMark {
+  readonly type: ProseMirrorMarkType;
+  readonly attrs?: Readonly<Record<string, unknown>>;
+}
+
+/** The heading levels the constrained schema permits (mirrors `ALLOWED_HEADING_LEVELS`). */
+export type ProseMirrorHeadingLevel = 1 | 2 | 3;
+
+/** A minimal ProseMirror text node (now optionally mark-bearing). */
 export interface ProseMirrorTextNode {
   readonly type: "text";
   readonly text: string;
+  /** Inline marks (bold/italic/link/code); omitted when the run is unmarked. */
+  readonly marks?: readonly ProseMirrorMark[];
 }
 
-/** A minimal ProseMirror paragraph node (text content only in M2). */
+/** A hard line break inside a block (`<br>` → `hardBreak`). */
+export interface ProseMirrorHardBreakNode {
+  readonly type: "hardBreak";
+}
+
+/** The inline content a text-bearing block may hold. */
+export type ProseMirrorInlineNode = ProseMirrorTextNode | ProseMirrorHardBreakNode;
+
+/**
+ * The stable block id (T016), embedded as a node attribute so the editor ADOPTS
+ * it instead of minting a fresh one — this is what preserves block ids across
+ * import → edit → save → re-import. Mirrors the matching
+ * `document_blocks.stableBlockId`. Carried on exactly the OUTERMOST block of a row.
+ */
+export interface BlockIdAttrs {
+  readonly blockId: BlockId;
+}
+
+/** A paragraph node — inline content only. */
 export interface ProseMirrorParagraphNode {
   readonly type: "paragraph";
-  /**
-   * The stable block id (T016), embedded as a node attribute so the editor
-   * ADOPTS it instead of minting a fresh one — this is what preserves block ids
-   * across import → edit → save → re-import. Mirrors the matching
-   * `document_blocks.stableBlockId`.
-   */
-  readonly attrs?: { readonly blockId: BlockId };
+  readonly attrs?: BlockIdAttrs;
+  readonly content?: readonly ProseMirrorInlineNode[];
+}
+
+/** A heading node (levels 1–3) — inline content only. */
+export interface ProseMirrorHeadingNode {
+  readonly type: "heading";
+  readonly attrs: { readonly level: ProseMirrorHeadingLevel } & Partial<BlockIdAttrs>;
+  readonly content?: readonly ProseMirrorInlineNode[];
+}
+
+/** A code block — a single plain-text run (no inline marks). */
+export interface ProseMirrorCodeBlockNode {
+  readonly type: "codeBlock";
+  readonly attrs?: BlockIdAttrs;
   readonly content?: readonly ProseMirrorTextNode[];
 }
 
-/** A minimal ProseMirror `doc` node — paragraphs only for pasted plain text. */
-export interface ProseMirrorDoc {
-  readonly type: "doc";
-  readonly content: readonly ProseMirrorParagraphNode[];
+/** A horizontal rule — a leaf block. */
+export interface ProseMirrorHorizontalRuleNode {
+  readonly type: "horizontalRule";
+  readonly attrs?: BlockIdAttrs;
 }
 
-/** One stable block descriptor mirroring a paragraph in the produced doc. */
+/** A blockquote — wraps block children; the row id sits on the quote, not its inner paragraph. */
+export interface ProseMirrorBlockquoteNode {
+  readonly type: "blockquote";
+  readonly attrs?: BlockIdAttrs;
+  readonly content?: readonly ProseMirrorBlockNode[];
+}
+
+/** A list item — wraps block children; the row id sits on the item, not its inner paragraph. */
+export interface ProseMirrorListItemNode {
+  readonly type: "listItem";
+  readonly attrs?: BlockIdAttrs;
+  readonly content?: readonly ProseMirrorBlockNode[];
+}
+
+/** A bullet list container — structural, never id-bearing. */
+export interface ProseMirrorBulletListNode {
+  readonly type: "bulletList";
+  readonly content?: readonly ProseMirrorListItemNode[];
+}
+
+/** An ordered list container — structural, never id-bearing. */
+export interface ProseMirrorOrderedListNode {
+  readonly type: "orderedList";
+  readonly content?: readonly ProseMirrorListItemNode[];
+}
+
+/**
+ * Any block-level node the constrained schema admits. Mirrors
+ * `@interleave/editor`'s `ALLOWED_NODE_NAMES` (sans the structural `doc`/`text`),
+ * so a doc built from this union validates against `buildSchema()`.
+ */
+export type ProseMirrorBlockNode =
+  | ProseMirrorParagraphNode
+  | ProseMirrorHeadingNode
+  | ProseMirrorBlockquoteNode
+  | ProseMirrorBulletListNode
+  | ProseMirrorOrderedListNode
+  | ProseMirrorListItemNode
+  | ProseMirrorCodeBlockNode
+  | ProseMirrorHorizontalRuleNode;
+
+/**
+ * A constrained ProseMirror `doc` node. Admits the full constrained block set
+ * (paragraphs/headings/lists/blockquotes/code/rules) — the paragraph-only
+ * plain-text converter still satisfies it, and the richer HTML→PM converter
+ * (T060) produces the same shape.
+ */
+export interface ProseMirrorDoc {
+  readonly type: "doc";
+  readonly content: readonly ProseMirrorBlockNode[];
+}
+
+/**
+ * The row-bearing block types that get one stable id each (mirrors
+ * `@interleave/editor`'s `BLOCK_ID_NODE_TYPES`). List CONTAINERS
+ * (`bulletList`/`orderedList`) never carry an id.
+ */
+export type ProseMirrorBlockType =
+  | "paragraph"
+  | "heading"
+  | "blockquote"
+  | "listItem"
+  | "codeBlock"
+  | "horizontalRule";
+
+/** One stable block descriptor mirroring a row-bearing node in the produced doc. */
 export interface ProseMirrorBlock {
-  readonly blockType: "paragraph";
+  readonly blockType: ProseMirrorBlockType;
   /** 0-based position in the document. */
   readonly order: number;
   /** The stable id extracts/read-points/sync anchor to (T016). */

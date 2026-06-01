@@ -9,7 +9,18 @@
 
 import { describe, expect, it } from "vitest";
 import type { BlockId } from "./ids";
-import { plainTextToProseMirrorDoc } from "./prosemirror";
+import {
+  type ProseMirrorParagraphNode,
+  type ProseMirrorTextNode,
+  plainTextToProseMirrorDoc,
+} from "./prosemirror";
+
+/** The plain-text converter emits paragraphs only — narrow to read their text. */
+function paragraphText(node: { readonly type: string }): string | undefined {
+  if (node.type !== "paragraph") return undefined;
+  const inline = (node as ProseMirrorParagraphNode).content?.[0];
+  return inline && inline.type === "text" ? (inline as ProseMirrorTextNode).text : undefined;
+}
 
 describe("plainTextToProseMirrorDoc", () => {
   it("splits on blank lines into one paragraph node + block each", () => {
@@ -17,7 +28,7 @@ describe("plainTextToProseMirrorDoc", () => {
     expect(doc.type).toBe("doc");
     expect(doc.content).toHaveLength(3);
     expect(doc.content.map((p) => p.type)).toEqual(["paragraph", "paragraph", "paragraph"]);
-    expect(doc.content[0]?.content?.[0]).toEqual({ type: "text", text: "First para." });
+    expect(paragraphText(doc.content[0] as ProseMirrorParagraphNode)).toBe("First para.");
     expect(blocks).toHaveLength(3);
     expect(blocks.map((b) => b.order)).toEqual([0, 1, 2]);
     expect(blocks.every((b) => b.blockType === "paragraph")).toBe(true);
@@ -27,20 +38,22 @@ describe("plainTextToProseMirrorDoc", () => {
     const { doc, blocks } = plainTextToProseMirrorDoc("Just one line of text here.");
     expect(doc.content).toHaveLength(1);
     expect(blocks).toHaveLength(1);
-    expect(doc.content[0]?.content?.[0]?.text).toBe("Just one line of text here.");
+    expect(paragraphText(doc.content[0] as ProseMirrorParagraphNode)).toBe(
+      "Just one line of text here.",
+    );
   });
 
   it("collapses runs of blank lines and inline whitespace", () => {
     const { doc } = plainTextToProseMirrorDoc("A\n\n\n\nB   B\twith   spaces");
     expect(doc.content).toHaveLength(2);
-    expect(doc.content[0]?.content?.[0]?.text).toBe("A");
-    expect(doc.content[1]?.content?.[0]?.text).toBe("B B with spaces");
+    expect(paragraphText(doc.content[0] as ProseMirrorParagraphNode)).toBe("A");
+    expect(paragraphText(doc.content[1] as ProseMirrorParagraphNode)).toBe("B B with spaces");
   });
 
   it("normalizes CRLF / CR line endings", () => {
     const { doc } = plainTextToProseMirrorDoc("One\r\n\r\nTwo\r\rThree");
     expect(doc.content).toHaveLength(3);
-    expect(doc.content.map((p) => p.content?.[0]?.text)).toEqual(["One", "Two", "Three"]);
+    expect(doc.content.map((p) => paragraphText(p))).toEqual(["One", "Two", "Three"]);
   });
 
   it("returns a valid EMPTY doc for an empty or whitespace-only body", () => {
@@ -81,7 +94,10 @@ describe("plainTextToProseMirrorDoc", () => {
     const mint = () => `blk-${n++}` as BlockId;
     const { doc, blocks } = plainTextToProseMirrorDoc("alpha\n\nbeta", mint);
     // The node attr and the parallel block list carry the SAME id, in order.
-    expect(doc.content.map((p) => p.attrs?.blockId)).toEqual(["blk-0", "blk-1"]);
+    expect(doc.content.map((p) => (p as ProseMirrorParagraphNode).attrs?.blockId)).toEqual([
+      "blk-0",
+      "blk-1",
+    ]);
     expect(blocks.map((b) => b.stableBlockId)).toEqual(["blk-0", "blk-1"]);
   });
 });

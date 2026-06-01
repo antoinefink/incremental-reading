@@ -508,6 +508,25 @@ export interface SourcesImportManualResult {
   readonly item: InboxItemSummary;
 }
 
+/** Request to fetch + clean + snapshot a live URL into an inbox source (T060). */
+export interface SourcesImportUrlRequest {
+  readonly url: string;
+  readonly priority?: PriorityLabelInput;
+  readonly reasonAdded?: string;
+  /** T061: import a fresh source even if this URL / content is already imported. */
+  readonly forceNewVersion?: boolean;
+}
+
+/**
+ * The discriminated URL-import result (T060 always `"imported"`; T061 adds
+ * `"duplicate"`). Keeping it discriminated avoids a breaking shape change later.
+ */
+export type SourcesImportUrlResult = {
+  readonly status: "imported";
+  readonly id: string;
+  readonly item: InboxItemSummary;
+};
+
 export interface InboxListResult {
   readonly items: readonly InboxItemSummary[];
 }
@@ -1506,6 +1525,7 @@ export interface AppApi {
   };
   readonly sources: {
     importManual(request: SourcesImportManualRequest): Promise<SourcesImportManualResult>;
+    importUrl(request: SourcesImportUrlRequest): Promise<SourcesImportUrlResult>;
   };
   readonly inbox: {
     list(): Promise<InboxListResult>;
@@ -1699,6 +1719,10 @@ export const appApi = {
   /** Create a source in the inbox with its body (T012 + T013). */
   importManualSource(request: SourcesImportManualRequest): Promise<SourcesImportManualResult> {
     return requireAppApi().sources.importManual(request);
+  },
+  /** Fetch + clean + snapshot a live URL into an inbox source (T060). */
+  importUrlSource(request: SourcesImportUrlRequest): Promise<SourcesImportUrlResult> {
+    return requireAppApi().sources.importUrl(request);
   },
   /** Live inbox-status source summaries (T012). */
   listInbox(): Promise<InboxListResult> {
