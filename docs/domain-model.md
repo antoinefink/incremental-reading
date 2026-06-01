@@ -96,7 +96,8 @@ OperationLogEntry one command-shaped, logged mutation (create_element, update_el
                   set_read_point, create_extract, create_card, add_review_log,
                   reschedule_element, add_relation, remove_relation, add_tag, remove_tag):
                   id, op type, payload, element ID, timestamp. Persisted in `operation_log`
-                  from day one to support backup/audit/undo and later cloud sync.
+                  from day one to support undo, audit, and incremental backup (not server-side
+                  sync — the server, when it arrives, is an encrypted-backup target only).
 ```
 
 ## Core tables (Drizzle)
@@ -105,8 +106,9 @@ The canonical local store is **native SQLite** (`better-sqlite3` + Drizzle, SQLi
 opened by the Electron main/DB service and reached only through the typed `window.appApi`
 bridge — never by the renderer directly. Large assets (PDFs, HTML snapshots, images, media)
 live on the **filesystem asset vault**, not in the database; SQLite stores their metadata,
-hashes, relative paths, and owning element IDs. The later, server-only Postgres schema
-(M11 cloud sync) reuses these definitions and adds user/device/sync fields.
+hashes, relative paths, and owning element IDs. The later backup server (M11) stores only opaque
+**end-to-end-encrypted archives** + minimal metadata (`users`, `devices`, `backup_manifests`);
+it does **not** mirror these tables, and there is no live multi-device sync.
 
 The initial M1 schema (defined in `packages/db`, generated/migrated with `drizzle-kit`):
 
@@ -138,7 +140,8 @@ settings          key, value
 
 > Not every column exists from day one, but the MVP introduces these tables per the
 > roadmap, and **`operation_log` exists from day one** — every meaningful mutation appends
-> an entry so backup/audit/undo and the eventual cloud-sync layer stay tractable. FTS5
+> an entry so undo, audit, and incremental backup stay tractable (the server is backup-only —
+> the op-log is never replayed into a server domain DB). FTS5
 > tables (`source_fts`, `extract_fts`, `card_fts`) arrive with full-text search later.
 > Stable UUID/ULID-style IDs are generated in domain services. **Any schema change ships
 > with a Drizzle migration** (see Definition of Done in `CLAUDE.md`).
@@ -163,6 +166,7 @@ Every meaningful mutation is command-shaped and appended to the `operation_log` 
 `create_card`, `add_review_log`, `reschedule_element`, `add_relation`, `remove_relation`,
 `add_tag`, `remove_tag`. Mutations run as transactions in the Electron main/`packages/local-db`
 layer and are exposed to the renderer only through typed `window.appApi` commands — the
-renderer never issues SQL. We do not overbuild sync now; logging command-shaped mutations
-keeps backup/audit/undo and the eventual cloud-sync layer tractable.
+renderer never issues SQL. We do not overbuild backup now; logging command-shaped mutations
+keeps undo, audit, and **incremental backup** tractable (the server, when it arrives, is an
+encrypted-backup target only — the op-log is never replayed into a server domain DB).
 </content>

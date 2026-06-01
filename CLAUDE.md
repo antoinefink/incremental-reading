@@ -52,9 +52,11 @@ directory, native modules, and a real window, so it cannot live in a container. 
 | `pnpm seed` | Load demo fixtures into the dev SQLite DB |
 
 Docker is **not** canonical for the desktop app. The existing `docker compose` / `Makefile`
-setup is kept but **re-scoped to the future server phase only** — it provisions the
-gold-standard services (`api`, `worker`, `db` = PostgreSQL 18 + pgvector, `minio`) when cloud
-sync work begins. Do not use it to build, run, or test the local desktop app.
+setup is kept but **re-scoped to the future encrypted-backup server only** — it provisions a
+thin `api` (Hono backup API), a minimal `db` (Postgres for accounts + backup manifests), and
+`minio` (encrypted-archive blob store) when backup work begins. There is **no** server-side
+`worker` and **no** sync tier — on-device background work runs in a local runner, and there is no
+live multi-device sync. Do not use Docker to build, run, or test the local desktop app.
 
 ## Design system (visual source of truth)
 
@@ -87,8 +89,11 @@ Use the planned stack unless a task explicitly says otherwise:
 - Vitest for unit/domain/repository tests
 - Playwright for end-to-end flows (against the Electron app)
 - Tailwind/Radix-style primitives for UI; `lucide-react` for icons
-- Later (server phase only): Hono API, PostgreSQL + pgvector, background workers, operation-log
-  cloud sync, browser extension
+- Later (local-first; server = encrypted backup only): a thin Hono **backup** API + minimal
+  Postgres (accounts + backup manifests) + an encrypted-archive blob store; an **on-device**
+  background runner (import/OCR/embeddings/AI); a **local-loopback** browser extension. Semantic
+  search uses a local vector store (`sqlite-vec`), **not** pgvector; the server never holds
+  plaintext or a domain mirror, and there is no live multi-device sync.
 
 Core principle: **SQLite is the canonical local database. The filesystem is the canonical
 local asset vault. The React app is the UI. Electron owns trusted local capabilities. The
@@ -181,8 +186,10 @@ Domain services (`SchedulerService`, `ExtractionService`, `CardService`, `QueueS
 these repositories. The Drizzle schema, migrations, and generated types (SQLite dialect) live in
 `packages/db`. New domain types (`Asset`, `AssetLocation`, `OperationLogEntry`, `LocalVaultPath`,
 alongside the existing `Element` family) live in `packages/core`. The Electron main/preload/
-lifecycle/windows/IPC/paths/backups live in `apps/desktop`; `apps/web` stays a pure UI renderer
-that calls `window.appApi` in desktop mode. `apps/api` and `apps/worker` remain later-only.
+lifecycle/windows/IPC/paths/backups + the on-device background runner live in `apps/desktop`;
+`apps/web` stays a pure UI renderer that calls `window.appApi` in desktop mode. `apps/api` (the
+thin encrypted-backup server) remains later-only; there is **no** `apps/worker` — background jobs
+run on-device, not on a server.
 
 Prefer small composable domain functions with tests over large UI-coupled handlers.
 
@@ -235,7 +242,8 @@ Do not expose arbitrary file read/write to the renderer; all vault access goes t
 
 ## Data rules
 
-All important user actions should be persistable, testable, and eventually syncable.
+All important user actions should be persistable, testable, and durable — command-shaped and
+logged so undo, audit, and incremental backup stay tractable (the server is backup-only; no live sync).
 
 There is an `operation_log` table **from day one**. Every meaningful mutation is representable
 as a command/op and appended to the log inside the same transaction as the mutation:
@@ -256,8 +264,9 @@ as a command/op and appended to the log inside the same transaction as the mutat
 - `add_tag`
 - `remove_tag`
 
-The operation log later supports backup, audit, undo, and cloud sync. Do **not** overbuild sync
-now — just make mutations command-like and logged.
+The operation log supports undo, audit, and **incremental backup** (it is never replayed into a
+server domain DB; there is no live sync). Do **not** overbuild backup now — just make mutations
+command-like and logged.
 
 Persistence rules:
 
@@ -450,7 +459,7 @@ Avoid implementing these until the core loop is solid, unless explicitly request
 
 - PGlite / browser-storage-as-source-of-truth (replaced by native SQLite — do not reintroduce)
 - a PWA / browser-first build (the canonical app is the Electron desktop app)
-- cloud sync
+- live multi-device sync (the server, when it arrives, is an encrypted-backup target only — no two-way sync, no server-side domain mirror, no conflict resolution)
 - browser extension
 - PDF/EPUB import
 - AI features

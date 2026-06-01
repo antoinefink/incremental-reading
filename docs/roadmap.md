@@ -15,7 +15,8 @@ then checks the box and records the commit.
 > bridge. Layering: React UI → typed client API wrapper → preload bridge → Electron main/DB
 > service → `packages/local-db` repositories/services → SQLite + vault. Native **pnpm** is the
 > canonical way to run/dev/test the desktop app; the Docker/compose/Makefile setup is re-scoped
-> to the **future server phase only** (`api`/`worker`/`db`/`minio`).
+> to the **future encrypted-backup server only** (a thin `api` + minimal `db` + `minio`
+> blob store — no sync tier, no server-side `worker`; on-device work runs in a local runner).
 
 **Status legend:** `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked.
 Add `· (branch/commit)` after the title when you start/finish.
@@ -179,52 +180,72 @@ Detailed specs: [`tasks/M1-foundations.md`](./tasks/M1-foundations.md)
 
 # Part II — Gold-standard application (T051–T100)
 
-Goal: turn the useful MVP into a serious long-term system — imports, PDFs, capture, sync,
-overload management, semantic search, AI, media, reliability, scale.
+Goal: turn the useful MVP into a serious long-term system — imports, PDFs, capture, overload
+management, semantic search, AI, media, reliability, scale — **while staying local-first**.
 
-## M11 — Backend & sync foundations (T051–T057)
+> **Direction (authoritative for Part II).** Interleave stays **local-first**: everything —
+> import, reading, extraction, scheduling, review, search, AI — runs **on the device** against
+> native SQLite + the filesystem asset vault. The server is **only an end-to-end-encrypted
+> backup target**: it stores opaque archives + minimal metadata and **never** mirrors the domain
+> model, replays the op-log, or processes content. There is **no live multi-device sync** — one
+> canonical device + restore-to-a-fresh-install; two-way sync and conflict resolution are out of
+> scope. The `operation_log` (built from day one) now powers **undo, audit, and incremental
+> backup**, not server-side convergence. AI/semantic search run on-device (local model or the
+> user's own API key) with an **optional, off-by-default** managed proxy.
 
-- [ ] **T051 — Backend API skeleton** · _deps: T050_
-  Done when: `apps/api` (Hono) has auth middleware, typed RPC routes, health checks, structured errors; the frontend can call a typed endpoint in dev.
-- [ ] **T052 — Server PostgreSQL schema** · _deps: T051, T006_
-  Done when: the local schema is mirrored in PostgreSQL with server-only fields (user/device/sync version/storage keys/audit timestamps); server migrations create a working DB.
+## M11 — Backup & restore (local-first; server = encrypted backup only) (T051–T057)
+
+> M11 collapses from the old "sync engine + server domain mirror + conflict resolution" into a
+> small, low-risk **encrypted backup** milestone. Because nothing else depends on it, it no
+> longer has to lead Part II — it can land whenever offsite durability is wanted.
+
+- [ ] **T051 — Thin backup API skeleton** · _deps: T050_
+  Done when: `apps/api` (Hono) exposes a SMALL typed surface — auth middleware, health checks, structured errors, and backup routes (`upload-archive`, `list-backups`, `download-archive`) — and the desktop app can call a typed endpoint in dev. It is **not** a domain RPC mirror: no element/card/extract endpoints, no `db.query`, no server-side domain logic.
+- [ ] **T052 — Minimal server backup store** · _deps: T051_
+  Done when: the server persists only what a blob backup needs — `users`, `devices`, and `backup_manifests` (id, user, device, created_at, size, content hash, encryption metadata, schema/app version, storage key) — plus the encrypted-archive bytes in object storage. The server schema does **not** mirror `elements`/`cards`/`documents`/etc.; it stores opaque ciphertext + metadata. Server migrations create a working DB.
 - [ ] **T053 — Authentication** · _deps: T052_
-  Done when: email/password or passkey-first auth identifies the user and protects cloud data; self-host/personal mode remains possible.
-- [ ] **T054 — Operation-log sync design** · _deps: T052_
-  Done when: sync is designed around the local SQLite `operation_log` (introduced in T006/T008) shipping deterministic ops (`create_element`, `update_element`, …) to server Postgres via typed domain operations — **not** PGlite/Electric/PowerSync (PowerSync may be reconsidered later). Every local mutation already appends a deterministic op to `operation_log`.
-- [ ] **T055 — One-way backup sync** · _deps: T054, T053_
-  Done when: a user can back up the local SQLite DB + asset vault to the server and restore onto a fresh desktop install (no multi-device conflict resolution yet).
-- [ ] **T056 — Two-way sync** · _deps: T055_
-  Done when: device IDs, op IDs, sync cursors, conflict detection, and safe-field LWW let two desktop installs converge after divergent edits via the op-log + server Postgres (documents not silently merged).
-- [ ] **T057 — Conflict UI** · _deps: T056_
-  Done when: same-document/card edits on two devices surface a resolver (local/remote/source history); destructive conflicts require explicit choice.
+  Done when: email/password or passkey-first auth identifies the user and gates their backups; self-host/personal mode remains possible. Auth protects *backup storage*, not live domain data (there is none on the server).
+- [ ] **T054 — Incremental-backup design (op-log + asset manifest)** · _deps: T052_
+  Done when: backup is designed around the local SQLite `operation_log` (introduced in T006/T008) + a content-hash asset manifest so a backup ships only what changed since the last one (new ops + new/changed asset bytes) rather than re-uploading everything. The op-log is the local changelog that makes backups incremental — it is **not** replayed into a server domain DB (no Postgres mirror, no Electric/PowerSync). Every local mutation already appends a deterministic op.
+- [ ] **T055 — Encrypted backup & restore** · _deps: T054, T053_
+  Done when: the desktop encrypts the SQLite DB + asset vault into an archive **client-side (end-to-end)** and uploads it to the server, and can restore it onto a fresh desktop install so the whole knowledge base (data + assets + lineage) comes back intact. The server only ever holds ciphertext. No multi-device conflict resolution (single canonical device).
+- [ ] **T056 — Automatic backups, retention & integrity verification** · _deps: T055_
+  Done when: backups can run automatically (scheduled / after-N-changes), old backups are pruned by a retention policy, every archive is integrity-verified (hash/manifest check), and a restore **drill** proves an archive restores cleanly — so backup is trustworthy and hands-off, not a manual chore. (Replaces the dropped two-way-sync task; there is no live sync.)
+- [ ] **T057 — Backup encryption keys & recovery** · _deps: T055_
+  Done when: the user's backup encryption is key-managed safely — a passphrase/key derives the archive encryption, recovery codes let a user restore on a new device, and re-keying is possible. Losing the key means losing the ability to restore (by design — the server cannot read the data), and the UI makes that consequence explicit. (Replaces the dropped conflict-UI task.)
 
-## M12 — Workers, storage & web import (T058–T061)
+## M12 — Local background runner, vault & web import (T058–T061)
+Detailed specs: [`tasks/M12-web-import.md`](./tasks/M12-web-import.md)
 
-- [ ] **T058 — Background job worker** · _deps: T052_
-  Done when: `apps/worker` with pg-boss processes import/snapshot/AI/embedding/cleanup jobs; the API can enqueue an import job.
-- [ ] **T059 — Object storage** · _deps: T058_
-  Done when: S3-compatible storage handles PDFs/images/clips/snapshots/backups via presigned URLs; the app can upload/retrieve a snapshot.
-- [ ] **T060 — Automatic URL import** · _deps: T058, T059_
-  Done when: URL import fetches the page, runs Readability, stores the original snapshot + cleaned HTML, converts to ProseMirror JSON, and creates a source.
+- [ ] **T058 — Local background runner** · _deps: T050_
+  Done when: an on-device background runner (an Electron utility process / `worker_threads` queue — **not** a server worker, **not** pg-boss) processes local jobs: URL fetch/snapshot, OCR, embeddings, AI calls, cleanup; the main process can enqueue a job and observe progress/completion. All work runs locally; nothing is sent to a server. (Re-scope: replaces the pg-boss/Postgres server worker — "everything is done locally".)
+- [ ] **T059 — Asset-vault scaling for large media** · _deps: T058_
+  Done when: the filesystem asset vault robustly handles large binaries (PDFs, images, audio/video, snapshots) — streamed read/write, content-hash dedup, integrity checks, and orphan GC — all behind the typed `window.appApi`/`AssetRepository` seam. The vault is the canonical local store for assets; there is **no** app-facing S3 (object storage exists only inside the T052 backup server, holding encrypted archives). (Re-scope: replaces app-level S3 object storage.)
+- [ ] **T060 — Automatic URL import (local-first)** · _deps: T013, T015, T016, T047_
+  Done when: URL import — run in the **Electron main process** — fetches the page, runs Readability, stores the original snapshot + cleaned HTML in the asset vault, converts to ProseMirror JSON, and creates an inbox source. (Re-scoped local-first off T058/T059 — see [`tasks/M12-web-import.md`](./tasks/M12-web-import.md).)
 - [ ] **T061 — Canonical URL & duplicate detection** · _deps: T060_
-  Done when: URLs are normalized (tracking params removed), already-imported canonical URLs are detected, content hashes computed; re-importing prompts reuse-or-new-version.
+  Done when: URLs are normalized (tracking params removed), already-imported canonical URLs are detected against the local `sources` table, content hashes computed; re-importing prompts reuse-or-new-version. (Local-first — see [`tasks/M12-web-import.md`](./tasks/M12-web-import.md).)
 
-## M13 — Browser extension (T062–T063)
+## M13 — Browser extension (local-first capture) (T062–T063)
+Detailed specs: [`tasks/M13-browser-extension.md`](./tasks/M13-browser-extension.md)
 
-- [ ] **T062 — Browser extension MVP** · _deps: T060, T053_
-  Done when: a Manifest V3 extension can "save page" / "save selection" / "save to inbox" via its service worker. (Pivot: the extension sends captures to the **Electron app** or the cloud API; it never writes the SQLite DB directly.)
+- [ ] **T062 — Browser extension MVP** · _deps: T060_
+  Done when: a Manifest V3 extension can "save page" / "save selection" / "save to inbox" via its service worker; the capture is POSTed to a token-protected `127.0.0.1` **loopback** server in the Electron main, which runs the M12 import pipeline. The extension never writes the SQLite DB directly and makes no cloud call. (Re-scoped local-first off the original T053 cloud-auth dep — see [`tasks/M13-browser-extension.md`](./tasks/M13-browser-extension.md).)
 - [ ] **T063 — Side-panel capture** · _deps: T062_
-  Done when: the extension's Side Panel shows inbox/import UI beside the page and can save a selection with priority + reason, routed to the Electron app or cloud API (not direct DB writes).
+  Done when: the extension's Side Panel shows inbox/import UI beside the page and can save a selection with priority + reason, routed through the **same loopback capture path** (not direct DB writes).
 
 ## M14 — PDF / EPUB / document import (T064–T070)
+
+> Local-first: imported documents and their assets live in the **filesystem asset vault**
+> (T059 scaling), never app-level S3; OCR/parsing run on the **local background runner** (T058),
+> never a server worker.
 
 - [ ] **T064 — PDF import** · _deps: T059, T018_
   Done when: PDF.js renders PDFs, extracts selectable text, tracks page read-points, and stores page-level source locations; PDF text extracts link to page numbers.
 - [ ] **T065 — PDF region extraction** · _deps: T064_
   Done when: drawing a rectangle around a figure/table creates an image extract with page number + coordinates as its own scheduled topic.
 - [ ] **T066 — OCR fallback** · _deps: T064, T058_
-  Done when: OCR jobs produce searchable/extractable text for scanned pages/images with confidence metadata attached to page/region (not blindly inserted into the body).
+  Done when: OCR jobs run on the **local background runner** (on-device, e.g. Tesseract/WASM) and produce searchable/extractable text for scanned pages/images with confidence metadata attached to page/region (not blindly inserted into the body).
 - [ ] **T067 — EPUB import** · _deps: T059, T018_
   Done when: EPUBs parse into book/chapter/section sources preserving chapters/headings/footnotes/locations; a chapter can be read incrementally.
 - [ ] **T068 — Markdown & HTML import/export** · _deps: T015_
@@ -235,6 +256,9 @@ overload management, semantic search, AI, media, reliability, scale.
   Done when: cards export to Anki-compatible packages/CSV with source refs, and Anki cards import as card elements preserving review history when available.
 
 ## M15 — Rich media cards (T071–T075)
+
+> Local-first: image/video/audio bytes live in the **asset vault** (T059), transcoding/clipping
+> runs on the **local background runner** (T058); no app-level S3, no server processing.
 
 - [ ] **T071 — Image occlusion** · _deps: T065_
   Done when: image-occlusion cards generate from image extracts with masks/regions stored separately from the base image; one diagram yields multiple sibling cards.
@@ -277,8 +301,15 @@ overload management, semantic search, AI, media, reliability, scale.
 
 ## M18 — Semantic search & AI (T087–T095)
 
-- [ ] **T087 — Semantic search** · _deps: T052, T042_
-  Done when: embeddings for sources/extracts/cards are stored in **Postgres/pgvector** (optionally a local vector option) and search finds conceptually related material without keyword match. (Pivot: semantic search uses Postgres/pgvector, not PGlite.)
+> Local-first: embeddings and the vector index live **on-device** (e.g. `sqlite-vec` on the same
+> better-sqlite3 DB); AI runs from the Electron main with a **local model or the user's own API
+> key**. Your infrastructure is never in the loop by default. An **optional, off-by-default**
+> managed AI proxy may route calls through the first-party server for convenience — enabling it
+> must visibly disclose that content is sent to the server. AI output is always **drafts** until
+> the user approves it.
+
+- [ ] **T087 — Semantic search (local)** · _deps: T058, T042_
+  Done when: embeddings for sources/extracts/cards are generated **on-device** (a local model via the background runner, or an embedding API called with the user's own key) and stored in a **local vector index** (e.g. `sqlite-vec` on the same better-sqlite3 DB); search finds conceptually related material without keyword match. (Re-scope: local vector store, **not** Postgres/pgvector.)
 - [ ] **T088 — Related-item suggestions** · _deps: T087_
   Done when: each element shows similar extracts, possible duplicates, prerequisite concepts, and sibling sources.
 - [ ] **T089 — Contradiction detection** · _deps: T087_
@@ -289,8 +320,8 @@ overload management, semantic search, AI, media, reliability, scale.
   Done when: source type, author, date, primary/secondary/tertiary, confidence, and notes can show reliability/uncertainty on important cards.
 - [ ] **T092 — Verification tasks** · _deps: T090, T091_
   Done when: scheduled `task` elements ("verify this claim", "find better source", "update outdated card", "check current version") keep time-sensitive knowledge from rotting.
-- [ ] **T093 — AI-assisted distillation** · _deps: T058, T024_
-  Done when: AI actions (explain/simplify/suggest Q&A/suggest cloze/detect ambiguity/propose prerequisites/summarize) help formulation but never schedule unapproved cards (drafts only).
+- [ ] **T093 — AI-assisted distillation (local-first)** · _deps: T058, T024_
+  Done when: AI actions (explain/simplify/suggest Q&A/suggest cloze/detect ambiguity/propose prerequisites/summarize) help formulation but never schedule unapproved cards (drafts only). AI calls run **from the Electron main with the user's own API key (or a local model via the background runner)** — your infrastructure is never in the loop by default; an **optional, off-by-default managed proxy** may route calls through the first-party server, disclosing that content is sent. (Re-scope: no server worker mediates AI by default.)
 - [ ] **T094 — AI source grounding** · _deps: T093_
   Done when: every AI suggestion links back to selected source text and AI output is stored separately from source quotes.
 - [ ] **T095 — Incremental writing / synthesis notes** · _deps: T024, T028_
@@ -302,15 +333,15 @@ overload management, semantic search, AI, media, reliability, scale.
   Done when: review by concept, source, search query, branch, stale items, leeches, or random audit works outside normal scheduling.
 - [ ] **T097 — Tauri shell (deprioritized — possible future alternative)** · _deps: T050_
   Deprioritized: the canonical desktop shell is **Electron** (`apps/desktop`, shipped in T050). Do **not** build both Electron and Tauri. This task is parked as a possible future alternative shell only; if ever revisited, a Tauri shell would reuse the same renderer, typed `window.appApi` surface, SQLite DB, and asset vault — native menus, global shortcuts, clipboard helpers, filesystem backups, and local media storage all already belong to the Electron shell.
-- [ ] **T098 — End-to-end encryption for sync** · _deps: T055_
-  Done when: user content is encrypted before upload where practical (at minimum encrypted backups; ideally per-user keys + device recovery) so server compromise doesn't trivially reveal data.
+- [ ] **T098 — Backup encryption hardening & audit** · _deps: T055_
+  Done when: the end-to-end backup encryption (introduced in T055/T057) is hardened and audited — per-user keys, device recovery, key rotation, and a threat-model review — so a server compromise reveals only ciphertext. (Re-scope: encryption protects *backups*; there is no live sync to encrypt.)
 
 ## M20 — Scale & hardening (T099–T100)
 
 - [ ] **T099 — Large-collection maintenance tools** · _deps: T044, T083_
   Done when: dedup, orphan-media cleanup, broken-source reports, cards-without-sources, bulk low-priority postpone/archive, and DB integrity checks keep a 100k-element collection maintainable.
 - [ ] **T100 — Gold-standard QA & performance hardening** · _deps: T099, T096, T097, T098_
-  Done when: load-tested at 100k cards / 100k extracts / thousands of sources / large PDFs / long histories / multiple devices, with indexes, rendering, search, queue calc, and sync optimized so the app stays fast, safe, backed up, and searchable after years of use.
+  Done when: load-tested at 100k cards / 100k extracts / thousands of sources / large PDFs / long histories, with indexes, rendering, search, queue calc, and backup/restore optimized so the app stays fast, safe, backed up, and searchable after years of use.
 
 ---
 
@@ -318,6 +349,7 @@ overload management, semantic search, AI, media, reliability, scale.
 
 Record notable completions / decisions here as tasks land (newest first).
 
+- 2026-06-01 - Part II re-scoped local-first (server = encrypted backup only). The gold-standard half of the roadmap (T051–T100) is reframed so EVERYTHING runs on-device and the server is **only an end-to-end-encrypted backup target** — it never mirrors the domain model, replays the op-log, or processes content. Decisions: (1) **pure backup, single canonical device** — no live multi-device sync, so the old two-way-sync (T056) and conflict-UI (T057) tasks are **dropped and repurposed** into automatic-backup/retention/verification (T056) and encryption-keys/recovery (T057); (2) a **thin first-party backup server** (auth + encrypted blob store), so M11 collapses from a sync engine + server domain mirror into "Backup & restore" (T051 thin API, T052 minimal blob store, T053 light auth, T054 incremental-backup design, T055 encrypted backup+restore); (3) **local/BYO-key AI + an optional, off-by-default managed proxy** — semantic search moves to a local vector store (`sqlite-vec`, not pgvector — T087) and AI runs from the Electron main with the user's own key (T093). M12's server worker (T058) becomes a **local background runner** and app-level S3 (T059) becomes **asset-vault scaling**; M14/M15 storage is the local vault and OCR/embeddings run on the local runner; T098 becomes backup-encryption hardening; T100 drops multi-device from the load matrix. The MVP (T001–T050) is unchanged and nothing already built is wasted — the `operation_log` now powers undo/audit/**incremental backup** instead of server convergence. Reconciled `roadmap.md`, `architecture.md`, `CLAUDE.md`, and `domain-model.md`; the local-first `tasks/M12-web-import.md` and `tasks/M13-browser-extension.md` specs now match the roadmap.
 - 2026-05-30 - T050 Ship MVP (Electron desktop) - done. The MVP now packages and runs as a local-first Electron desktop app on macOS: `apps/desktop` builds a distributable via electron-builder (`electron-builder.yml`, `scripts/dist.mjs`, `RELEASE.md`), SQLite persists in the app data directory and assets in the filesystem vault, backup/onboarding/backup-prompt flows are polished (`apps/web/src/components/Onboarding.tsx`, `BackupPrompt.tsx`), and the core loop survives restart with no raw DB/filesystem APIs exposed to the renderer. Covered by Vitest (`Onboarding.test.tsx`, `BackupPrompt.test.tsx`, `paths.test.ts`, `contract.test.ts`) and the Playwright spec (`tests/electron/onboarding.spec.ts`).
 - 2026-05-30 - T049 MVP end-to-end tests - done. A single serial Playwright/Electron spec (`tests/electron/mvp-flow.spec.ts`) drives the whole MVP loop against the real Electron app: import a pasted article → activate → read + set read-point → extract a paragraph (with lineage) → author Q&A + cloze cards → review/reschedule (durable review log, advanced due date) → search → open original source → backup (valid hashed zip), then relaunches the app and verifies every artifact survives the restart. Exercises only the typed `window.appApi` surface, so the renderer-never-touches-DB/filesystem invariant is asserted end-to-end.
 - 2026-05-30 - T048 Keyboard shortcuts & command palette - done. The main workflow is now mouse-free: scoped shortcuts (next-item, extract, cloze, postpone, done, delete, raise/lower priority, search, open-parent, open-source) plus a command palette invoke commands through the same typed `window.appApi` path as the UI buttons, with a native Electron menu wired up. Shortcuts/scope/global-actions live in `apps/web/src/shell/` (`shortcuts.ts`, `activeScope.ts`, `useGlobalActions.ts`, `useShellShortcuts.ts`, `CommandPalette.tsx`) and the native menu in `apps/desktop/src/main/menu.ts`. Covered by Vitest (`shortcuts.test.ts`, `CommandPalette.test.tsx`, `useShellShortcuts.test.tsx`, `nav.test.ts`, `contract.test.ts`) and the Playwright spec (`tests/electron/keyboard.spec.ts`).
