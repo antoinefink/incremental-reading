@@ -215,7 +215,7 @@ management, semantic search, AI, media, reliability, scale — **while staying l
   Done when: the user's backup encryption is key-managed safely — a passphrase/key derives the archive encryption, recovery codes let a user restore on a new device, and re-keying is possible. Losing the key means losing the ability to restore (by design — the server cannot read the data), and the UI makes that consequence explicit. (Replaces the dropped conflict-UI task.)
 
 ## M12 — Local background runner, vault & web import (T058–T061)
-Detailed specs: [`tasks/M12-web-import.md`](./tasks/M12-web-import.md)
+Detailed specs: [`tasks/M12-runner-and-vault.md`](./tasks/M12-runner-and-vault.md) (T058–T059) · [`tasks/M12-web-import.md`](./tasks/M12-web-import.md) (T060–T061)
 
 - [ ] **T058 — Local background runner** · _deps: T050_
   Done when: an on-device background runner (an Electron utility process / `worker_threads` queue — **not** a server worker, **not** pg-boss) processes local jobs: URL fetch/snapshot, OCR, embeddings, AI calls, cleanup; the main process can enqueue a job and observe progress/completion. All work runs locally; nothing is sent to a server. (Re-scope: replaces the pg-boss/Postgres server worker — "everything is done locally".)
