@@ -25,7 +25,7 @@
  */
 
 import type { Element, ElementId, ElementStatus, IsoTimestamp } from "@interleave/core";
-import { elements, type InterleaveDatabase, operationLog } from "@interleave/db";
+import { elements, embeddings, type InterleaveDatabase, operationLog } from "@interleave/db";
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { rowToElement } from "./mappers";
 
@@ -121,9 +121,42 @@ export class TrashRepository {
     return this.db.transaction((tx) => {
       const existing = tx.select().from(elements).where(eq(elements.id, id)).get();
       if (!existing) return false;
+      // The `vec0` `element_vectors` virtual table has NO foreign key to `elements`
+      // (a virtual table cannot), so the hard DELETE below does NOT cascade to it.
+      // Drop this element's vector rowid first so a purge leaves no orphan vector
+      // (no-op on hosts where the vec0 store was never created).
+      if (this.vecStoreExists(tx)) this.purgeVectorFor(tx, id);
       tx.delete(elements).where(eq(elements.id, id)).run();
       return true;
     });
+  }
+
+  /** Whether the `element_vectors` (vec0) virtual table exists on this connection. */
+  // biome-ignore lint/suspicious/noExplicitAny: drizzle tx/db share the raw query surface
+  private vecStoreExists(tx: any): boolean {
+    return (
+      tx.get(
+        sql`SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'element_vectors'`,
+      ) != null
+    );
+  }
+
+  /**
+   * Delete the element's `element_vectors` (vec0) rowid, read from the `embeddings`
+   * sidecar BEFORE the element DELETE cascades that sidecar row away. Caller must run
+   * inside its transaction and have confirmed the vec0 store exists.
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: drizzle tx/db share the raw query surface
+  private purgeVectorFor(tx: any, id: ElementId): void {
+    const emb = tx
+      .select({ vecRowid: embeddings.vecRowid })
+      .from(embeddings)
+      .where(eq(embeddings.elementId, id))
+      .get();
+    if (!emb) return;
+    tx.run(
+      sql`DELETE FROM element_vectors WHERE rowid = ${sql.raw(String(Math.trunc(emb.vecRowid)))}`,
+    );
   }
 
   /**
@@ -138,7 +171,11 @@ export class TrashRepository {
         .from(elements)
         .where(isNotNull(elements.deletedAt))
         .all();
+      // Drop each purged element's vec0 vector first (no FK cascade reaches the
+      // virtual table) so emptying the trash leaves no orphan vectors.
+      const hasVec = this.vecStoreExists(tx);
       for (const row of trashed) {
+        if (hasVec) this.purgeVectorFor(tx, row.id as ElementId);
         tx.delete(elements).where(eq(elements.id, row.id)).run();
       }
       return { purged: trashed.length };

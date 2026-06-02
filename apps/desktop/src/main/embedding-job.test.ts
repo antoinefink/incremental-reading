@@ -193,6 +193,41 @@ describe.skipIf(!VEC_OK)("embed job (T087)", () => {
     svc.close();
   });
 
+  it("hard-purging an embedded element removes its vec0 vector — leaves NO orphan", async () => {
+    const svc = openDb();
+    svc.updateAppSettings({ semanticSearchEnabled: true, embeddingModelDownloaded: true });
+    const runner = makeRunner(svc, new AutoEmbedWorker());
+    runner.start();
+
+    const source = svc.repos.elements.create({
+      type: "source",
+      status: "active",
+      stage: "raw_source",
+      title: "Ephemeral note",
+      priority: 0.5,
+    });
+    svc.saveDocument({
+      elementId: source.id,
+      prosemirrorJson: { type: "doc", content: [] },
+      plainText: "a transient idea that will be purged",
+    });
+    await until(() => svc.semanticStatus().embedded >= 1);
+    expect(svc.semanticStatus().embedded).toBe(1);
+
+    // Hard-purge the element. The vec0 `element_vectors` table has NO FK to
+    // `elements`, so the DELETE cannot cascade to it — `purge` must drop the vector
+    // explicitly. The embeddings sidecar cascades away (embedded → 0), and a backstop
+    // orphan sweep must find NOTHING (without the explicit cleanup it would find 1).
+    svc.repos.elements.softDelete(source.id);
+    expect(svc.repos.trash.purge(source.id)).toBe(true);
+
+    expect(svc.semanticStatus().embedded).toBe(0);
+    expect(svc.repos.embeddings.pruneOrphanVectors()).toBe(0);
+
+    runner.stop();
+    svc.close();
+  });
+
   it("re-embed is idempotent: editing the body updates the SAME vector row (no duplicate)", async () => {
     const svc = openDb();
     svc.updateAppSettings({ semanticSearchEnabled: true, embeddingModelDownloaded: true });

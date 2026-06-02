@@ -160,6 +160,16 @@ let localModelLoad: Promise<FastEmbedModel | null> | null = null;
  */
 async function loadLocalModel(): Promise<FastEmbedModel | null> {
   if (localModel !== undefined) return localModel;
+  // Under Vitest, NEVER load the real model. `fastembed` resolves from the workspace
+  // store in the test process, so `FlagEmbedding.init` would stream the ~80 MB ONNX
+  // model over the network — making the unit suite non-hermetic and cold-cache-slow.
+  // The deterministic fallback is exactly what the unit tests assert; the REAL model
+  // is exercised only in the Electron E2E (which runs the packaged worker and does
+  // NOT set VITEST). This makes the fallback deterministic instead of env-dependent.
+  if (process.env.VITEST) {
+    localModel = null;
+    return null;
+  }
   if (localModelLoad) return localModelLoad;
   localModelLoad = (async () => {
     try {

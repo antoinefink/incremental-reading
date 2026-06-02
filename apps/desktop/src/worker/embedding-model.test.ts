@@ -5,10 +5,11 @@
  * The spec's load-bearing guarantee is that the REAL `all-MiniLM-L6-v2` semantic
  * space and the deterministic lexical FALLBACK are recorded under DISTINCT model
  * ids, so a host that flips between them re-embeds via the `model_id` gate rather
- * than KNN-mixing incompatible vectors under one id. `fastembed` is not resolvable
- * under Vitest, so `loadLocalModel` fails and `computeEmbedding` deterministically
- * takes the FALLBACK path here — we pin that it labels the vector with
- * {@link FALLBACK_MODEL_ID} REGARDLESS of the requested id (the real path labels
+ * than KNN-mixing incompatible vectors under one id. Under Vitest `loadLocalModel`
+ * short-circuits to the deterministic fallback via the `process.env.VITEST` guard
+ * (so the suite never streams the ~80 MB real model), and `computeEmbedding`
+ * deterministically takes the FALLBACK path here — we pin that it labels the vector
+ * with {@link FALLBACK_MODEL_ID} REGARDLESS of the requested id (the real path labels
  * with {@link REAL_MODEL_ID}, exercised against the live model in the Electron E2E).
  */
 
