@@ -292,6 +292,7 @@ Detailed specs: [`tasks/M16-sort-overload.md`](./tasks/M16-sort-overload.md) (T0
   Done when: cards can be retired/archived/moved to very-low retention so low-value mature cards leave active review gracefully.
 
 ## M17 — Analytics, quality & maintenance (T083–T086)
+Detailed specs: [`tasks/M17-analytics.md`](./tasks/M17-analytics.md) (T083–T084) · [`tasks/M17-quality.md`](./tasks/M17-quality.md) (T085–T086)
 
 - [ ] **T083 — Source-yield analytics** · _deps: T045_
   Done when: each source shows read %, extracts/cards/mature-cards created, leeches, and time spent; low-yield sources are identifiable.
