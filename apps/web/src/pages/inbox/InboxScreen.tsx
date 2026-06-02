@@ -74,7 +74,7 @@ const IMPORT_OPTS: {
   {
     icon: "library",
     label: "Import file",
-    hint: "EPUB, Markdown, HTML, highlights",
+    hint: "EPUB, Markdown, HTML, highlights, Anki",
     action: "file",
   },
   { icon: "globe", label: "Browser capture", hint: "Pair the extension", action: "capture" },

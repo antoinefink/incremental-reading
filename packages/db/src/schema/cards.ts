@@ -39,6 +39,15 @@ export const cards = sqliteTable(
       onDelete: "set null",
     }),
     /**
+     * A round-trippable, human-readable source reference (T070) — the originating
+     * source's title + URL/location as a single string. Carried OUT to Anki's
+     * `Source` field on export and read back IN on import, so an Anki round-trip
+     * does not lose the source pointer even when there is no in-app
+     * `source_locations` anchor (an imported Anki card has none). `null` for cards
+     * authored from an in-app extract (their lineage lives in `sourceLocationId`).
+     */
+    sourceUri: text("source_uri"),
+    /**
      * Durable leech flag (T040). A card is automatically flagged a leech once its
      * cumulative `review_states.lapses` reaches the leech threshold (4 — see
      * `@interleave/scheduler` `isLeech`); the flag is set in the SAME transaction as

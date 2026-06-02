@@ -152,6 +152,10 @@ export const ASSET_KINDS = [
   // at `assets/sources/<book_id>/original.epub`; the bytes never touch SQLite, and
   // the book source's `snapshotKey` points at this path (mirrors `source_pdf`).
   "source_epub",
+  // The original `.apkg` bytes of an imported Anki deck (T070). Streamed into the
+  // vault for provenance/re-import; the bytes never touch SQLite. Imported Anki
+  // cards point back to the deck source whose vault holds this archive.
+  "import_archive",
   "snapshot",
   "image",
   "audio",

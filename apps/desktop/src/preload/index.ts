@@ -22,7 +22,9 @@ import type {
   CaptureSetEnabledRequest,
   CardsCreateRequest,
   CardsDeleteRequest,
+  CardsExportAnkiRequest,
   CardsFlagRequest,
+  CardsImportAnkiRequest,
   CardsMarkLeechRequest,
   CardsSuspendRequest,
   CardsUpdateRequest,
@@ -193,6 +195,10 @@ const appApi: AppApi = {
     flag: (request: CardsFlagRequest) => ipcRenderer.invoke(IPC_CHANNELS.cardsFlag, request),
     markLeech: (request: CardsMarkLeechRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.cardsMarkLeech, request),
+    importAnki: (request: CardsImportAnkiRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.cardsImportAnki, request),
+    exportAnki: (request: CardsExportAnkiRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.cardsExportAnki, request),
   },
   extracts: {
     updateStage: (request: ExtractsUpdateStageRequest) =>

@@ -34,6 +34,7 @@
     "@interleave/testing": "workspace:*",
     "@interleave/web": "workspace:*",
     "@tesseract.js-data/eng": "^1.0.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "@types/yazl": "^2.4.6",
     "drizzle-orm": "^0.45.2",

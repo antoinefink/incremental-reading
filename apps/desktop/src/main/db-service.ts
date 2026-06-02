@@ -197,6 +197,12 @@ import type {
   VaultVerifyResult,
 } from "../shared/contract";
 import {
+  type AnkiExportFileResult,
+  type AnkiExportSelection,
+  AnkiExportService,
+} from "./anki-export-service";
+import { type AnkiImportResult, AnkiImportService } from "./anki-import-service";
+import {
   AssetVaultService,
   type OrphanReport,
   type VaultIntegrityReport,
@@ -302,6 +308,19 @@ export class DbService {
    */
   private highlightImport: HighlightImportService | null = null;
   /**
+   * The Anki `.apkg` import orchestrator (T070) — unwrap the ZIP + open the embedded
+   * `collection.anki2` (better-sqlite3) + author the notes as `card` elements under a
+   * per-deck `source`, preserving review history when available. Built lazily on first
+   * read (it needs the vault `assetsDir` + the `nativeBinding`).
+   */
+  private ankiImport: AnkiImportService | null = null;
+  /**
+   * The Anki `.apkg`/CSV export orchestrator (T070) — build an Anki-importable file in
+   * `exports/`, carrying source refs OUT. Built lazily (it needs `exportsDir` + the
+   * `nativeBinding` to write the embedded collection).
+   */
+  private ankiExport: AnkiExportService | null = null;
+  /**
    * The PDF region-extract orchestrator (T065) — crop a figure/table region into a
    * scheduled `media_fragment` extract (vault image + page+region source location).
    * Built lazily (it needs the extraction service + the `assetVaultService`).
@@ -323,6 +342,12 @@ export class DbService {
   private assetsDir: string | null = null;
   /** The exports-root (`<dataDir>/exports`), injected at open(); for Markdown export (T068). */
   private exportsDir: string | null = null;
+  /**
+   * The Electron-ABI `better-sqlite3` binding path, injected at open() (T070). The Anki
+   * import/export services need it to open the EMBEDDED `collection.anki2` with the same
+   * native ABI the app DB uses; `null`/undefined in Node/Vitest (default binding).
+   */
+  private nativeBinding: string | undefined = undefined;
   /** DEV/E2E-only: permit loopback/private hosts in URL import (see open()). */
   private allowLoopbackImport = false;
   private migrated = false;
@@ -364,6 +389,7 @@ export class DbService {
     migrateDatabase(this.handle.db, options.migrationsDir);
     this.assetsDir = options.assetsDir ?? null;
     this.exportsDir = options.exportsDir ?? null;
+    this.nativeBinding = options.nativeBinding;
     this.allowLoopbackImport = options.allowLoopbackImport ?? false;
     this.repositories = createRepositories(this.handle.db);
     this.inspector = new InspectorQuery(this.repositories);
@@ -426,11 +452,14 @@ export class DbService {
     this.epubImport = null;
     this.documentImport = null;
     this.highlightImport = null;
+    this.ankiImport = null;
+    this.ankiExport = null;
     this.pdfRegion = null;
     this.ocr = null;
     this.runner = null;
     this.assetsDir = null;
     this.exportsDir = null;
+    this.nativeBinding = undefined;
     this.allowLoopbackImport = false;
     this.migrated = false;
   }
@@ -1002,6 +1031,81 @@ export class DbService {
     priority?: PriorityLabel;
   }): Promise<HighlightImportResult> {
     return await this.highlightImportService.importFromFile(input);
+  }
+
+  /**
+   * The Anki `.apkg`-import orchestrator (T070), lazily built on first read against the
+   * open DB + repos + the vault `assetsDir` (so the original `.apkg` is retained in the
+   * vault) + the Electron-ABI `nativeBinding` (to open the embedded collection). Throws
+   * a clear error if `assetsDir` was not provided — mirrors {@link epubImportService}.
+   */
+  get ankiImportService(): AnkiImportService {
+    if (this.ankiImport) return this.ankiImport;
+    if (!this.assetsDir) {
+      throw new Error(
+        "DbService: Anki import requires an assets directory — call open() with { assetsDir }",
+      );
+    }
+    this.ankiImport = new AnkiImportService({
+      db: this.require().db,
+      repositories: this.repos,
+      assetsDir: this.assetsDir,
+      assetVault: this.assetVaultService,
+      nativeBinding: this.nativeBinding,
+    });
+    return this.ankiImport;
+  }
+
+  /**
+   * Import a local `.apkg` (T070) — the IPC handler resolved the chosen path via the
+   * MAIN file picker. Delegates to {@link AnkiImportService.importFromFile}; a thrown
+   * `AnkiImportError` propagates to the IPC layer.
+   */
+  async importAnki(input: {
+    absPath: string;
+    priority?: PriorityLabel;
+  }): Promise<AnkiImportResult> {
+    return await this.ankiImportService.importFromFile(input);
+  }
+
+  /**
+   * The Anki `.apkg`/CSV-export orchestrator (T070), lazily built on first read against
+   * the open DB + repos + the `exportsDir` (where the file lands) + the `nativeBinding`
+   * (to write the embedded collection). Throws if `exportsDir` was not provided.
+   */
+  get ankiExportService(): AnkiExportService {
+    if (this.ankiExport) return this.ankiExport;
+    if (!this.exportsDir) {
+      throw new Error(
+        "DbService: Anki export requires an exports directory — call open() with { exportsDir }",
+      );
+    }
+    this.ankiExport = new AnkiExportService({
+      repositories: this.repos,
+      exportsDir: this.exportsDir,
+      nativeBinding: this.nativeBinding,
+    });
+    return this.ankiExport;
+  }
+
+  /**
+   * Export selected cards to an Anki `.apkg`/CSV in `exports/` (T070) — read-only on the
+   * DB. Delegates to {@link AnkiExportService}; a thrown `AnkiExportError` propagates.
+   */
+  async exportAnki(input: {
+    format: "apkg" | "csv";
+    cardIds?: readonly string[] | undefined;
+    conceptId?: string | undefined;
+    all?: boolean | undefined;
+  }): Promise<AnkiExportFileResult> {
+    const selection: AnkiExportSelection = {
+      ...(input.cardIds ? { cardIds: input.cardIds as readonly ElementId[] } : {}),
+      ...(input.conceptId ? { conceptId: input.conceptId as ElementId } : {}),
+      ...(input.all != null ? { all: input.all } : {}),
+    };
+    return input.format === "csv"
+      ? await this.ankiExportService.exportCsv(selection)
+      : await this.ankiExportService.exportApkg(selection);
   }
 
   /**

@@ -1199,6 +1199,37 @@ export interface CardsMarkLeechResult {
 }
 
 // ---------------------------------------------------------------------------
+// cards.importAnki() / cards.exportAnki()  (T070 — Anki .apkg/CSV interop)
+// ---------------------------------------------------------------------------
+
+export interface CardsImportAnkiRequest {
+  readonly path: string;
+  readonly priority?: PriorityLabelInput;
+}
+
+export type CardsImportAnkiResult = {
+  readonly status: "imported";
+  readonly deckCount: number;
+  readonly cardCount: number;
+  /** How many cards carried scheduling history over (the rest imported as new). */
+  readonly withHistory: number;
+  readonly item: InboxItemSummary;
+};
+
+export interface CardsExportAnkiRequest {
+  readonly format: "apkg" | "csv";
+  readonly cardIds?: readonly string[];
+  readonly conceptId?: string;
+  readonly all?: boolean;
+}
+
+export type CardsExportAnkiResult = {
+  readonly relativePath: string;
+  readonly absPath: string;
+  readonly cardCount: number;
+};
+
+// ---------------------------------------------------------------------------
 // extracts.updateStage() / .rewrite() / .postpone() / .markDone() / .delete()
 //   (T024 — extract review mode actions)
 // ---------------------------------------------------------------------------
@@ -1920,6 +1951,8 @@ export interface AppApi {
     delete(request: CardsDeleteRequest): Promise<CardsDeleteResult>;
     flag(request: CardsFlagRequest): Promise<CardsFlagResult>;
     markLeech(request: CardsMarkLeechRequest): Promise<CardsMarkLeechResult>;
+    importAnki(request: CardsImportAnkiRequest): Promise<CardsImportAnkiResult>;
+    exportAnki(request: CardsExportAnkiRequest): Promise<CardsExportAnkiResult>;
   };
   readonly extracts: {
     updateStage(request: ExtractsUpdateStageRequest): Promise<ExtractsUpdateStageResult>;
@@ -2293,6 +2326,21 @@ export const appApi = {
    */
   markLeechCard(request: CardsMarkLeechRequest): Promise<CardsMarkLeechResult> {
     return requireAppApi().cards.markLeech(request);
+  },
+  /**
+   * Import an Anki `.apkg` deck as `card` elements under a per-deck `source` (T070),
+   * preserving review history when available. The renderer passes a path chosen via
+   * {@link pickImportFile}; MAIN unwraps the ZIP + reads the embedded collection.
+   */
+  importAnki(request: CardsImportAnkiRequest): Promise<CardsImportAnkiResult> {
+    return requireAppApi().cards.importAnki(request);
+  },
+  /**
+   * Export selected cards to an Anki `.apkg`/CSV in the managed `exports/` vault (T070),
+   * carrying source refs OUT to Anki. Read-only on the DB; returns the written path.
+   */
+  exportAnki(request: CardsExportAnkiRequest): Promise<CardsExportAnkiResult> {
+    return requireAppApi().cards.exportAnki(request);
   },
   /** Advance an extract `raw → clean → atomic` (or set a stage); reschedules it (T024). */
   updateExtractStage(request: ExtractsUpdateStageRequest): Promise<ExtractsUpdateStageResult> {

@@ -2452,7 +2452,7 @@ describe("DbService — backup support (T047)", () => {
   it("getSchemaVersion returns the latest applied Drizzle migration tag", () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
-    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe("0012_abnormal_strong_guy");
+    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe("0013_charming_senator_kelly");
     svc.close();
   });
 

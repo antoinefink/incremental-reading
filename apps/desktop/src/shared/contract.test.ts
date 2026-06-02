@@ -17,7 +17,11 @@ import {
   CaptureSetEnabledRequestSchema,
   CardsCreateRequestSchema,
   CardsDeleteRequestSchema,
+  CardsExportAnkiRequestSchema,
+  type CardsExportAnkiResult,
   CardsFlagRequestSchema,
+  CardsImportAnkiRequestSchema,
+  type CardsImportAnkiResult,
   CardsMarkLeechRequestSchema,
   CardsSuspendRequestSchema,
   CardsUpdateRequestSchema,
@@ -145,6 +149,8 @@ describe("IPC channels", () => {
         "cards:delete",
         "cards:flag",
         "cards:markLeech",
+        "cards:importAnki",
+        "cards:exportAnki",
         "extracts:updateStage",
         "extracts:rewrite",
         "extracts:postpone",
@@ -422,6 +428,70 @@ describe("Highlight import schemas (T069)", () => {
     expect(result.extractCount).toBe(5);
     expect(result.skipped).toBe(1);
     expect(result.items).toHaveLength(1);
+  });
+});
+
+describe("Anki import/export schemas (T070)", () => {
+  it("PickImportFileRequestSchema accepts the anki kind", () => {
+    expect(PickImportFileRequestSchema.parse({ kind: "anki" }).kind).toBe("anki");
+  });
+
+  it("CardsImportAnkiRequestSchema requires a non-empty path + optional priority", () => {
+    const parsed = CardsImportAnkiRequestSchema.parse({ path: "/tmp/deck.apkg", priority: "C" });
+    expect(parsed.path).toBe("/tmp/deck.apkg");
+    expect(parsed.priority).toBe("C");
+    expect(CardsImportAnkiRequestSchema.parse({ path: "/x.apkg" }).priority).toBeUndefined();
+    expect(() => CardsImportAnkiRequestSchema.parse({ path: "" })).toThrow();
+    expect(() => CardsImportAnkiRequestSchema.parse({ path: "/x.apkg", priority: "Z" })).toThrow();
+  });
+
+  it("CardsImportAnkiResult round-trips the imported shape (counts + item)", () => {
+    const result: CardsImportAnkiResult = {
+      status: "imported",
+      deckCount: 1,
+      cardCount: 42,
+      withHistory: 30,
+      item: {
+        id: "el_deck",
+        type: "source",
+        status: "inbox",
+        stage: "raw_source",
+        priority: 0.375,
+        title: "Imported Anki deck: French",
+        srcType: "Manual note",
+        author: null,
+        accessedAt: "2026-06-01T00:00:00.000Z",
+        charCount: 0,
+        previewSnippet: "",
+      },
+    };
+    expect(result.cardCount).toBe(42);
+    expect(result.withHistory).toBe(30);
+  });
+
+  it("CardsExportAnkiRequestSchema requires a scope (cardIds / conceptId / all)", () => {
+    expect(CardsExportAnkiRequestSchema.parse({ format: "apkg", all: true }).format).toBe("apkg");
+    expect(
+      CardsExportAnkiRequestSchema.parse({ format: "csv", cardIds: ["c1", "c2"] }).cardIds,
+    ).toHaveLength(2);
+    expect(CardsExportAnkiRequestSchema.parse({ format: "apkg", conceptId: "cn1" }).conceptId).toBe(
+      "cn1",
+    );
+    // No scope ⇒ rejected.
+    expect(() => CardsExportAnkiRequestSchema.parse({ format: "apkg" })).toThrow();
+    expect(() => CardsExportAnkiRequestSchema.parse({ format: "apkg", cardIds: [] })).toThrow();
+    // Bad format ⇒ rejected.
+    expect(() => CardsExportAnkiRequestSchema.parse({ format: "pdf", all: true })).toThrow();
+  });
+
+  it("CardsExportAnkiResult round-trips the file-path shape", () => {
+    const result: CardsExportAnkiResult = {
+      relativePath: "anki-export-123.apkg",
+      absPath: "/data/exports/anki-export-123.apkg",
+      cardCount: 5,
+    };
+    expect(result.cardCount).toBe(5);
+    expect(result.relativePath.endsWith(".apkg")).toBe(true);
   });
 });
 

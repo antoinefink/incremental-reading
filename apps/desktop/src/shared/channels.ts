@@ -57,6 +57,8 @@ export const IPC_CHANNELS = {
   cardsDelete: "cards:delete",
   cardsFlag: "cards:flag",
   cardsMarkLeech: "cards:markLeech",
+  cardsImportAnki: "cards:importAnki",
+  cardsExportAnki: "cards:exportAnki",
   extractsUpdateStage: "extracts:updateStage",
   extractsRewrite: "extracts:rewrite",
   extractsPostpone: "extracts:postpone",

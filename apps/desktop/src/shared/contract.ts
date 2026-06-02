@@ -1080,6 +1080,62 @@ export type SourcesImportHighlightsResult = {
 };
 
 // ---------------------------------------------------------------------------
+// cards.importAnki() / cards.exportAnki()  (T070 — Anki .apkg/CSV interop)
+// ---------------------------------------------------------------------------
+
+/**
+ * Import an Anki `.apkg` deck (T070) — after the renderer has a chosen path (via
+ * {@link PickImportFileRequestSchema} with kind `anki`), it calls this with the path;
+ * MAIN unwraps the ZIP, opens the embedded `collection.anki2` with `better-sqlite3`,
+ * and authors the notes as `card` elements under a per-deck `source`, preserving
+ * review history when available. The archive never crosses the bridge — only the path.
+ */
+export const CardsImportAnkiRequestSchema = z.object({
+  path: z.string().min(1),
+  /** Coarse A/B/C/D priority; defaults `C` main-side so a fresh deck never dominates. */
+  priority: PriorityLabelSchema.optional(),
+});
+export type CardsImportAnkiRequest = z.infer<typeof CardsImportAnkiRequestSchema>;
+
+/**
+ * The Anki-import result. Discriminated on `status`; `"imported"` carries the deck +
+ * card counts, how many cards carried scheduling history over (`withHistory`), and the
+ * inbox summary for the per-deck `source`.
+ */
+export type CardsImportAnkiResult = {
+  readonly status: "imported";
+  readonly deckCount: number;
+  readonly cardCount: number;
+  readonly withHistory: number;
+  readonly item: InboxItemSummary;
+};
+
+/**
+ * Export selected cards to an Anki-compatible `.apkg` or CSV (T070). The selection is
+ * explicit card ids, a concept's cards, or all live cards; the format is `apkg` or
+ * `csv`. MAIN builds the file in the managed `exports/` vault (read-only on the DB,
+ * carrying source refs OUT to Anki) and returns the written path + card count.
+ */
+export const CardsExportAnkiRequestSchema = z
+  .object({
+    format: z.enum(["apkg", "csv"]),
+    cardIds: z.array(ElementIdSchema).optional(),
+    conceptId: ElementIdSchema.optional(),
+    all: z.boolean().optional(),
+  })
+  .refine((v) => (v.cardIds && v.cardIds.length > 0) || v.conceptId != null || v.all === true, {
+    message: "Provide a non-empty cardIds, a conceptId, or all=true.",
+  });
+export type CardsExportAnkiRequest = z.infer<typeof CardsExportAnkiRequestSchema>;
+
+/** The Anki-export result — the written file path (relative + absolute) + card count. */
+export type CardsExportAnkiResult = {
+  readonly relativePath: string;
+  readonly absPath: string;
+  readonly cardCount: number;
+};
+
+// ---------------------------------------------------------------------------
 // sources.extractRegion() / sources.getRegionImage()  (T065 — PDF region extract)
 // ---------------------------------------------------------------------------
 
@@ -3239,6 +3295,17 @@ export interface AppApi {
      * after ≥4 lapses; this is the manual override.
      */
     markLeech(request: CardsMarkLeechRequest): Promise<CardsMarkLeechResult>;
+    /**
+     * Import an Anki `.apkg` deck (T070) — MAIN unwraps the ZIP, opens the embedded
+     * `collection.anki2` (`better-sqlite3`), and authors the notes as `card` elements
+     * under a per-deck `source`, preserving review history when available.
+     */
+    importAnki(request: CardsImportAnkiRequest): Promise<CardsImportAnkiResult>;
+    /**
+     * Export selected cards to an Anki-compatible `.apkg`/CSV in `exports/` (T070),
+     * carrying source refs OUT to Anki. Read-only on the DB; returns the file path.
+     */
+    exportAnki(request: CardsExportAnkiRequest): Promise<CardsExportAnkiResult>;
   };
   readonly extracts: {
     /**

@@ -159,6 +159,7 @@ export {
   type LeechCard,
   type ReviewOutcome,
   ReviewRepository,
+  type ReviewStateSeed,
 } from "./review-repository";
 export {
   type NextReviewCard,

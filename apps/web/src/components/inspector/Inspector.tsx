@@ -552,6 +552,136 @@ function friendlyExportError(message: string): string {
   return "Could not export to Markdown.";
 }
 
+/** The export scope the Anki section offers: just this card, a concept, or all cards. */
+type AnkiExportScope = { kind: "card" } | { kind: "concept"; id: string } | { kind: "all" };
+
+/**
+ * "Export to Anki" action (T070) — exports cards to an Anki-compatible `.apkg` (or CSV)
+ * in the managed `exports/` vault, carrying the source reference OUT to Anki. The scope
+ * selector mirrors the spec: this card, a concept the card belongs to, or all cards. The
+ * `conceptId`/`all` scopes are resolved MAIN-side by the export service. Read-only on the
+ * DB. Desktop-only.
+ */
+function ExportAnkiSection({
+  cardId,
+  concepts,
+}: {
+  cardId: string;
+  concepts: readonly { id: string; name: string }[];
+}) {
+  const [scope, setScope] = useState<AnkiExportScope>({ kind: "card" });
+  const [busy, setBusy] = useState<"apkg" | "csv" | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (!isDesktop()) return null;
+
+  const onExport = async (format: "apkg" | "csv") => {
+    if (busy) return;
+    setBusy(format);
+    setError(null);
+    setDone(null);
+    try {
+      const request =
+        scope.kind === "all"
+          ? { format, all: true }
+          : scope.kind === "concept"
+            ? { format, conceptId: scope.id }
+            : { format, cardIds: [cardId] };
+      const result = await appApi.exportAnki(request);
+      setDone(
+        `${result.relativePath} · ${result.cardCount} card${result.cardCount === 1 ? "" : "s"}`,
+      );
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message.replace(/^[a-z_]+:\s*/, "") : "Could not export to Anki.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Build the scope options: this card always; one per assigned concept; all cards.
+  const scopeOptions: { value: string; label: string; scope: AnkiExportScope }[] = [
+    { value: "card", label: "This card", scope: { kind: "card" } },
+    ...concepts.map((c) => ({
+      value: `concept:${c.id}`,
+      label: `Concept: ${c.name}`,
+      scope: { kind: "concept" as const, id: c.id },
+    })),
+    { value: "all", label: "All cards", scope: { kind: "all" } },
+  ];
+  const selectedValue =
+    scope.kind === "concept" ? `concept:${scope.id}` : scope.kind === "all" ? "all" : "card";
+
+  return (
+    <div className="insp-sec" data-testid="export-anki-section">
+      <div className="insp-sec__title">Export to Anki</div>
+      <select
+        className="insp-add__select"
+        data-testid="export-anki-scope"
+        aria-label="Export scope"
+        value={selectedValue}
+        disabled={busy != null}
+        onChange={(e) => {
+          const next = scopeOptions.find((o) => o.value === e.target.value);
+          if (next) setScope(next.scope);
+        }}
+        style={{ marginBottom: 6, width: "100%" }}
+      >
+        {scopeOptions.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button
+          type="button"
+          className="insp-add__btn"
+          data-testid="export-anki-apkg"
+          disabled={busy != null}
+          onClick={() => void onExport("apkg")}
+        >
+          <Icon
+            name={busy === "apkg" ? "clock" : "download"}
+            size={12}
+            className={busy === "apkg" ? "animate-spin" : ""}
+          />
+          {busy === "apkg" ? "Exporting…" : ".apkg"}
+        </button>
+        <button
+          type="button"
+          className="insp-add__btn"
+          data-testid="export-anki-csv"
+          disabled={busy != null}
+          onClick={() => void onExport("csv")}
+        >
+          <Icon
+            name={busy === "csv" ? "clock" : "download"}
+            size={12}
+            className={busy === "csv" ? "animate-spin" : ""}
+          />
+          {busy === "csv" ? "Exporting…" : "CSV"}
+        </button>
+      </div>
+      {done ? (
+        <p className="insp-empty" data-testid="export-anki-done">
+          Exported to exports/{done}
+        </p>
+      ) : null}
+      {error ? (
+        <p
+          className="insp-empty"
+          data-testid="export-anki-error"
+          style={{ color: "var(--danger)" }}
+        >
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /** The full metadata view for one inspected element. */
 function InspectorBody({
   data,
@@ -643,6 +773,9 @@ function InspectorBody({
 
       {/* Export to Markdown (T068) — document-bearing elements only. */}
       {EXPORTABLE_TYPES.has(element.type) && <ExportMarkdownSection elementId={element.id} />}
+
+      {/* Export to Anki (T070) — cards only; scope = this card / a concept / all. */}
+      {element.type === "card" && <ExportAnkiSection cardId={element.id} concepts={concepts} />}
 
       {/* Scheduler — the FSRS vs attention split, surfaced explicitly. */}
       <div className="insp-sec" data-testid="scheduler-section">

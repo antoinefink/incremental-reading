@@ -59,6 +59,29 @@ export interface CreateCardInput {
   /** Anchor to the exact source position the card derives from. */
   readonly sourceLocationId?: SourceLocationId | null;
   /**
+   * A round-trippable, human-readable source reference (T070) — written verbatim to
+   * `cards.source_uri`. Carried OUT to Anki's `Source` field on export and read back
+   * IN on Anki import (where there is no in-app `sourceLocationId`). `null`/omitted
+   * for cards authored from an in-app extract (whose lineage lives in
+   * `sourceLocationId`); the existing card-authoring callers leave it unset.
+   */
+  readonly sourceUri?: string | null;
+  /**
+   * An imported FSRS-state SEED (T070) — used by Anki import to PRESERVE review
+   * history when available. When supplied, `createCardWithin` writes the
+   * `review_states` row with THESE values (and the matching element `dueAt`) instead
+   * of the bare `{ fsrsState: "new", dueAt: firstScheduledAt }` default. When
+   * omitted, the existing default behaviour is unchanged (every authored-card caller
+   * keeps working untouched). `firstScheduledAt` and `reviewSeed` are mutually
+   * exclusive — a seed carries its OWN `dueAt`; if both are supplied the seed wins
+   * (its `dueAt` is authoritative). This is an HONEST approximation of Anki's SM-2
+   * scheduling into our FSRS state, NOT a faithful FSRS history: `reps`/`lapses`/
+   * `dueAt` are carried as-is; `stability`/`difficulty` are seeded plausibly and
+   * re-converge over the next few real reviews. No historical `review_logs` are
+   * fabricated.
+   */
+  readonly reviewSeed?: ReviewStateSeed | null;
+  /**
    * First FSRS schedule (T036). When supplied, the fresh `review_states` row is
    * created DUE at this time (`dueAt = firstScheduledAt`, still `fsrsState: "new"`)
    * so an authored card immediately enters the due deck (`QueueRepository.dueCards`)
@@ -69,6 +92,27 @@ export interface CreateCardInput {
    * first GRADE is where `CardSchedulerService.gradeCard` computes the interval.
    */
   readonly firstScheduledAt?: IsoTimestamp | null;
+}
+
+/**
+ * An imported FSRS-state seed (T070) — the subset of `review_states` columns the
+ * Anki importer maps from Anki's SM-2 scheduling. `stability`/`difficulty` are an
+ * approximation (see {@link CreateCardInput.reviewSeed}); `reps`/`lapses`/`dueAt`
+ * are carried directly. Omitted numeric fields default to FSRS-neutral values.
+ */
+export interface ReviewStateSeed {
+  readonly reps: number;
+  readonly lapses: number;
+  readonly stability: number;
+  readonly difficulty: number;
+  readonly elapsedDays?: number;
+  readonly scheduledDays?: number;
+  /** The FSRS phase the seeded card lands in (default `review` for a scheduled card). */
+  readonly fsrsState?: FsrsState;
+  /** The preserved next-due time (the most user-visible continuity); `null` ⇒ due now. */
+  readonly dueAt: IsoTimestamp | null;
+  /** When the card was last reviewed in Anki, if known. */
+  readonly lastReviewedAt?: IsoTimestamp | null;
 }
 
 /** A card element + its `cards` side-table row. */
@@ -136,14 +180,21 @@ export class ReviewRepository {
    * `next()` math runs — setting `dueAt = now` for a brand-new card is not FSRS math.
    */
   createCardWithin(tx: DbClient, input: CreateCardInput): CardWithElement {
-    const firstScheduledAt = input.firstScheduledAt ?? null;
+    // A `reviewSeed` (T070, Anki import) is mutually exclusive with `firstScheduledAt`
+    // and authoritative when present — it carries its OWN due time + FSRS counters.
+    const seed = input.reviewSeed ?? null;
+    const firstScheduledAt = seed ? null : (input.firstScheduledAt ?? null);
     // A first-scheduled card is authored straight into active rotation; an un-due
-    // card stays at its requested stage (default card_draft) until it is graded.
-    const activate = firstScheduledAt != null && (input.stage ?? "card_draft") === "card_draft";
+    // card stays at its requested stage (default card_draft) until it is graded. A
+    // SEEDED card (imported with history) is ALWAYS authored active — it already has a
+    // schedule + counters, so it belongs in the deck, not parked as a draft, regardless
+    // of the requested stage (the Anki importer passes stage:"active_card" explicitly).
+    const requestedStage = input.stage ?? "card_draft";
+    const activate = seed != null || (firstScheduledAt != null && requestedStage === "card_draft");
     const element = this.elementsRepo.createWithin(tx, {
       type: "card",
       status: activate ? "active" : "pending",
-      stage: activate ? "active_card" : (input.stage ?? "card_draft"),
+      stage: activate ? "active_card" : requestedStage,
       priority: input.priority,
       title: input.title,
       parentId: input.parentId ?? null,
@@ -157,16 +208,40 @@ export class ReviewRepository {
         answer: input.answer ?? null,
         cloze: input.cloze ?? null,
         sourceLocationId: input.sourceLocationId ?? null,
+        sourceUri: input.sourceUri ?? null,
       })
       .run();
-    // The review_states row carries fsrsState "new"; its dueAt is the first schedule
-    // (so the card is reviewable now) or null (still authored-only). The element's
-    // dueAt mirrors review_states so any element-level read agrees with the deck.
-    tx.insert(reviewStates)
-      .values({ elementId: element.id, fsrsState: "new", dueAt: firstScheduledAt })
-      .run();
-    if (firstScheduledAt != null) {
-      tx.update(elements).set({ dueAt: firstScheduledAt }).where(eq(elements.id, element.id)).run();
+    // The review_states row. WITHOUT a seed it carries fsrsState "new"; its dueAt is
+    // the first schedule (so the card is reviewable now) or null (still authored-only).
+    // WITH a seed (Anki import) it carries the mapped counters + the preserved due
+    // date so scheduling continuity holds. The element's dueAt mirrors review_states
+    // so any element-level read agrees with the deck.
+    if (seed) {
+      tx.insert(reviewStates)
+        .values({
+          elementId: element.id,
+          dueAt: seed.dueAt,
+          stability: seed.stability,
+          difficulty: seed.difficulty,
+          elapsedDays: seed.elapsedDays ?? 0,
+          scheduledDays: seed.scheduledDays ?? 0,
+          reps: seed.reps,
+          lapses: seed.lapses,
+          fsrsState: seed.fsrsState ?? "review",
+          lastReviewedAt: seed.lastReviewedAt ?? null,
+        })
+        .run();
+      tx.update(elements).set({ dueAt: seed.dueAt }).where(eq(elements.id, element.id)).run();
+    } else {
+      tx.insert(reviewStates)
+        .values({ elementId: element.id, fsrsState: "new", dueAt: firstScheduledAt })
+        .run();
+      if (firstScheduledAt != null) {
+        tx.update(elements)
+          .set({ dueAt: firstScheduledAt })
+          .where(eq(elements.id, element.id))
+          .run();
+      }
     }
 
     new OperationLogRepository(tx).append(tx, {
@@ -177,6 +252,10 @@ export class ReviewRepository {
         kind: input.kind,
         sourceLocationId: input.sourceLocationId ?? null,
         firstScheduledAt,
+        // T070: record that this card was imported with a scheduling seed (the
+        // counters/due come from Anki, not a fresh first-schedule) for audit/sync.
+        ...(seed ? { imported: true, reviewSeed: { reps: seed.reps, lapses: seed.lapses } } : {}),
+        ...(input.sourceUri ? { sourceUri: input.sourceUri } : {}),
       },
     });
 
@@ -191,7 +270,10 @@ export class ReviewRepository {
         payload: {
           id: element.id,
           patch: { stage: "active_card", status: "active" },
-          prev: { stage: "card_draft", status: "pending" },
+          // The pre-activation shape: a draft card was at card_draft/pending; a seeded
+          // import that requested active_card only transitions status (stage was already
+          // active_card), so the logged prev reflects the actual requested stage.
+          prev: { stage: requestedStage, status: "pending" },
           firstScheduledAt,
         },
       });

@@ -19,7 +19,9 @@ import {
   CaptureSetEnabledRequestSchema,
   CardsCreateRequestSchema,
   CardsDeleteRequestSchema,
+  CardsExportAnkiRequestSchema,
   CardsFlagRequestSchema,
+  CardsImportAnkiRequestSchema,
   CardsMarkLeechRequestSchema,
   CardsSuspendRequestSchema,
   CardsUpdateRequestSchema,
@@ -99,6 +101,8 @@ import {
   VaultFindOrphansRequestSchema,
   VaultVerifyRequestSchema,
 } from "../shared/contract";
+import { AnkiExportError } from "./anki-export-service";
+import { AnkiImportError } from "./anki-import-service";
 import { BackupService } from "./backup-service";
 import type { CaptureController } from "./capture-controller";
 import type { DbService } from "./db-service";
@@ -407,6 +411,41 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
     }
   });
 
+  // Import an Anki `.apkg` deck (T070) — the renderer resolved the chosen path via
+  // `sources.pickImportFile({ kind: "anki" })`. MAIN unwraps the ZIP, opens the embedded
+  // `collection.anki2` (`better-sqlite3`), and authors the notes as `card` elements
+  // under a per-deck `source`, preserving review history when available. A thrown
+  // `AnkiImportError` is re-thrown as a `code: message` line for the modal to map.
+  ipcMain.handle(IPC_CHANNELS.cardsImportAnki, async (_event, rawRequest: unknown) => {
+    const request = CardsImportAnkiRequestSchema.parse(rawRequest);
+    try {
+      return await dbService.importAnki({
+        absPath: request.path,
+        ...(request.priority ? { priority: request.priority } : {}),
+      });
+    } catch (err) {
+      if (err instanceof AnkiImportError) {
+        throw new Error(`${err.code}: ${err.message}`);
+      }
+      throw err;
+    }
+  });
+
+  // Export selected cards to an Anki `.apkg`/CSV in `exports/` (T070) — read-only on the
+  // DB, carrying source refs OUT to Anki. A thrown `AnkiExportError` (empty selection)
+  // is re-thrown as a friendly `code: message` line.
+  ipcMain.handle(IPC_CHANNELS.cardsExportAnki, async (_event, rawRequest: unknown) => {
+    const request = CardsExportAnkiRequestSchema.parse(rawRequest);
+    try {
+      return await dbService.exportAnki(request);
+    } catch (err) {
+      if (err instanceof AnkiExportError) {
+        throw new Error(`${err.code}: ${err.message}`);
+      }
+      throw err;
+    }
+  });
+
   // PDF region extraction (T065). The renderer crops the figure/table from the page
   // it rendered and ships the size-capped PNG + the normalized rect + page; MAIN
   // streams the bytes into the vault and creates a `media_fragment` region extract
@@ -550,7 +589,9 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
       anki: {
         title: "Import Anki deck",
         name: "Anki",
-        exts: ["apkg", "csv"],
+        // Import accepts `.apkg` only; CSV is an EXPORT-only format here, so the picker
+        // must not advertise it (the service rejects a non-.apkg with a typed error).
+        exts: ["apkg"],
         env: "INTERLEAVE_ANKI_IMPORT_PATH",
       },
     };

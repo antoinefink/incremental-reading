@@ -20,8 +20,8 @@ import { Kbd } from "../../shell/Kbd";
 
 const PRIORITY_LABELS: readonly PriorityLabelInput[] = ["A", "B", "C", "D"];
 
-/** The file kinds this modal can import (EPUB T067; Markdown/HTML T068; highlights T069). */
-export type ImportFileKind = "epub" | "markdown" | "html" | "highlights";
+/** The file kinds this modal can import (EPUB T067; Markdown/HTML T068; highlights T069; Anki T070). */
+export type ImportFileKind = "epub" | "markdown" | "html" | "highlights" | "anki";
 
 /** Per-kind copy + picker config + hint shown before a file is chosen. */
 const KIND_CONFIG: Record<
@@ -52,6 +52,12 @@ const KIND_CONFIG: Record<
     ext: ".csv / .json / .txt",
     hint: "A Readwise CSV/JSON or a Kindle My Clippings.txt — each highlight becomes an inbox extract.",
   },
+  anki: {
+    title: "Import Anki deck",
+    choose: "Choose .apkg…",
+    ext: ".apkg",
+    hint: "An Anki deck — each note becomes a card. Review history is carried over approximately.",
+  },
 };
 
 /** Map a thrown import `code: message` error line to a friendly message. */
@@ -69,6 +75,12 @@ function friendlyError(message: string): string {
     empty: "There's nothing to import in that file.",
     // Highlight import (T069).
     unrecognized: "Couldn't recognize that highlight export.",
+    // Anki import (T070).
+    not_apkg: "That file is not an Anki package (.apkg).",
+    no_collection: "That .apkg has no Anki collection inside it.",
+    unsupported_compression:
+      "That .apkg uses Anki's newer compressed format. In Anki, export with “Support older Anki versions” enabled.",
+    empty_collection: "That Anki deck has no cards to import.",
     // Shared.
     too_large: "That file is too large to import.",
     unreadable: "That file could not be read.",
@@ -85,7 +97,7 @@ function basename(absPath: string): string {
 }
 
 /** The selectable file kinds, in display order. */
-const KIND_ORDER: readonly ImportFileKind[] = ["epub", "markdown", "html", "highlights"];
+const KIND_ORDER: readonly ImportFileKind[] = ["epub", "markdown", "html", "highlights", "anki"];
 
 /** Short label for the kind selector chips. */
 const KIND_LABEL: Record<ImportFileKind, string> = {
@@ -93,6 +105,7 @@ const KIND_LABEL: Record<ImportFileKind, string> = {
   markdown: "Markdown",
   html: "HTML",
   highlights: "Highlights",
+  anki: "Anki",
 };
 
 export type ImportFileModalProps = {
@@ -166,6 +179,21 @@ export function ImportFileModal({
       if (kind === "epub") {
         const result = await appApi.importEpubSource({ path, priority });
         if (result.status === "imported") onImported(result.bookId);
+      } else if (kind === "anki") {
+        const result = await appApi.importAnki({ path, priority });
+        if (result.status === "imported") {
+          // Surface the counts + the with-history note; the deck source lands in the
+          // inbox with its cards underneath. Keep the modal open so the user reads it.
+          const historyPart =
+            result.withHistory > 0 ? ` (${result.withHistory} with scheduling carried over)` : "";
+          setSuccess(
+            `Imported ${result.cardCount} card${result.cardCount === 1 ? "" : "s"}${historyPart}.`,
+          );
+          setPath(null);
+          setSubmitting(false);
+          if (onHighlightsImported) onHighlightsImported(result.item.id);
+          else onImported(result.item.id);
+        }
       } else if (kind === "highlights") {
         const result = await appApi.importHighlights({ path, priority });
         if (result.status === "imported") {
