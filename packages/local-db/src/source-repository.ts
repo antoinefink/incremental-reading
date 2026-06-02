@@ -17,6 +17,7 @@
 import type {
   BlockId,
   ClipWindow,
+  ConfidenceLevel,
   DistillationStage,
   Element,
   ElementId,
@@ -28,10 +29,17 @@ import type {
   PlainTextConversion,
   Priority,
   RegionRect,
+  ReliabilityTier,
   Source,
   SourceLocationId,
+  SourceType,
 } from "@interleave/core";
-import { plainTextToProseMirrorDoc } from "@interleave/core";
+import {
+  isConfidenceLevel,
+  isReliabilityTier,
+  isSourceType,
+  plainTextToProseMirrorDoc,
+} from "@interleave/core";
 import {
   documentBlocks,
   documents,
@@ -74,6 +82,25 @@ export interface CreateSourceInput {
    * The media-import service sets it at create time; the media reader keys off it.
    */
   readonly mediaKind?: MediaKind | null;
+  /** Source-reliability metadata (T091) — all optional, all default `null`. */
+  readonly sourceType?: SourceType | null;
+  readonly reliabilityTier?: ReliabilityTier | null;
+  readonly confidence?: ConfidenceLevel | null;
+  readonly reliabilityNotes?: string | null;
+}
+
+/**
+ * A source-reliability edit (T091) — the four `sources` reliability fields. Each is
+ * OPTIONAL: an omitted field is LEFT UNCHANGED; an explicit `null`/`""` CLEARS it (a
+ * source with no reliability data renders exactly as before). The three enums are
+ * validated against the core tuples; the notes are stored as-entered (trimmed; empty →
+ * `null`). Editing these is `update_element` on the source element (no new op type).
+ */
+export interface UpdateSourceReliabilityInput {
+  readonly sourceType?: SourceType | null;
+  readonly reliabilityTier?: ReliabilityTier | null;
+  readonly confidence?: ConfidenceLevel | null;
+  readonly reliabilityNotes?: string | null;
 }
 
 /** The element + provenance pair returned when a source is created/read. */
@@ -248,6 +275,11 @@ export class SourceRepository {
         snapshotKey: input.snapshotKey ?? null,
         reasonAdded: input.reasonAdded ?? null,
         mediaKind: input.mediaKind ?? null,
+        // Source-reliability metadata (T091) — narrowed to the core tuples; default null.
+        sourceType: isSourceType(input.sourceType) ? input.sourceType : null,
+        reliabilityTier: isReliabilityTier(input.reliabilityTier) ? input.reliabilityTier : null,
+        confidence: isConfidenceLevel(input.confidence) ? input.confidence : null,
+        reliabilityNotes: input.reliabilityNotes ?? null,
       };
       tx.insert(sources)
         .values({ ...source })
@@ -302,6 +334,11 @@ export class SourceRepository {
       snapshotKey: input.snapshotKey ?? null,
       reasonAdded: input.reasonAdded ?? null,
       mediaKind: input.mediaKind ?? null,
+      // Source-reliability metadata (T091) — narrowed to the core tuples; default null.
+      sourceType: isSourceType(input.sourceType) ? input.sourceType : null,
+      reliabilityTier: isReliabilityTier(input.reliabilityTier) ? input.reliabilityTier : null,
+      confidence: isConfidenceLevel(input.confidence) ? input.confidence : null,
+      reliabilityNotes: input.reliabilityNotes ?? null,
     };
     const { element, blockCount } = this.insertElementWithDocument(tx, {
       type: "source",
@@ -464,6 +501,94 @@ export class SourceRepository {
     const sourceRow = this.db.select().from(sources).where(eq(sources.elementId, elementId)).get();
     if (!elementRow || !sourceRow) return null;
     return { element: rowToElement(elementRow), source: rowToSource(sourceRow) };
+  }
+
+  /**
+   * Set / clear a source's reliability metadata (T091) — `source_type` /
+   * `reliability_tier` / `confidence` / `reliability_notes`. Writes the four `sources`
+   * columns, stamps `elements.updatedAt`, and logs `update_element` on the OWNING
+   * `source` element — all in ONE transaction (NO new op type; reliability is provenance
+   * on the side-table the source element owns, not lineage). An OMITTED field is left
+   * unchanged; an explicit `null` (or empty string for the notes) CLEARS it. The three
+   * enums are validated against the core tuples (a non-tuple value clears the field);
+   * notes are trimmed (empty → `null`). Lineage (`source_locations`/`element_relations`)
+   * is NEVER touched. Throws when the id is not a live source.
+   */
+  updateReliability(elementId: ElementId, patch: UpdateSourceReliabilityInput): SourceWithElement {
+    const existing = this.findById(elementId);
+    if (existing?.element.type !== "source" || existing.element.deletedAt) {
+      throw new Error(`SourceRepository.updateReliability: source ${elementId} not found`);
+    }
+    const next = this.nextReliability(existing.source, patch);
+
+    return this.db.transaction((tx) => {
+      tx.update(sources)
+        .set({
+          sourceType: next.sourceType,
+          reliabilityTier: next.reliabilityTier,
+          confidence: next.confidence,
+          reliabilityNotes: next.reliabilityNotes,
+        })
+        .where(eq(sources.elementId, elementId))
+        .run();
+
+      const updatedAt = nowIso();
+      tx.update(elements).set({ updatedAt }).where(eq(elements.id, elementId)).run();
+      new OperationLogRepository(tx).append(tx, {
+        opType: "update_element",
+        elementId,
+        payload: {
+          id: elementId,
+          reliability: {
+            sourceType: next.sourceType,
+            reliabilityTier: next.reliabilityTier,
+            confidence: next.confidence,
+            reliabilityNotes: next.reliabilityNotes,
+          },
+        },
+      });
+
+      const elementRow = tx.select().from(elements).where(eq(elements.id, elementId)).get();
+      const sourceRow = tx.select().from(sources).where(eq(sources.elementId, elementId)).get();
+      if (!elementRow || !sourceRow) {
+        throw new Error(
+          `SourceRepository.updateReliability: source ${elementId} missing after update`,
+        );
+      }
+      return { element: rowToElement(elementRow), source: rowToSource(sourceRow) };
+    });
+  }
+
+  /** Resolve the next reliability fields: omitted → keep current; provided → normalize. */
+  private nextReliability(
+    current: Source,
+    patch: UpdateSourceReliabilityInput,
+  ): Pick<Source, "sourceType" | "reliabilityTier" | "confidence" | "reliabilityNotes"> {
+    const sourceType =
+      patch.sourceType === undefined
+        ? current.sourceType
+        : isSourceType(patch.sourceType)
+          ? patch.sourceType
+          : null;
+    const reliabilityTier =
+      patch.reliabilityTier === undefined
+        ? current.reliabilityTier
+        : isReliabilityTier(patch.reliabilityTier)
+          ? patch.reliabilityTier
+          : null;
+    const confidence =
+      patch.confidence === undefined
+        ? current.confidence
+        : isConfidenceLevel(patch.confidence)
+          ? patch.confidence
+          : null;
+    const notes =
+      patch.reliabilityNotes === undefined
+        ? current.reliabilityNotes
+        : (patch.reliabilityNotes ?? "").trim() === ""
+          ? null
+          : (patch.reliabilityNotes ?? "").trim();
+    return { sourceType, reliabilityTier, confidence, reliabilityNotes: notes };
   }
 
   /**

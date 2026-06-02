@@ -244,8 +244,25 @@ export {
 // Source provenance + editable document body (./source).
 export type { Document, DocumentSchemaVersion, MediaKind, Source } from "./source";
 // Source reference (the refblock) — citation formatter, one source of truth (./source-ref).
-export type { FormattedSourceRef, SourceRef } from "./source-ref";
-export { EMPTY_SOURCE_REF, formatSourceRef } from "./source-ref";
+// Source-reliability metadata (T091) — tier/type/confidence tuples + the badge summary.
+export type {
+  ConfidenceLevel,
+  FormattedSourceRef,
+  ReliabilitySummary,
+  ReliabilityTier,
+  SourceRef,
+  SourceType,
+} from "./source-ref";
+export {
+  CONFIDENCE_LEVELS,
+  EMPTY_SOURCE_REF,
+  formatSourceRef,
+  isConfidenceLevel,
+  isReliabilityTier,
+  isSourceType,
+  RELIABILITY_TIERS,
+  SOURCE_TYPES,
+} from "./source-ref";
 // Source-yield scoring — the pure, tunable per-source yield rank (T083, ./source-yield).
 export type { SourceYieldInputs, SourceYieldVerdict, YieldBand } from "./source-yield";
 export {

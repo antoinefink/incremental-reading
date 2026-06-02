@@ -53,6 +53,13 @@ export const DEMO_FIXTURES = {
     accessedAt: "2026-05-20T09:30:00.000Z" as IsoTimestamp,
     reasonAdded: "Foundational paper for the ARC benchmark and a clean definition of intelligence.",
     priority: PRIORITY_LABEL_VALUE.A,
+    // Source-reliability metadata (T091) — so the refblock/inspector specs render a
+    // real badge (a card derived from this source inherits it). The second/inbox
+    // sources leave reliability null to prove the no-badge case.
+    sourceType: "article" as const,
+    reliabilityTier: "secondary" as const,
+    confidence: "medium" as const,
+    reliabilityNotes: "Pre-print; influential but not peer reviewed.",
   },
   /** Stable document block ids — the anchors extracts + read-points depend on. */
   blocks: [
@@ -512,6 +519,11 @@ export function seedDemoCollection(repos: Repositories, db: InterleaveDatabase):
     publishedAt: f.source.publishedAt,
     accessedAt: f.source.accessedAt,
     reasonAdded: f.source.reasonAdded,
+    // Source-reliability metadata (T091).
+    sourceType: f.source.sourceType,
+    reliabilityTier: f.source.reliabilityTier,
+    confidence: f.source.confidence,
+    reliabilityNotes: f.source.reliabilityNotes,
   });
   const sourceId = source.element.id;
 

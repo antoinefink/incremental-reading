@@ -69,6 +69,10 @@ const QA_CARD: ReviewCardView = {
     publishedAt: "2019-11-05T00:00:00.000Z",
     locationLabel: "¶ 4",
     snippet: "Intelligence is a measure of skill-acquisition efficiency…",
+    sourceType: null,
+    reliabilityTier: null,
+    confidence: null,
+    reliabilityNotes: null,
   },
   expiry: null,
   schedulerSignals: {

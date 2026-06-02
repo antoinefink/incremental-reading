@@ -109,6 +109,7 @@ import type {
   SourcesImportPdfRequest,
   SourcesImportUrlRequest,
   SourcesRunOcrRequest,
+  SourcesUpdateReliabilityRequest,
   SourceYieldListRequest,
   TagsAddRequest,
   TagsRemoveRequest,
@@ -169,6 +170,8 @@ const appApi: AppApi = {
   sources: {
     importManual: (request: SourcesImportManualRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.sourcesImportManual, request),
+    updateReliability: (request: SourcesUpdateReliabilityRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.sourcesUpdateReliability, request),
     importUrl: (request: SourcesImportUrlRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.sourcesImportUrl, request),
     importPdf: (request: SourcesImportPdfRequest) =>

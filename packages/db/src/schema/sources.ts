@@ -15,7 +15,9 @@
  * re-import of the source document.
  */
 
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { CONFIDENCE_LEVELS, RELIABILITY_TIERS, SOURCE_TYPES } from "@interleave/core";
+import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { inList } from "./_shared";
 import { elements } from "./elements";
 
 export const sources = sqliteTable(
@@ -49,12 +51,32 @@ export const sources = sqliteTable(
      * no backfill (existing rows get `null`).
      */
     mediaKind: text("media_kind"),
+    /**
+     * Source-reliability metadata (T091) — how trustworthy the source is. All four
+     * are nullable (a source with no reliability data renders exactly as before, no
+     * badge; no backfill). The three enums are CHECK-constrained against the
+     * `@interleave/core` tuples so the DB + the domain union can't drift.
+     */
+    /** The source KIND — one of `@interleave/core` `SOURCE_TYPES`, or `null`. */
+    sourceType: text("source_type"),
+    /** The source TIER — one of `RELIABILITY_TIERS` (`primary`/`secondary`/`tertiary`), or `null`. */
+    reliabilityTier: text("reliability_tier"),
+    /** The user's CONFIDENCE — one of `CONFIDENCE_LEVELS` (`high`/`medium`/`low`), or `null`. */
+    confidence: text("confidence"),
+    /** Free-text reliability caveats / known biases (≤2048), or `null`. */
+    reliabilityNotes: text("reliability_notes"),
   },
   (table) => [
     // T061: the canonical-URL duplicate-detection lookup. Non-unique by design —
     // distinct sources MAY legitimately share a canonical URL (an explicit
     // "import new version anyway"), so uniqueness would block that escape hatch.
     index("sources_canonical_url_idx").on(table.canonicalUrl),
+    // T091: the reliability enums are constrained against the core tuples (the DB +
+    // the domain union can never drift). `null` is allowed (IN (...) is unknown for
+    // NULL, so an absent value passes — exactly the "no reliability data" case).
+    check("sources_source_type_check", inList(table.sourceType, SOURCE_TYPES)),
+    check("sources_reliability_tier_check", inList(table.reliabilityTier, RELIABILITY_TIERS)),
+    check("sources_confidence_check", inList(table.confidence, CONFIDENCE_LEVELS)),
   ],
 );
 

@@ -6,7 +6,17 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { EMPTY_SOURCE_REF, formatSourceRef, type SourceRef } from "./source-ref";
+import {
+  CONFIDENCE_LEVELS,
+  EMPTY_SOURCE_REF,
+  formatSourceRef,
+  isConfidenceLevel,
+  isReliabilityTier,
+  isSourceType,
+  RELIABILITY_TIERS,
+  SOURCE_TYPES,
+  type SourceRef,
+} from "./source-ref";
 
 const FULL: SourceRef = {
   sourceElementId: "src-1",
@@ -16,6 +26,10 @@ const FULL: SourceRef = {
   publishedAt: "2019-11-05T00:00:00.000Z",
   locationLabel: "Definition · ¶ 4",
   snippet: "Intelligence is skill-acquisition efficiency.",
+  sourceType: null,
+  reliabilityTier: null,
+  confidence: null,
+  reliabilityNotes: null,
 };
 
 describe("formatSourceRef", () => {
@@ -89,5 +103,99 @@ describe("formatSourceRef", () => {
     expect(out.citation).toBe("");
     expect(out.snippet).toBeNull();
     expect(out.hasSource).toBe(false);
+  });
+});
+
+describe("formatSourceRef — reliability (T091)", () => {
+  it("omits the reliability summary cleanly when all fields are null", () => {
+    expect(formatSourceRef(FULL).reliability).toBeNull();
+    expect(formatSourceRef(EMPTY_SOURCE_REF).reliability).toBeNull();
+  });
+
+  it("a source with ONLY reliability data still resolves (hasSource true, badge shown)", () => {
+    const out = formatSourceRef({
+      ...EMPTY_SOURCE_REF,
+      reliabilityTier: "primary",
+      confidence: "high",
+    });
+    expect(out.hasSource).toBe(true);
+    expect(out.reliability).not.toBeNull();
+    expect(out.reliability?.label).toBe("Primary source · high confidence");
+    expect(out.reliability?.hasUncertainty).toBe(false);
+  });
+
+  it("assembles the tier + confidence label for each combination", () => {
+    for (const tier of RELIABILITY_TIERS) {
+      for (const confidence of CONFIDENCE_LEVELS) {
+        const out = formatSourceRef({ ...EMPTY_SOURCE_REF, reliabilityTier: tier, confidence });
+        const tierWord = { primary: "Primary", secondary: "Secondary", tertiary: "Tertiary" }[tier];
+        expect(out.reliability?.label).toBe(`${tierWord} source · ${confidence} confidence`);
+        expect(out.reliability?.tier).toBe(tier);
+        expect(out.reliability?.confidence).toBe(confidence);
+      }
+    }
+  });
+
+  it("leads with the source type when no tier is set", () => {
+    const out = formatSourceRef({
+      ...EMPTY_SOURCE_REF,
+      sourceType: "personal_note",
+      confidence: "medium",
+    });
+    expect(out.reliability?.label).toBe("Personal note · medium confidence");
+    expect(out.reliability?.sourceType).toBe("personal_note");
+  });
+
+  it("sets hasUncertainty for LOW confidence", () => {
+    const out = formatSourceRef({
+      ...EMPTY_SOURCE_REF,
+      reliabilityTier: "secondary",
+      confidence: "low",
+    });
+    expect(out.reliability?.label).toBe("Secondary source · low confidence");
+    expect(out.reliability?.hasUncertainty).toBe(true);
+  });
+
+  it("sets hasUncertainty + carries notes when a reliability note is present", () => {
+    const out = formatSourceRef({
+      ...EMPTY_SOURCE_REF,
+      reliabilityTier: "primary",
+      confidence: "high",
+      reliabilityNotes: "  Pre-print; not yet peer reviewed.  ",
+    });
+    expect(out.reliability?.hasUncertainty).toBe(true);
+    expect(out.reliability?.notes).toBe("Pre-print; not yet peer reviewed.");
+  });
+
+  it("labels a notes-only source 'Source notes' (no type/tier/confidence)", () => {
+    const out = formatSourceRef({
+      ...EMPTY_SOURCE_REF,
+      reliabilityNotes: "Author has a known bias.",
+    });
+    expect(out.reliability?.label).toBe("Source notes");
+    expect(out.reliability?.hasUncertainty).toBe(true);
+  });
+
+  it("blank notes do not create a reliability summary on their own", () => {
+    expect(
+      formatSourceRef({ ...EMPTY_SOURCE_REF, reliabilityNotes: "   " }).reliability,
+    ).toBeNull();
+  });
+});
+
+describe("reliability tuple guards (T091)", () => {
+  it("isSourceType / isReliabilityTier / isConfidenceLevel accept their tuple members", () => {
+    for (const v of SOURCE_TYPES) expect(isSourceType(v)).toBe(true);
+    for (const v of RELIABILITY_TIERS) expect(isReliabilityTier(v)).toBe(true);
+    for (const v of CONFIDENCE_LEVELS) expect(isConfidenceLevel(v)).toBe(true);
+  });
+
+  it("rejects non-members / non-strings", () => {
+    expect(isSourceType("bogus")).toBe(false);
+    expect(isReliabilityTier("quaternary")).toBe(false);
+    expect(isConfidenceLevel("maybe")).toBe(false);
+    expect(isSourceType(null)).toBe(false);
+    expect(isReliabilityTier(42)).toBe(false);
+    expect(isConfidenceLevel(undefined)).toBe(false);
   });
 });

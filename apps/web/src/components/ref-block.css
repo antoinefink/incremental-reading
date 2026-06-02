@@ -44,3 +44,56 @@
   font-size: var(--t-xs);
   font-style: normal;
 }
+
+/* Source-reliability badge + uncertainty note (T091). The badge reuses the shared
+   `.badge` primitive (inspector.css) and adds tier-colored variants; the note is a calm
+   second line. Restrained + status-colored, matching the kit's dense visual language.
+   `.refblock__reliability` wraps the badge so it sits on its own row beneath the
+   citation/location, never inline with the URL. */
+.refblock__reliability {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--s-2, 6px);
+  font-style: normal;
+}
+/* Tier tints: primary reads as the most trustworthy (ok), secondary neutral, tertiary
+   muted. An uncertainty cue (low confidence OR a caveat note) overrides to the warn tint
+   so the eye lands on "be careful". */
+.badge--tier-primary {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.badge--tier-secondary {
+  background: var(--surface-2);
+  color: var(--text-2);
+  border-color: var(--border);
+}
+.badge--tier-tertiary {
+  background: var(--surface-2);
+  color: var(--text-3);
+  border-color: var(--border);
+}
+/* No tier set — a plain type/confidence badge reads as soft/neutral. */
+.badge--reliability {
+  background: var(--surface-2);
+  color: var(--text-2);
+  border-color: var(--border);
+}
+/* The uncertainty override (low confidence / a caveat note present). */
+.badge--uncertain {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: transparent;
+}
+/* The free-text reliability/uncertainty caveat line. */
+.refblock__rel-note {
+  display: block;
+  margin-top: var(--s-2, 6px);
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  font-style: normal;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}

@@ -272,6 +272,8 @@ import type {
   SourcesImportPdfResult,
   SourcesRunOcrRequest,
   SourcesRunOcrResult,
+  SourcesUpdateReliabilityRequest,
+  SourcesUpdateReliabilityResult,
   SourceYieldListRequest,
   SourceYieldListResult,
   TagsAddRequest,
@@ -1171,6 +1173,36 @@ export class DbService {
       throw new Error("DbService.importManualSource: created source not found in inbox");
     }
     return { id: element.id, item };
+  }
+
+  /**
+   * Edit a source's reliability metadata (T091) via
+   * {@link SourceRepository.updateReliability}: set/clear `source_type` /
+   * `reliability_tier` / `confidence` / `reliability_notes` in ONE transaction logging
+   * `update_element` on the source element (no new op type, no lineage touched). Returns
+   * the source's refreshed provenance (built by the SAME {@link InspectorQuery} the
+   * inspector uses) so the renderer reflects the new badge WITHOUT a re-fetch.
+   */
+  updateSourceReliability(
+    request: SourcesUpdateReliabilityRequest,
+  ): SourcesUpdateReliabilityResult {
+    this.repos.sources.updateReliability(request.sourceId as ElementId, {
+      ...(request.sourceType !== undefined ? { sourceType: request.sourceType } : {}),
+      ...(request.reliabilityTier !== undefined
+        ? { reliabilityTier: request.reliabilityTier }
+        : {}),
+      ...(request.confidence !== undefined ? { confidence: request.confidence } : {}),
+      ...(request.reliabilityNotes !== undefined
+        ? { reliabilityNotes: request.reliabilityNotes }
+        : {}),
+    });
+    const data = this.inspectorQuery.get(request.sourceId as ElementId);
+    if (!data?.provenance) {
+      throw new Error(
+        `DbService.updateSourceReliability: provenance not found for ${request.sourceId}`,
+      );
+    }
+    return { provenance: data.provenance };
   }
 
   /**
@@ -2121,6 +2153,11 @@ export class DbService {
           publishedAt: detail.provenance.publishedAt,
           accessedAt: detail.provenance.accessedAt,
           reasonAdded: detail.provenance.reasonAdded,
+          // Source-reliability metadata (T091).
+          sourceType: detail.provenance.sourceType,
+          reliabilityTier: detail.provenance.reliabilityTier,
+          confidence: detail.provenance.confidence,
+          reliabilityNotes: detail.provenance.reliabilityNotes,
         },
         bodyPreview: detail.bodyPreview,
       },

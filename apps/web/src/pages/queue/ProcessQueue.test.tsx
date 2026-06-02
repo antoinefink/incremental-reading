@@ -120,6 +120,10 @@ const h = vi.hoisted(() => {
       publishedAt: null,
       locationLabel: "¶ 4",
       snippet: "intelligence is skill-acquisition efficiency",
+      sourceType: null,
+      reliabilityTier: null,
+      confidence: null,
+      reliabilityNotes: null,
     },
     expiry: null,
     schedulerSignals: {

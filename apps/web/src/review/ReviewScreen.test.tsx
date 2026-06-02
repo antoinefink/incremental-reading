@@ -42,6 +42,10 @@ const h = vi.hoisted(() => {
       publishedAt: "2019-11-05T00:00:00.000Z",
       locationLabel: "¶ 4",
       snippet: "Intelligence is a measure of skill-acquisition efficiency…",
+      sourceType: null,
+      reliabilityTier: null,
+      confidence: null,
+      reliabilityNotes: null,
     },
     expiry: null,
     schedulerSignals: {
@@ -84,6 +88,10 @@ const h = vi.hoisted(() => {
       publishedAt: "2019-11-05T00:00:00.000Z",
       locationLabel: "¶ 4",
       snippet: null,
+      sourceType: null,
+      reliabilityTier: null,
+      confidence: null,
+      reliabilityNotes: null,
     },
     expiry: null,
     schedulerSignals: {
@@ -145,6 +153,25 @@ const h = vi.hoisted(() => {
       softwareVersion: null,
     },
   };
+  // T091: a card whose source carries reliability metadata — the badge is part of the
+  // post-reveal refblock (it rides the reveal gate, never on the prompt face).
+  const reliableCard: ReviewCardView = {
+    ...qaCard,
+    id: "card-reliable",
+    sourceRef: {
+      sourceElementId: "src-1",
+      sourceTitle: "On the Measure of Intelligence",
+      url: "https://arxiv.org/abs/1911.01547",
+      author: "François Chollet",
+      publishedAt: "2019-11-05T00:00:00.000Z",
+      locationLabel: "¶ 4",
+      snippet: "Intelligence is a measure of skill-acquisition efficiency…",
+      sourceType: "paper",
+      reliabilityTier: "primary",
+      confidence: "high",
+      reliabilityNotes: null,
+    },
+  };
   return {
     navigateSpy: vi.fn(),
     selectSpy: vi.fn(),
@@ -162,6 +189,7 @@ const h = vi.hoisted(() => {
     audioPromptCard,
     audioAnswerCard,
     expiredCard,
+    reliableCard,
   };
 });
 
@@ -321,6 +349,36 @@ describe("ReviewScreen", () => {
 
     // The seeded fresh card carries `expiry: null` → no banner ever.
     expect(screen.queryByTestId("review-expiry-banner")).not.toBeInTheDocument();
+  });
+
+  it("hides the reliability badge until reveal, then shows it on the refblock (T091 reveal gate)", async () => {
+    h.reviewSessionNext.mockResolvedValue(singleDeck(h.reliableCard));
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    // The reliability badge is part of the refblock — absent before reveal so it can't
+    // leak the answer.
+    expect(screen.queryByTestId("review-refblock-reliability")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("review-reveal"));
+    await screen.findByTestId("review-answer");
+
+    const badge = await screen.findByTestId("review-refblock-reliability");
+    expect(badge).toHaveTextContent("Primary source · high confidence");
+    expect(badge).toHaveAttribute("data-reliability-tier", "primary");
+  });
+
+  it("shows no reliability badge for a card whose source has none, even after reveal (T091)", async () => {
+    h.reviewSessionNext.mockResolvedValue(singleDeck(h.qaCard));
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    fireEvent.click(screen.getByTestId("review-reveal"));
+    await screen.findByTestId("review-answer");
+
+    // The refblock shows, but the seeded qaCard's source has no reliability → no badge.
+    await screen.findByTestId("review-refblock");
+    expect(screen.queryByTestId("review-refblock-reliability")).not.toBeInTheDocument();
   });
 
   it("grading calls reviewGrade with the rating + a plausible responseMs, then advances", async () => {

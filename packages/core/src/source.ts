@@ -14,6 +14,7 @@
  */
 
 import type { ElementId, IsoTimestamp } from "./ids";
+import type { ConfidenceLevel, ReliabilityTier, SourceType } from "./source-ref";
 
 /**
  * Provenance metadata for a `source` element (`sources` table). `snapshotKey`
@@ -45,6 +46,19 @@ export interface Source {
    * media reader keys off (NOT a snapshot-key derivation).
    */
   mediaKind: MediaKind | null;
+  /**
+   * Source-reliability metadata (T091) — how trustworthy the source is. All four are
+   * nullable (a source with no reliability data is the unchanged pre-T091 render).
+   * User-entered only; auto-classification is out of scope (that needs AI — T093+).
+   */
+  /** The source KIND (`paper`/`book`/…), or `null`. */
+  sourceType: SourceType | null;
+  /** The source TIER (`primary`/`secondary`/`tertiary`), or `null`. */
+  reliabilityTier: ReliabilityTier | null;
+  /** The user's CONFIDENCE in the source (`high`/`medium`/`low`), or `null`. */
+  confidence: ConfidenceLevel | null;
+  /** Free-text reliability caveats / known biases, or `null`. */
+  reliabilityNotes: string | null;
 }
 
 /**

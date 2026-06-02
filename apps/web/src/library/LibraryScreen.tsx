@@ -585,6 +585,12 @@ export function LibraryScreen() {
                       publishedAt: null,
                       locationLabel: selected.sourceLocationLabel,
                       snippet: null,
+                      // The library mini-ref does not carry reliability metadata (T091);
+                      // the badge surfaces in the inspector/review refblock instead.
+                      sourceType: null,
+                      reliabilityTier: null,
+                      confidence: null,
+                      reliabilityNotes: null,
                     }}
                     showSnippet={false}
                     testId="library-detail-ref"

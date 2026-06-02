@@ -14,6 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import { MIGRATIONS_DIR, openDatabase } from "@interleave/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { SourcesUpdateReliabilityRequestSchema } from "../shared/contract";
 import { DbService } from "./db-service";
 
 let dir: string;
@@ -286,6 +287,85 @@ describe("DbService", () => {
     expect(row.accessed_at).toBe(accessed);
     expect(row.snapshot_key).toBeNull();
     second.close();
+  });
+
+  // -------------------------------------------------------------------------
+  // Source-reliability metadata (T091).
+  // -------------------------------------------------------------------------
+
+  it("updateSourceReliability writes the four fields + returns provenance (T091)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+
+    const { id } = svc.importManualSource({ title: "Reliable source" });
+    // A fresh source has no reliability badge.
+    let data = svc.getInspectorData(id).data;
+    expect(data?.provenance?.reliabilityTier).toBeNull();
+
+    const { provenance } = svc.updateSourceReliability({
+      sourceId: id,
+      sourceType: "paper",
+      reliabilityTier: "primary",
+      confidence: "high",
+      reliabilityNotes: "Peer reviewed.",
+    });
+    expect(provenance.sourceType).toBe("paper");
+    expect(provenance.reliabilityTier).toBe("primary");
+    expect(provenance.confidence).toBe("high");
+    expect(provenance.reliabilityNotes).toBe("Peer reviewed.");
+
+    // The inspector reflects it; the op is the existing update_element (no new op type).
+    data = svc.getInspectorData(id).data;
+    expect(data?.provenance?.reliabilityTier).toBe("primary");
+    const ops = svc.raw.sqlite
+      .prepare("SELECT op_type FROM operation_log WHERE element_id = ? ORDER BY rowid DESC LIMIT 1")
+      .get(id) as { op_type: string };
+    expect(ops.op_type).toBe("update_element");
+
+    svc.close();
+  });
+
+  it("updateSourceReliability persists across a close + reopen (T091 restart)", () => {
+    const first = new DbService();
+    first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const { id } = first.importManualSource({ title: "Durable reliability" });
+    first.updateSourceReliability({
+      sourceId: id,
+      reliabilityTier: "secondary",
+      confidence: "low",
+    });
+    first.close();
+
+    const second = new DbService();
+    second.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const data = second.getInspectorData(id).data;
+    expect(data?.provenance?.reliabilityTier).toBe("secondary");
+    expect(data?.provenance?.confidence).toBe("low");
+    second.close();
+  });
+
+  it("the reliability IPC schema rejects a bad enum + an oversized note (T091)", () => {
+    // Bad enum value.
+    expect(() =>
+      SourcesUpdateReliabilityRequestSchema.parse({ sourceId: "x", reliabilityTier: "quaternary" }),
+    ).toThrow();
+    // Oversized note (> 2048 chars).
+    expect(() =>
+      SourcesUpdateReliabilityRequestSchema.parse({
+        sourceId: "x",
+        reliabilityNotes: "z".repeat(2049),
+      }),
+    ).toThrow();
+    // An empty patch (no fields) is rejected by the refine.
+    expect(() => SourcesUpdateReliabilityRequestSchema.parse({ sourceId: "x" })).toThrow();
+    // A valid patch parses.
+    expect(
+      SourcesUpdateReliabilityRequestSchema.parse({
+        sourceId: "x",
+        reliabilityTier: "primary",
+        confidence: "high",
+      }),
+    ).toMatchObject({ reliabilityTier: "primary", confidence: "high" });
   });
 
   it("keeps the import path fetch-free: the DB service imports no network module (T014)", () => {
@@ -2671,7 +2751,7 @@ describe("DbService — backup support (T047)", () => {
   it("getSchemaVersion returns the latest applied Drizzle migration tag", () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
-    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe("0023_secret_master_mold");
+    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe("0024_minor_ravenous");
     svc.close();
   });
 

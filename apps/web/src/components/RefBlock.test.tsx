@@ -19,6 +19,10 @@ const FULL: SourceRef = {
   publishedAt: "2019-11-05T00:00:00.000Z",
   locationLabel: "Definition · ¶1",
   snippet: "Intelligence is skill-acquisition efficiency.",
+  sourceType: null,
+  reliabilityTier: null,
+  confidence: null,
+  reliabilityNotes: null,
 };
 
 describe("RefBlock", () => {
@@ -61,5 +65,30 @@ describe("RefBlock", () => {
     render(<RefBlock ref={FULL} testId="rb" showSnippet={false} />);
     expect(screen.queryByTestId("rb-quote")).not.toBeInTheDocument();
     expect(screen.getByTestId("rb-citation")).toBeInTheDocument();
+  });
+
+  it("renders the reliability badge + note for a reliable source (T091)", () => {
+    render(
+      <RefBlock
+        ref={{
+          ...FULL,
+          reliabilityTier: "secondary",
+          confidence: "low",
+          reliabilityNotes: "Author has a known bias.",
+        }}
+        testId="rb"
+      />,
+    );
+    const badge = screen.getByTestId("rb-reliability");
+    expect(badge).toHaveTextContent("Secondary source · low confidence");
+    expect(badge).toHaveAttribute("data-reliability-tier", "secondary");
+    // Low confidence + a note → the uncertainty note is shown.
+    expect(screen.getByTestId("rb-reliability-note")).toHaveTextContent("Author has a known bias.");
+  });
+
+  it("renders NOTHING extra for a source with no reliability data (T091)", () => {
+    render(<RefBlock ref={FULL} testId="rb" />);
+    expect(screen.queryByTestId("rb-reliability")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("rb-reliability-note")).not.toBeInTheDocument();
   });
 });

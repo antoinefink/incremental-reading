@@ -210,6 +210,24 @@ export interface ReviewSummary {
  * how a reference reads. Every field is nullable (manual imports may omit
  * provenance; a source-less element degrades to a calm placeholder).
  */
+/** The source KIND (T091) — mirrors `@interleave/core`'s `SourceType`. */
+export type SourceTypeInput =
+  | "paper"
+  | "book"
+  | "article"
+  | "docs"
+  | "reference"
+  | "blog"
+  | "forum"
+  | "video"
+  | "dataset"
+  | "personal_note"
+  | "other";
+/** The source TIER (T091) — mirrors `@interleave/core`'s `ReliabilityTier`. */
+export type ReliabilityTierInput = "primary" | "secondary" | "tertiary";
+/** The user's CONFIDENCE (T091) — mirrors `@interleave/core`'s `ConfidenceLevel`. */
+export type ConfidenceLevelInput = "high" | "medium" | "low";
+
 export interface SourceRef {
   readonly sourceElementId: string | null;
   readonly sourceTitle: string | null;
@@ -218,6 +236,11 @@ export interface SourceRef {
   readonly publishedAt: string | null;
   readonly locationLabel: string | null;
   readonly snippet: string | null;
+  /** Source-reliability metadata (T091) — all nullable (no badge when all absent). */
+  readonly sourceType: SourceTypeInput | null;
+  readonly reliabilityTier: ReliabilityTierInput | null;
+  readonly confidence: ConfidenceLevelInput | null;
+  readonly reliabilityNotes: string | null;
 }
 
 export interface SourceProvenance {
@@ -231,6 +254,28 @@ export interface SourceProvenance {
   readonly publishedAt: string | null;
   readonly accessedAt: string | null;
   readonly reasonAdded: string | null;
+  /** Source-reliability metadata (T091) — all nullable (no badge when all absent). */
+  readonly sourceType: SourceTypeInput | null;
+  readonly reliabilityTier: ReliabilityTierInput | null;
+  readonly confidence: ConfidenceLevelInput | null;
+  readonly reliabilityNotes: string | null;
+}
+
+/**
+ * Request to edit a source's reliability metadata (T091). Each field is OPTIONAL: an
+ * omitted field is left unchanged; an explicit `null`/`""` (notes) clears it.
+ */
+export interface SourcesUpdateReliabilityRequest {
+  readonly sourceId: string;
+  readonly sourceType?: SourceTypeInput | null;
+  readonly reliabilityTier?: ReliabilityTierInput | null;
+  readonly confidence?: ConfidenceLevelInput | null;
+  readonly reliabilityNotes?: string | null;
+}
+
+/** The source's refreshed provenance after a reliability edit (T091). */
+export interface SourcesUpdateReliabilityResult {
+  readonly provenance: SourceProvenance;
 }
 
 export interface LocationSummary {
@@ -2859,6 +2904,9 @@ export interface AppApi {
   };
   readonly sources: {
     importManual(request: SourcesImportManualRequest): Promise<SourcesImportManualResult>;
+    updateReliability(
+      request: SourcesUpdateReliabilityRequest,
+    ): Promise<SourcesUpdateReliabilityResult>;
     importUrl(request: SourcesImportUrlRequest): Promise<SourcesImportUrlResult>;
     importPdf(request: SourcesImportPdfRequest): Promise<SourcesImportPdfResult>;
     getPdfData(request: SourcesGetPdfDataRequest): Promise<SourcesGetPdfDataResult>;
@@ -3182,6 +3230,12 @@ export const appApi = {
   /** Create a source in the inbox with its body (T012 + T013). */
   importManualSource(request: SourcesImportManualRequest): Promise<SourcesImportManualResult> {
     return requireAppApi().sources.importManual(request);
+  },
+  /** Edit a source's reliability metadata — type/tier/confidence/notes (T091). */
+  updateSourceReliability(
+    request: SourcesUpdateReliabilityRequest,
+  ): Promise<SourcesUpdateReliabilityResult> {
+    return requireAppApi().sources.updateReliability(request);
   },
   /** Fetch + clean + snapshot a live URL into an inbox source (T060). */
   importUrlSource(request: SourcesImportUrlRequest): Promise<SourcesImportUrlResult> {

@@ -146,6 +146,7 @@ describe("IPC channels", () => {
         "queue:vacation:apply",
         "lineage:get",
         "sources:importManual",
+        "sources:updateReliability",
         "sources:importUrl",
         "sources:importPdf",
         "sources:getPdfData",

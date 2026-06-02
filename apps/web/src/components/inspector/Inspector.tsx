@@ -27,6 +27,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   appApi,
   type ConceptNode,
+  type ConfidenceLevelInput,
   type ElementSummary,
   type ElementsSetPriorityAction,
   type FactLifetimeSummary,
@@ -37,8 +38,11 @@ import {
   type LineageItem,
   type LineageNode,
   type PriorityLabel as PriorityLabelType,
+  type ReliabilityTierInput,
   type SemanticRelatedItem,
   type SemanticRelatedResult,
+  type SourceProvenance,
+  type SourceTypeInput,
 } from "../../lib/appApi";
 import { useNavigateToLocation } from "../../reader/navigateToLocation";
 import { useSelection } from "../../shell/selection";
@@ -985,6 +989,289 @@ export function ExpirySection({
   );
 }
 
+/** The source-type options for the reliability picker (T091). */
+const SOURCE_TYPE_OPTIONS: readonly { value: SourceTypeInput; label: string }[] = [
+  { value: "paper", label: "Paper" },
+  { value: "book", label: "Book" },
+  { value: "article", label: "Article" },
+  { value: "docs", label: "Docs" },
+  { value: "reference", label: "Reference" },
+  { value: "blog", label: "Blog" },
+  { value: "forum", label: "Forum" },
+  { value: "video", label: "Video" },
+  { value: "dataset", label: "Dataset" },
+  { value: "personal_note", label: "Personal note" },
+  { value: "other", label: "Other" },
+];
+/** The reliability-tier options (T091). */
+const TIER_OPTIONS: readonly { value: ReliabilityTierInput; label: string }[] = [
+  { value: "primary", label: "Primary" },
+  { value: "secondary", label: "Secondary" },
+  { value: "tertiary", label: "Tertiary" },
+];
+/** The confidence options (T091). */
+const CONFIDENCE_OPTIONS: readonly { value: ConfidenceLevelInput; label: string }[] = [
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
+];
+const TYPE_LABEL: Record<SourceTypeInput, string> = Object.fromEntries(
+  SOURCE_TYPE_OPTIONS.map((o) => [o.value, o.label]),
+) as Record<SourceTypeInput, string>;
+/** The badge class for a reliability tier / uncertainty (mirrors the RefBlock helper). */
+function reliabilityBadgeClass(
+  tier: ReliabilityTierInput | null,
+  confidence: ConfidenceLevelInput | null,
+  notes: string | null,
+): string {
+  const uncertain = confidence === "low" || (notes != null && notes.trim() !== "");
+  if (uncertain) return "badge--uncertain";
+  if (tier === "primary") return "badge--tier-primary";
+  if (tier === "secondary") return "badge--tier-secondary";
+  if (tier === "tertiary") return "badge--tier-tertiary";
+  return "badge--reliability";
+}
+
+/**
+ * The source's RELIABILITY section (T091) — the trust-metadata editor for a `source`.
+ * Shows the tier/type/confidence as a badge + `MetaRow`s and the free-text notes, with
+ * inline edit controls (three enum pickers + a notes textarea) that call
+ * `sources.updateReliability` (one `update_element`; reliability is provenance, not
+ * lineage). Source-only. When nothing is set it offers an "Add reliability" affordance.
+ * On save the inspector re-reads (`onChanged`) so the badge + the card refblocks derived
+ * from this source reflect the new reliability.
+ */
+export function ReliabilitySection({
+  sourceId,
+  provenance,
+  onChanged,
+}: {
+  sourceId: string;
+  provenance: SourceProvenance;
+  onChanged: () => void;
+}) {
+  const anySet =
+    provenance.sourceType !== null ||
+    provenance.reliabilityTier !== null ||
+    provenance.confidence !== null ||
+    (provenance.reliabilityNotes ?? "") !== "";
+
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sourceType, setSourceType] = useState<SourceTypeInput | "">(provenance.sourceType ?? "");
+  const [tier, setTier] = useState<ReliabilityTierInput | "">(provenance.reliabilityTier ?? "");
+  const [confidence, setConfidence] = useState<ConfidenceLevelInput | "">(
+    provenance.confidence ?? "",
+  );
+  const [notes, setNotes] = useState(provenance.reliabilityNotes ?? "");
+
+  const openEditor = useCallback(() => {
+    setSourceType(provenance.sourceType ?? "");
+    setTier(provenance.reliabilityTier ?? "");
+    setConfidence(provenance.confidence ?? "");
+    setNotes(provenance.reliabilityNotes ?? "");
+    setError(null);
+    setEditing(true);
+  }, [provenance]);
+
+  const save = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await appApi.updateSourceReliability({
+        sourceId,
+        sourceType: sourceType === "" ? null : sourceType,
+        reliabilityTier: tier === "" ? null : tier,
+        confidence: confidence === "" ? null : confidence,
+        reliabilityNotes: notes,
+      });
+      setEditing(false);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, sourceId, sourceType, tier, confidence, notes, onChanged]);
+
+  // The calm one-line badge label ("Primary source · high confidence"), mirroring the
+  // core `formatSourceRef` summary so the inspector + the refblock read identically.
+  const badgeLabel = (() => {
+    const parts: string[] = [];
+    if (provenance.reliabilityTier) {
+      const tw = { primary: "Primary", secondary: "Secondary", tertiary: "Tertiary" }[
+        provenance.reliabilityTier
+      ];
+      parts.push(`${tw} source`);
+    } else if (provenance.sourceType) {
+      parts.push(TYPE_LABEL[provenance.sourceType]);
+    }
+    if (provenance.confidence) parts.push(`${provenance.confidence} confidence`);
+    return parts.length > 0 ? parts.join(" · ") : "Source notes";
+  })();
+  const uncertain =
+    provenance.confidence === "low" || (provenance.reliabilityNotes ?? "").trim() !== "";
+
+  return (
+    <div className="insp-sec" data-testid="reliability-section">
+      <div className="insp-sec__title">
+        <span>Reliability</span>
+        {anySet ? (
+          <span
+            className={`badge ${reliabilityBadgeClass(
+              provenance.reliabilityTier,
+              provenance.confidence,
+              provenance.reliabilityNotes,
+            )}`}
+            data-testid="inspector-reliability-badge"
+            data-reliability-tier={provenance.reliabilityTier ?? ""}
+            data-reliability-confidence={provenance.confidence ?? ""}
+          >
+            <Icon name={uncertain ? "warning" : "shield"} size={11} />
+            {badgeLabel}
+          </span>
+        ) : null}
+      </div>
+
+      {!editing ? (
+        <>
+          {anySet ? (
+            <div className="meta-list">
+              <MetaRow k="Type">
+                {provenance.sourceType ? TYPE_LABEL[provenance.sourceType] : "—"}
+              </MetaRow>
+              <MetaRow k="Tier">
+                {provenance.reliabilityTier
+                  ? (TIER_OPTIONS.find((o) => o.value === provenance.reliabilityTier)?.label ??
+                    provenance.reliabilityTier)
+                  : "—"}
+              </MetaRow>
+              <MetaRow k="Confidence">
+                {provenance.confidence
+                  ? (CONFIDENCE_OPTIONS.find((o) => o.value === provenance.confidence)?.label ??
+                    provenance.confidence)
+                  : "—"}
+              </MetaRow>
+              {provenance.reliabilityNotes ? (
+                <div className="meta-row meta-row--stack">
+                  <span className="meta-key">Notes</span>
+                  <span data-testid="inspector-reliability-notes">
+                    {provenance.reliabilityNotes}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p className="insp-empty" data-testid="inspector-reliability-empty">
+              No reliability set — add the source's tier, type, and confidence.
+            </p>
+          )}
+          <button
+            type="button"
+            className="insp-add__btn"
+            data-testid="inspector-reliability-edit"
+            onClick={openEditor}
+            style={{ marginTop: 8 }}
+          >
+            <Icon name="shield" size={13} />
+            {anySet ? "Edit reliability" : "Add reliability"}
+          </button>
+        </>
+      ) : (
+        <div className="meta-list">
+          <div className="meta-row meta-row--stack">
+            <span className="meta-key">Tier</span>
+            <select
+              className="insp-add__select"
+              data-testid="inspector-reliability-tier"
+              value={tier}
+              onChange={(e) => setTier(e.target.value as ReliabilityTierInput | "")}
+            >
+              <option value="">Unspecified</option>
+              {TIER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="meta-row meta-row--stack">
+            <span className="meta-key">Type</span>
+            <select
+              className="insp-add__select"
+              data-testid="inspector-reliability-type"
+              value={sourceType}
+              onChange={(e) => setSourceType(e.target.value as SourceTypeInput | "")}
+            >
+              <option value="">Unspecified</option>
+              {SOURCE_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="meta-row meta-row--stack">
+            <span className="meta-key">Confidence</span>
+            <select
+              className="insp-add__select"
+              data-testid="inspector-reliability-confidence"
+              value={confidence}
+              onChange={(e) => setConfidence(e.target.value as ConfidenceLevelInput | "")}
+            >
+              <option value="">Unspecified</option>
+              {CONFIDENCE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="meta-row meta-row--stack">
+            <span className="meta-key">Notes</span>
+            <textarea
+              className="insp-add__input"
+              data-testid="inspector-reliability-notes-input"
+              placeholder="Caveats / known biases"
+              rows={2}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </div>
+          <div className="insp-add" style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="insp-add__btn"
+              data-testid="inspector-reliability-save"
+              disabled={busy}
+              onClick={() => void save()}
+            >
+              <Icon name="check" size={13} />
+              Save
+            </button>
+            <button
+              type="button"
+              className="insp-add__btn"
+              data-testid="inspector-reliability-cancel"
+              disabled={busy}
+              onClick={() => setEditing(false)}
+            >
+              Cancel
+            </button>
+          </div>
+          {error ? (
+            <span className="text-danger" data-testid="inspector-reliability-error">
+              {error}
+            </span>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * The card's RETIREMENT row (T082) — shows whether the card is currently retired and
  * a Retire / Un-retire toggle. Retiring removes a low-value mature card from active
@@ -1373,6 +1660,18 @@ function InspectorBody({
             {provenance.reasonAdded && <MetaRow k="Reason">{provenance.reasonAdded}</MetaRow>}
           </div>
         </div>
+      )}
+
+      {/* Source reliability (T091) — the trust-metadata editor, sources only. Tier /
+          type / confidence / notes as a badge + editable rows; a source with no
+          reliability data offers an "Add reliability" affordance. The badge flows down
+          to every card/extract refblock derived from this source. */}
+      {provenance && (
+        <ReliabilitySection
+          sourceId={provenance.elementId}
+          provenance={provenance}
+          onChanged={onOrganizeChanged}
+        />
       )}
 
       {/* Owning source (lineage root) for non-source elements. */}

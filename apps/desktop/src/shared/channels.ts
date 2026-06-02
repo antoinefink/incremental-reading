@@ -30,6 +30,8 @@ export const IPC_CHANNELS = {
   queueVacationApply: "queue:vacation:apply",
   lineageGet: "lineage:get",
   sourcesImportManual: "sources:importManual",
+  /** T091: edit a source's reliability metadata (type/tier/confidence/notes). */
+  sourcesUpdateReliability: "sources:updateReliability",
   sourcesImportUrl: "sources:importUrl",
   sourcesImportPdf: "sources:importPdf",
   sourcesGetPdfData: "sources:getPdfData",

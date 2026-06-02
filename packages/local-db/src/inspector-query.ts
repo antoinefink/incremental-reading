@@ -20,14 +20,17 @@
 
 import type {
   ClipWindow,
+  ConfidenceLevel,
   Element,
   ElementId,
   FactExpiryStatus,
   FactLifetime,
   IsoTimestamp,
   RegionRect,
+  ReliabilityTier,
   SourceLocationId,
   SourceRef,
+  SourceType,
 } from "@interleave/core";
 import { deriveExpiryStatus, priorityToLabel } from "@interleave/core";
 import { cardRowToLifetime } from "./card-edit-service";
@@ -114,6 +117,11 @@ export interface SourceProvenance {
   readonly publishedAt: string | null;
   readonly accessedAt: string | null;
   readonly reasonAdded: string | null;
+  /** Source-reliability metadata (T091) — all nullable (no badge when all absent). */
+  readonly sourceType: SourceType | null;
+  readonly reliabilityTier: ReliabilityTier | null;
+  readonly confidence: ConfidenceLevel | null;
+  readonly reliabilityNotes: string | null;
 }
 
 export interface LocationSummary {
@@ -279,6 +287,11 @@ export class InspectorQuery {
           publishedAt: provenanceRow.source.publishedAt,
           accessedAt: provenanceRow.source.accessedAt,
           reasonAdded: provenanceRow.source.reasonAdded,
+          // Source-reliability metadata (T091) — surfaced as the inspector badge.
+          sourceType: provenanceRow.source.sourceType,
+          reliabilityTier: provenanceRow.source.reliabilityTier,
+          confidence: provenanceRow.source.confidence,
+          reliabilityNotes: provenanceRow.source.reliabilityNotes,
         }
       : null;
 

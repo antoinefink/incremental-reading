@@ -50,6 +50,11 @@ export function resolveSourceRef(repos: SourceRefRepos, id: ElementId): SourceRe
       publishedAt: row?.source.publishedAt ?? null,
       locationLabel: null,
       snippet: null,
+      // Source-reliability metadata (T091) — the badge + uncertainty note.
+      sourceType: row?.source.sourceType ?? null,
+      reliabilityTier: row?.source.reliabilityTier ?? null,
+      confidence: row?.source.confidence ?? null,
+      reliabilityNotes: row?.source.reliabilityNotes ?? null,
     };
   }
 
@@ -78,5 +83,12 @@ export function resolveSourceRef(repos: SourceRefRepos, id: ElementId): SourceRe
     publishedAt: provenance?.source.publishedAt ?? null,
     locationLabel: location?.label ?? null,
     snippet: location?.selectedText ?? null,
+    // Source-reliability metadata (T091) — inherited from the owning source so a card's
+    // refblock carries its source's reliability (the "reliability on important cards"
+    // surfacing). A soft-deleted/missing source leaves these `null` (no badge).
+    sourceType: provenance?.source.sourceType ?? null,
+    reliabilityTier: provenance?.source.reliabilityTier ?? null,
+    confidence: provenance?.source.confidence ?? null,
+    reliabilityNotes: provenance?.source.reliabilityNotes ?? null,
   };
 }

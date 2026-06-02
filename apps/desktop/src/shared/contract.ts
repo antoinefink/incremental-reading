@@ -18,6 +18,8 @@
 import {
   type AppSettings,
   CARD_KINDS,
+  CONFIDENCE_LEVELS,
+  type ConfidenceLevel,
   DAILY_REVIEW_BUDGET_MAX,
   DAILY_REVIEW_BUDGET_MIN,
   DESIRED_RETENTION_MAX,
@@ -39,8 +41,12 @@ import {
   MARK_TYPES,
   MEDIA_REF_FACES,
   type MediaRef,
+  RELIABILITY_TIERS,
   REVIEW_RATINGS,
+  type ReliabilityTier,
+  SOURCE_TYPES,
   type SourceRef,
+  type SourceType,
   THEMES,
 } from "@interleave/core";
 import { z } from "zod";
@@ -50,12 +56,18 @@ import { z } from "zod";
 // `RefBlock` reuses it. No new lineage model — this is derived display data.
 // The claim-lifetime model (T090) crosses IPC verbatim; the pure `deriveExpiryStatus`
 // lives in `@interleave/core` (computed main-side; the renderer only renders the status).
+// The source-reliability tuples (T091) cross IPC verbatim; `formatSourceRef` assembles
+// the badge from them.
 export type {
   AppSettings,
+  ConfidenceLevel,
   FactExpiryStatus,
   FactLifetime,
   FactStability,
+  ReliabilitySummary,
+  ReliabilityTier,
   SourceRef,
+  SourceType,
 } from "@interleave/core";
 
 // Channel names live in their own dependency-free module so the preload can
@@ -324,6 +336,15 @@ export interface SourceProvenance {
   readonly publishedAt: string | null;
   readonly accessedAt: string | null;
   readonly reasonAdded: string | null;
+  /**
+   * Source-reliability metadata (T091) — `type` / `tier` / `confidence` / `notes`.
+   * All nullable: a source with no reliability data shows no badge (the unchanged
+   * pre-T091 render). Edited through `sources.updateReliability` (`update_element`).
+   */
+  readonly sourceType: SourceType | null;
+  readonly reliabilityTier: ReliabilityTier | null;
+  readonly confidence: ConfidenceLevel | null;
+  readonly reliabilityNotes: string | null;
 }
 
 /**
@@ -1052,6 +1073,47 @@ export const SourcesImportManualRequestSchema = z.object({
   priority: PriorityLabelSchema.optional(),
 });
 export type SourcesImportManualRequest = z.infer<typeof SourcesImportManualRequestSchema>;
+
+/**
+ * Edit a source's reliability metadata (T091) — `sourceType` / `reliabilityTier` /
+ * `confidence` / `reliabilityNotes`. Every field is OPTIONAL: an omitted field is LEFT
+ * UNCHANGED; an explicit `null`/`""` (for notes) CLEARS it (a source with no reliability
+ * data renders exactly as before, no badge). The three enums are validated against the
+ * core tuples main-side; notes are bounded free text. Written in ONE transaction logging
+ * `update_element` on the source element — NO new op type, NO lineage touched. The body
+ * refine requires at least one field so an empty call is rejected.
+ */
+export const SourcesUpdateReliabilityRequestSchema = z
+  .object({
+    /** The source element id whose reliability to edit. */
+    sourceId: ElementIdSchema,
+    /** One of `SOURCE_TYPES` (`paper`/`book`/…), or `null` to clear. */
+    sourceType: z.enum(SOURCE_TYPES).nullable().optional(),
+    /** One of `RELIABILITY_TIERS` (`primary`/`secondary`/`tertiary`), or `null` to clear. */
+    reliabilityTier: z.enum(RELIABILITY_TIERS).nullable().optional(),
+    /** One of `CONFIDENCE_LEVELS` (`high`/`medium`/`low`), or `null` to clear. */
+    confidence: z.enum(CONFIDENCE_LEVELS).nullable().optional(),
+    /** Free-text reliability caveats / known biases (≤2048), or empty/`null` to clear. */
+    reliabilityNotes: z.string().trim().max(2048).nullable().optional(),
+  })
+  .refine(
+    (value) =>
+      value.sourceType !== undefined ||
+      value.reliabilityTier !== undefined ||
+      value.confidence !== undefined ||
+      value.reliabilityNotes !== undefined,
+    { message: "sources.updateReliability requires at least one reliability field" },
+  );
+export type SourcesUpdateReliabilityRequest = z.infer<typeof SourcesUpdateReliabilityRequestSchema>;
+
+export interface SourcesUpdateReliabilityResult {
+  /**
+   * The source's provenance after the edit (including the new reliability fields), so
+   * the inspector reflects the refreshed badge WITHOUT a re-fetch (mirrors how the
+   * other inspector edits return the updated row).
+   */
+  readonly provenance: SourceProvenance;
+}
 
 /** A flat, list-row summary for one inbox source. */
 export interface InboxItemSummary {
@@ -4630,6 +4692,10 @@ export interface AppApi {
   readonly sources: {
     /** Create a source in the `inbox` (T012; body lands with T013). */
     importManual(request: SourcesImportManualRequest): Promise<SourcesImportManualResult>;
+    /** Edit a source's reliability metadata — type/tier/confidence/notes (T091). */
+    updateReliability(
+      request: SourcesUpdateReliabilityRequest,
+    ): Promise<SourcesUpdateReliabilityResult>;
     /** Fetch + clean + snapshot a live URL into an `inbox` source (T060). */
     importUrl(request: SourcesImportUrlRequest): Promise<SourcesImportUrlResult>;
     /**

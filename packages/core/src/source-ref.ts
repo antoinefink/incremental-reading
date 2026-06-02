@@ -20,6 +20,69 @@
  */
 
 /**
+ * Source-reliability vocabulary (T091) — three small ordinal enums the user assigns
+ * to a `source` to record HOW TRUSTWORTHY it is. Ordinal enums (not free-form 0–1
+ * floats) are deliberate: they map cleanly to the kit's restrained labels + the badge
+ * colors, and the closed tuples are the single source of truth for the matching
+ * `sources` CHECK constraints (the DB + the domain union can never drift). All three
+ * are nullable on a source — a source with no reliability data renders exactly as
+ * before (no badge), no backfill.
+ */
+
+/**
+ * What KIND of source this is — display + a loose reliability prior. Free-form
+ * classification (e.g. AI auto-tagging) is out of scope (T093+); this is user-entered.
+ */
+export const SOURCE_TYPES = [
+  "paper",
+  "book",
+  "article",
+  "docs",
+  "reference",
+  "blog",
+  "forum",
+  "video",
+  "dataset",
+  "personal_note",
+  "other",
+] as const;
+
+/** A source type — one of {@link SOURCE_TYPES}. */
+export type SourceType = (typeof SOURCE_TYPES)[number];
+
+/**
+ * The source's TIER in the primary/secondary/tertiary scholarship sense:
+ *  - `primary`   — original/first-hand (a paper, a dataset, a spec).
+ *  - `secondary` — analysis/synthesis of primaries (a review article, a textbook).
+ *  - `tertiary`  — digests/aggregations (an encyclopedia, a blog summary).
+ */
+export const RELIABILITY_TIERS = ["primary", "secondary", "tertiary"] as const;
+
+/** A reliability tier — one of {@link RELIABILITY_TIERS}. */
+export type ReliabilityTier = (typeof RELIABILITY_TIERS)[number];
+
+/** The user's CONFIDENCE in the source — an ordinal trust level. */
+export const CONFIDENCE_LEVELS = ["high", "medium", "low"] as const;
+
+/** A confidence level — one of {@link CONFIDENCE_LEVELS}. */
+export type ConfidenceLevel = (typeof CONFIDENCE_LEVELS)[number];
+
+/** Type guard: is `value` one of the {@link SOURCE_TYPES}? */
+export function isSourceType(value: unknown): value is SourceType {
+  return typeof value === "string" && (SOURCE_TYPES as readonly string[]).includes(value);
+}
+
+/** Type guard: is `value` one of the {@link RELIABILITY_TIERS}? */
+export function isReliabilityTier(value: unknown): value is ReliabilityTier {
+  return typeof value === "string" && (RELIABILITY_TIERS as readonly string[]).includes(value);
+}
+
+/** Type guard: is `value` one of the {@link CONFIDENCE_LEVELS}? */
+export function isConfidenceLevel(value: unknown): value is ConfidenceLevel {
+  return typeof value === "string" && (CONFIDENCE_LEVELS as readonly string[]).includes(value);
+}
+
+/**
  * A resolved reference to the origin of an extract/card, assembled main-side from
  * the persisted `sources` provenance row + the `source_locations` anchor. Every
  * field is nullable because manual imports may omit provenance and a (rare)
@@ -41,6 +104,14 @@ export interface SourceRef {
   readonly locationLabel: string | null;
   /** A verbatim snapshot of the originating text (the `refblock` quote), or `null`. */
   readonly snippet: string | null;
+  /** The source's kind (T091 — `paper`/`book`/…), or `null` when unspecified. */
+  readonly sourceType: SourceType | null;
+  /** The source's tier (T091 — `primary`/`secondary`/`tertiary`), or `null`. */
+  readonly reliabilityTier: ReliabilityTier | null;
+  /** The user's confidence in the source (T091 — `high`/`medium`/`low`), or `null`. */
+  readonly confidence: ConfidenceLevel | null;
+  /** Free-text reliability caveats / known biases (T091), or `null`. */
+  readonly reliabilityNotes: string | null;
 }
 
 /** A {@link SourceRef} whose source could not be resolved (the calm orphan case). */
@@ -52,6 +123,10 @@ export const EMPTY_SOURCE_REF: SourceRef = {
   publishedAt: null,
   locationLabel: null,
   snippet: null,
+  sourceType: null,
+  reliabilityTier: null,
+  confidence: null,
+  reliabilityNotes: null,
 };
 
 /**
@@ -73,6 +148,32 @@ export interface FormattedSourceRef {
   readonly snippet: string | null;
   /** False when nothing about the source could be resolved (the orphan case). */
   readonly hasSource: boolean;
+  /**
+   * A presentation-ready reliability summary (T091), or `null` when the source carries
+   * NO reliability metadata (no badge — the unchanged pre-T091 render). When present it
+   * gives the renderer everything for the badge + uncertainty note WITHOUT re-deriving:
+   * the raw `tier`/`confidence`/`sourceType`, a calm `label`
+   * ("Primary source · high confidence"), the free-text `notes`, and `hasUncertainty`
+   * (true for `low` confidence OR a present notes string — the badge tints + the note
+   * shows). All framework-free; the `RefBlock` only renders it.
+   */
+  readonly reliability: ReliabilitySummary | null;
+}
+
+/** The presentation-ready reliability badge + uncertainty note (T091). */
+export interface ReliabilitySummary {
+  /** The source tier, or `null`. */
+  readonly tier: ReliabilityTier | null;
+  /** The confidence level, or `null`. */
+  readonly confidence: ConfidenceLevel | null;
+  /** The source type, or `null`. */
+  readonly sourceType: SourceType | null;
+  /** The calm one-line badge label, e.g. "Primary source · high confidence". */
+  readonly label: string;
+  /** The free-text reliability/uncertainty note, or `null`. */
+  readonly notes: string | null;
+  /** True for low confidence OR a present notes string — surfaces the uncertainty cue. */
+  readonly hasUncertainty: boolean;
 }
 
 /** Extract a 4-digit year from a loose date string, when one parses; else `null`. */
@@ -117,12 +218,75 @@ function hrefOf(url: string | null): string | null {
   return null;
 }
 
+/** Human labels for a source tier (the badge's leading phrase). */
+const TIER_LABEL: Record<ReliabilityTier, string> = {
+  primary: "Primary source",
+  secondary: "Secondary source",
+  tertiary: "Tertiary source",
+};
+
+/** Human labels for a source type (the badge's leading phrase when no tier is set). */
+const SOURCE_TYPE_LABEL: Record<SourceType, string> = {
+  paper: "Paper",
+  book: "Book",
+  article: "Article",
+  docs: "Docs",
+  reference: "Reference",
+  blog: "Blog",
+  forum: "Forum",
+  video: "Video",
+  dataset: "Dataset",
+  personal_note: "Personal note",
+  other: "Source",
+};
+
+/**
+ * Assemble the presentation-ready {@link ReliabilitySummary} from the raw reliability
+ * fields, or `null` when ALL of them are absent (no badge — the unchanged render). The
+ * `label` reads calmly: the tier (or the source type when there is no tier) leads, the
+ * confidence follows ("Primary source · high confidence"); a low confidence / a notes
+ * string sets `hasUncertainty` so the badge tints + the note shows. Framework-free.
+ */
+function summarizeReliability(
+  sourceType: SourceType | null,
+  tier: ReliabilityTier | null,
+  confidence: ConfidenceLevel | null,
+  notesRaw: string | null,
+): ReliabilitySummary | null {
+  const type = isSourceType(sourceType) ? sourceType : null;
+  const reliabilityTier = isReliabilityTier(tier) ? tier : null;
+  const conf = isConfidenceLevel(confidence) ? confidence : null;
+  const notes = clean(notesRaw);
+  // No reliability metadata at all → no badge (the pre-T091 render is unchanged).
+  if (!type && !reliabilityTier && !conf && !notes) return null;
+
+  const parts: string[] = [];
+  // The tier leads; if no tier, the source type leads instead; else nothing leads.
+  if (reliabilityTier) parts.push(TIER_LABEL[reliabilityTier]);
+  else if (type) parts.push(SOURCE_TYPE_LABEL[type]);
+  if (conf) parts.push(`${conf} confidence`);
+  // If only notes are set (no type/tier/confidence), label the badge "Source notes".
+  const label = parts.length > 0 ? parts.join(" · ") : "Source notes";
+  // Low confidence OR a caveat note is an uncertainty cue.
+  const hasUncertainty = conf === "low" || notes != null;
+
+  return {
+    tier: reliabilityTier,
+    confidence: conf,
+    sourceType: type,
+    label,
+    notes,
+    hasUncertainty,
+  };
+}
+
 /**
  * Assemble the presentation-ready {@link FormattedSourceRef} from a {@link SourceRef}.
  * Pure + framework-free: the citation omits missing parts cleanly, the year is
  * appended only when it parses, and the href is `null` when there is no usable URL.
  * When nothing about the source resolves, `hasSource` is `false` so the renderer
- * shows a calm placeholder instead of a broken reference.
+ * shows a calm placeholder instead of a broken reference. The T091 reliability summary
+ * is `null` when the source carries no reliability metadata (no badge).
  */
 export function formatSourceRef(ref: SourceRef | null | undefined): FormattedSourceRef {
   const r = ref ?? EMPTY_SOURCE_REF;
@@ -132,6 +296,12 @@ export function formatSourceRef(ref: SourceRef | null | undefined): FormattedSou
   const href = hrefOf(r.url);
   const locationLabel = clean(r.locationLabel);
   const snippet = clean(r.snippet);
+  const reliability = summarizeReliability(
+    r.sourceType,
+    r.reliabilityTier,
+    r.confidence,
+    r.reliabilityNotes,
+  );
 
   // "Author. Title (Year)." — each piece appears only when present.
   const parts: string[] = [];
@@ -147,7 +317,8 @@ export function formatSourceRef(ref: SourceRef | null | undefined): FormattedSou
     href != null ||
     locationLabel != null ||
     snippet != null ||
+    reliability != null ||
     clean(r.sourceElementId) != null;
 
-  return { citation, locationLabel, href, snippet, hasSource };
+  return { citation, locationLabel, href, snippet, hasSource, reliability };
 }

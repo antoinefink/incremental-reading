@@ -118,6 +118,7 @@ import {
   SourcesImportUrlRequestSchema,
   type SourcesImportUrlResult,
   SourcesRunOcrRequestSchema,
+  SourcesUpdateReliabilityRequestSchema,
   SourceYieldListRequestSchema,
   TagsAddRequestSchema,
   TagsListRequestSchema,
@@ -301,6 +302,13 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.sourcesImportManual, (_event, rawRequest: unknown) => {
     const request = SourcesImportManualRequestSchema.parse(rawRequest);
     return dbService.importManualSource(request);
+  });
+
+  // Source-reliability edit (T091) — set/clear the source's type/tier/confidence/notes,
+  // one `update_element` transaction on the source element (no new op type).
+  ipcMain.handle(IPC_CHANNELS.sourcesUpdateReliability, (_event, rawRequest: unknown) => {
+    const request = SourcesUpdateReliabilityRequestSchema.parse(rawRequest);
+    return dbService.updateSourceReliability(request);
   });
 
   // URL import (T060/T058) — the renderer enqueues a `url_import` job; the

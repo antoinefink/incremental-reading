@@ -12,7 +12,13 @@
  * the flat, JSON-serializable shapes below so they cross IPC unchanged.
  */
 
-import type { Element, ElementId } from "@interleave/core";
+import type {
+  ConfidenceLevel,
+  Element,
+  ElementId,
+  ReliabilityTier,
+  SourceType,
+} from "@interleave/core";
 import type { Repositories } from "./index";
 
 /** A flat, list-row summary for one inbox source. */
@@ -42,6 +48,11 @@ export interface InboxProvenance {
   readonly publishedAt: string | null;
   readonly accessedAt: string | null;
   readonly reasonAdded: string | null;
+  /** Source-reliability metadata (T091) — all nullable (no badge when all absent). */
+  readonly sourceType: SourceType | null;
+  readonly reliabilityTier: ReliabilityTier | null;
+  readonly confidence: ConfidenceLevel | null;
+  readonly reliabilityNotes: string | null;
 }
 
 /** Full preview payload for one inbox item. */
@@ -105,6 +116,11 @@ export class InboxQuery {
       publishedAt: provenanceRow?.publishedAt ?? null,
       accessedAt: provenanceRow?.accessedAt ?? null,
       reasonAdded: provenanceRow?.reasonAdded ?? null,
+      // Source-reliability metadata (T091) — surfaced in the inbox preview rail.
+      sourceType: provenanceRow?.sourceType ?? null,
+      reliabilityTier: provenanceRow?.reliabilityTier ?? null,
+      confidence: provenanceRow?.confidence ?? null,
+      reliabilityNotes: provenanceRow?.reliabilityNotes ?? null,
     };
 
     const doc = this.repos.documents.findById(id);

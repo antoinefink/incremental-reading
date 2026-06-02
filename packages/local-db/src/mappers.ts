@@ -19,6 +19,7 @@ import type {
   ReviewState,
   Source,
 } from "@interleave/core";
+import { isConfidenceLevel, isReliabilityTier, isSourceType } from "@interleave/core";
 import type {
   AssetRow,
   DocumentRow,
@@ -58,6 +59,12 @@ export function rowToSource(row: SourceRow): Source {
     snapshotKey: row.snapshotKey,
     reasonAdded: row.reasonAdded,
     mediaKind: (row.mediaKind as Source["mediaKind"]) ?? null,
+    // Source-reliability metadata (T091) — narrowed to the core tuples (a non-tuple
+    // legacy value degrades to `null` rather than mis-typing the badge).
+    sourceType: isSourceType(row.sourceType) ? row.sourceType : null,
+    reliabilityTier: isReliabilityTier(row.reliabilityTier) ? row.reliabilityTier : null,
+    confidence: isConfidenceLevel(row.confidence) ? row.confidence : null,
+    reliabilityNotes: row.reliabilityNotes ?? null,
   };
 }
 

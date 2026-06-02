@@ -504,3 +504,83 @@ describe("SourceRepository dedup queries (T069)", () => {
     expect(texts.size).toBe(2);
   });
 });
+
+describe("SourceRepository.updateReliability (T091)", () => {
+  function makeSource() {
+    return new SourceRepository(handle.db).create({
+      title: "On the Measure of Intelligence",
+      priority: priorityFromLabel("A"),
+      status: "active",
+    });
+  }
+
+  it("writes the four reliability columns in ONE transaction logging update_element", () => {
+    const repo = new SourceRepository(handle.db);
+    const { element } = makeSource();
+    // A fresh source carries no reliability.
+    expect(repo.findById(element.id)?.source.reliabilityTier).toBeNull();
+
+    const result = repo.updateReliability(element.id, {
+      sourceType: "paper",
+      reliabilityTier: "primary",
+      confidence: "high",
+      reliabilityNotes: "  Peer reviewed.  ",
+    });
+    expect(result.source.sourceType).toBe("paper");
+    expect(result.source.reliabilityTier).toBe("primary");
+    expect(result.source.confidence).toBe("high");
+    // Notes are trimmed.
+    expect(result.source.reliabilityNotes).toBe("Peer reviewed.");
+
+    // Persisted.
+    expect(repo.findById(element.id)?.source.reliabilityTier).toBe("primary");
+
+    // It is logged as update_element (no new op type) and stamps updatedAt.
+    const ops = new OperationLogRepository(handle.db).listForElement(element.id);
+    const latest = ops[0];
+    expect(latest?.opType).toBe("update_element");
+    expect((latest?.payload as { reliability?: unknown }).reliability).toMatchObject({
+      reliabilityTier: "primary",
+      confidence: "high",
+    });
+    // No NEW op type was introduced — only the closed set is present.
+    for (const op of ops) {
+      expect(["create_element", "create_source", "update_element"]).toContain(op.opType);
+    }
+  });
+
+  it("leaves OMITTED fields unchanged and CLEARS on explicit null/empty", () => {
+    const repo = new SourceRepository(handle.db);
+    const { element } = makeSource();
+    repo.updateReliability(element.id, {
+      sourceType: "book",
+      reliabilityTier: "secondary",
+      confidence: "medium",
+      reliabilityNotes: "caveat",
+    });
+
+    // Patch only confidence; the others stay.
+    repo.updateReliability(element.id, { confidence: "low" });
+    let row = repo.findById(element.id)?.source;
+    expect(row?.confidence).toBe("low");
+    expect(row?.reliabilityTier).toBe("secondary");
+    expect(row?.sourceType).toBe("book");
+    expect(row?.reliabilityNotes).toBe("caveat");
+
+    // Explicit null clears tier; empty string clears notes.
+    repo.updateReliability(element.id, { reliabilityTier: null, reliabilityNotes: "" });
+    row = repo.findById(element.id)?.source;
+    expect(row?.reliabilityTier).toBeNull();
+    expect(row?.reliabilityNotes).toBeNull();
+    // Untouched fields persist.
+    expect(row?.confidence).toBe("low");
+    expect(row?.sourceType).toBe("book");
+  });
+
+  it("throws when the id is not a live source", () => {
+    const repo = new SourceRepository(handle.db);
+    expect(() => repo.updateReliability(newElementId(), { reliabilityTier: "primary" })).toThrow(
+      /not found/,
+    );
+  });
+});

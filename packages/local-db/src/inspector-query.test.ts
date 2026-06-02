@@ -244,6 +244,49 @@ describe("InspectorQuery.get — attention scheduler", () => {
   });
 });
 
+describe("InspectorQuery.get — source reliability (T091)", () => {
+  it("returns the source's reliability in provenance + sourceRef after an edit", () => {
+    const { sourceId, cardId } = buildChain();
+    // Fresh source carries no reliability — no badge.
+    let data = inspector.get(sourceId);
+    expect(data?.provenance?.reliabilityTier).toBeNull();
+    expect(data?.sourceRef?.reliabilityTier).toBeNull();
+
+    repos.sources.updateReliability(sourceId, {
+      sourceType: "paper",
+      reliabilityTier: "primary",
+      confidence: "high",
+      reliabilityNotes: "Peer reviewed.",
+    });
+
+    // The source inspector now carries reliability in BOTH provenance and the ref.
+    data = inspector.get(sourceId);
+    expect(data?.provenance?.sourceType).toBe("paper");
+    expect(data?.provenance?.reliabilityTier).toBe("primary");
+    expect(data?.provenance?.confidence).toBe("high");
+    expect(data?.provenance?.reliabilityNotes).toBe("Peer reviewed.");
+    expect(data?.sourceRef?.reliabilityTier).toBe("primary");
+
+    // A card derived from the source INHERITS the source's reliability on its sourceRef
+    // (the "reliability on important cards" surfacing) — even though the card itself has
+    // no provenance row.
+    const cardData = inspector.get(cardId);
+    expect(cardData?.provenance).toBeNull();
+    expect(cardData?.sourceRef?.reliabilityTier).toBe("primary");
+    expect(cardData?.sourceRef?.confidence).toBe("high");
+    expect(cardData?.sourceRef?.reliabilityNotes).toBe("Peer reviewed.");
+  });
+
+  it("a null-reliability source yields a sourceRef with no reliability fields set", () => {
+    const { cardId } = buildChain();
+    const cardData = inspector.get(cardId);
+    expect(cardData?.sourceRef?.sourceType).toBeNull();
+    expect(cardData?.sourceRef?.reliabilityTier).toBeNull();
+    expect(cardData?.sourceRef?.confidence).toBeNull();
+    expect(cardData?.sourceRef?.reliabilityNotes).toBeNull();
+  });
+});
+
 describe("InspectorQuery.get — absence", () => {
   it("returns null for an unknown id", () => {
     expect(inspector.get("nope-not-an-id" as never)).toBeNull();

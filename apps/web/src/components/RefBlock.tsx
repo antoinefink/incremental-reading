@@ -20,9 +20,23 @@
  * accent-text source line.
  */
 
-import { formatSourceRef, type SourceRef } from "@interleave/core";
+import { formatSourceRef, type ReliabilitySummary, type SourceRef } from "@interleave/core";
 import { Icon } from "./Icon";
 import "./ref-block.css";
+
+/**
+ * Pick the reliability-badge variant class (T091). An uncertainty cue (low confidence
+ * OR a caveat note) overrides the tier color to the warn tint so the eye lands on
+ * "be careful"; otherwise the tier sets a calm trust color (primary → ok, secondary/
+ * tertiary → neutral/muted); with no tier, a soft neutral badge.
+ */
+function reliabilityBadgeClass(reliability: ReliabilitySummary): string {
+  if (reliability.hasUncertainty) return "badge--uncertain";
+  if (reliability.tier === "primary") return "badge--tier-primary";
+  if (reliability.tier === "secondary") return "badge--tier-secondary";
+  if (reliability.tier === "tertiary") return "badge--tier-tertiary";
+  return "badge--reliability";
+}
 
 export interface RefBlockProps {
   /** The resolved source reference, or `null` (the orphan placeholder case). */
@@ -80,6 +94,30 @@ export function RefBlock({
         <div className="refblock__cite" data-testid={`${testId}-citation`}>
           {f.locationLabel}
         </div>
+      ) : null}
+
+      {/* Source-reliability badge + uncertainty note (T091). Shown only when the source
+          carries reliability metadata; a null-reliability source renders nothing extra
+          (the unchanged pre-T091 refblock). Colored by tier; tinted warn on uncertainty.
+          In review this rides the post-reveal reveal gate (the whole refblock is hidden
+          until reveal), so it never leaks the answer. */}
+      {f.reliability ? (
+        <div className="refblock__reliability">
+          <span
+            className={`badge ${reliabilityBadgeClass(f.reliability)}`}
+            data-testid={`${testId}-reliability`}
+            data-reliability-tier={f.reliability.tier ?? ""}
+            data-reliability-confidence={f.reliability.confidence ?? ""}
+          >
+            <Icon name={f.reliability.hasUncertainty ? "warning" : "shield"} size={11} />
+            {f.reliability.label}
+          </span>
+        </div>
+      ) : null}
+      {f.reliability?.notes ? (
+        <span className="refblock__rel-note" data-testid={`${testId}-reliability-note`}>
+          {f.reliability.notes}
+        </span>
       ) : null}
 
       {f.href ? (
