@@ -47,6 +47,20 @@ export {
   sourceIntervalDays,
 } from "./attention-scheduler";
 export {
+  type AutoPostponeInput,
+  type AutoPostponeOptions,
+  type AutoPostponePlan,
+  type AutoPostponeSignals,
+  CARD_MATURE_RETRIEVABILITY,
+  CARD_MATURE_STABILITY_DAYS,
+  isCardFragile,
+  isCardMature,
+  type PostponeKind,
+  type PostponePlanItem,
+  type PostponeReason,
+  planAutoPostpone,
+} from "./auto-postpone";
+export {
   CardSchedulerService,
   type CardSchedulerServiceOptions,
   formatInterval,

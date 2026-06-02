@@ -37,12 +37,67 @@ import { ElementRepository } from "./element-repository";
 import { newRowId, nowIso } from "./ids";
 import { ReviewRepository } from "./review-repository";
 import { SchedulerService } from "./scheduler-service";
+import type { DbClient } from "./types";
 
 /** The mutating queue actions (open is renderer-only navigation, never an IPC call). */
 export type QueueActionKind = "postpone" | "raise" | "lower" | "markDone" | "dismiss" | "delete";
 
 /** How far forward a card's FSRS due is nudged on an M5 thin postpone-defer. */
 export const CARD_DEFER_DAYS = 1;
+
+const DAY_MS = 86_400_000;
+
+/**
+ * The SHARED FSRS-defer helper (T077) — the ONE place a card's schedule is pushed forward
+ * WITHOUT a re-grade. It is the heart of the two-scheduler split's card half: it moves ONLY
+ * `review_states.due_at` (+ `elements.due_at` in lockstep, since the queue reads
+ * `review_states.due_at` for cards), in ONE transaction, logging `reschedule_element` with
+ * the EXACT existing payload shape (`{ postpone: true, cardDefer: true, prevReviewDueAt,
+ * batchId? }`), PRESERVING the card's element status (a card lives in active/pending/
+ * suspended, never the attention-side `scheduled`), and writing NO review log. FSRS memory
+ * state (`stability`/`difficulty`/`reps`/`lapses`/`fsrsState`) is left UNTOUCHED — a deferred
+ * card resumes its exact FSRS trajectory when it next comes due.
+ *
+ * Two variants share this core so the new due is the ONLY difference:
+ *  - {@link cardDeferBy} — RELATIVE: `nextDue = max(prevReviewDueAt, now) + days` (what T077's
+ *    single-shot "postpone by one cycle" valve uses);
+ *  - {@link cardDeferTo} — ABSOLUTE: `nextDue = targetDueAt` (what T078 catch-up uses so each
+ *    card lands on the EXACT planned calendar day the per-day load curve was computed for —
+ *    converting an absolute date back to a relative delta is lossy when `prevDue` is already
+ *    overdue, which would break catch-up's "each day ≤ budget" guarantee).
+ *
+ * Exported (not private) so a separate `AutoPostponeService` / `RecoveryModeService` can call
+ * it directly without a visibility wall (the spec's option (a) — a shared, exported helper).
+ */
+export function cardDeferWithin(
+  tx: DbClient,
+  elements: ElementRepository,
+  id: ElementId,
+  nextDue: IsoTimestamp,
+  prevReviewDueAt: IsoTimestamp | null,
+  batchId?: string,
+): Element {
+  // Keep the FSRS due (review_states) and the element due in lockstep so the queue (which
+  // reads review_states.due_at for cards) picks up the new date.
+  tx.update(reviewStates).set({ dueAt: nextDue }).where(eq(reviewStates.elementId, id)).run();
+  // Capture the FSRS due PRE-IMAGE in the `reschedule_element` op so command-level undo
+  // restores BOTH `elements.due_at` and `review_states.due_at` (T044). PRESERVE the card's
+  // status (pass no `status`): a card never wears the attention-side `scheduled`.
+  return elements.rescheduleWithin(tx, id, nextDue, undefined, {
+    postpone: true,
+    cardDefer: true,
+    prevReviewDueAt,
+    ...(batchId ? { batchId } : {}),
+  });
+}
+
+/**
+ * Read a card's current FSRS due (the pre-image), or `null` for a never-scheduled card.
+ * The base the RELATIVE {@link cardDeferBy} pushes forward from.
+ */
+function reviewDueOf(review: ReviewRepository, id: ElementId): IsoTimestamp | null {
+  return review.findReviewState(id)?.dueAt ?? null;
+}
 
 /** The result of applying one queue action. */
 export interface QueueActionResult {
@@ -121,7 +176,7 @@ export class QueueActionService {
    */
   private postpone(element: Element, now: IsoTimestamp, batchId?: string): QueueActionResult {
     if (element.type === "card") {
-      const deferred = this.deferCard(element.id, now, batchId);
+      const deferred = this.cardDeferBy(element.id, now, CARD_DEFER_DAYS, batchId);
       return { element: deferred, removed: false, undo: null };
     }
     const { element: rescheduled } = this.scheduler.rescheduleForAction(
@@ -157,43 +212,54 @@ export class QueueActionService {
   }
 
   /**
-   * Thin FSRS defer (M5): push a card's `review_states.due_at` + the element's
-   * `dueAt` forward by {@link CARD_DEFER_DAYS}, in ONE transaction, logging
-   * `reschedule_element` (the existing op). The card's element STATUS is left
-   * untouched (cards live in active/pending/suspended, never the attention-side
-   * `scheduled`). This is NOT full FSRS grade-driven rescheduling — that lands in
-   * T036/T037 (M7), which replaces this. The attention scheduler is never touched for
-   * a card; no review LOG is written (a postpone is not a graded review).
+   * RELATIVE FSRS defer: push a card's `review_states.due_at` (+ the element's `dueAt`)
+   * forward by `days` (default {@link CARD_DEFER_DAYS}), in ONE transaction, logging
+   * `reschedule_element` (the existing op). `nextDue = max(prevReviewDueAt, now) + days`.
+   * The card's element STATUS is preserved (cards live in active/pending/suspended, never
+   * the attention-side `scheduled`); FSRS memory state is left UNTOUCHED and NO review log
+   * is written (a postpone is not a graded review).
    *
-   * TODO(T036/M7): replace this thin defer with FSRS grade-driven rescheduling.
+   * Generalized from the M5 single-day thin defer so T077's auto-postpone can push a mature
+   * card out by N days. The single-day callers (`postpone`/`bulkPostpone`) are unaffected
+   * (default arg). Public so a separate `AutoPostponeService` can call it without a
+   * visibility wall (the spec's option (a) — a shared, exported card-defer helper).
+   *
+   * TODO(T036/M7): full FSRS grade-driven rescheduling lives in `review.grade`; this defer
+   * is the deliberate NON-graded "postpone a card" path used by the queue + overload tools.
    */
-  private deferCard(id: ElementId, now: IsoTimestamp, batchId?: string): Element {
-    const state = this.review.findReviewState(id);
-    const prevReviewDueAt = state?.dueAt ?? null;
+  cardDeferBy(
+    id: ElementId,
+    now: IsoTimestamp = nowIso(),
+    days: number = CARD_DEFER_DAYS,
+    batchId?: string,
+  ): Element {
+    const prevReviewDueAt = reviewDueOf(this.review, id);
     const base = prevReviewDueAt ? Date.parse(prevReviewDueAt) : Date.parse(now);
     const from = Number.isNaN(base) ? Date.parse(now) : Math.max(base, Date.parse(now));
-    const nextDue = new Date(from + CARD_DEFER_DAYS * 86_400_000).toISOString() as IsoTimestamp;
-    return this.db.transaction((tx) => {
-      // Keep the FSRS due (review_states) and the element due in lockstep so the
-      // queue (which reads review_states.due_at for cards) picks up the new date.
-      tx.update(reviewStates).set({ dueAt: nextDue }).where(eq(reviewStates.elementId, id)).run();
-      // Capture the FSRS due PRE-IMAGE in the `reschedule_element` op so command-level
-      // undo restores BOTH `elements.due_at` and `review_states.due_at` (otherwise the
-      // card would stay out of the FSRS due queue after undo — T044).
-      //
-      // PRESERVE the card's status (pass no `status`): a card lives in the
-      // card-lifecycle vocabulary (active/pending/suspended), NOT the attention
-      // lifecycle's `scheduled`. Flipping it to `scheduled` would smear the
-      // attention-side status onto an FSRS item and muddy the two-scheduler split.
-      // The card's schedule lives on `review_states.due_at`; its element status is
-      // untouched by this thin defer.
-      return this.elements.rescheduleWithin(tx, id, nextDue, undefined, {
-        postpone: true,
-        cardDefer: true,
-        prevReviewDueAt,
-        ...(batchId ? { batchId } : {}),
-      });
-    });
+    const nextDue = new Date(from + days * DAY_MS).toISOString() as IsoTimestamp;
+    return this.db.transaction((tx) =>
+      cardDeferWithin(tx, this.elements, id, nextDue, prevReviewDueAt, batchId),
+    );
+  }
+
+  /**
+   * ABSOLUTE FSRS defer: set a card's `review_states.due_at` (+ the element's `dueAt`) to the
+   * EXACT `targetDueAt` (a specific calendar day), in ONE transaction, with the SAME op shape
+   * + pre-image + status-preservation + no-review-log guarantees as {@link cardDeferBy}. T078
+   * catch-up uses this so each card lands on its precise planned day (a relative delta would
+   * mis-place a card whose `prevDue` is already overdue, breaking the per-day load curve).
+   * Public for the same reason as {@link cardDeferBy}.
+   */
+  cardDeferTo(
+    id: ElementId,
+    _now: IsoTimestamp,
+    targetDueAt: IsoTimestamp,
+    batchId?: string,
+  ): Element {
+    const prevReviewDueAt = reviewDueOf(this.review, id);
+    return this.db.transaction((tx) =>
+      cardDeferWithin(tx, this.elements, id, targetDueAt, prevReviewDueAt, batchId),
+    );
   }
 
   /**

@@ -30,6 +30,13 @@ export {
 } from "./analytics-query";
 export { AssetRepository, type CreateAssetInput } from "./asset-repository";
 export {
+  AUTO_POSTPONE_CARD_DEFER_DAYS,
+  type AutoPostponeApplyResult,
+  type AutoPostponePreview,
+  AutoPostponeService,
+  type PostponePreviewRow,
+} from "./auto-postpone-service";
+export {
   type CardEditResult,
   CardEditService,
   type UpdateCardBodyInput,

@@ -55,6 +55,7 @@ import type {
   LineageGetRequest,
   PickImportFileRequest,
   QueueActRequest,
+  QueueAutoPostponeRequest,
   QueueListRequest,
   QueueScheduleRequest,
   QueueUndoRequest,
@@ -124,6 +125,10 @@ const appApi: AppApi = {
     schedule: (request: QueueScheduleRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.queueSchedule, request),
     undo: (request: QueueUndoRequest) => ipcRenderer.invoke(IPC_CHANNELS.queueUndo, request),
+    autoPostpone: (request?: QueueAutoPostponeRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.queueAutoPostpone, request ?? {}),
+    autoPostponeApply: (request?: QueueAutoPostponeRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.queueAutoPostponeApply, request ?? {}),
   },
   lineage: {
     get: (request: LineageGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.lineageGet, request),

@@ -152,6 +152,19 @@ export class SchedulerService {
   }
 
   /**
+   * READ-ONLY projection of where a `postpone` would land an attention item — the SAME
+   * `nextDueAt` decision {@link rescheduleForAction}(id,"postpone",…) computes, but WITHOUT
+   * mutating or appending an op. T077's auto-postpone preview uses this so the previewed
+   * `toDueAt` matches exactly what the apply will persist (the postpone interval grows with
+   * the running postpone count, so the projection must run the same heuristic). Rejects a
+   * `card` (cards never use the attention heuristic).
+   */
+  previewPostpone(id: ElementId, now: IsoTimestamp = nowIso()): IsoTimestamp {
+    const element = this.requireAttentionElement(id);
+    return nextDueAt(this.toSchedulable(element, "postpone"), now).dueAt;
+  }
+
+  /**
    * Schedule an attention element for an EXPLICIT choice — tomorrow / next week /
    * next month / a manual date — computing the date with the pure scheduler and
    * persisting it via {@link ElementRepository.reschedule} (`reschedule_element`,

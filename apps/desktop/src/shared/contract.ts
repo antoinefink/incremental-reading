@@ -479,6 +479,13 @@ export interface QueueSchedulerSignals {
   readonly retrievability: number | null;
   /** FSRS memory stability in days, or `null` for attention rows. */
   readonly stability: number | null;
+  /**
+   * Current FSRS phase (`new`/`learning`/`review`/`relearning`), or `null` for attention
+   * rows — the fragile↔mature signal the T077 auto-postpone planner reads.
+   */
+  readonly fsrsState: string | null;
+  /** Cumulative FSRS lapses, or `null` for attention rows — drives the T077 leech exclusion. */
+  readonly lapses: number | null;
   /** Distillation stage (shown on the attention chip). */
   readonly stage: string;
   /** How many times an attention element has been postponed. */
@@ -709,6 +716,73 @@ export type QueueUndoRequest = z.infer<typeof QueueUndoRequestSchema>;
 export interface QueueUndoResult {
   /** The restored queue row summary, or `null` when the id is unknown. */
   readonly item: QueueItemSummary | null;
+}
+
+// ---------------------------------------------------------------------------
+// queue.autoPostpone() / queue.autoPostponeApply()  (T077 — the overload valve)
+// ---------------------------------------------------------------------------
+
+/**
+ * The overload AUTO-POSTPONE surface (T077). When the due load exceeds the daily review
+ * budget (`getAppSettings().dailyReviewBudget`), the user can relieve the overflow — and the
+ * system chooses victims DETERMINISTICALLY by value: low-priority topics/sources/extracts
+ * first, then low-priority *mature* cards, while NEVER touching high-priority *fragile* cards
+ * (or leeches, or explicitly protected items). Selection is the pure `planAutoPostpone`
+ * (`@interleave/scheduler`); application is transactional through the `AutoPostponeService`,
+ * routing each item to its CORRECT scheduler — attention items reschedule on the attention
+ * scheduler (`reschedule_element`); cards defer on FSRS (`review_states.due_at` only, memory
+ * state untouched, no review log) — all under ONE shared `batchId` so the whole sweep undoes
+ * as one (T044). No new op types (the closed 15-op set is unchanged), no schema migration.
+ *
+ * `preview` is READ-ONLY (no mutation, no op); `apply` is transactional. Undo reuses the
+ * existing command-level/`batchId` undo (`undo.last`) — the `reschedule_element` pre-images
+ * restore BOTH `elements.due_at` and `review_states.due_at`. There is still no generic
+ * `db.query`.
+ */
+export const QueueAutoPostponeRequestSchema = z.object({
+  /** "Now" the due reads + plan compare against (ISO-8601); defaults to the server clock. */
+  asOf: IsoTimestampInputSchema.optional(),
+});
+export type QueueAutoPostponeRequest = z.infer<typeof QueueAutoPostponeRequestSchema>;
+
+/** Why a victim was chosen — surfaced so the cost of postponement is legible. */
+export type AutoPostponeReason = "low-priority-topic" | "low-priority-mature-card";
+
+/** One preview row — what moves, from→to, and why. */
+export interface AutoPostponePreviewRow {
+  readonly id: string;
+  readonly title: string;
+  readonly type: string;
+  /** Numeric priority `0.0`–`1.0`; the UI derives the band. */
+  readonly priority: number;
+  readonly scheduler: QueueScheduler;
+  /** The current due time (ISO-8601), or `null`. */
+  readonly fromDueAt: string | null;
+  /** The projected due time after the postpone (ISO-8601). */
+  readonly toDueAt: string;
+  readonly reason: AutoPostponeReason;
+}
+
+/** The read-only auto-postpone preview the renderer shows BEFORE committing. */
+export interface AutoPostponePreview {
+  /** How many items are over today's budget (`used - target`, clamped at 0). */
+  readonly overBudget: number;
+  /** The daily review budget target. */
+  readonly target: number;
+  /** The current due count. */
+  readonly used: number;
+  /** The ordered postpone victims (cheapest value first). */
+  readonly willPostpone: readonly AutoPostponePreviewRow[];
+  /** The due count remaining after applying the plan. */
+  readonly remainingAfter: number;
+}
+
+/** The result of applying the auto-postpone sweep. */
+export interface AutoPostponeApplyResult {
+  /** How many items were postponed. */
+  readonly postponed: number;
+  /** The shared batch id (the whole sweep undoes as one via `undo.last`). */
+  readonly batchId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -3472,6 +3546,19 @@ export interface AppApi {
      * prior status (done/dismiss). One transaction + the correct existing op.
      */
     undo(request: QueueUndoRequest): Promise<QueueUndoResult>;
+    /**
+     * Preview the overload AUTO-POSTPONE (T077) — READ-ONLY. Returns what would move
+     * (low-priority topics first, then low-priority mature cards), from→to + why, so the
+     * user sees the cost before committing. No mutation, no op.
+     */
+    autoPostpone(request?: QueueAutoPostponeRequest): Promise<AutoPostponePreview>;
+    /**
+     * Apply the overload AUTO-POSTPONE (T077) — transactional. Postpones the planned items
+     * (attention items on the attention scheduler; cards via an FSRS defer that leaves
+     * memory state untouched + writes no review log), all under ONE `batchId` so the sweep
+     * undoes as one. Returns the count + the batch id.
+     */
+    autoPostponeApply(request?: QueueAutoPostponeRequest): Promise<AutoPostponeApplyResult>;
   };
   readonly lineage: {
     /** The full, depth-tagged lineage tree for one element (read-only) (T023). */

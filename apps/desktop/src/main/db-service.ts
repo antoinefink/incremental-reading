@@ -46,6 +46,7 @@ import { type DbHandle, migrateDatabase, openDatabase } from "@interleave/db";
 import { parseYouTubeId } from "@interleave/importers";
 import {
   SchedulerService as AttentionScheduleService,
+  AutoPostponeService,
   CardEditService,
   CardService,
   createRepositories,
@@ -72,6 +73,8 @@ import { seedDemoCollection } from "@interleave/testing";
 import type {
   AnalyticsGetRequest,
   AnalyticsGetResult,
+  AutoPostponeApplyResult,
+  AutoPostponePreview,
   BalanceGetRequest,
   BalanceGetResult,
   CardEditSummary,
@@ -141,6 +144,7 @@ import type {
   LineageGetResult,
   QueueActRequest,
   QueueActResult,
+  QueueAutoPostponeRequest,
   QueueListRequest,
   QueueListResult,
   QueueScheduleRequest,
@@ -265,6 +269,8 @@ export class DbService {
   private library: LibraryQuery | null = null;
   private inboxQuery: InboxQuery | null = null;
   private queueAction: QueueActionService | null = null;
+  /** The overload AUTO-POSTPONE apply seam (T077) — preview + apply, one `batchId` per sweep. */
+  private autoPostpone: AutoPostponeService | null = null;
   private extraction: ExtractionService | null = null;
   private extractReview: ExtractService | null = null;
   private cardService: CardService | null = null;
@@ -440,6 +446,10 @@ export class DbService {
     // including topic/synthesis_note/task which the FTS index never covers.
     this.library = new LibraryQuery(this.handle.db, this.repositories);
     this.queueAction = new QueueActionService(this.handle.db);
+    // The overload AUTO-POSTPONE apply seam (T077): reads the merged due set + budget,
+    // runs the pure `planAutoPostpone`, and applies each victim through its CORRECT
+    // scheduler (attention reschedule / FSRS card defer) under one `batchId`.
+    this.autoPostpone = new AutoPostponeService(this.handle.db, this.repositories);
     this.inboxQuery = new InboxQuery(this.repositories);
     this.extraction = new ExtractionService(this.handle.db);
     this.extractReview = new ExtractService(this.handle.db);
@@ -480,6 +490,7 @@ export class DbService {
     this.queue = null;
     this.library = null;
     this.queueAction = null;
+    this.autoPostpone = null;
     this.inboxQuery = null;
     this.extraction = null;
     this.extractReview = null;
@@ -810,6 +821,39 @@ export class DbService {
       previousStatus: request.undo.previousStatus as ElementStatus,
     });
     return { item: this.queueQuery.summaryFor(id) };
+  }
+
+  /** The overload AUTO-POSTPONE apply seam (T077), bound to the open database. */
+  private get autoPostponeService(): AutoPostponeService {
+    if (!this.autoPostpone) {
+      throw new Error("DbService: database is not open");
+    }
+    return this.autoPostpone;
+  }
+
+  /**
+   * Preview the overload auto-postpone (T077) — READ-ONLY. Runs the pure `planAutoPostpone`
+   * over the current due set + budget and returns what would move (low-priority topics first,
+   * then low-priority mature cards — never a high-priority fragile card), from→to + why, so
+   * the renderer shows the cost before committing. No mutation, no op.
+   */
+  previewAutoPostpone(request: QueueAutoPostponeRequest): AutoPostponePreview {
+    return this.autoPostponeService.preview({
+      ...(request.asOf ? { asOf: request.asOf as IsoTimestamp } : {}),
+    });
+  }
+
+  /**
+   * Apply the overload auto-postpone (T077) — TRANSACTIONAL. Postpones the planned items
+   * through their CORRECT scheduler (attention items reschedule on the attention scheduler;
+   * cards defer on FSRS — `review_states.due_at` only, memory state untouched, no review
+   * log), all under ONE `batchId` so the whole sweep undoes as one (T044). Returns the count
+   * + the batch id; no new op types.
+   */
+  applyAutoPostpone(request: QueueAutoPostponeRequest): AutoPostponeApplyResult {
+    return this.autoPostponeService.apply({
+      ...(request.asOf ? { asOf: request.asOf as IsoTimestamp } : {}),
+    });
   }
 
   /** Read-only inbox query layer (T012), bound to the open database. */

@@ -55,6 +55,17 @@ export interface QueueSchedulerSignals {
   readonly retrievability: number | null;
   /** FSRS memory stability in days, or `null` for attention rows. */
   readonly stability: number | null;
+  /**
+   * Current FSRS phase (`new`/`learning`/`review`/`relearning`), or `null` for attention
+   * rows — the fragile↔mature signal the T077 auto-postpone planner reads (a card is mature
+   * only in the `review` phase with high stability). Read-only here; never re-graded.
+   */
+  readonly fsrsState: string | null;
+  /**
+   * Cumulative FSRS lapses (failed reviews), or `null` for attention rows — drives the
+   * leech exclusion in T077 auto-postpone (a leech under repair is never auto-postponed).
+   */
+  readonly lapses: number | null;
   /** Distillation stage (shown on the attention chip). */
   readonly stage: string;
   /** How many times an attention element has been postponed. */
@@ -399,6 +410,8 @@ export class QueueQuery {
         kind: "fsrs",
         retrievability,
         stability: state?.stability ?? null,
+        fsrsState: state?.fsrsState ?? null,
+        lapses: state?.lapses ?? null,
         stage: element.stage,
         postponed: 0,
       },
@@ -431,6 +444,8 @@ export class QueueQuery {
         kind: "attention",
         retrievability: null,
         stability: null,
+        fsrsState: null,
+        lapses: null,
         stage: element.stage,
         postponed: this.countPostpones(element.id),
       },

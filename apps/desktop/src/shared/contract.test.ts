@@ -59,6 +59,7 @@ import {
   MediaRefSchema,
   PickImportFileRequestSchema,
   QueueActRequestSchema,
+  QueueAutoPostponeRequestSchema,
   QueueListRequestSchema,
   QueueScheduleRequestSchema,
   QueueUndoRequestSchema,
@@ -122,6 +123,8 @@ describe("IPC channels", () => {
         "queue:act",
         "queue:schedule",
         "queue:undo",
+        "queue:autoPostpone",
+        "queue:autoPostpone:apply",
         "lineage:get",
         "sources:importManual",
         "sources:importUrl",
@@ -1329,6 +1332,16 @@ describe("QueueListRequestSchema asOf guard", () => {
     );
     expect(() => QueueListRequestSchema.parse({ asOf: "" })).toThrow();
     expect(() => QueueListRequestSchema.parse({ asOf: "soon" })).toThrow();
+  });
+});
+
+describe("QueueAutoPostponeRequestSchema (T077)", () => {
+  it("accepts an empty object + a parseable asOf, rejects a garbage asOf", () => {
+    expect(QueueAutoPostponeRequestSchema.parse({})).toEqual({});
+    expect(QueueAutoPostponeRequestSchema.parse({ asOf: "2027-06-01T12:00:00.000Z" }).asOf).toBe(
+      "2027-06-01T12:00:00.000Z",
+    );
+    expect(() => QueueAutoPostponeRequestSchema.parse({ asOf: "whenever" })).toThrow();
   });
 });
 

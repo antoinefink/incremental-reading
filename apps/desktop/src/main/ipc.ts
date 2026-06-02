@@ -62,6 +62,7 @@ import {
   PickImportFileRequestSchema,
   type PickImportFileResult,
   QueueActRequestSchema,
+  QueueAutoPostponeRequestSchema,
   QueueListRequestSchema,
   QueueScheduleRequestSchema,
   QueueUndoRequestSchema,
@@ -235,6 +236,16 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.queueUndo, (_event, rawRequest: unknown) => {
     const request = QueueUndoRequestSchema.parse(rawRequest);
     return dbService.undoQueueAction(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.queueAutoPostpone, (_event, rawRequest: unknown) => {
+    const request = QueueAutoPostponeRequestSchema.parse(rawRequest ?? {});
+    return dbService.previewAutoPostpone(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.queueAutoPostponeApply, (_event, rawRequest: unknown) => {
+    const request = QueueAutoPostponeRequestSchema.parse(rawRequest ?? {});
+    return dbService.applyAutoPostpone(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.lineageGet, (_event, rawRequest: unknown) => {

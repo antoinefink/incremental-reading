@@ -287,6 +287,10 @@ export interface QueueSchedulerSignals {
   readonly retrievability: number | null;
   /** FSRS memory stability in days, or `null` for attention rows. */
   readonly stability: number | null;
+  /** Current FSRS phase, or `null` for attention rows (the T077 fragile↔mature signal). */
+  readonly fsrsState: string | null;
+  /** Cumulative FSRS lapses, or `null` for attention rows (the T077 leech exclusion signal). */
+  readonly lapses: number | null;
   /** Distillation stage (shown on the attention chip). */
   readonly stage: string;
   /** How many times an attention element has been postponed. */
@@ -362,6 +366,45 @@ export interface QueueListResult {
   readonly items: readonly QueueItemSummary[];
   readonly counts: QueueCounts;
   readonly budget: { readonly used: number; readonly target: number };
+}
+
+// ---------------------------------------------------------------------------
+// queue.autoPostpone() / queue.autoPostponeApply()  (T077 — the overload valve)
+// ---------------------------------------------------------------------------
+
+/** The auto-postpone request — an optional clock for the due reads + plan. */
+export interface QueueAutoPostponeRequest {
+  readonly asOf?: string;
+}
+
+/** Why a victim was chosen (for the preview). */
+export type AutoPostponeReason = "low-priority-topic" | "low-priority-mature-card";
+
+/** One auto-postpone preview row — what moves, from→to, and why. */
+export interface AutoPostponePreviewRow {
+  readonly id: string;
+  readonly title: string;
+  readonly type: string;
+  readonly priority: number;
+  readonly scheduler: QueueScheduler;
+  readonly fromDueAt: string | null;
+  readonly toDueAt: string;
+  readonly reason: AutoPostponeReason;
+}
+
+/** The read-only auto-postpone preview shown BEFORE committing. */
+export interface AutoPostponePreview {
+  readonly overBudget: number;
+  readonly target: number;
+  readonly used: number;
+  readonly willPostpone: readonly AutoPostponePreviewRow[];
+  readonly remainingAfter: number;
+}
+
+/** The result of applying the auto-postpone sweep. */
+export interface AutoPostponeApplyResult {
+  readonly postponed: number;
+  readonly batchId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -2102,6 +2145,8 @@ export interface AppApi {
     act(request: QueueActRequest): Promise<QueueActResult>;
     schedule(request: QueueScheduleRequest): Promise<QueueScheduleResult>;
     undo(request: QueueUndoRequest): Promise<QueueUndoResult>;
+    autoPostpone(request?: QueueAutoPostponeRequest): Promise<AutoPostponePreview>;
+    autoPostponeApply(request?: QueueAutoPostponeRequest): Promise<AutoPostponeApplyResult>;
   };
   readonly lineage: {
     get(request: LineageGetRequest): Promise<LineageGetResult>;
@@ -2339,6 +2384,22 @@ export const appApi = {
    */
   undoQueueAction(request: QueueUndoRequest): Promise<QueueUndoResult> {
     return requireAppApi().queue.undo(request);
+  },
+  /**
+   * Preview the overload auto-postpone (T077) — READ-ONLY. Returns what would move
+   * (low-priority topics first, then low-priority mature cards; high-priority fragile
+   * cards protected), from→to + why, so the user sees the cost before committing.
+   */
+  previewAutoPostpone(request?: QueueAutoPostponeRequest): Promise<AutoPostponePreview> {
+    return requireAppApi().queue.autoPostpone(request);
+  },
+  /**
+   * Apply the overload auto-postpone (T077) — transactional, one `batchId`. Postpones the
+   * planned items through their correct scheduler (attention reschedule / FSRS card defer,
+   * memory state untouched, no review log). Undo via the existing batch undo (`undo.last`).
+   */
+  applyAutoPostpone(request?: QueueAutoPostponeRequest): Promise<AutoPostponeApplyResult> {
+    return requireAppApi().queue.autoPostponeApply(request);
   },
   /** The full, depth-tagged lineage tree for one element (read-only) (T023). */
   getLineage(request: LineageGetRequest): Promise<LineageGetResult> {

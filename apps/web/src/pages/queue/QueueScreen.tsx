@@ -43,6 +43,7 @@ import {
 import { useSelection } from "../../shell/selection";
 import "./queue.css";
 import { jitterOrder } from "./jitter";
+import { OverloadBanner } from "./OverloadBanner";
 import { actionFor, DueBadge, metaFor, titleFor } from "./queueRow";
 
 /** The non-open queue actions a row exposes, with their icon + label (T030). */
@@ -138,8 +139,8 @@ function QueueItem({
     stability: item.schedulerSignals.stability,
     difficulty: null,
     reps: null,
-    lapses: null,
-    fsrsState: null,
+    lapses: item.schedulerSignals.lapses,
+    fsrsState: item.schedulerSignals.fsrsState,
     stage: item.schedulerSignals.stage,
     postponed: item.schedulerSignals.postponed,
     lastProcessedAt: null,
@@ -241,7 +242,9 @@ export function QueueScreen() {
   const [undoState, setUndoState] = useState<{
     id: string;
     message: string;
-    undo: { kind: "restore" | "status"; previousStatus: string } | null;
+    // `restore`/`status` → the queue's per-row recipe undo (T030); `batch` → the overload
+    // auto-postpone sweep, reversed via the general command-level `undo.last` (T044/T077).
+    undo: { kind: "restore" | "status" | "batch"; previousStatus: string } | null;
   } | null>(null);
 
   const refresh = useCallback(async () => {
@@ -392,12 +395,42 @@ export function QueueScreen() {
     setUndoState(null);
     if (!pending?.undo || !isDesktop()) return;
     try {
-      await appApi.undoQueueAction({ id: pending.id, undo: pending.undo });
+      // A `batch` undo (the overload auto-postpone sweep) reverses the WHOLE batch via the
+      // general command-level undo (`undo.last` reverses every op sharing the last op's
+      // batchId — restoring both `elements.due_at` and `review_states.due_at`). A normal
+      // removing action restores via the queue's recipe undo.
+      if (pending.undo.kind === "batch") {
+        await appApi.undoLast();
+      } else {
+        await appApi.undoQueueAction({
+          id: pending.id,
+          undo: { kind: pending.undo.kind, previousStatus: pending.undo.previousStatus },
+        });
+      }
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [undoState, refresh]);
+
+  /**
+   * After a successful overload auto-postpone (T077): re-read the queue (the sweep moved N
+   * items out of the due set) and raise a "Postponed N · Undo" snackbar. Undo reverses the
+   * whole batch through the general command-level `undo.last` (the `batch` recipe above).
+   */
+  const onPostponed = useCallback(
+    (count: number) => {
+      void refresh();
+      if (count > 0) {
+        setUndoState({
+          id: "auto-postpone",
+          message: `Postponed ${count} low-priority item${count === 1 ? "" : "s"}`,
+          undo: { kind: "batch", previousStatus: "scheduled" },
+        });
+      }
+    },
+    [refresh],
+  );
 
   if (!desktop) {
     return (
@@ -462,7 +495,19 @@ export function QueueScreen() {
           </div>
         </div>
 
-        {/* session controls (the overload Banner + Segmented modes are M16/T031) */}
+        {/* overload valve (T077): when the due load exceeds today's budget, offer an
+            auto-postpone of the lowest-priority topics + mature cards (high-priority fragile
+            cards are protected). The preview shows the cost before committing. */}
+        {data ? (
+          <OverloadBanner
+            used={data.budget.used}
+            target={data.budget.target}
+            {...(asOf ? { asOf } : {})}
+            onPostponed={onPostponed}
+          />
+        ) : null}
+
+        {/* session controls (the Segmented modes are wired in T031/T076) */}
         <div className="sessionbar">
           <button
             type="button"

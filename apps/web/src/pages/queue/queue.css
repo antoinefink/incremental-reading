@@ -473,3 +473,101 @@
 .snackbar.fade-up {
   animation: qFadeUp var(--fast) var(--ease);
 }
+
+/* ---------- overload banner (T077 — the kit `Banner variant="info"` slot) ---------- */
+.q-overload-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3, 10px);
+  padding: var(--s-3, 12px) var(--s-4, 14px);
+  border: 1px solid var(--accent-soft-bd, var(--border-strong));
+  background: var(--accent-soft);
+  border-radius: var(--r-md);
+  margin-bottom: 14px;
+}
+.q-overload-banner svg {
+  flex: none;
+  color: var(--accent-text);
+  margin-top: 1px;
+}
+.q-overload-banner__main {
+  min-width: 0;
+  flex: 1;
+}
+.q-overload-banner__title {
+  font-weight: 600;
+  font-size: var(--t-sm);
+}
+.q-overload-banner__body {
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  margin-top: 2px;
+}
+.q-overload-banner__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2, 6px);
+}
+.q-overload-banner__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.q-overload-banner__btn:hover {
+  border-color: var(--text-3);
+}
+.q-overload-banner__btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* The confirm/preview drawer the "Auto-postpone N" button opens. */
+.q-postpone-preview {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.q-postpone-preview__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 8px 0;
+}
+.q-postpone-preview__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-sm);
+  color: var(--text-2);
+}
+.q-postpone-preview__row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.q-postpone-preview__row-move {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+.q-postpone-preview__confirm {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}

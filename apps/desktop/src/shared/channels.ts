@@ -22,6 +22,8 @@ export const IPC_CHANNELS = {
   queueAct: "queue:act",
   queueSchedule: "queue:schedule",
   queueUndo: "queue:undo",
+  queueAutoPostpone: "queue:autoPostpone",
+  queueAutoPostponeApply: "queue:autoPostpone:apply",
   lineageGet: "lineage:get",
   sourcesImportManual: "sources:importManual",
   sourcesImportUrl: "sources:importUrl",
