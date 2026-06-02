@@ -30,6 +30,7 @@ import type {
   CardsImportAnkiRequest,
   CardsMarkLeechRequest,
   CardsRetireRequest,
+  CardsSetLifetimeRequest,
   CardsSiblingAnswersRequest,
   CardsSplitRequest,
   CardsSuspendRequest,
@@ -238,6 +239,8 @@ const appApi: AppApi = {
     generateOcclusion: (request: CardsGenerateOcclusionRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.cardsGenerateOcclusion, request),
     update: (request: CardsUpdateRequest) => ipcRenderer.invoke(IPC_CHANNELS.cardsUpdate, request),
+    setLifetime: (request: CardsSetLifetimeRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.cardsSetLifetime, request),
     suspend: (request: CardsSuspendRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.cardsSuspend, request),
     delete: (request: CardsDeleteRequest) => ipcRenderer.invoke(IPC_CHANNELS.cardsDelete, request),

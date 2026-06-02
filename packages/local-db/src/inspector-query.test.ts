@@ -19,6 +19,7 @@
 import type { BlockId } from "@interleave/core";
 import type { DbHandle } from "@interleave/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { CardEditService } from "./card-edit-service";
 import { createRepositories, type Repositories } from "./index";
 import { InspectorQuery, schedulerKindForType } from "./inspector-query";
 import { createInMemoryDb } from "./test-db";
@@ -162,6 +163,41 @@ describe("InspectorQuery.get — cards (FSRS scheduler)", () => {
     expect(data?.scheduler.kind).toBe("fsrs");
     expect(data?.scheduler.retrievability).toBeNull();
     expect(data?.scheduler.fsrsState).toBe("new");
+  });
+
+  it("carries the card's claim-lifetime fields + the derived expiry status (T090)", () => {
+    const { cardId } = buildChain();
+    // No lifetime yet → present with status "fresh" and every field null.
+    const before = inspector.get(cardId);
+    expect(before?.lifetime).not.toBeNull();
+    expect(before?.lifetime?.status).toBe("fresh");
+    expect(before?.lifetime?.validUntil).toBeNull();
+
+    // Set a PAST valid_until → the derived status reads as "expired".
+    new CardEditService(handle.db).setLifetime(cardId, {
+      factStability: "slow",
+      validUntil: "2020-01-01",
+      jurisdiction: "global",
+    });
+    const after = inspector.get(cardId, new Date("2026-06-01T00:00:00.000Z"));
+    expect(after?.lifetime?.status).toBe("expired");
+    expect(after?.lifetime?.validUntil).toBe("2020-01-01");
+    expect(after?.lifetime?.factStability).toBe("slow");
+    expect(after?.lifetime?.jurisdiction).toBe("global");
+
+    // A future review_by (no valid_until) → "due_for_review" only once it passes.
+    new CardEditService(handle.db).setLifetime(cardId, {
+      validUntil: "",
+      reviewBy: "2026-03-01",
+    });
+    const due = inspector.get(cardId, new Date("2026-06-01T00:00:00.000Z"));
+    expect(due?.lifetime?.status).toBe("due_for_review");
+  });
+
+  it("returns lifetime: null for a non-card element (T090)", () => {
+    const { sourceId, extractId } = buildChain();
+    expect(inspector.get(sourceId)?.lifetime).toBeNull();
+    expect(inspector.get(extractId)?.lifetime).toBeNull();
   });
 });
 

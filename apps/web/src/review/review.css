@@ -517,6 +517,15 @@
   color: var(--warn);
   margin-top: 1px;
 }
+/* Expiry banner tones (T090) — `expired` is the stronger danger tint, `due_for_review`
+   keeps the default warn tint. Restrained, status-colored, no playful widget. */
+.banner--expired {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+.banner--expired svg {
+  color: var(--danger);
+}
 .banner__title {
   font-weight: 600;
   font-size: var(--t-sm);

@@ -121,6 +121,7 @@ const h = vi.hoisted(() => {
       locationLabel: "¶ 4",
       snippet: "intelligence is skill-acquisition efficiency",
     },
+    expiry: null,
     schedulerSignals: {
       kind: "fsrs",
       retrievability: 0.82,

@@ -259,6 +259,27 @@ export interface ConceptInspectorSummary {
   readonly name: string;
 }
 
+/** How stable a fact is over time (T090) — `stable`/`slow`/`volatile`. */
+export type FactStability = "stable" | "slow" | "volatile";
+
+/** A fact's derived expiry attribute (T090) — NOT a lifecycle status. */
+export type FactExpiryStatus = "fresh" | "due_for_review" | "expired";
+
+/** The claim-lifetime fields a fact (a card) may carry (T090); all nullable. */
+export interface FactLifetime {
+  readonly factStability: FactStability | null;
+  readonly validFrom: string | null;
+  readonly validUntil: string | null;
+  readonly jurisdiction: string | null;
+  readonly softwareVersion: string | null;
+  readonly reviewBy: string | null;
+}
+
+/** The card's claim-lifetime fields + the derived expiry status, for the inspector (T090). */
+export interface FactLifetimeSummary extends FactLifetime {
+  readonly status: FactExpiryStatus;
+}
+
 export interface InspectorData {
   readonly element: ElementSummary;
   readonly scheduler: SchedulerSignals;
@@ -273,6 +294,12 @@ export interface InspectorData {
   /** Concepts this element is a member of (T041 — `concept_membership` edges). */
   readonly concepts: readonly ConceptInspectorSummary[];
   readonly review: ReviewSummary | null;
+  /**
+   * The card's claim-lifetime fields + the DERIVED expiry status (T090). Present only
+   * for a `card`; `null` for non-card elements. A card with no lifetime is still
+   * present with `status: "fresh"` + every field `null`.
+   */
+  readonly lifetime: FactLifetimeSummary | null;
 }
 
 export interface InspectorListResult {
@@ -1490,6 +1517,27 @@ export interface CardsUpdateResult {
   readonly card: CardEditSummary;
 }
 
+/**
+ * Edit a card's claim-lifetime fields (T090). Every field is OPTIONAL — an omitted
+ * field is left unchanged; an explicit `null`/`""` clears it. Edits log
+ * `update_element` (no new op type); "expired" stays a derived attribute.
+ */
+export interface CardsSetLifetimeRequest {
+  readonly cardId: string;
+  readonly factStability?: FactStability | null;
+  readonly validFrom?: string | null;
+  readonly validUntil?: string | null;
+  readonly jurisdiction?: string | null;
+  readonly softwareVersion?: string | null;
+  readonly reviewBy?: string | null;
+}
+
+export interface CardsSetLifetimeResult {
+  readonly card: CardEditSummary;
+  /** The card's lifetime fields + the freshly-derived expiry status after the edit. */
+  readonly lifetime: FactLifetimeSummary;
+}
+
 export interface CardsSuspendRequest {
   readonly cardId: string;
 }
@@ -1803,6 +1851,19 @@ export interface ReviewSchedulerSignals {
  * with the card but the renderer keeps them hidden until reveal (no reveal
  * round-trip — review stays local + fast).
  */
+/**
+ * The reveal-gated expiry block a stale card carries into review (T090). `status` is
+ * never `"fresh"` here (a fresh card carries `expiry: null`). The renderer keeps it
+ * hidden until reveal so it cannot leak the answer.
+ */
+export interface ReviewCardExpiry {
+  readonly status: FactExpiryStatus;
+  readonly validUntil: string | null;
+  readonly reviewBy: string | null;
+  readonly jurisdiction: string | null;
+  readonly softwareVersion: string | null;
+}
+
 export interface ReviewCardView {
   readonly id: string;
   readonly kind: string;
@@ -1824,6 +1885,13 @@ export interface ReviewCardView {
    * with the shared `formatSourceRef`/`RefBlock`. `null` for a source-less card.
    */
   readonly sourceRef: SourceRef | null;
+  /**
+   * The card's claim-lifetime expiry block (T090) — present when the card is STALE
+   * (derived status `due_for_review`/`expired`); `null` for a fresh / lifetime-less
+   * card. The renderer keeps it HIDDEN until reveal (a calm post-reveal "this fact may
+   * be out of date" banner), exactly like `sourceRef`, so it can't leak the answer.
+   */
+  readonly expiry: ReviewCardExpiry | null;
   readonly schedulerSignals: ReviewSchedulerSignals;
   readonly leech: boolean;
   readonly lapses: number;
@@ -2842,6 +2910,7 @@ export interface AppApi {
       request: CardsGenerateOcclusionRequest,
     ): Promise<CardsGenerateOcclusionResult>;
     update(request: CardsUpdateRequest): Promise<CardsUpdateResult>;
+    setLifetime(request: CardsSetLifetimeRequest): Promise<CardsSetLifetimeResult>;
     suspend(request: CardsSuspendRequest): Promise<CardsSuspendResult>;
     delete(request: CardsDeleteRequest): Promise<CardsDeleteResult>;
     flag(request: CardsFlagRequest): Promise<CardsFlagResult>;
@@ -3317,6 +3386,14 @@ export const appApi = {
    */
   updateCard(request: CardsUpdateRequest): Promise<CardsUpdateResult> {
     return requireAppApi().cards.update(request);
+  },
+  /**
+   * Set/clear a card's claim-lifetime fields (T090) — `fact_stability`/`valid_from`/
+   * `valid_until`/`jurisdiction`/`software_version`/`review_by` — in one transaction;
+   * logs `update_element`. Returns the edited card + the freshly-derived expiry status.
+   */
+  setCardLifetime(request: CardsSetLifetimeRequest): Promise<CardsSetLifetimeResult> {
+    return requireAppApi().cards.setLifetime(request);
   },
   /** Suspend a card in review (T038): status `suspended`; logs `update_element`. */
   suspendCard(request: CardsSuspendRequest): Promise<CardsSuspendResult> {

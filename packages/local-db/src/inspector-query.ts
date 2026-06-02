@@ -22,12 +22,15 @@ import type {
   ClipWindow,
   Element,
   ElementId,
+  FactExpiryStatus,
+  FactLifetime,
   IsoTimestamp,
   RegionRect,
   SourceLocationId,
   SourceRef,
 } from "@interleave/core";
-import { priorityToLabel } from "@interleave/core";
+import { deriveExpiryStatus, priorityToLabel } from "@interleave/core";
+import { cardRowToLifetime } from "./card-edit-service";
 import type { Repositories } from "./index";
 import { resolveSourceRef } from "./source-ref-query";
 
@@ -152,6 +155,21 @@ export interface InspectorData {
   /** Concepts this element is a member of (T041 — `concept_membership` edges). */
   readonly concepts: readonly ConceptInspectorSummary[];
   readonly review: ReviewSummary | null;
+  /**
+   * The card's claim-lifetime fields + the DERIVED expiry status (T090). Present only
+   * for a `card` (the fact carrier; the element-level mirror is deferred). `null` for
+   * non-card elements. The `status` is computed MAIN-side via `deriveExpiryStatus(now)`
+   * so the renderer never recomputes it; the raw fields back the inspector's Expiry
+   * section editor. A card with no lifetime is still present here with `status: "fresh"`
+   * and every field `null` (the section renders an "Add expiry" affordance).
+   */
+  readonly lifetime: FactLifetimeSummary | null;
+}
+
+/** The card's claim-lifetime fields + derived expiry status, for the inspector (T090). */
+export interface FactLifetimeSummary extends FactLifetime {
+  /** The derived `fresh` / `due_for_review` / `expired` attribute (NOT a status). */
+  readonly status: FactExpiryStatus;
 }
 
 /** A concept summary embedded in the inspector payload (T041). */
@@ -296,8 +314,15 @@ export class InspectorQuery {
 
     let scheduler: SchedulerSignals;
     let reviewSummary: ReviewSummary | null = null;
+    // T090 — the card's claim-lifetime fields + the derived expiry status (cards only).
+    let lifetime: FactLifetimeSummary | null = null;
 
     if (element.type === "card") {
+      const cardRow = review.findCardById(id)?.card;
+      if (cardRow) {
+        const fields = cardRowToLifetime(cardRow);
+        lifetime = { ...fields, status: deriveExpiryStatus(fields, asOf) };
+      }
       const state = review.findReviewState(id);
       const logCount = review.listReviewLogs(id).length;
       const retrievability = state
@@ -380,6 +405,8 @@ export class InspectorQuery {
       tags,
       concepts,
       review: reviewSummary,
+      // T090 — claim-lifetime + derived expiry (cards only; null for other types).
+      lifetime,
     };
   }
 

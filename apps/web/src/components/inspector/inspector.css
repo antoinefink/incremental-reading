@@ -77,6 +77,22 @@
   color: var(--text-3);
   border-color: var(--border);
 }
+/* Expiry status markers (T090) — a DERIVED attribute (not a status). `fresh` is calm
+   and muted (the fact is current); `due_for_review` is the warn tint; `expired` is the
+   stronger danger tint. Restrained, status-colored, matching leech/retired. */
+.badge--fresh {
+  background: var(--surface-2);
+  color: var(--text-3);
+  border-color: var(--border);
+}
+.badge--due-for-review {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.badge--expired {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
 
 /* priority badges */
 .prio {

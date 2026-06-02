@@ -70,6 +70,7 @@ const QA_CARD: ReviewCardView = {
     locationLabel: "¶ 4",
     snippet: "Intelligence is a measure of skill-acquisition efficiency…",
   },
+  expiry: null,
   schedulerSignals: {
     kind: "fsrs",
     retrievability: 0.82,

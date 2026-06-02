@@ -137,6 +137,17 @@ export {
   REVIEW_RATINGS,
   VAULT_ROOTS,
 } from "./enums";
+// Fact lifetime + expiry derivation (T090) — the claim-lifetime model + pure status (./fact-lifetime).
+export type { FactExpiryStatus, FactLifetime, FactStability } from "./fact-lifetime";
+export {
+  deriveExpiryStatus,
+  EMPTY_FACT_LIFETIME,
+  expiryLabel,
+  FACT_STABILITY,
+  hasFactLifetime,
+  isFactStability,
+  lifetimeToRecencySignals,
+} from "./fact-lifetime";
 // Stable IDs + timestamps — branded string aliases (./ids).
 export type {
   AssetId,

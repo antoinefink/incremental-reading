@@ -28,6 +28,9 @@ import {
   EMBEDDING_API_KEY_MAX,
   EMBEDDING_MODEL_ID_MAX,
   EMBEDDING_PROVIDERS,
+  FACT_STABILITY,
+  type FactExpiryStatus,
+  type FactLifetime,
   IMPORT_BALANCE_FACTOR_MAX,
   IMPORT_BALANCE_FACTOR_MIN,
   JOB_STATUSES,
@@ -45,7 +48,15 @@ import { z } from "zod";
 // The source-reference (refblock) shape (T043) crosses IPC verbatim; the citation
 // formatter (`formatSourceRef`) lives in `@interleave/core` and the renderer's
 // `RefBlock` reuses it. No new lineage model — this is derived display data.
-export type { AppSettings, SourceRef } from "@interleave/core";
+// The claim-lifetime model (T090) crosses IPC verbatim; the pure `deriveExpiryStatus`
+// lives in `@interleave/core` (computed main-side; the renderer only renders the status).
+export type {
+  AppSettings,
+  FactExpiryStatus,
+  FactLifetime,
+  FactStability,
+  SourceRef,
+} from "@interleave/core";
 
 // Channel names live in their own dependency-free module so the preload can
 // import them without pulling Zod into the sandboxed bundle.
@@ -372,6 +383,21 @@ export interface InspectorData {
   readonly concepts: readonly ConceptInspectorSummary[];
   /** FSRS review summary for cards; `null` for attention-scheduled elements. */
   readonly review: ReviewSummary | null;
+  /**
+   * The card's claim-lifetime fields + the DERIVED expiry status (T090). Present only
+   * for a `card` (the fact carrier); `null` for non-card elements. The `status` is
+   * computed MAIN-side via `deriveExpiryStatus(now)` — the renderer renders the
+   * Expiry section/badge from it and never recomputes it. A card with no lifetime is
+   * still present with `status: "fresh"` + every field `null` (the section offers an
+   * "Add expiry" affordance). Edited through `cards.setLifetime` (`update_element`).
+   */
+  readonly lifetime: FactLifetimeSummary | null;
+}
+
+/** The card's claim-lifetime fields + the derived expiry status, for the inspector (T090). */
+export interface FactLifetimeSummary extends FactLifetime {
+  /** The derived `fresh` / `due_for_review` / `expired` attribute (NOT a lifecycle status). */
+  readonly status: FactExpiryStatus;
 }
 
 /** A concept summary embedded in the inspector payload (T041). */
@@ -2652,6 +2678,62 @@ export interface CardsUpdateResult {
   readonly card: CardEditSummary;
 }
 
+/**
+ * A bounded ISO-or-empty date string (T090). The lifetime dates are stored loosely
+ * (parsed defensively by `deriveExpiryStatus` — an unparseable value is "no
+ * constraint", never an error), so the IPC schema only BOUNDS the length; it does not
+ * reject a free-form date. An empty string clears the field. `null` also clears it; an
+ * OMITTED field is left unchanged.
+ */
+const LifetimeDateSchema = z.string().trim().max(40).nullable().optional();
+
+/**
+ * Edit a card's claim-lifetime fields (T090). Every field is OPTIONAL — an omitted
+ * field is left unchanged; an explicit `null`/`""` clears it. Validated main-side:
+ * `factStability` against the core tuple (or `null` to clear), the dates bounded,
+ * the jurisdiction/version bounded free text. Rides the existing `cards.*` group — no
+ * new top-level command group. The body refine requires at least one field so an empty
+ * call is rejected.
+ */
+export const CardsSetLifetimeRequestSchema = z
+  .object({
+    /** The card element id whose lifetime to edit. */
+    cardId: ElementIdSchema,
+    /** `stable`/`slow`/`volatile`, or `null` to clear. */
+    factStability: z.enum(FACT_STABILITY).nullable().optional(),
+    /** ISO date the validity starts (or empty/`null` to clear). */
+    validFrom: LifetimeDateSchema,
+    /** ISO date the validity ends — when `now > valid_until` the fact is EXPIRED. */
+    validUntil: LifetimeDateSchema,
+    /** Free-text jurisdiction ("US-CA"/"EU"/"global"), ≤128 chars, or empty/`null`. */
+    jurisdiction: z.string().trim().max(128).nullable().optional(),
+    /** Free-text software version ("React 19"/"Postgres 18"), ≤64 chars, or empty/`null`. */
+    softwareVersion: z.string().trim().max(64).nullable().optional(),
+    /** ISO date the fact should be re-checked — when `now > review_by` it is DUE-FOR-REVIEW. */
+    reviewBy: LifetimeDateSchema,
+  })
+  .refine(
+    (value) =>
+      value.factStability !== undefined ||
+      value.validFrom !== undefined ||
+      value.validUntil !== undefined ||
+      value.jurisdiction !== undefined ||
+      value.softwareVersion !== undefined ||
+      value.reviewBy !== undefined,
+    { message: "cards.setLifetime requires at least one lifetime field" },
+  );
+export type CardsSetLifetimeRequest = z.infer<typeof CardsSetLifetimeRequestSchema>;
+
+export interface CardsSetLifetimeResult {
+  readonly card: CardEditSummary;
+  /**
+   * The card's lifetime fields + the freshly-derived expiry status after the edit, so
+   * the inspector reflects the new badge/rows WITHOUT a re-fetch (mirrors how
+   * `cards.update` returns the edited body).
+   */
+  readonly lifetime: FactLifetimeSummary;
+}
+
 export const CardsSuspendRequestSchema = z.object({
   /** The card element id to suspend. */
   cardId: ElementIdSchema,
@@ -2975,6 +3057,16 @@ export interface ReviewCardView {
    * `sourceLocationLabel`/`ref` fields above are kept for back-compat.
    */
   readonly sourceRef: SourceRef | null;
+  /**
+   * The card's claim-lifetime expiry block (T090) — present when the card carries any
+   * lifetime AND its derived status is NOT `fresh` (a stale fact); `null` otherwise (a
+   * fresh or lifetime-less card shows no banner). It travels with the card but the
+   * renderer keeps it HIDDEN until reveal (a calm "this fact may be out of date" banner
+   * near the refblock) — exactly like `answer`/`sourceRef`, so it can't leak the answer.
+   * The `status` is derived MAIN-side (`deriveExpiryStatus`); the renderer renders the
+   * banner from it. Resolved from the card's `cards` lifetime columns.
+   */
+  readonly expiry: ReviewCardExpiry | null;
   /** The FSRS signals for the chip + stat readout. */
   readonly schedulerSignals: ReviewSchedulerSignals;
   /** True when the card has crossed the leech lapse threshold (T040 makes this real). */
@@ -3018,6 +3110,26 @@ export interface ReviewCardView {
   readonly mediaSource: "local" | "youtube" | null;
   /** The YouTube video id for a youtube audio source (T075), else `null`. */
   readonly youtubeId: string | null;
+}
+
+/**
+ * The reveal-gated expiry block a stale card carries into review (T090). Only the
+ * fields the post-reveal banner renders — the derived `status`, the two dates, and the
+ * jurisdiction/version context (so the banner can say WHAT changed). `status` is never
+ * `"fresh"` here (a fresh card carries `expiry: null`). The renderer keeps this hidden
+ * until reveal so it cannot leak the answer.
+ */
+export interface ReviewCardExpiry {
+  /** `due_for_review` or `expired` (never `fresh` — a fresh card has `expiry: null`). */
+  readonly status: FactExpiryStatus;
+  /** ISO date the fact's validity ended (drives the "expired {date}" line), or `null`. */
+  readonly validUntil: string | null;
+  /** ISO date the fact should be re-checked (drives the "review by {date}" line), or `null`. */
+  readonly reviewBy: string | null;
+  /** Free-text jurisdiction context shown beside the banner, or `null`. */
+  readonly jurisdiction: string | null;
+  /** Free-text software version context shown beside the banner, or `null`. */
+  readonly softwareVersion: string | null;
 }
 
 /** The image-occlusion data a review face needs (T071). */
@@ -4670,6 +4782,13 @@ export interface AppApi {
      * `review_states`, or `review_logs`.
      */
     update(request: CardsUpdateRequest): Promise<CardsUpdateResult>;
+    /**
+     * Set/clear a card's claim-lifetime fields (T090) — `fact_stability`/`valid_from`/
+     * `valid_until`/`jurisdiction`/`software_version`/`review_by` — in one transaction;
+     * logs `update_element`. "Expired" stays a DERIVED attribute (no status change, no
+     * new op type). Returns the edited card + the freshly-derived expiry status.
+     */
+    setLifetime(request: CardsSetLifetimeRequest): Promise<CardsSetLifetimeResult>;
     /** Suspend a card (T038): status `suspended`; logs `update_element`. Leaves the deck. */
     suspend(request: CardsSuspendRequest): Promise<CardsSuspendResult>;
     /** Soft-delete a card (T038): `deletedAt` + status `deleted`; logs `soft_delete_element`. */

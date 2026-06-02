@@ -28,6 +28,7 @@ import type { BlockId, ElementId, IsoTimestamp, SiblingGroupId } from "@interlea
 import { PRIORITY_LABEL_VALUE } from "@interleave/core";
 import type { InterleaveDatabase } from "@interleave/db";
 import {
+  CardEditService,
   CardRetirementService,
   type CardWithElement,
   type ExtractWithLocation,
@@ -93,12 +94,27 @@ export const DEMO_FIXTURES = {
     label: "Definition · ¶1 (clause)",
     priority: PRIORITY_LABEL_VALUE.B,
   },
-  /** Q&A card distilled from the extract, anchored at the extract's source location. */
+  /**
+   * Q&A card distilled from the extract, anchored at the extract's source location.
+   * Carries a claim-lifetime (T090) whose `valid_until`/`review_by` are in the PAST
+   * (2020) so the card reads as EXPIRED — giving the inspector/review specs + the T092
+   * generation scan a real stale fact. `valid_from` dates the original claim; the
+   * stability + jurisdiction/version fields exercise the display rows. Other seeded
+   * cards keep `null` lifetimes (they never expire).
+   */
   qaCard: {
     title: "Chollet's definition of intelligence",
     prompt: "How does Chollet define the intelligence of a system?",
     answer: "As a measure of its skill-acquisition efficiency over a scope of tasks.",
     priority: PRIORITY_LABEL_VALUE.A,
+    lifetime: {
+      factStability: "slow" as const,
+      validFrom: "2019-11-05",
+      validUntil: "2020-01-01",
+      jurisdiction: "global",
+      softwareVersion: null,
+      reviewBy: "2020-01-01",
+    },
   },
   /** Cloze card from the same extract; siblings of the Q&A card. */
   clozeCard: {
@@ -584,6 +600,13 @@ export function seedDemoCollection(repos: Repositories, db: InterleaveDatabase):
     relationType: "sibling_group",
     siblingGroupId,
   });
+
+  // 6b) Claim-lifetime on the Q&A card (T090) — a PAST `valid_until`/`review_by` so the
+  //     card reads as EXPIRED (the inspector Expiry section + the review banner + the
+  //     T092 generation scan have a real stale fact). Applied through the SAME
+  //     production path (`CardEditService.setLifetime`: one transaction + `update_element`),
+  //     never a raw insert.
+  new CardEditService(db).setLifetime(qaCard.element.id, f.qaCard.lifetime);
 
   // 7) Two reviews on the Q&A card (durable review_logs + advanced FSRS state).
   for (const review of f.reviews) {

@@ -206,3 +206,70 @@ describe("CardEditService.flag", () => {
     expect(review.findReviewState(cardId)?.dueAt).toBe(stateBefore?.dueAt);
   });
 });
+
+describe("CardEditService.setLifetime (T090)", () => {
+  it("writes the six lifetime columns, logs update_element, and keeps the card active", () => {
+    const { cardId } = seedCard(handle);
+    const service = new CardEditService(handle.db);
+    const review = new ReviewRepository(handle.db);
+    const elements = new ElementRepository(handle.db);
+    const opsBefore = opCount(handle, cardId, "update_element");
+    const stateBefore = review.findReviewState(cardId);
+
+    const { card, element } = service.setLifetime(cardId, {
+      factStability: "slow",
+      validFrom: "2019-11-05",
+      validUntil: "2020-01-01",
+      jurisdiction: "global",
+      softwareVersion: "React 18",
+      reviewBy: "2020-06-01",
+    });
+
+    expect(card.factStability).toBe("slow");
+    expect(card.validFrom).toBe("2019-11-05");
+    expect(card.validUntil).toBe("2020-01-01");
+    expect(card.jurisdiction).toBe("global");
+    expect(card.softwareVersion).toBe("React 18");
+    expect(card.reviewBy).toBe("2020-06-01");
+    // "Expired" is a DERIVED attribute — the card never leaves active/scheduled.
+    expect(element.status).toBe(elements.findById(cardId)?.status);
+    expect(["active", "scheduled", "pending"]).toContain(element.status);
+    // Exactly one new update_element op (no new op type, no status change op).
+    expect(opCount(handle, cardId, "update_element")).toBe(opsBefore + 1);
+    // The FSRS state is untouched (a lifetime edit must not touch review state).
+    expect(review.findReviewState(cardId)?.dueAt).toBe(stateBefore?.dueAt);
+    expect(review.findReviewState(cardId)?.reps).toBe(stateBefore?.reps);
+  });
+
+  it("leaves omitted fields unchanged and clears with an explicit null / empty string", () => {
+    const { cardId } = seedCard(handle);
+    const service = new CardEditService(handle.db);
+    service.setLifetime(cardId, { validUntil: "2025-01-01", reviewBy: "2025-06-01" });
+    // An omitted field is unchanged; only validUntil is patched here.
+    let { card } = service.setLifetime(cardId, { validUntil: "2026-01-01" });
+    expect(card.validUntil).toBe("2026-01-01");
+    expect(card.reviewBy).toBe("2025-06-01");
+    // An explicit empty string / null clears the field.
+    ({ card } = service.setLifetime(cardId, { reviewBy: "", validUntil: null }));
+    expect(card.reviewBy).toBeNull();
+    expect(card.validUntil).toBeNull();
+  });
+
+  it("clears fact_stability on a non-tuple value", () => {
+    const { cardId } = seedCard(handle);
+    const service = new CardEditService(handle.db);
+    service.setLifetime(cardId, { factStability: "stable" });
+    const { card } = service.setLifetime(cardId, {
+      // @ts-expect-error — exercising the runtime guard against a bad value.
+      factStability: "rock-solid",
+    });
+    expect(card.factStability).toBeNull();
+  });
+
+  it("rejects a non-card / unknown element", () => {
+    const service = new CardEditService(handle.db);
+    expect(() =>
+      service.setLifetime("el_missing" as ElementId, { reviewBy: "2025-01-01" }),
+    ).toThrow(/not found/);
+  });
+});

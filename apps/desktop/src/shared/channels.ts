@@ -63,6 +63,11 @@ export const IPC_CHANNELS = {
   cardsCreate: "cards:create",
   cardsGenerateOcclusion: "cards:generateOcclusion",
   cardsUpdate: "cards:update",
+  // Claim-lifetime (T090). `cards:setLifetime` writes the six expiry fields
+  // (fact_stability/valid_from/valid_until/jurisdiction/software_version/review_by) in
+  // one transaction (`update_element`); "expired" stays a DERIVED attribute, no status
+  // change, no new op type. Rides the existing `cards.*` group (no new top-level group).
+  cardsSetLifetime: "cards:setLifetime",
   cardsSuspend: "cards:suspend",
   cardsDelete: "cards:delete",
   cardsFlag: "cards:flag",

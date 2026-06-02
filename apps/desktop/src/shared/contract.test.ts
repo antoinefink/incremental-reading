@@ -189,6 +189,7 @@ describe("IPC channels", () => {
         "cards:retire",
         "cards:unretire",
         "cards:retired",
+        "cards:setLifetime",
         "cards:siblingAnswers",
         "cards:importAnki",
         "cards:exportAnki",

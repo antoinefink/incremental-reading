@@ -37,6 +37,8 @@ import type {
 } from "@interleave/core";
 import {
   canonicalizeUrl,
+  deriveExpiryStatus,
+  type FactLifetime,
   lowerPriority,
   parseMediaRef,
   priorityFromLabel,
@@ -58,6 +60,7 @@ import {
   CardRemediationService,
   CardRetirementService,
   CardService,
+  cardRowToLifetime,
   createRepositories,
   type DocumentMark,
   ExtractionService,
@@ -121,6 +124,8 @@ import type {
   CardsRetiredResult,
   CardsRetireRequest,
   CardsRetireResult,
+  CardsSetLifetimeRequest,
+  CardsSetLifetimeResult,
   CardsSiblingAnswersRequest,
   CardsSiblingAnswersResult,
   CardsSplitRequest,
@@ -172,6 +177,7 @@ import type {
   ExtractsRewriteResult,
   ExtractsUpdateStageRequest,
   ExtractsUpdateStageResult,
+  FactLifetimeSummary,
   InboxGetResult,
   InboxItemSummary,
   InboxListResult,
@@ -2645,6 +2651,33 @@ export class DbService {
   }
 
   /**
+   * Set/clear a card's claim-lifetime fields (T090) via {@link CardEditService.setLifetime}:
+   * writes the six `cards` columns + logs `update_element` in ONE transaction (no new
+   * op type; "expired" stays a DERIVED attribute, the card never leaves
+   * `active`/`scheduled`). An omitted field is left unchanged; an explicit `null`/`""`
+   * clears it. Returns the edited card + the freshly-derived expiry status so the
+   * inspector reflects the new badge/rows without a re-fetch.
+   */
+  setCardLifetime(request: CardsSetLifetimeRequest): CardsSetLifetimeResult {
+    const result = this.cardEdit.setLifetime(request.cardId as ElementId, {
+      ...(request.factStability !== undefined ? { factStability: request.factStability } : {}),
+      ...(request.validFrom !== undefined ? { validFrom: request.validFrom } : {}),
+      ...(request.validUntil !== undefined ? { validUntil: request.validUntil } : {}),
+      ...(request.jurisdiction !== undefined ? { jurisdiction: request.jurisdiction } : {}),
+      ...(request.softwareVersion !== undefined
+        ? { softwareVersion: request.softwareVersion }
+        : {}),
+      ...(request.reviewBy !== undefined ? { reviewBy: request.reviewBy } : {}),
+    });
+    const fields = cardRowToLifetime(result.card);
+    const lifetime: FactLifetimeSummary = {
+      ...fields,
+      status: deriveExpiryStatus(fields, new Date()),
+    };
+    return { card: this.toCardEditSummary(result), lifetime };
+  }
+
+  /**
    * Suspend a card in review (T038) via {@link CardEditService.suspend}: status
    * `suspended` (`update_element`). The card drops out of `QueueRepository.dueCards`
    * (which excludes suspended) but keeps its `review_states` + `review_logs`,
@@ -3321,6 +3354,23 @@ export class DbService {
       ? DbService.approximateRetrievability(state.stability, state.lastReviewedAt, asOfMs)
       : null;
 
+    // Claim-lifetime expiry block (T090): resolved from the card's six lifetime columns.
+    // Present ONLY when the fact is STALE (derived status !== "fresh"); the renderer keeps
+    // it hidden until reveal (a calm post-reveal "may be out of date" banner). A fresh /
+    // lifetime-less card carries `expiry: null` (no banner).
+    const lifetime: FactLifetime = cardRowToLifetime(card.card);
+    const expiryStatus = deriveExpiryStatus(lifetime, new Date(asOfMs));
+    const expiry: ReviewCardView["expiry"] =
+      expiryStatus === "fresh"
+        ? null
+        : {
+            status: expiryStatus,
+            validUntil: lifetime.validUntil,
+            reviewBy: lifetime.reviewBy,
+            jurisdiction: lifetime.jurisdiction,
+            softwareVersion: lifetime.softwareVersion,
+          };
+
     // Image-occlusion render data (T071): resolved from `occlusion_masks` ONLY for
     // an `image_occlusion` card. The face loads the base image bytes through the
     // typed `getRegionImage` command (the masks are stored SEPARATELY); we ship the
@@ -3374,6 +3424,9 @@ export class DbService {
       // snippet, resolved from the card's lineage with the SAME resolver the
       // inspector uses. Ships with the card but the renderer hides it until reveal.
       sourceRef: resolveSourceRef(this.repos, element.id),
+      // Claim-lifetime expiry block (T090) — null unless the fact is stale; the
+      // renderer hides it until reveal (the calm "may be out of date" banner).
+      expiry,
       schedulerSignals: {
         kind: "fsrs",
         retrievability,

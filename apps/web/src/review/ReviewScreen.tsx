@@ -45,6 +45,7 @@ import { CardAudioFace } from "./CardAudioFace";
 import { CardBody } from "./CardBody";
 import { CardFront } from "./CardFront";
 import { CardOcclusionFace } from "./CardOcclusionFace";
+import { ExpiryBanner } from "./ExpiryBanner";
 import { ReviewRepairBar } from "./ReviewRepairBar";
 import "./review.css";
 
@@ -515,6 +516,10 @@ export function ReviewScreen() {
                             {...(card.sourceLocationLabel ? { onOpenSource: openSource } : {})}
                           />
                         ) : null}
+                        {/* Expiry banner (T090) — a calm "may be out of date" line, shown
+                            ONLY post-reveal (it rides the reveal gate so it can't leak the
+                            answer). Absent for a fresh / lifetime-less card (`expiry: null`). */}
+                        {card.expiry ? <ExpiryBanner expiry={card.expiry} /> : null}
                         {/* Possible-conflict flags (T089) — shown ONLY post-reveal so
                             they can't leak the answer; suggestive, never authoritative. */}
                         <ConflictSection
@@ -582,6 +587,10 @@ export function ReviewScreen() {
                             {...(card.sourceLocationLabel ? { onOpenSource: openSource } : {})}
                           />
                         ) : null}
+                        {/* Expiry banner (T090) — a calm "may be out of date" line, shown
+                            ONLY post-reveal (it rides the reveal gate so it can't leak the
+                            answer). Absent for a fresh / lifetime-less card (`expiry: null`). */}
+                        {card.expiry ? <ExpiryBanner expiry={card.expiry} /> : null}
                         {/* Possible-conflict flags (T089) — shown ONLY post-reveal so
                             they can't leak the answer; suggestive, never authoritative. */}
                         <ConflictSection

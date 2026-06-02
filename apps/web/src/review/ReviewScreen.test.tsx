@@ -43,6 +43,7 @@ const h = vi.hoisted(() => {
       locationLabel: "¶ 4",
       snippet: "Intelligence is a measure of skill-acquisition efficiency…",
     },
+    expiry: null,
     schedulerSignals: {
       kind: "fsrs",
       retrievability: 0.82,
@@ -84,6 +85,7 @@ const h = vi.hoisted(() => {
       locationLabel: "¶ 4",
       snippet: null,
     },
+    expiry: null,
     schedulerSignals: {
       kind: "fsrs",
       retrievability: null,
@@ -129,6 +131,20 @@ const h = vi.hoisted(() => {
     mediaSource: "local",
     youtubeId: null,
   };
+  // T090: an EXPIRED card — its lifetime carries a past valid_until → the expiry block
+  // is present. The renderer must keep the banner hidden until reveal (it must not leak
+  // the answer), then show the "may be out of date" line.
+  const expiredCard: ReviewCardView = {
+    ...qaCard,
+    id: "card-expired",
+    expiry: {
+      status: "expired",
+      validUntil: "2020-01-01",
+      reviewBy: "2020-01-01",
+      jurisdiction: "global",
+      softwareVersion: null,
+    },
+  };
   return {
     navigateSpy: vi.fn(),
     selectSpy: vi.fn(),
@@ -145,6 +161,7 @@ const h = vi.hoisted(() => {
     leechCard,
     audioPromptCard,
     audioAnswerCard,
+    expiredCard,
   };
 });
 
@@ -274,6 +291,36 @@ describe("ReviewScreen", () => {
       "On the Measure of Intelligence (2019)",
     );
     expect(screen.getByTestId("review-refblock-open-source")).toBeInTheDocument();
+  });
+
+  it("hides the expiry banner until reveal, then shows it for an expired card (T090 reveal gate)", async () => {
+    h.reviewSessionNext.mockResolvedValue(singleDeck(h.expiredCard));
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    // The expiry banner must NOT be in the DOM before reveal — it rides the reveal gate.
+    expect(screen.queryByTestId("review-expiry-banner")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("review-reveal"));
+    await screen.findByTestId("review-answer");
+
+    const banner = await screen.findByTestId("review-expiry-banner");
+    expect(banner).toBeInTheDocument();
+    expect(banner).toHaveAttribute("data-expiry-status", "expired");
+    expect(banner).toHaveTextContent(/out of date/i);
+    expect(banner).toHaveTextContent("2020-01-01");
+  });
+
+  it("shows no expiry banner at all for a fresh card (expiry null), even after reveal (T090)", async () => {
+    h.reviewSessionNext.mockResolvedValue(singleDeck(h.qaCard));
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    fireEvent.click(screen.getByTestId("review-reveal"));
+    await screen.findByTestId("review-answer");
+
+    // The seeded fresh card carries `expiry: null` → no banner ever.
+    expect(screen.queryByTestId("review-expiry-banner")).not.toBeInTheDocument();
   });
 
   it("grading calls reviewGrade with the rating + a plausible responseMs, then advances", async () => {

@@ -40,8 +40,10 @@ export {
   type CardBodyForKind,
   type CardEditResult,
   CardEditService,
+  cardRowToLifetime,
   resolveCardBodyForKind,
   type UpdateCardBodyInput,
+  type UpdateCardLifetimeInput,
 } from "./card-edit-service";
 export {
   type AddContextResult,
@@ -137,6 +139,7 @@ export {
 } from "./inbox-query";
 export {
   type ElementSummary,
+  type FactLifetimeSummary,
   type InspectorData,
   InspectorQuery,
   type LineageItem,

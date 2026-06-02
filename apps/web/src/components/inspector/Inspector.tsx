@@ -29,6 +29,8 @@ import {
   type ConceptNode,
   type ElementSummary,
   type ElementsSetPriorityAction,
+  type FactLifetimeSummary,
+  type FactStability,
   type InspectorData,
   isDesktop,
   type LineageData,
@@ -735,6 +737,254 @@ function ResolvedRetentionRow({ cardId }: { cardId: string }) {
   );
 }
 
+/** The human label for an expiry status badge (T090). */
+const EXPIRY_STATUS_LABEL: Record<FactLifetimeSummary["status"], string> = {
+  fresh: "Fresh",
+  due_for_review: "Due for review",
+  expired: "Expired",
+};
+/** The badge modifier class for an expiry status (T090). */
+const EXPIRY_STATUS_CLASS: Record<FactLifetimeSummary["status"], string> = {
+  fresh: "badge--fresh",
+  due_for_review: "badge--due-for-review",
+  expired: "badge--expired",
+};
+/** The fact-stability options for the picker (T090). */
+const STABILITY_OPTIONS: readonly { value: FactStability; label: string }[] = [
+  { value: "stable", label: "Stable" },
+  { value: "slow", label: "Slow-changing" },
+  { value: "volatile", label: "Volatile" },
+];
+
+/**
+ * The card's EXPIRY section (T090) — the claim-lifetime editor. Shows the DERIVED
+ * expiry status as a badge + `MetaRow`s for `valid_from`/`valid_until`/`review_by`/
+ * `jurisdiction`/`software_version`/`fact_stability`, with inline edit controls that
+ * call `cards.setLifetime` (one `update_element`; "expired" stays a derived attribute,
+ * never a status). Card-only. When no lifetime is set it offers an "Add expiry"
+ * affordance; opening the editor reveals the fields. On save the inspector re-reads
+ * (`onChanged`) so the badge + the review banner reflect the new lifetime.
+ */
+export function ExpirySection({
+  cardId,
+  lifetime,
+  onChanged,
+}: {
+  cardId: string;
+  lifetime: FactLifetimeSummary;
+  onChanged: () => void;
+}) {
+  const anySet =
+    lifetime.factStability !== null ||
+    !!lifetime.validFrom ||
+    !!lifetime.validUntil ||
+    !!lifetime.reviewBy ||
+    !!lifetime.jurisdiction ||
+    !!lifetime.softwareVersion;
+
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Draft fields seeded from the current lifetime; only opened on demand.
+  const [factStability, setFactStability] = useState<FactStability | "">(
+    lifetime.factStability ?? "",
+  );
+  const [validFrom, setValidFrom] = useState(lifetime.validFrom ?? "");
+  const [validUntil, setValidUntil] = useState(lifetime.validUntil ?? "");
+  const [reviewBy, setReviewBy] = useState(lifetime.reviewBy ?? "");
+  const [jurisdiction, setJurisdiction] = useState(lifetime.jurisdiction ?? "");
+  const [softwareVersion, setSoftwareVersion] = useState(lifetime.softwareVersion ?? "");
+
+  const openEditor = useCallback(() => {
+    setFactStability(lifetime.factStability ?? "");
+    setValidFrom(lifetime.validFrom ?? "");
+    setValidUntil(lifetime.validUntil ?? "");
+    setReviewBy(lifetime.reviewBy ?? "");
+    setJurisdiction(lifetime.jurisdiction ?? "");
+    setSoftwareVersion(lifetime.softwareVersion ?? "");
+    setError(null);
+    setEditing(true);
+  }, [lifetime]);
+
+  const save = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await appApi.setCardLifetime({
+        cardId,
+        factStability: factStability === "" ? null : factStability,
+        validFrom,
+        validUntil,
+        reviewBy,
+        jurisdiction,
+        softwareVersion,
+      });
+      setEditing(false);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [
+    busy,
+    cardId,
+    factStability,
+    validFrom,
+    validUntil,
+    reviewBy,
+    jurisdiction,
+    softwareVersion,
+    onChanged,
+  ]);
+
+  return (
+    <div className="insp-sec" data-testid="expiry-section">
+      <div className="insp-sec__title">
+        <span>Expiry</span>
+        <span
+          className={`badge ${EXPIRY_STATUS_CLASS[lifetime.status]}`}
+          data-testid="inspector-expiry-badge"
+          data-expiry-status={lifetime.status}
+        >
+          <Icon name={lifetime.status === "expired" ? "hourglass" : "calendar"} size={11} />
+          {EXPIRY_STATUS_LABEL[lifetime.status]}
+        </span>
+      </div>
+
+      {!editing ? (
+        <>
+          {anySet ? (
+            <div className="meta-list">
+              <MetaRow k="Valid from">{lifetime.validFrom || "—"}</MetaRow>
+              <MetaRow k="Valid until">{lifetime.validUntil || "—"}</MetaRow>
+              <MetaRow k="Review by">{lifetime.reviewBy || "—"}</MetaRow>
+              <MetaRow k="Jurisdiction">{lifetime.jurisdiction || "—"}</MetaRow>
+              <MetaRow k="Version">{lifetime.softwareVersion || "—"}</MetaRow>
+              <MetaRow k="Stability">
+                {lifetime.factStability
+                  ? (STABILITY_OPTIONS.find((o) => o.value === lifetime.factStability)?.label ??
+                    lifetime.factStability)
+                  : "—"}
+              </MetaRow>
+            </div>
+          ) : (
+            <p className="insp-empty" data-testid="inspector-expiry-empty">
+              No expiry set — this fact never goes stale.
+            </p>
+          )}
+          <button
+            type="button"
+            className="insp-add__btn"
+            data-testid="inspector-expiry-edit"
+            onClick={openEditor}
+            style={{ marginTop: 8 }}
+          >
+            <Icon name="calendar" size={13} />
+            {anySet ? "Edit expiry" : "Add expiry"}
+          </button>
+        </>
+      ) : (
+        <div className="meta-list">
+          <div className="meta-row meta-row--stack">
+            <span className="meta-key">Valid until</span>
+            <input
+              className="insp-add__input"
+              data-testid="inspector-expiry-valid-until"
+              placeholder="YYYY-MM-DD"
+              value={validUntil}
+              onChange={(e) => setValidUntil(e.target.value)}
+            />
+          </div>
+          <div className="meta-row meta-row--stack">
+            <span className="meta-key">Review by</span>
+            <input
+              className="insp-add__input"
+              data-testid="inspector-expiry-review-by"
+              placeholder="YYYY-MM-DD"
+              value={reviewBy}
+              onChange={(e) => setReviewBy(e.target.value)}
+            />
+          </div>
+          <div className="meta-row meta-row--stack">
+            <span className="meta-key">Valid from</span>
+            <input
+              className="insp-add__input"
+              data-testid="inspector-expiry-valid-from"
+              placeholder="YYYY-MM-DD"
+              value={validFrom}
+              onChange={(e) => setValidFrom(e.target.value)}
+            />
+          </div>
+          <div className="meta-row meta-row--stack">
+            <span className="meta-key">Stability</span>
+            <select
+              className="insp-add__select"
+              data-testid="inspector-expiry-stability"
+              value={factStability}
+              onChange={(e) => setFactStability(e.target.value as FactStability | "")}
+            >
+              <option value="">Unspecified</option>
+              {STABILITY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="meta-row meta-row--stack">
+            <span className="meta-key">Jurisdiction</span>
+            <input
+              className="insp-add__input"
+              data-testid="inspector-expiry-jurisdiction"
+              placeholder="US-CA / EU / global"
+              value={jurisdiction}
+              onChange={(e) => setJurisdiction(e.target.value)}
+            />
+          </div>
+          <div className="meta-row meta-row--stack">
+            <span className="meta-key">Version</span>
+            <input
+              className="insp-add__input"
+              data-testid="inspector-expiry-version"
+              placeholder="React 19 / Postgres 18"
+              value={softwareVersion}
+              onChange={(e) => setSoftwareVersion(e.target.value)}
+            />
+          </div>
+          <div className="insp-add" style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="insp-add__btn"
+              data-testid="inspector-expiry-save"
+              disabled={busy}
+              onClick={() => void save()}
+            >
+              <Icon name="check" size={13} />
+              Save
+            </button>
+            <button
+              type="button"
+              className="insp-add__btn"
+              data-testid="inspector-expiry-cancel"
+              disabled={busy}
+              onClick={() => setEditing(false)}
+            >
+              Cancel
+            </button>
+          </div>
+          {error ? (
+            <span className="text-danger" data-testid="inspector-expiry-error">
+              {error}
+            </span>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * The card's RETIREMENT row (T082) — shows whether the card is currently retired and
  * a Retire / Un-retire toggle. Retiring removes a low-value mature card from active
@@ -984,6 +1234,7 @@ function InspectorBody({
     tags,
     concepts,
     review,
+    lifetime,
   } = data;
   return (
     <div className="insp" data-testid="inspector-content" data-element-type={element.type}>
@@ -1250,6 +1501,14 @@ function InspectorBody({
           </div>
         </div>
       )}
+
+      {/* Expiry / claim-lifetime (T090) — cards only. The derived expiry status badge +
+          the six lifetime fields with inline edit controls (cards.setLifetime). A card
+          with no lifetime shows an "Add expiry" affordance; "expired" is a derived
+          attribute (never a status). */}
+      {element.type === "card" && lifetime ? (
+        <ExpirySection cardId={element.id} lifetime={lifetime} onChanged={onOrganizeChanged} />
+      ) : null}
 
       {/* Concepts + tags (T041) — assign/unassign + add/remove, through the bridge. */}
       <OrganizeSection

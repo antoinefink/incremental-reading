@@ -13,7 +13,7 @@
  * are repairable and parameters can later be optimized.
  */
 
-import { CARD_KINDS, FSRS_STATES, REVIEW_RATINGS } from "@interleave/core";
+import { CARD_KINDS, FACT_STABILITY, FSRS_STATES, REVIEW_RATINGS } from "@interleave/core";
 import { check, index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { inList } from "./_shared";
 import { elements } from "./elements";
@@ -104,14 +104,47 @@ export const cards = sqliteTable(
      * from rotation; only THIS flag does.
      */
     isRetired: integer("is_retired", { mode: "boolean" }).notNull().default(false),
+    /**
+     * T090 — claim-lifetime fields (CARDS-ONLY; the optional `elements` mirror is
+     * DEFERRED by default). They make a fact's LIFETIME explicit so it can EXPIRE and
+     * trigger verification (T092). "Expired" is a DERIVED attribute (computed by
+     * `@interleave/core` `deriveExpiryStatus`), NOT a lifecycle status — the card stays
+     * `active`/`scheduled` underneath, exactly like `is_leech`/`is_retired`. All six
+     * are NULLABLE (no backfill); a fact with no lifetime never expires (the vast
+     * majority of cards).
+     *
+     * How stable the fact is — one of `@interleave/core` `FACT_STABILITY`
+     * (`stable`/`slow`/`volatile`) under a CHECK, or `null` = unspecified. Advisory
+     * (colors the badge); the DATES drive expiry, not this.
+     */
+    factStability: text("fact_stability"),
+    /** ISO date — the start of the fact's validity, or `null`. */
+    validFrom: text("valid_from"),
+    /** ISO date — the END of validity; when `now > valid_until` the fact is EXPIRED, or `null`. */
+    validUntil: text("valid_until"),
+    /** Free-text jurisdiction the fact applies to ("US-CA"/"EU"/"global"); display-only, or `null`. */
+    jurisdiction: text("jurisdiction"),
+    /** Free-text software version the fact describes ("React 19"/"Postgres 18"), or `null`. */
+    softwareVersion: text("software_version"),
+    /**
+     * ISO date — the soft re-check deadline; when `now > review_by` the fact is
+     * DUE-FOR-REVIEW (a softer signal than expired), or `null`. The T092
+     * verification-task generation scans this + `valid_until`.
+     */
+    reviewBy: text("review_by"),
   },
   (table) => [
     check("cards_kind_check", inList(table.kind, CARD_KINDS)),
+    // T090: constrain `fact_stability` to the core tuple so the DB + domain can't drift.
+    check("cards_fact_stability_check", inList(table.factStability, FACT_STABILITY)),
     index("cards_source_location_idx").on(table.sourceLocationId),
     // The leech cleanup view + analytics filter on the leech flag (T040).
     index("cards_is_leech_idx").on(table.isLeech),
     // The retired-inventory view + the due-read join filter on the retirement flag (T082).
     index("cards_is_retired_idx").on(table.isRetired),
+    // T090: the T092 expiry → task generation scan filters on `review_by`/`valid_until`,
+    // so index `review_by` to keep `WHERE review_by < now` cheap on a large collection.
+    index("cards_review_by_idx").on(table.reviewBy),
   ],
 );
 

@@ -1068,6 +1068,77 @@ describe("DbService — review session (T037)", () => {
     svc.close();
   });
 
+  it("reviewCard carries the expiry block for an expired seeded card and null for a fresh one (T090)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    // The seeded Q&A card carries a PAST valid_until/review_by (2020) → expired.
+    const expiredId = seededDueCardId(svc);
+    const { card } = svc.reviewCard({ cardId: expiredId, asOf: ASOF });
+    expect(card?.expiry).not.toBeNull();
+    expect(card?.expiry?.status).toBe("expired");
+    expect(card?.expiry?.validUntil).toBe("2020-01-01");
+    expect(card?.expiry?.jurisdiction).toBe("global");
+
+    // A brand-new card with no lifetime carries `expiry: null` (no banner).
+    const fresh = svc.repos.review.createCard({
+      kind: "qa",
+      title: "No-lifetime card",
+      priority: 0.5,
+      prompt: "q",
+      answer: "a",
+    });
+    const { card: freshView } = svc.reviewCard({ cardId: fresh.element.id, asOf: ASOF });
+    expect(freshView?.expiry).toBeNull();
+
+    svc.close();
+  });
+
+  it("setCardLifetime round-trips the six fields (one update_element) and the inspector reads the derived status (T090)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const cardId = seededDueCardId(svc);
+
+    const opsBefore = svc.repos.operationLog
+      .listForElement(cardId as never)
+      .filter((o) => o.opType === "update_element").length;
+
+    const res = svc.setCardLifetime({
+      cardId,
+      factStability: "volatile",
+      validUntil: "2099-01-01",
+      reviewBy: "2099-01-01",
+      jurisdiction: "EU",
+      softwareVersion: "React 19",
+    });
+    // Future dates → the derived status is fresh now.
+    expect(res.lifetime.status).toBe("fresh");
+    expect(res.lifetime.factStability).toBe("volatile");
+    expect(res.lifetime.softwareVersion).toBe("React 19");
+
+    // Exactly one new update_element op (no new op type).
+    const opsAfter = svc.repos.operationLog
+      .listForElement(cardId as never)
+      .filter((o) => o.opType === "update_element").length;
+    expect(opsAfter).toBe(opsBefore + 1);
+
+    // The inspector reflects the new lifetime + derived status.
+    const data = svc.getInspectorData(cardId).data;
+    expect(data?.lifetime?.factStability).toBe("volatile");
+    expect(data?.lifetime?.validUntil).toBe("2099-01-01");
+    expect(data?.lifetime?.status).toBe("fresh");
+
+    // Survives a service close + reopen (the unit-level "app restart").
+    svc.close();
+    const second = new DbService();
+    second.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const after = second.getInspectorData(cardId).data;
+    expect(after?.lifetime?.softwareVersion).toBe("React 19");
+    expect(after?.lifetime?.jurisdiction).toBe("EU");
+    second.close();
+  });
+
   it("reviewPreview returns four ordered intervals and mutates nothing", () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
@@ -2600,7 +2671,7 @@ describe("DbService — backup support (T047)", () => {
   it("getSchemaVersion returns the latest applied Drizzle migration tag", () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
-    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe("0022_semantic_vec0");
+    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe("0023_secret_master_mold");
     svc.close();
   });
 

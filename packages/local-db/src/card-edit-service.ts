@@ -35,8 +35,8 @@
  * validated `cards.*` IPC commands (T038).
  */
 
-import type { CardKind, ElementId } from "@interleave/core";
-import { canonicalizeCloze } from "@interleave/core";
+import type { CardKind, ElementId, FactLifetime, FactStability } from "@interleave/core";
+import { canonicalizeCloze, isFactStability } from "@interleave/core";
 import { type CardRow, cards, elements, type InterleaveDatabase } from "@interleave/db";
 import { eq } from "drizzle-orm";
 import { ElementRepository } from "./element-repository";
@@ -50,6 +50,34 @@ export interface UpdateCardBodyInput {
   readonly prompt?: string | null;
   readonly answer?: string | null;
   readonly cloze?: string | null;
+}
+
+/**
+ * A claim-lifetime edit (T090) — the six fields a fact may carry. Each is OPTIONAL: an
+ * omitted field is LEFT UNCHANGED; an explicit `null`/`""` CLEARS it (a fact with no
+ * lifetime never expires). Mirrors {@link FactLifetime} as a partial patch. The dates
+ * are stored as-entered (ISO preferred); `factStability` is validated against the core
+ * tuple. Editing these is `update_element` (no new op type, no status change).
+ */
+export interface UpdateCardLifetimeInput {
+  readonly factStability?: FactStability | null;
+  readonly validFrom?: string | null;
+  readonly validUntil?: string | null;
+  readonly jurisdiction?: string | null;
+  readonly softwareVersion?: string | null;
+  readonly reviewBy?: string | null;
+}
+
+/** Read a card row's six claim-lifetime columns as a {@link FactLifetime} (T090). */
+export function cardRowToLifetime(card: CardRow): FactLifetime {
+  return {
+    factStability: isFactStability(card.factStability) ? card.factStability : null,
+    validFrom: card.validFrom ?? null,
+    validUntil: card.validUntil ?? null,
+    jurisdiction: card.jurisdiction ?? null,
+    softwareVersion: card.softwareVersion ?? null,
+    reviewBy: card.reviewBy ?? null,
+  };
 }
 
 /** A card element + its `cards` side-table row, after a repair. */
@@ -151,6 +179,81 @@ export class CardEditService {
       }
       return { element: rowToElement(elementRow), card };
     });
+  }
+
+  /**
+   * Set / clear a card's claim-lifetime fields (T090). Writes the six `cards` columns
+   * (`fact_stability`/`valid_from`/`valid_until`/`jurisdiction`/`software_version`/
+   * `review_by`), stamps `elements.updatedAt`, and logs `update_element` — all in ONE
+   * transaction (NO new op type; "expired" is a DERIVED attribute, the card never
+   * leaves `active`/`scheduled`). An OMITTED field is left unchanged; an explicit
+   * `null` (or empty string for the text/date fields) CLEARS it. Dates are stored
+   * as-entered (trimmed; empty → `null`); `factStability` is normalized to the core
+   * tuple or cleared. Lineage, `review_states`, and `review_logs` are NEVER touched.
+   */
+  setLifetime(id: ElementId, patch: UpdateCardLifetimeInput): CardEditResult {
+    const existing = this.requireCard(id);
+
+    // Resolve the next value of each field: omitted → keep; provided → trim/normalize
+    // (empty → null). `factStability` clears on any non-tuple value.
+    const next = this.nextLifetime(existing.card, patch);
+
+    return this.db.transaction((tx) => {
+      tx.update(cards)
+        .set({
+          factStability: next.factStability,
+          validFrom: next.validFrom,
+          validUntil: next.validUntil,
+          jurisdiction: next.jurisdiction,
+          softwareVersion: next.softwareVersion,
+          reviewBy: next.reviewBy,
+        })
+        .where(eq(cards.elementId, id))
+        .run();
+
+      // The lifetime fields live on the `card` element / its `cards` row, so the edit
+      // is logged as `update_element` on the card element (no new op type). This also
+      // stamps `elements.updatedAt` so the change is observable + ordered.
+      const updatedAt = nowIso();
+      tx.update(elements).set({ updatedAt }).where(eq(elements.id, id)).run();
+      new OperationLogRepository(tx).append(tx, {
+        opType: "update_element",
+        elementId: id,
+        payload: { id, lifetime: next },
+      });
+
+      const card = tx.select().from(cards).where(eq(cards.elementId, id)).get();
+      const elementRow = tx.select().from(elements).where(eq(elements.id, id)).get();
+      if (!card || !elementRow) {
+        throw new Error(`CardEditService.setLifetime: card ${id} missing after update`);
+      }
+      return { element: rowToElement(elementRow), card };
+    });
+  }
+
+  /** Resolve the next lifetime fields: omitted → keep current; provided → normalize. */
+  private nextLifetime(current: CardRow, patch: UpdateCardLifetimeInput): FactLifetime {
+    const text = (provided: string | null | undefined, existing: string | null): string | null => {
+      if (provided === undefined) return existing ?? null;
+      const t = (provided ?? "").trim();
+      return t === "" ? null : t;
+    };
+    const stability =
+      patch.factStability === undefined
+        ? isFactStability(current.factStability)
+          ? current.factStability
+          : null
+        : isFactStability(patch.factStability)
+          ? patch.factStability
+          : null;
+    return {
+      factStability: stability,
+      validFrom: text(patch.validFrom, current.validFrom),
+      validUntil: text(patch.validUntil, current.validUntil),
+      jurisdiction: text(patch.jurisdiction, current.jurisdiction),
+      softwareVersion: text(patch.softwareVersion, current.softwareVersion),
+      reviewBy: text(patch.reviewBy, current.reviewBy),
+    };
   }
 
   /**
