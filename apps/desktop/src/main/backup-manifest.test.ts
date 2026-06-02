@@ -91,9 +91,11 @@ describe("sha256 / sha256File (T047)", () => {
 
 describe("resolveSchemaVersion (T047)", () => {
   it("maps the applied-migration count to the latest tag via the real journal", () => {
-    // The packaged journal currently has 11 entries (0000…0010). With all applied,
-    // the latest tag is the ocr_pages table (T066); fewer applied resolve to the
-    // prior tags.
+    // The packaged journal currently has 13 entries (0000…0012). With all applied,
+    // the latest tag is the EPUB `jobs.type` widening (T067); fewer applied resolve
+    // to the prior tags.
+    expect(resolveSchemaVersion(MIGRATIONS_DIR, 13)).toBe("0012_abnormal_strong_guy");
+    expect(resolveSchemaVersion(MIGRATIONS_DIR, 12)).toBe("0011_young_unicorn");
     expect(resolveSchemaVersion(MIGRATIONS_DIR, 11)).toBe("0010_free_silver_fox");
     expect(resolveSchemaVersion(MIGRATIONS_DIR, 10)).toBe("0009_public_steel_serpent");
     expect(resolveSchemaVersion(MIGRATIONS_DIR, 9)).toBe("0008_outgoing_sir_ram");

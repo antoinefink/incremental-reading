@@ -48,6 +48,7 @@ import {
   type JobsListResult,
   LibraryBrowseRequestSchema,
   LineageGetRequestSchema,
+  PickImportFileRequestSchema,
   QueueActRequestSchema,
   QueueListRequestSchema,
   QueueScheduleRequestSchema,
@@ -68,6 +69,8 @@ import {
   SourcesGetOcrRequestSchema,
   SourcesGetPdfDataRequestSchema,
   SourcesGetRegionImageRequestSchema,
+  SourcesImportEpubRequestSchema,
+  type SourcesImportEpubResult,
   SourcesImportManualRequestSchema,
   SourcesImportPdfRequestSchema,
   type SourcesImportPdfResult,
@@ -105,6 +108,8 @@ describe("IPC channels", () => {
         "sources:importUrl",
         "sources:importPdf",
         "sources:getPdfData",
+        "sources:pickImportFile",
+        "sources:importEpub",
         "sources:extractRegion",
         "sources:getRegionImage",
         "sources:runOcr",
@@ -299,6 +304,54 @@ describe("SourcesImportPdfRequestSchema (T064)", () => {
   it("SourcesGetPdfDataRequestSchema requires an elementId", () => {
     expect(SourcesGetPdfDataRequestSchema.parse({ elementId: "el_1" }).elementId).toBe("el_1");
     expect(() => SourcesGetPdfDataRequestSchema.parse({})).toThrow();
+  });
+});
+
+describe("EPUB import schemas (T067)", () => {
+  it("PickImportFileRequestSchema accepts the known kinds + rejects others", () => {
+    expect(PickImportFileRequestSchema.parse({ kind: "epub" }).kind).toBe("epub");
+    expect(PickImportFileRequestSchema.parse({ kind: "anki" }).kind).toBe("anki");
+    expect(() => PickImportFileRequestSchema.parse({ kind: "pdf" })).toThrow();
+    expect(() => PickImportFileRequestSchema.parse({})).toThrow();
+  });
+
+  it("SourcesImportEpubRequestSchema requires a non-empty path + optional priority/reason", () => {
+    const parsed = SourcesImportEpubRequestSchema.parse({
+      path: "/tmp/book.epub",
+      priority: "C",
+      reasonAdded: "to read",
+    });
+    expect(parsed.path).toBe("/tmp/book.epub");
+    expect(parsed.priority).toBe("C");
+    expect(parsed.reasonAdded).toBe("to read");
+    expect(() => SourcesImportEpubRequestSchema.parse({ path: "" })).toThrow();
+    expect(() =>
+      SourcesImportEpubRequestSchema.parse({ path: "/x.epub", priority: "Z" }),
+    ).toThrow();
+  });
+
+  it("SourcesImportEpubResult round-trips the imported shape", () => {
+    const result: SourcesImportEpubResult = {
+      status: "imported",
+      bookId: "el_book",
+      chapterCount: 3,
+      item: {
+        id: "el_book",
+        type: "source",
+        status: "inbox",
+        stage: "raw_source",
+        priority: 0.4,
+        title: "A Book",
+        srcType: "Manual note",
+        author: "An Author",
+        accessedAt: "2026-06-01T00:00:00.000Z",
+        charCount: 10,
+        previewSnippet: "Title",
+      },
+    };
+    expect(result.status).toBe("imported");
+    expect(result.bookId).toBe("el_book");
+    expect(result.chapterCount).toBe(3);
   });
 });
 

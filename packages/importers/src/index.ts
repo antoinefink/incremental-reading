@@ -14,6 +14,17 @@
 
 export const IMPORTERS_PACKAGE = "@interleave/importers" as const;
 
+export {
+  type ChapterConversion,
+  chapterToProseMirror,
+  EpubParseError,
+  type EpubParseErrorCode,
+  type ParsedEpub,
+  type ParsedEpubChapter,
+  type ParsedEpubMetadata,
+  type ParsedFootnote,
+  parseEpub,
+} from "./epub";
 export { htmlToProseMirrorDoc } from "./html-to-prosemirror";
 export {
   aggregateOcrWords,

@@ -54,6 +54,8 @@ import {
   type JobsListResult,
   LibraryBrowseRequestSchema,
   LineageGetRequestSchema,
+  PickImportFileRequestSchema,
+  type PickImportFileResult,
   QueueActRequestSchema,
   QueueListRequestSchema,
   QueueScheduleRequestSchema,
@@ -75,6 +77,7 @@ import {
   SourcesGetOcrRequestSchema,
   SourcesGetPdfDataRequestSchema,
   SourcesGetRegionImageRequestSchema,
+  SourcesImportEpubRequestSchema,
   SourcesImportManualRequestSchema,
   SourcesImportPdfRequestSchema,
   SourcesImportUrlRequestSchema,
@@ -95,6 +98,7 @@ import {
 import { BackupService } from "./backup-service";
 import type { CaptureController } from "./capture-controller";
 import type { DbService } from "./db-service";
+import { EpubImportError } from "./epub-import-service";
 import type { UrlImportJobPayload } from "./job-apply-handlers";
 import type { JobRunner } from "./job-runner";
 import type { AppPaths } from "./paths";
@@ -301,6 +305,42 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
     return dbService.getPdfData(request);
   });
 
+  // Pick a local file to import (T067) — the SHARED native picker for all M14 file
+  // imports. The renderer cannot read the filesystem, so it asks MAIN to open the
+  // dialog (filtered to the `kind`'s extensions) and returns the chosen path(s) or a
+  // cancellation. The E2E stubs the EPUB picker via INTERLEAVE_EPUB_IMPORT_PATH
+  // (unpackaged only), mirroring the INTERLEAVE_PDF_IMPORT_PATH escape.
+  ipcMain.handle(
+    IPC_CHANNELS.sourcesPickImportFile,
+    async (event, rawRequest: unknown): Promise<PickImportFileResult> => {
+      const request = PickImportFileRequestSchema.parse(rawRequest);
+      const paths = await pickImportFilePaths(event, request.kind);
+      if (paths.length === 0) return { cancelled: true };
+      return { paths };
+    },
+  );
+
+  // Import a local `.epub` (T067) — the renderer has already resolved the chosen
+  // path via `sources.pickImportFile`. MAIN reads + validates + streams the original
+  // into the vault + parses the book + creates an `inbox` book source + chapter
+  // topics. A thrown `EpubImportError` is re-thrown as a `code: message` line so the
+  // renderer modal can map the `code` to a friendly message (mirrors the PDF path).
+  ipcMain.handle(IPC_CHANNELS.sourcesImportEpub, async (_event, rawRequest: unknown) => {
+    const request = SourcesImportEpubRequestSchema.parse(rawRequest);
+    try {
+      return await dbService.importEpub({
+        absPath: request.path,
+        ...(request.priority ? { priority: request.priority } : {}),
+        ...(request.reasonAdded !== undefined ? { reasonAdded: request.reasonAdded } : {}),
+      });
+    } catch (err) {
+      if (err instanceof EpubImportError) {
+        throw new Error(`${err.code}: ${err.message}`);
+      }
+      throw err;
+    }
+  });
+
   // PDF region extraction (T065). The renderer crops the figure/table from the page
   // it rendered and ships the size-capped PNG + the normalized rect + page; MAIN
   // streams the bytes into the vault and creates a `media_fragment` region extract
@@ -398,6 +438,70 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
         });
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0] ?? null;
+  }
+
+  /**
+   * Resolve the chosen file path(s) for an import `kind` (T067) — the SHARED native
+   * picker for all M14 file imports. In a normal run this opens the native open
+   * dialog filtered to the kind's extensions; in an UNPACKAGED build (DEV/E2E) the
+   * `INTERLEAVE_<KIND>_IMPORT_PATH` env override short-circuits the picker so the
+   * Electron E2E can drive import deterministically — mirroring `pickPdfPath`.
+   */
+  async function pickImportFilePaths(
+    event: Electron.IpcMainInvokeEvent,
+    kind: "epub" | "markdown" | "html" | "highlights" | "anki",
+  ): Promise<string[]> {
+    // Per-kind picker config (extensions + the E2E env escape). Only EPUB is wired in
+    // T067; the other kinds land with T068–T070 (they reuse this same picker).
+    const config: Record<
+      typeof kind,
+      { title: string; name: string; exts: string[]; env: string }
+    > = {
+      epub: {
+        title: "Import EPUB",
+        name: "EPUB",
+        exts: ["epub"],
+        env: "INTERLEAVE_EPUB_IMPORT_PATH",
+      },
+      markdown: {
+        title: "Import Markdown",
+        name: "Markdown",
+        exts: ["md", "markdown"],
+        env: "INTERLEAVE_MARKDOWN_IMPORT_PATH",
+      },
+      html: {
+        title: "Import HTML",
+        name: "HTML",
+        exts: ["html", "htm"],
+        env: "INTERLEAVE_HTML_IMPORT_PATH",
+      },
+      highlights: {
+        title: "Import highlights",
+        name: "Highlights",
+        exts: ["csv", "json", "txt"],
+        env: "INTERLEAVE_HIGHLIGHTS_IMPORT_PATH",
+      },
+      anki: {
+        title: "Import Anki deck",
+        name: "Anki",
+        exts: ["apkg", "csv"],
+        env: "INTERLEAVE_ANKI_IMPORT_PATH",
+      },
+    };
+    const { title, name, exts, env } = config[kind];
+
+    const override = process.env[env];
+    if (!app.isPackaged && override && override.length > 0) return [override];
+
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const opts: Electron.OpenDialogOptions = {
+      title,
+      properties: ["openFile"],
+      filters: [{ name, extensions: exts }],
+    };
+    const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
+    if (result.canceled) return [];
+    return result.filePaths;
   }
 
   ipcMain.handle(IPC_CHANNELS.captureGetPairing, () => {

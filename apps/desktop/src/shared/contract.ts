@@ -932,6 +932,55 @@ export interface SourcesGetPdfDataResult {
 }
 
 // ---------------------------------------------------------------------------
+// sources.pickImportFile() / sources.importEpub()  (T067 — local EPUB import)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pick a local file to import (T067) — the SHARED file-picker command for all M14
+ * file imports (EPUB now; T068 Markdown/HTML, T069 highlights, T070 Anki extend the
+ * `kind` enum). The renderer cannot read the filesystem, so it asks MAIN to open a
+ * native picker (filtered to the `kind`'s extensions) and returns the chosen
+ * absolute path(s) — MAIN reads the bytes; the renderer never receives a `File`. The
+ * single command serves every file kind so it is defined ONCE.
+ */
+export const PickImportFileRequestSchema = z.object({
+  kind: z.enum(["epub", "markdown", "html", "highlights", "anki"]),
+});
+export type PickImportFileRequest = z.infer<typeof PickImportFileRequestSchema>;
+
+/** The picker result: the chosen path(s), or a non-error cancellation. */
+export type PickImportFileResult =
+  | { readonly paths: readonly string[] }
+  | { readonly cancelled: true };
+
+/**
+ * EPUB import (T067). After the renderer has a chosen `.epub` path (via
+ * {@link PickImportFileRequestSchema}), it calls this with the path; MAIN reads +
+ * validates the bytes, streams `original.epub` into the vault, parses the book, and
+ * creates an `inbox` book `source` + one chapter `topic` per spine item — all main-
+ * side. A large `.epub` never crosses the IPC bridge as a payload; only the path does.
+ */
+export const SourcesImportEpubRequestSchema = z.object({
+  path: z.string().min(1),
+  /** Coarse A/B/C/D priority; defaults `C` main-side so a fresh book never dominates. */
+  priority: PriorityLabelSchema.optional(),
+  reasonAdded: z.string().trim().max(2048).optional(),
+});
+export type SourcesImportEpubRequest = z.infer<typeof SourcesImportEpubRequestSchema>;
+
+/**
+ * The EPUB-import result. Discriminated on `status` so future arms (e.g. a
+ * duplicate-book check) can be added without a breaking change; `"imported"` carries
+ * the new book id, its chapter count, and the inbox summary for the BOOK source.
+ */
+export type SourcesImportEpubResult = {
+  readonly status: "imported";
+  readonly bookId: string;
+  readonly chapterCount: number;
+  readonly item: InboxItemSummary;
+};
+
+// ---------------------------------------------------------------------------
 // sources.extractRegion() / sources.getRegionImage()  (T065 — PDF region extract)
 // ---------------------------------------------------------------------------
 
@@ -2966,6 +3015,18 @@ export interface AppApi {
     importPdf(request: SourcesImportPdfRequest): Promise<SourcesImportPdfResult>;
     /** Serve a PDF source's original bytes to the renderer for rendering (T064). */
     getPdfData(request: SourcesGetPdfDataRequest): Promise<SourcesGetPdfDataResult>;
+    /**
+     * Open a native file picker for an import `kind` (T067) — the SHARED picker for
+     * all M14 file imports; returns the chosen path(s) or a cancellation. MAIN reads
+     * the bytes (the renderer never receives a `File`).
+     */
+    pickImportFile(request: PickImportFileRequest): Promise<PickImportFileResult>;
+    /**
+     * Import a local `.epub` into an `inbox` book `source` + chapter `topic`s (T067) —
+     * MAIN reads + validates the bytes, streams `original.epub` into the vault, and
+     * creates the book→chapter lineage tree in one transaction.
+     */
+    importEpub(request: SourcesImportEpubRequest): Promise<SourcesImportEpubResult>;
     /**
      * Crop a PDF page region into a scheduled `media_fragment` extract (T065) —
      * the renderer ships the cropped PNG + the normalized rect + page; MAIN streams

@@ -173,6 +173,7 @@ import type {
   SourcesGetPdfDataResult,
   SourcesGetRegionImageRequest,
   SourcesGetRegionImageResult,
+  SourcesImportEpubResult,
   SourcesImportManualRequest,
   SourcesImportManualResult,
   SourcesImportPdfResult,
@@ -207,6 +208,7 @@ import {
   CAPTURE_PORT_KEY,
   CAPTURE_TOKEN_KEY,
 } from "./capture-pairing";
+import { EpubImportService } from "./epub-import-service";
 import type { JobRunner } from "./job-runner";
 import { OcrService } from "./ocr-service";
 import { PdfImportService } from "./pdf-import-service";
@@ -273,6 +275,12 @@ export class DbService {
    * (it needs `assetsDir` + the `assetVaultService`, both available after open()).
    */
   private pdfImport: PdfImportService | null = null;
+  /**
+   * The EPUB-import orchestrator (T067) — read + validate + stream `original.epub`
+   * into the vault + parse the book + create an `inbox` book source + chapter topics
+   * in one transaction. Built lazily on first read (it needs `assetsDir`, after open()).
+   */
+  private epubImport: EpubImportService | null = null;
   /**
    * The PDF region-extract orchestrator (T065) — crop a figure/table region into a
    * scheduled `media_fragment` extract (vault image + page+region source location).
@@ -390,6 +398,7 @@ export class DbService {
     this.urlImport = null;
     this.assetVault = null;
     this.pdfImport = null;
+    this.epubImport = null;
     this.pdfRegion = null;
     this.ocr = null;
     this.runner = null;
@@ -850,6 +859,41 @@ export class DbService {
   }): Promise<SourcesImportPdfResult> {
     const { id, item } = await this.pdfImportService.importFromFile(input);
     return { status: "imported", id, item };
+  }
+
+  /**
+   * The EPUB-import orchestrator (T067), lazily built on first read against the open
+   * DB + repos + the vault `assetsDir` (so `original.epub` streams in). Throws a clear
+   * error if `assetsDir` was not provided — mirrors {@link pdfImportService}.
+   */
+  get epubImportService(): EpubImportService {
+    if (this.epubImport) return this.epubImport;
+    const repositories = this.repos;
+    if (!this.assetsDir) {
+      throw new Error(
+        "DbService: EPUB import requires an assets directory — call open() with { assetsDir }",
+      );
+    }
+    this.epubImport = new EpubImportService({
+      db: this.require().db,
+      repositories,
+      assetsDir: this.assetsDir,
+    });
+    return this.epubImport;
+  }
+
+  /**
+   * Import a local `.epub` (T067) — the IPC handler has already resolved the chosen
+   * absolute `absPath` via the MAIN file picker. Delegates to
+   * {@link EpubImportService.importFromFile}; a thrown `EpubImportError` propagates to
+   * the IPC layer (rejected invoke → the modal's friendly-message catch).
+   */
+  async importEpub(input: {
+    absPath: string;
+    priority?: PriorityLabel;
+    reasonAdded?: string | null;
+  }): Promise<SourcesImportEpubResult> {
+    return await this.epubImportService.importFromFile(input);
   }
 
   /**

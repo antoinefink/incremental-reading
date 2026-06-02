@@ -563,6 +563,31 @@ export type SourcesImportPdfResult =
       readonly status: "cancelled";
     };
 
+/** Pick a local file for an import `kind` (T067) — MAIN opens the native picker. */
+export interface PickImportFileRequest {
+  readonly kind: "epub" | "markdown" | "html" | "highlights" | "anki";
+}
+
+/** The picker result (T067) — chosen path(s), or a non-error cancellation. */
+export type PickImportFileResult =
+  | { readonly paths: readonly string[] }
+  | { readonly cancelled: true };
+
+/** Import a local `.epub` (T067) — the renderer passes a chosen path; MAIN imports. */
+export interface SourcesImportEpubRequest {
+  readonly path: string;
+  readonly priority?: PriorityLabelInput;
+  readonly reasonAdded?: string;
+}
+
+/** The EPUB-import result (T067) — the new book + its chapter count + inbox summary. */
+export type SourcesImportEpubResult = {
+  readonly status: "imported";
+  readonly bookId: string;
+  readonly chapterCount: number;
+  readonly item: InboxItemSummary;
+};
+
 /** Serve a PDF source's original bytes to the renderer for rendering (T064). */
 export interface SourcesGetPdfDataRequest {
   readonly elementId: string;
@@ -1795,6 +1820,8 @@ export interface AppApi {
     importUrl(request: SourcesImportUrlRequest): Promise<SourcesImportUrlResult>;
     importPdf(request: SourcesImportPdfRequest): Promise<SourcesImportPdfResult>;
     getPdfData(request: SourcesGetPdfDataRequest): Promise<SourcesGetPdfDataResult>;
+    pickImportFile(request: PickImportFileRequest): Promise<PickImportFileResult>;
+    importEpub(request: SourcesImportEpubRequest): Promise<SourcesImportEpubResult>;
     extractRegion(request: SourcesExtractRegionRequest): Promise<SourcesExtractRegionResult>;
     getRegionImage(request: SourcesGetRegionImageRequest): Promise<SourcesGetRegionImageResult>;
     runOcr(request: SourcesRunOcrRequest): Promise<SourcesRunOcrResult>;
@@ -2030,6 +2057,23 @@ export const appApi = {
   /** Serve a PDF source's original bytes to the renderer for rendering (T064). */
   getSourcePdfData(request: SourcesGetPdfDataRequest): Promise<SourcesGetPdfDataResult> {
     return requireAppApi().sources.getPdfData(request);
+  },
+  /**
+   * Open the native file picker for an import `kind` (T067) — the SHARED picker for
+   * all M14 file imports. Returns the chosen path(s) or a cancellation; the renderer
+   * passes a chosen path back to the matching import command (e.g. `importEpubSource`).
+   */
+  pickImportFile(request: PickImportFileRequest): Promise<PickImportFileResult> {
+    return requireAppApi().sources.pickImportFile(request);
+  },
+  /**
+   * Import a local `.epub` into an inbox book source + chapter topics (T067) — the
+   * renderer passes a path chosen via {@link pickImportFile}; MAIN reads + validates +
+   * streams the original into the vault + parses the book, all main-side. A thrown
+   * `EpubImportError` (a `code: message` line) surfaces a friendly message.
+   */
+  importEpubSource(request: SourcesImportEpubRequest): Promise<SourcesImportEpubResult> {
+    return requireAppApi().sources.importEpub(request);
   },
   /**
    * Crop a PDF page region into a scheduled `media_fragment` extract (T065) — ships

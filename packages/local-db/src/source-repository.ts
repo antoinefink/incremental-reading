@@ -20,6 +20,8 @@ import type {
   Element,
   ElementId,
   ElementLocation,
+  ElementStatus,
+  ElementType,
   IsoTimestamp,
   PlainTextConversion,
   Priority,
@@ -97,6 +99,44 @@ export interface CreateSourceWithDocumentInput extends CreateSourceInput {
 export interface SourceWithDocument {
   readonly element: Element;
   readonly source: Source;
+  /** ProseMirror `doc` JSON stored for the body (opaque to callers). */
+  readonly prosemirrorJson: unknown;
+  /** The flattened plain-text mirror stored for search/preview. */
+  readonly plainText: string;
+  /** Number of stable blocks written for the body. */
+  readonly blockCount: number;
+}
+
+/**
+ * Create a `topic` element + its document body, all in ONE transaction (T067). A
+ * topic — e.g. an EPUB chapter — is a readable, schedulable document-bearing element
+ * derived from a source, but it is NOT itself a provenance-bearing source: it has no
+ * `sources` row and logs no `create_source`. Unlike {@link CreateSourceWithDocumentInput}
+ * it carries explicit `parentId` (its place in the lineage tree, e.g. the book) and
+ * `sourceId` (the lineage root — the same book), since a topic always belongs to a
+ * source. The pre-built {@link PlainTextConversion} `conversion` is stored verbatim
+ * (the importer already mapped the chapter's XHTML to the constrained schema).
+ */
+export interface CreateTopicWithDocumentInput {
+  /** Optional explicit element id, pre-minted by the caller (book-import path). */
+  readonly id?: ElementId;
+  readonly title: string;
+  readonly priority: Priority;
+  readonly status?: Element["status"];
+  readonly stage?: DistillationStage;
+  /** The element this topic hangs under in the hierarchy (e.g. the book source). */
+  readonly parentId: ElementId;
+  /** The lineage root this topic belongs to (e.g. the book source). */
+  readonly sourceId: ElementId;
+  /** A PRE-BUILT conversion stored verbatim; mutually exclusive with `body`. */
+  readonly conversion?: PlainTextConversion | undefined;
+  /** Raw body text → `plainTextToProseMirrorDoc` when no `conversion` is supplied. */
+  readonly body?: string | undefined;
+}
+
+/** A topic element + its created document body (T067). */
+export interface TopicWithDocument {
+  readonly element: Element;
   /** ProseMirror `doc` JSON stored for the body (opaque to callers). */
   readonly prosemirrorJson: unknown;
   /** The flattened plain-text mirror stored for search/preview. */
@@ -235,83 +275,169 @@ export class SourceRepository {
    */
   createWithDocumentWithin(tx: DbClient, input: CreateSourceWithDocumentInput): SourceWithDocument {
     const conversion = input.conversion ?? plainTextToProseMirrorDoc(input.body ?? "");
-    {
-      const element = this.elementsRepo.createWithin(tx, {
-        type: "source",
-        status: input.status ?? "inbox",
-        stage: input.stage ?? "raw_source",
-        priority: input.priority,
-        title: input.title,
-        parentId: null,
-        sourceId: null,
-        ...(input.id ? { id: input.id } : {}),
-      });
-      const source: Source = {
-        elementId: element.id,
-        url: input.url ?? null,
-        canonicalUrl: input.canonicalUrl ?? null,
-        originalUrl: input.originalUrl ?? null,
-        author: input.author ?? null,
-        publishedAt: input.publishedAt ?? null,
-        accessedAt: input.accessedAt ?? null,
-        snapshotKey: input.snapshotKey ?? null,
-        reasonAdded: input.reasonAdded ?? null,
-      };
+    const source: Source = {
+      // The element id is minted by `insertElementWithDocument`; patched in below.
+      elementId: "" as ElementId,
+      url: input.url ?? null,
+      canonicalUrl: input.canonicalUrl ?? null,
+      originalUrl: input.originalUrl ?? null,
+      author: input.author ?? null,
+      publishedAt: input.publishedAt ?? null,
+      accessedAt: input.accessedAt ?? null,
+      snapshotKey: input.snapshotKey ?? null,
+      reasonAdded: input.reasonAdded ?? null,
+    };
+    const { element, blockCount } = this.insertElementWithDocument(tx, {
+      type: "source",
+      status: input.status ?? "inbox",
+      stage: input.stage ?? "raw_source",
+      priority: input.priority,
+      title: input.title,
+      parentId: null,
+      sourceId: null,
+      conversion,
+      ...(input.id ? { id: input.id } : {}),
+      // A source ALSO writes its `sources` provenance row + `create_source` op.
+      provenance: source,
+    });
+    return {
+      element,
+      source: { ...source, elementId: element.id },
+      prosemirrorJson: conversion.doc,
+      plainText: conversion.plainText,
+      blockCount,
+    };
+  }
+
+  /**
+   * Create a `topic` element + its document body in a SINGLE transaction (T067) —
+   * the seam the EPUB importer uses to author one chapter (and any future paginated
+   * import that splits a source into readable topics). It shares the SAME private
+   * document-insert helper as {@link createWithDocumentWithin} (parameterized by the
+   * element `type` + whether to write a `sources` provenance row), so the two paths
+   * never drift. A topic logs `create_element` + `update_document` but NO
+   * `create_source` (it is not provenance-bearing — only the source is). The supplied
+   * `parentId`/`sourceId` are adopted onto the element so lineage is recorded.
+   */
+  createTopicWithDocument(input: CreateTopicWithDocumentInput): TopicWithDocument {
+    return this.db.transaction((tx) => this.createTopicWithDocumentWithin(tx, input));
+  }
+
+  /** {@link createTopicWithDocument} using an EXISTING transaction (the book seam). */
+  createTopicWithDocumentWithin(
+    tx: DbClient,
+    input: CreateTopicWithDocumentInput,
+  ): TopicWithDocument {
+    const conversion = input.conversion ?? plainTextToProseMirrorDoc(input.body ?? "");
+    const { element, blockCount } = this.insertElementWithDocument(tx, {
+      type: "topic",
+      status: input.status ?? "inbox",
+      stage: input.stage ?? "rough_topic",
+      priority: input.priority,
+      title: input.title,
+      parentId: input.parentId,
+      sourceId: input.sourceId,
+      conversion,
+      ...(input.id ? { id: input.id } : {}),
+      // A topic writes NO `sources` row (it is not provenance-bearing).
+      provenance: null,
+    });
+    return {
+      element,
+      prosemirrorJson: conversion.doc,
+      plainText: conversion.plainText,
+      blockCount,
+    };
+  }
+
+  /**
+   * The shared element + `documents` + `document_blocks` insert body (T067), used by
+   * BOTH the source path ({@link createWithDocumentWithin} — writes the `sources`
+   * provenance row + `create_source` op) and the topic path
+   * ({@link createTopicWithDocumentWithin} — skips both). Centralizing the body-insert
+   * here means the two document-bearing element types can never diverge in how their
+   * body + stable blocks + `update_document` op are written. Always logs
+   * `create_element` (via {@link ElementRepository.createWithin}) + `update_document`;
+   * logs `create_source` ONLY when `provenance` is supplied.
+   */
+  private insertElementWithDocument(
+    tx: DbClient,
+    input: {
+      readonly type: ElementType;
+      readonly status: ElementStatus;
+      readonly stage: DistillationStage;
+      readonly priority: Priority;
+      readonly title: string;
+      readonly parentId: ElementId | null;
+      readonly sourceId: ElementId | null;
+      readonly conversion: PlainTextConversion;
+      readonly id?: ElementId;
+      /** When set, also write the `sources` provenance row + `create_source` op. */
+      readonly provenance: Source | null;
+    },
+  ): { element: Element; blockCount: number } {
+    const element = this.elementsRepo.createWithin(tx, {
+      type: input.type,
+      status: input.status,
+      stage: input.stage,
+      priority: input.priority,
+      title: input.title,
+      parentId: input.parentId,
+      sourceId: input.sourceId,
+      ...(input.id ? { id: input.id } : {}),
+    });
+    const log = new OperationLogRepository(tx);
+
+    if (input.provenance) {
+      const source: Source = { ...input.provenance, elementId: element.id };
       tx.insert(sources)
         .values({ ...source })
         .run();
-      const log = new OperationLogRepository(tx);
       log.append(tx, {
         opType: "create_source",
         elementId: element.id,
         payload: { source },
       });
+    }
 
-      // Document body + stable blocks (same transaction → atomic with the source).
-      const updatedAt = nowIso();
-      const json = JSON.stringify(conversion.doc);
-      const schemaVersion = 1;
-      tx.insert(documents)
+    // Document body + stable blocks (same transaction → atomic with the element).
+    const conversion = input.conversion;
+    const updatedAt = nowIso();
+    const json = JSON.stringify(conversion.doc);
+    const schemaVersion = 1;
+    tx.insert(documents)
+      .values({
+        elementId: element.id,
+        prosemirrorJson: json,
+        plainText: conversion.plainText,
+        schemaVersion,
+        updatedAt,
+      })
+      .run();
+    for (const block of conversion.blocks) {
+      tx.insert(documentBlocks)
         .values({
-          elementId: element.id,
-          prosemirrorJson: json,
-          plainText: conversion.plainText,
-          schemaVersion,
-          updatedAt,
+          id: newRowId(),
+          documentId: element.id,
+          blockType: block.blockType,
+          order: block.order,
+          stableBlockId: block.stableBlockId,
+          // The 1-based page for a paginated (PDF, T064) block; `null` otherwise.
+          page: block.page ?? null,
         })
         .run();
-      for (const block of conversion.blocks) {
-        tx.insert(documentBlocks)
-          .values({
-            id: newRowId(),
-            documentId: element.id,
-            blockType: block.blockType,
-            order: block.order,
-            stableBlockId: block.stableBlockId,
-            // The 1-based page for a paginated (PDF, T064) block; `null` for the
-            // HTML/text path (its converters never set `page`).
-            page: block.page ?? null,
-          })
-          .run();
-      }
-      log.append(tx, {
-        opType: "update_document",
-        elementId: element.id,
-        payload: {
-          elementId: element.id,
-          schemaVersion,
-          blockCount: conversion.blocks.length,
-        },
-      });
-
-      return {
-        element,
-        source,
-        prosemirrorJson: conversion.doc,
-        plainText: conversion.plainText,
-        blockCount: conversion.blocks.length,
-      };
     }
+    log.append(tx, {
+      opType: "update_document",
+      elementId: element.id,
+      payload: {
+        elementId: element.id,
+        schemaVersion,
+        blockCount: conversion.blocks.length,
+      },
+    });
+
+    return { element, blockCount: conversion.blocks.length };
   }
 
   /** Read a source (element + provenance) by element id, or `null`. */
@@ -402,6 +528,59 @@ export class SourceRepository {
     });
 
     return { element, location };
+  }
+
+  /**
+   * Record a bare `source_locations` anchor for an ALREADY-EXISTING element (T067) —
+   * e.g. a chapter `topic` anchored to its book, so the chapter knows its place in
+   * the book (`page` = spine ordinal, `label` = chapter title) and jump-to-book
+   * works. Unlike {@link createExtractWithin} this creates NO element (the element
+   * already exists) and logs NO `create_extract` — it is a pure lineage anchor for a
+   * paginated child, written on an EXISTING transaction so it commits with the book.
+   * `blockIds`/`selectedText` default empty (a chapter anchors to a whole spine item,
+   * not a text span). Returns the created location.
+   */
+  createElementLocationWithin(
+    tx: DbClient,
+    input: {
+      readonly elementId: ElementId;
+      readonly sourceElementId: ElementId;
+      readonly page?: number | null;
+      readonly label?: string | null;
+      readonly blockIds?: readonly BlockId[];
+      readonly selectedText?: string;
+    },
+  ): ElementLocation {
+    const locationId: SourceLocationId = newSourceLocationId();
+    const location: ElementLocation = {
+      id: locationId,
+      elementId: input.elementId,
+      sourceElementId: input.sourceElementId,
+      blockIds: input.blockIds ?? [],
+      startOffset: null,
+      endOffset: null,
+      page: input.page ?? null,
+      timestampMs: null,
+      region: null,
+      label: input.label ?? null,
+      selectedText: input.selectedText ?? "",
+    };
+    tx.insert(sourceLocations)
+      .values({
+        id: location.id,
+        elementId: location.elementId,
+        sourceElementId: location.sourceElementId,
+        blockIds: JSON.stringify(location.blockIds),
+        startOffset: location.startOffset,
+        endOffset: location.endOffset,
+        page: location.page,
+        timestampMs: location.timestampMs,
+        region: null,
+        label: location.label,
+        selectedText: location.selectedText,
+      })
+      .run();
+    return location;
   }
 
   /** Fetch one source location by id, or `null`. */

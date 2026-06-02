@@ -128,6 +128,13 @@ export interface LaunchOptions {
    * the `INTERLEAVE_ALLOW_LOOPBACK_IMPORT` escape. Defaults unset (a real picker).
    */
   readonly pdfImportPath?: string;
+  /**
+   * Stub the native EPUB file picker (T067) to return this absolute path, so the
+   * EPUB-import E2E can drive import deterministically without a real dialog. Sets
+   * `INTERLEAVE_EPUB_IMPORT_PATH` (honored only in the unpackaged build), mirroring
+   * the `INTERLEAVE_PDF_IMPORT_PATH` escape. Defaults unset (a real picker).
+   */
+  readonly epubImportPath?: string;
 }
 
 /**
@@ -153,6 +160,7 @@ export async function launchApp(
       ...(options.allowLoopbackImport ? { INTERLEAVE_ALLOW_LOOPBACK_IMPORT: "1" } : {}),
       ...(options.captureEnabled ? { INTERLEAVE_CAPTURE_ENABLED: "1" } : {}),
       ...(options.pdfImportPath ? { INTERLEAVE_PDF_IMPORT_PATH: options.pdfImportPath } : {}),
+      ...(options.epubImportPath ? { INTERLEAVE_EPUB_IMPORT_PATH: options.epubImportPath } : {}),
       // Suppress the first-run onboarding overlay unless a spec opts in, so it
       // never covers the UI in the feature specs (all start empty). See main/index.ts.
       ...(options.showOnboarding ? {} : { INTERLEAVE_SUPPRESS_ONBOARDING: "1" }),

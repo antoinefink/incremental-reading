@@ -27,6 +27,8 @@ export const IPC_CHANNELS = {
   sourcesImportUrl: "sources:importUrl",
   sourcesImportPdf: "sources:importPdf",
   sourcesGetPdfData: "sources:getPdfData",
+  sourcesPickImportFile: "sources:pickImportFile",
+  sourcesImportEpub: "sources:importEpub",
   sourcesExtractRegion: "sources:extractRegion",
   sourcesGetRegionImage: "sources:getRegionImage",
   sourcesRunOcr: "sources:runOcr",

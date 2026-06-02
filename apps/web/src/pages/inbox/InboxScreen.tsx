@@ -13,8 +13,9 @@
  * reacts. The component is pure UI orchestration — no SQL, no scheduling rules, no
  * priority math (priority labels map to numbers on the main side).
  *
- * In M2 only "Paste text" / "Manual note" opens the working New-source modal
- * (T013 fills it in); the other import options are visibly disabled "coming soon".
+ * Every import chip is live: "Paste text" / "Manual note" open the New-source
+ * modal, "Paste URL" the Import-from-URL modal, "Import PDF" / "Import file" the
+ * file picker (PDF / EPUB), and "Browser capture" routes to the extension pairing.
  * Scheduling ("Read soon"), dedup/Merge, and the concept field are deferred.
  */
 
@@ -33,6 +34,7 @@ import {
 import { Kbd } from "../../shell/Kbd";
 import { NEW_SOURCE_EVENT } from "../../shell/nav";
 import { useSelection } from "../../shell/selection";
+import { ImportFileModal } from "./ImportFileModal";
 import { ImportUrlModal } from "./ImportUrlModal";
 import { NewSourceModal } from "./NewSourceModal";
 
@@ -54,20 +56,22 @@ const PRIORITY_HINT: Record<PriorityLabelInput, string> = {
 };
 
 /**
- * Import-strip options. "Paste text" / "Manual note" open the New-source modal;
- * "Paste URL" (T060) opens the Import-from-URL modal. The rest stay disabled
- * "coming soon" until their import paths land.
+ * Import-strip options, all live. "Paste text" / "Manual note" open the New-source
+ * modal; "Paste URL" (T060) opens the Import-from-URL modal; "Import PDF" (T064) and
+ * "Import file" (T067, EPUB) open the file picker; "Browser capture" routes to the
+ * extension pairing in Settings.
  */
 const IMPORT_OPTS: {
   icon: IconName;
   label: string;
   hint: string;
   /** When set, clicking opens the matching modal / picker (or routes to Settings). */
-  action?: "manual" | "url" | "capture" | "pdf";
+  action?: "manual" | "url" | "capture" | "pdf" | "file";
 }[] = [
   { icon: "link", label: "Paste URL", hint: "Fetch & clean the page", action: "url" },
   { icon: "paste", label: "Paste text", hint: "Plain text", action: "manual" },
   { icon: "source", label: "Import PDF", hint: "Read a PDF incrementally", action: "pdf" },
+  { icon: "library", label: "Import file", hint: "EPUB book", action: "file" },
   { icon: "globe", label: "Browser capture", hint: "Pair the extension", action: "capture" },
   { icon: "text", label: "Manual note", hint: "Your own idea", action: "manual" },
 ];
@@ -345,6 +349,7 @@ export function InboxScreen() {
   const [detail, setDetail] = useState<InboxItemDetail | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [urlModalOpen, setUrlModalOpen] = useState(false);
+  const [fileModalOpen, setFileModalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Bumped after any list change (import / triage) so the balance banner re-reads
@@ -460,7 +465,7 @@ export function InboxScreen() {
   // Keyboard triage: 1 = activate, 3 = save for later, 6 = delete (ignore when a
   // field/modal is focused, matching the kit's 1–6 hints).
   useEffect(() => {
-    if (!desktop || modalOpen || urlModalOpen || !selId) return;
+    if (!desktop || modalOpen || urlModalOpen || fileModalOpen || !selId) return;
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
@@ -471,7 +476,7 @@ export function InboxScreen() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [desktop, modalOpen, urlModalOpen, selId, onTriage]);
+  }, [desktop, modalOpen, urlModalOpen, fileModalOpen, selId, onTriage]);
 
   // Open the New-source modal when the ⌘K command palette fires its event
   // ("Paste text as source…" / "New manual note…").
@@ -515,7 +520,8 @@ export function InboxScreen() {
               o.action === "manual" ||
               o.action === "url" ||
               o.action === "capture" ||
-              o.action === "pdf";
+              o.action === "pdf" ||
+              o.action === "file";
             const onClick =
               o.action === "url"
                 ? () => setUrlModalOpen(true)
@@ -523,10 +529,12 @@ export function InboxScreen() {
                   ? () => setModalOpen(true)
                   : o.action === "pdf"
                     ? () => void onImportPdf()
-                    : o.action === "capture"
-                      ? // Route to the Settings "Browser capture" pairing card (T062).
-                        () => void navigate({ to: "/settings", hash: "browser-capture" })
-                      : undefined;
+                    : o.action === "file"
+                      ? () => setFileModalOpen(true)
+                      : o.action === "capture"
+                        ? // Route to the Settings "Browser capture" pairing card (T062).
+                          () => void navigate({ to: "/settings", hash: "browser-capture" })
+                        : undefined;
             return (
               <button
                 key={o.label}
@@ -634,6 +642,16 @@ export function InboxScreen() {
         onClose={() => setUrlModalOpen(false)}
         onImported={(id) => {
           setUrlModalOpen(false);
+          void refresh(id);
+        }}
+      />
+
+      <ImportFileModal
+        open={fileModalOpen}
+        kind="epub"
+        onClose={() => setFileModalOpen(false)}
+        onImported={(id) => {
+          setFileModalOpen(false);
           void refresh(id);
         }}
       />

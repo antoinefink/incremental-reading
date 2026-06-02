@@ -148,6 +148,10 @@ export const REVIEW_RATING_VALUE: Readonly<Record<ReviewRating, 1 | 2 | 3 | 4>> 
 export const ASSET_KINDS = [
   "source_html",
   "source_pdf",
+  // The original `.epub` bytes of an imported book (T067). Streamed into the vault
+  // at `assets/sources/<book_id>/original.epub`; the bytes never touch SQLite, and
+  // the book source's `snapshotKey` points at this path (mirrors `source_pdf`).
+  "source_epub",
   "snapshot",
   "image",
   "audio",
@@ -179,6 +183,11 @@ export type VaultRoot = (typeof VAULT_ROOTS)[number];
 export const JOB_TYPES = [
   "url_import",
   "ocr",
+  // RESERVED (T067): a future heavy-book EPUB parse + chapter conversion could run
+  // on the runner (DB-free worker unzips + converts; main does the vault write + the
+  // one transaction). v1 runs the parse inline in main (a book parse is sub-second);
+  // declared now so the later move is a non-breaking worker-dispatch addition.
+  "epub_import",
   "embed",
   "ai",
   "cleanup",

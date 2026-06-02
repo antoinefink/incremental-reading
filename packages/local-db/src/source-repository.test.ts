@@ -344,3 +344,91 @@ describe("SourceRepository.createExtractWithin region/media_fragment (T065)", ()
     expect(stored?.region).toBeNull();
   });
 });
+
+describe("SourceRepository.createTopicWithDocument (T067 chapter seam)", () => {
+  it("creates a topic (not a source) with a body + blocks + the right ops, adopting lineage", () => {
+    const repo = new SourceRepository(handle.db);
+    // The book source the chapter hangs under (its lineage root + parent).
+    const bookId = newElementId();
+    repo.createWithDocument({
+      id: bookId,
+      title: "The Book",
+      priority: priorityFromLabel("C"),
+      body: "Table of contents.",
+    });
+
+    const conversion = buildConversion();
+    const result = repo.createTopicWithDocument({
+      title: "Chapter One",
+      priority: priorityFromLabel("C"),
+      parentId: bookId,
+      sourceId: bookId,
+      conversion,
+    });
+
+    // It is a `topic` element, NOT a source — and adopted the supplied lineage.
+    expect(result.element.type).toBe("topic");
+    expect(result.element.status).toBe("inbox");
+    expect(result.element.stage).toBe("rough_topic");
+    expect(result.element.parentId).toBe(bookId);
+    expect(result.element.sourceId).toBe(bookId);
+    expect(repo.findById(result.element.id)).toBeNull(); // no `sources` provenance row
+
+    // The body + stable blocks were written verbatim.
+    const blocks = new DocumentRepository(handle.db).listBlocks(result.element.id);
+    expect(blocks.map((b) => b.blockType)).toEqual(["heading", "paragraph", "listItem"]);
+    expect(blocks.map((b) => b.stableBlockId)).toEqual(["h-1", "p-1", "li-1"]);
+    expect(result.blockCount).toBe(3);
+
+    // It logs create_element + update_document but NO create_source (not provenance).
+    const ops = new OperationLogRepository(handle.db)
+      .listForElement(result.element.id)
+      .map((e) => e.opType);
+    expect(ops).toContain("create_element");
+    expect(ops).toContain("update_document");
+    expect(ops).not.toContain("create_source");
+  });
+
+  it("createWithDocument STILL writes the sources row + create_source (no regression)", () => {
+    const repo = new SourceRepository(handle.db);
+    const result = repo.createWithDocument({
+      title: "A source",
+      priority: priorityFromLabel("C"),
+      body: "Some body.",
+      url: "https://example.com/x",
+    });
+    // The provenance row is intact after the shared-helper refactor.
+    expect(repo.findById(result.element.id)?.source.url).toBe("https://example.com/x");
+    const ops = new OperationLogRepository(handle.db)
+      .listForElement(result.element.id)
+      .map((e) => e.opType);
+    expect(ops).toContain("create_source");
+    expect(ops).toContain("update_document");
+  });
+
+  it("createElementLocationWithin anchors a chapter to the book (page + label)", () => {
+    const repo = new SourceRepository(handle.db);
+    const bookId = newElementId();
+    repo.createWithDocument({ id: bookId, title: "Book", priority: priorityFromLabel("C") });
+    const topic = repo.createTopicWithDocument({
+      title: "Ch",
+      priority: priorityFromLabel("C"),
+      parentId: bookId,
+      sourceId: bookId,
+      body: "x",
+    });
+    handle.db.transaction((tx) =>
+      repo.createElementLocationWithin(tx, {
+        elementId: topic.element.id,
+        sourceElementId: bookId,
+        page: 3,
+        label: "Chapter Three",
+      }),
+    );
+    const loc = repo.findLocationForElement(topic.element.id);
+    expect(loc?.sourceElementId).toBe(bookId);
+    expect(loc?.page).toBe(3);
+    expect(loc?.label).toBe("Chapter Three");
+    expect(loc?.blockIds).toEqual([]);
+  });
+});

@@ -49,6 +49,7 @@ import type {
   JobsListRequest,
   LibraryBrowseRequest,
   LineageGetRequest,
+  PickImportFileRequest,
   QueueActRequest,
   QueueListRequest,
   QueueScheduleRequest,
@@ -69,6 +70,7 @@ import type {
   SourcesGetOcrRequest,
   SourcesGetPdfDataRequest,
   SourcesGetRegionImageRequest,
+  SourcesImportEpubRequest,
   SourcesImportManualRequest,
   SourcesImportPdfRequest,
   SourcesImportUrlRequest,
@@ -125,6 +127,10 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.sourcesImportPdf, request),
     getPdfData: (request: SourcesGetPdfDataRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.sourcesGetPdfData, request),
+    pickImportFile: (request: PickImportFileRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.sourcesPickImportFile, request),
+    importEpub: (request: SourcesImportEpubRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.sourcesImportEpub, request),
     extractRegion: (request: SourcesExtractRegionRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.sourcesExtractRegion, request),
     getRegionImage: (request: SourcesGetRegionImageRequest) =>
