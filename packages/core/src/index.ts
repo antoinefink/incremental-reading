@@ -35,6 +35,7 @@ export {
 } from "./balance";
 // Card-quality heuristics — pure domain checks for the `qc` checklist (./card-quality).
 export type {
+  AudioQualitySignals,
   CardQualityCheck,
   CardQualityCheckId,
   CardQualityInput,
@@ -48,6 +49,7 @@ export {
   CLOZE_MAX_WORDS,
   CODE_MAX_LINES,
   evaluateCardQuality,
+  LONG_AUDIO_CLIP_MS,
   MAX_CLOZE_DELETIONS,
   PROMPT_MAX_CHARS,
 } from "./card-quality";
@@ -125,6 +127,9 @@ export type {
 } from "./ids";
 // Background-runner job model — local infra, not an element (./job).
 export type { Job, JobJsonValue, JobProgress } from "./job";
+// Audio-card presentation carrier — the `cards.media_ref` clip pointer (./media-ref).
+export type { MediaRef, MediaRefFace } from "./media-ref";
+export { isMediaRefFace, MEDIA_REF_FACES, parseMediaRef } from "./media-ref";
 // Shared numeric helpers (./numeric).
 export { clamp01 } from "./numeric";
 // Desktop pivot: command-shaped operation log — day-one invariant (./operation-log).

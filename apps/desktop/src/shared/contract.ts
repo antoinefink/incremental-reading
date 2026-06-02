@@ -31,6 +31,8 @@ import {
   JOB_TYPES,
   KEYBOARD_LAYOUTS,
   MARK_TYPES,
+  MEDIA_REF_FACES,
+  type MediaRef,
   REVIEW_RATINGS,
   type SourceRef,
   THEMES,
@@ -2151,6 +2153,27 @@ export interface ExtractsDeleteResult {
 /** The card kind values the renderer may request (validated against `CARD_KINDS`). */
 export const CardKindSchema = z.enum(CARD_KINDS);
 
+/**
+ * The audio-card presentation carrier (T075) — `{ sourceElementId, startMs, endMs, on }`
+ * (see `@interleave/core` `MediaRef`). When supplied on `cards.create`, the card LOOPS
+ * this clip of the original media (`sourceElementId`, the media `source`) over the
+ * `[startMs, endMs)` window on the `on` face. Validated `startMs >= 0`, `endMs > startMs`
+ * (both integer ms), `on ∈ {prompt,answer,both}` so an inverted/negative window cannot
+ * cross the bridge. Audio is a presentation modifier on the existing card model, NOT a new
+ * `kind`. `null` for a text/occlusion card. Mirrors `RegionRectSchema`'s refine discipline.
+ */
+export const MediaRefSchema = z
+  .object({
+    sourceElementId: ElementIdSchema,
+    startMs: z.number().int().min(0),
+    endMs: z.number().int().min(1),
+    on: z.enum(MEDIA_REF_FACES),
+  })
+  .refine((r) => r.endMs > r.startMs, {
+    message: "media clip must have endMs > startMs",
+  });
+export type MediaRefInput = z.infer<typeof MediaRefSchema>;
+
 export const CardsCreateRequestSchema = z
   .object({
     /** The originating extract this card is distilled from (lineage parent). */
@@ -2169,6 +2192,15 @@ export const CardsCreateRequestSchema = z
     priority: PriorityLabelSchema.optional(),
     /** Optional sibling group id (to group with a prior sibling); minted when absent. */
     siblingGroupId: z.string().min(1).max(128).optional(),
+    /**
+     * Audio-card presentation carrier (T075). When supplied, the card LOOPS this clip
+     * of the original media on the chosen face — an AUDIO card. When OMITTED and the
+     * `extractId` is a clip `media_fragment`, the main side DERIVES the ref from the
+     * clip window (defaulting the loop to the prompt). Validated by {@link MediaRefSchema}
+     * (window + face). Omitted/`null` for every text card. Audio is a presentation
+     * modifier, not a new `kind` — the existing channel carries it (no new command).
+     */
+    mediaRef: MediaRefSchema.nullable().optional(),
   })
   .superRefine((value, ctx) => {
     // `image_occlusion` cards are NOT authorable here: they require an
@@ -2185,15 +2217,22 @@ export const CardsCreateRequestSchema = z
     }
     // Coarse boundary check (the rich quality gate is T035): a Q&A card must carry
     // a non-empty prompt AND answer; a cloze card must carry non-empty cloze text.
+    // AUDIO override (T075): when `mediaRef` loops on a face, the AUDIO is that face's
+    // content, so the WRITTEN text for that face may be empty (an audio-prompt card has
+    // no written prompt; an audio-answer card no written answer). The audio thus
+    // satisfies the non-empty requirement for whichever face it covers.
+    const ref = value.mediaRef ?? null;
+    const audioOnPrompt = ref != null && (ref.on === "prompt" || ref.on === "both");
+    const audioOnAnswer = ref != null && (ref.on === "answer" || ref.on === "both");
     if (value.kind === "qa") {
-      if (!value.prompt || value.prompt.length === 0) {
+      if (!audioOnPrompt && (!value.prompt || value.prompt.length === 0)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["prompt"],
           message: "a Q&A card requires a non-empty prompt",
         });
       }
-      if (!value.answer || value.answer.length === 0) {
+      if (!audioOnAnswer && (!value.answer || value.answer.length === 0)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["answer"],
@@ -2229,6 +2268,12 @@ export interface CardSummary {
   readonly sourceId: string | null;
   /** The sibling group the card joined (thread into the next sibling's create). */
   readonly siblingGroupId: string;
+  /**
+   * The audio-card clip reference (T075) when this is an audio card — the looped
+   * clip + face; `null` for a text/occlusion card. Echoed so the builder can confirm
+   * an audio card was authored without a re-fetch.
+   */
+  readonly mediaRef: MediaRef | null;
 }
 
 export interface CardsCreateResult {
@@ -2528,6 +2573,23 @@ export interface ReviewCardView {
    * never baked into it.
    */
   readonly occlusion: ReviewOcclusion | null;
+  /**
+   * Audio-card render data (T075) — present ONLY for a card whose `cards.media_ref`
+   * is set, `null` otherwise. The clip window + face to LOOP (see `MediaRef`); the
+   * review face plays it by seeking the original media (no re-encoding) on the
+   * `mediaRef.on` face — the front loops it on `{prompt,both}`, the reveal on
+   * `{answer,both}`, NEVER leaking an audio answer before reveal.
+   */
+  readonly mediaRef: MediaRef | null;
+  /**
+   * The resolved media-source kind for the audio clip (T075) — `"local"` (a vault
+   * asset, played via `media://<mediaRef.sourceElementId>`) or `"youtube"` (an IFrame
+   * Player). Ships with the card so the face plays WITHOUT a second `getMediaData`
+   * round-trip. `null` for a non-audio card (no `mediaRef`).
+   */
+  readonly mediaSource: "local" | "youtube" | null;
+  /** The YouTube video id for a youtube audio source (T075), else `null`. */
+  readonly youtubeId: string | null;
 }
 
 /** The image-occlusion data a review face needs (T071). */

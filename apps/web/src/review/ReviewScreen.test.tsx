@@ -57,6 +57,9 @@ const h = vi.hoisted(() => {
     flagged: false,
     siblingGroupId: null,
     occlusion: null,
+    mediaRef: null,
+    mediaSource: null,
+    youtubeId: null,
   };
   const clozeCard: ReviewCardView = {
     id: "card-cloze",
@@ -95,6 +98,9 @@ const h = vi.hoisted(() => {
     flagged: false,
     siblingGroupId: null,
     occlusion: null,
+    mediaRef: null,
+    mediaSource: null,
+    youtubeId: null,
   };
   const leechCard: ReviewCardView = {
     ...qaCard,
@@ -102,6 +108,26 @@ const h = vi.hoisted(() => {
     leech: true,
     lapses: 8,
     schedulerSignals: { ...qaCard.schedulerSignals, lapses: 8 },
+  };
+  // T075: an audio-PROMPT card — the looped clip is the prompt; a written answer.
+  const audioPromptCard: ReviewCardView = {
+    ...qaCard,
+    id: "card-audio-prompt",
+    prompt: "", // audio-only prompt
+    answer: "the written translation",
+    mediaRef: { sourceElementId: "src-1", startMs: 1000, endMs: 4000, on: "prompt" },
+    mediaSource: "local",
+    youtubeId: null,
+  };
+  // T075: an audio-ANSWER card — written prompt; the looped clip is the answer.
+  const audioAnswerCard: ReviewCardView = {
+    ...qaCard,
+    id: "card-audio-answer",
+    prompt: "How is this phrase pronounced?",
+    answer: "",
+    mediaRef: { sourceElementId: "src-1", startMs: 1000, endMs: 4000, on: "answer" },
+    mediaSource: "local",
+    youtubeId: null,
   };
   return {
     navigateSpy: vi.fn(),
@@ -116,6 +142,8 @@ const h = vi.hoisted(() => {
     qaCard,
     clozeCard,
     leechCard,
+    audioPromptCard,
+    audioAnswerCard,
   };
 });
 
@@ -602,5 +630,46 @@ describe("ReviewScreen", () => {
     expect(screen.queryByTestId("review-summary")).not.toBeInTheDocument();
     // The progress denominator/tally reset: 0 reviewed again.
     expect(screen.getByTestId("review-progress")).toHaveTextContent("0 reviewed · 1 left");
+  });
+
+  // ---- T075: audio cards ----
+
+  it("an audio-prompt card mounts a looping <audio> on the FRONT and shows the Audio badge", async () => {
+    h.reviewSessionNext.mockResolvedValue(singleDeck(h.audioPromptCard));
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    // The looped clip plays on the prompt face before reveal.
+    const audio = screen.getByTestId("card-audio-prompt-el") as HTMLAudioElement;
+    expect(audio.getAttribute("src")).toBe("media://src-1");
+    // The audio badge marks it as an audio card (a presentation modifier, not a kind).
+    expect(screen.getByTestId("review-audio-badge")).toBeInTheDocument();
+    // The Q&A badge is still shown — an audio card stays a Q&A card.
+    expect(screen.getByTestId("review-kind")).toHaveTextContent("Q&A");
+  });
+
+  it("an audio-ANSWER card plays NO audio before reveal, then mounts it on reveal (never leaks)", async () => {
+    h.reviewSessionNext.mockResolvedValue(singleDeck(h.audioAnswerCard));
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    // Before reveal: the written prompt shows, but NO audio answer is in the DOM.
+    expect(screen.getByTestId("review-prompt")).toHaveTextContent(/how is this phrase/i);
+    expect(screen.queryByTestId("card-audio-answer-el")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("card-audio-prompt-el")).not.toBeInTheDocument();
+
+    // Reveal: now the looped answer clip mounts.
+    fireEvent.click(screen.getByTestId("review-reveal"));
+    await screen.findByTestId("review-answer");
+    const audio = screen.getByTestId("card-audio-answer-el") as HTMLAudioElement;
+    expect(audio.getAttribute("src")).toBe("media://src-1");
+  });
+
+  it("a plain Q&A card mounts NO audio (no regression)", async () => {
+    h.reviewSessionNext.mockResolvedValue(singleDeck(h.qaCard));
+    render(<ReviewScreen />);
+    await screen.findByTestId("review-card");
+    expect(screen.queryByTestId("card-audio-prompt-el")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("review-audio-badge")).not.toBeInTheDocument();
   });
 });

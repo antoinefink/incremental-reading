@@ -40,6 +40,7 @@ import { useNavigateToLocation } from "../reader/navigateToLocation";
 import { useActiveScope } from "../shell/activeScope";
 import { Kbd } from "../shell/Kbd";
 import { useSelection } from "../shell/selection";
+import { CardAudioFace } from "./CardAudioFace";
 import { CardBody } from "./CardBody";
 import { CardFront } from "./CardFront";
 import { CardOcclusionFace } from "./CardOcclusionFace";
@@ -452,6 +453,13 @@ export function ReviewScreen() {
                       ? "Occlusion"
                       : "Q&A"}
                 </span>
+                {/* Audio badge (T075) — a presentation modifier, shown alongside the
+                    kind (an audio card is still a Q&A/cloze card, never a new kind). */}
+                {card.mediaRef ? (
+                  <span className="badge badge--soft" data-testid="review-audio-badge">
+                    <Icon name="play" size={11} /> Audio
+                  </span>
+                ) : null}
                 {card.concept ? <span className="concept-tag">{card.concept}</span> : null}
                 <Prio priority={card.priority} />
                 <Stage stage={card.stage} />
@@ -512,10 +520,37 @@ export function ReviewScreen() {
                 ) : (
                   <>
                     <div className="rcard__prompt" data-testid="review-prompt">
+                      {/* Audio prompt (T075): a looping clip plays on the front when
+                          `media_ref.on ∈ {prompt, both}`. It never leaks the answer —
+                          an audio-ANSWER card plays nothing here. Rendered ABOVE the
+                          (possibly empty) written prompt; an audio card can be audio +
+                          text or audio-only. */}
+                      {card.mediaRef &&
+                      (card.mediaRef.on === "prompt" || card.mediaRef.on === "both") ? (
+                        <CardAudioFace
+                          mediaRef={card.mediaRef}
+                          mediaSource={card.mediaSource}
+                          youtubeId={card.youtubeId}
+                          face="prompt"
+                        />
+                      ) : null}
                       <CardFront card={card} revealed={false} />
                     </div>
                     {revealed ? (
                       <div className="rcard__reveal-wrap rv-fade" data-testid="review-answer">
+                        {/* Audio answer (T075): the clip plays only AFTER reveal when
+                            `media_ref.on ∈ {answer, both}` — the strict reveal-gating
+                            that keeps an audio answer from leaking, mirroring the text
+                            answer/refblock. */}
+                        {card.mediaRef &&
+                        (card.mediaRef.on === "answer" || card.mediaRef.on === "both") ? (
+                          <CardAudioFace
+                            mediaRef={card.mediaRef}
+                            mediaSource={card.mediaSource}
+                            youtubeId={card.youtubeId}
+                            face="answer"
+                          />
+                        ) : null}
                         <div className="rcard__answer">
                           {card.kind === "cloze" ? (
                             <CardFront card={card} revealed={true} />

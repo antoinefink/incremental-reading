@@ -82,6 +82,9 @@ const QA_CARD: ReviewCardView = {
   flagged: false,
   siblingGroupId: null,
   occlusion: null,
+  mediaRef: null,
+  mediaSource: null,
+  youtubeId: null,
 };
 
 function summary(overrides: Partial<CardEditSummary> = {}): CardEditSummary {

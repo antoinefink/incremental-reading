@@ -515,6 +515,40 @@
   color: var(--canvas);
 }
 
+/* ---------- audio card builder (T075): the clip player + face toggle ---------- */
+.cb-audio {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.cb-audio__faces {
+  display: flex;
+  gap: 6px;
+}
+.cb-audio__face {
+  flex: 1;
+  height: 28px;
+  font-size: var(--t-sm);
+  font-weight: 500;
+  color: var(--text-2);
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full, 999px);
+  cursor: pointer;
+}
+.cb-audio__face:hover {
+  border-color: var(--text-3);
+  color: var(--text);
+}
+.cb-audio__face[data-active="true"] {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--canvas);
+}
+
 /* Priority dot (kit `.prio-dot`), driven by the canonical `--prio-*` tokens. */
 .prio-dot {
   width: 7px;

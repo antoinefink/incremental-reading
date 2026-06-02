@@ -1,0 +1,1 @@
+ALTER TABLE `cards` ADD `media_ref` text;

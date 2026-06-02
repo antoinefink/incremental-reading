@@ -56,6 +56,7 @@ import {
   type JobsListResult,
   LibraryBrowseRequestSchema,
   LineageGetRequestSchema,
+  MediaRefSchema,
   PickImportFileRequestSchema,
   QueueActRequestSchema,
   QueueListRequestSchema,
@@ -1096,6 +1097,90 @@ describe("CardsCreateRequestSchema (T032)", () => {
     if (!result.success) {
       expect(result.error.issues.some((i) => i.path.includes("kind"))).toBe(true);
     }
+  });
+
+  // ---- T075: audio cards (the media_ref presentation carrier) ----
+
+  it("accepts a Q&A request carrying a media_ref (an audio card)", () => {
+    const parsed = CardsCreateRequestSchema.parse({
+      extractId: "el_1",
+      kind: "qa",
+      prompt: "How is this phrase pronounced?",
+      answer: "the answer",
+      mediaRef: { sourceElementId: "src_1", startMs: 1000, endMs: 4000, on: "answer" },
+    });
+    expect(parsed.mediaRef?.on).toBe("answer");
+    expect(parsed.mediaRef?.startMs).toBe(1000);
+  });
+
+  it("accepts an audio-PROMPT card with an EMPTY written prompt (the audio is the prompt)", () => {
+    // Without the audio override this would fail the non-empty-prompt refine; with a
+    // media_ref on the prompt face the audio carries the prompt, so it is valid.
+    const parsed = CardsCreateRequestSchema.parse({
+      extractId: "el_1",
+      kind: "qa",
+      answer: "the written translation",
+      mediaRef: { sourceElementId: "src_1", startMs: 0, endMs: 4000, on: "prompt" },
+    });
+    expect(parsed.mediaRef?.on).toBe("prompt");
+  });
+
+  it("accepts an audio-ANSWER card with an EMPTY written answer", () => {
+    const parsed = CardsCreateRequestSchema.parse({
+      extractId: "el_1",
+      kind: "qa",
+      prompt: "How is this phrase pronounced?",
+      mediaRef: { sourceElementId: "src_1", startMs: 0, endMs: 4000, on: "answer" },
+    });
+    expect(parsed.mediaRef?.on).toBe("answer");
+  });
+
+  it("STILL rejects an audio-prompt card whose written ANSWER is empty (audio covers only the prompt)", () => {
+    const result = CardsCreateRequestSchema.safeParse({
+      extractId: "el_1",
+      kind: "qa",
+      mediaRef: { sourceElementId: "src_1", startMs: 0, endMs: 4000, on: "prompt" },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("answer"))).toBe(true);
+    }
+  });
+});
+
+describe("MediaRefSchema (T075)", () => {
+  it("accepts a valid window + face", () => {
+    const parsed = MediaRefSchema.parse({
+      sourceElementId: "src_1",
+      startMs: 1000,
+      endMs: 4000,
+      on: "both",
+    });
+    expect(parsed.on).toBe("both");
+  });
+
+  it("rejects an inverted window (endMs <= startMs)", () => {
+    expect(() =>
+      MediaRefSchema.parse({ sourceElementId: "src_1", startMs: 4000, endMs: 4000, on: "prompt" }),
+    ).toThrow();
+    expect(() =>
+      MediaRefSchema.parse({ sourceElementId: "src_1", startMs: 5000, endMs: 4000, on: "prompt" }),
+    ).toThrow();
+  });
+
+  it("rejects a negative start and an unknown face", () => {
+    expect(() =>
+      MediaRefSchema.parse({ sourceElementId: "src_1", startMs: -1, endMs: 1000, on: "prompt" }),
+    ).toThrow();
+    expect(() =>
+      MediaRefSchema.parse({ sourceElementId: "src_1", startMs: 0, endMs: 1000, on: "front" }),
+    ).toThrow();
+  });
+
+  it("rejects a non-integer millisecond window", () => {
+    expect(() =>
+      MediaRefSchema.parse({ sourceElementId: "src_1", startMs: 0.5, endMs: 1000, on: "prompt" }),
+    ).toThrow();
   });
 });
 

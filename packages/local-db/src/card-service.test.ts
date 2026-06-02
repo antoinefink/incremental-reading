@@ -42,6 +42,7 @@ import { and, eq, isNotNull, lte } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CardService } from "./card-service";
 import { ElementRepository } from "./element-repository";
+import { ExtractionService } from "./extraction-service";
 import { nowIso } from "./ids";
 import { SourceRepository } from "./source-repository";
 import { createInMemoryDb } from "./test-db";
@@ -467,5 +468,133 @@ describe("CardService.createFromExtract — cloze card + siblings", () => {
       .where(eq(reviewStates.elementId, extractId))
       .get();
     expect(fsrs).toBeUndefined();
+  });
+});
+
+/**
+ * Seed a media `source` + a clip `media_fragment` (T074) so the audio-card path (T075)
+ * can be exercised end-to-end: the clip's `source_locations.clip` window + media source
+ * is exactly what `CardService` DERIVES the audio `media_ref` from.
+ */
+function seedClipFragment(handle: DbHandle): {
+  mediaSourceId: ElementId;
+  clipId: ElementId;
+} {
+  const sources = new SourceRepository(handle.db);
+  const { element: source } = sources.createWithDocument({
+    title: "A spoken lecture",
+    priority: 0.625,
+    status: "active",
+    stage: "raw_source",
+    body: "First cue.\n\nSecond cue.",
+  });
+  const blockRows = handle.db
+    .select()
+    .from(documentBlocks)
+    .where(eq(documentBlocks.documentId, source.id))
+    .all();
+  const anchor = blockRows[0]?.stableBlockId as BlockId;
+  const extraction = new ExtractionService(handle.db);
+  const { element: clip } = extraction.createClipExtract({
+    sourceElementId: source.id,
+    startMs: 42_000,
+    endMs: 75_000,
+    anchorBlockId: anchor,
+    transcriptSegment: "the spoken phrase under the range",
+    priority: 0.625,
+  });
+  return { mediaSourceId: source.id, clipId: clip.id };
+}
+
+describe("CardService.createFromExtract — audio card (T075)", () => {
+  it("DERIVES a media_ref from a clip media_fragment (window + media source, default prompt face)", () => {
+    const { mediaSourceId, clipId } = seedClipFragment(handle);
+    const service = new CardService(handle.db);
+
+    const { element, mediaRef } = service.createFromExtract({
+      extractId: clipId,
+      kind: "qa",
+      // The audio is the prompt; the written answer is the translation.
+      prompt: "",
+      answer: "the translation",
+    });
+
+    // The derived ref points at the MEDIA SOURCE (not the clip fragment), copies the
+    // clip window, and defaults the loop to the prompt face.
+    expect(mediaRef).toEqual({
+      sourceElementId: mediaSourceId,
+      startMs: 42_000,
+      endMs: 75_000,
+      on: "prompt",
+    });
+
+    // It is persisted on cards.media_ref (JSON) and round-trips.
+    const row = handle.db.select().from(cards).where(eq(cards.elementId, element.id)).get();
+    expect(JSON.parse(row?.mediaRef ?? "null")).toEqual({
+      sourceElementId: mediaSourceId,
+      startMs: 42_000,
+      endMs: 75_000,
+      on: "prompt",
+    });
+
+    // The card is a normal FSRS card (a review_states row exists) — the two-scheduler
+    // split holds: the CLIP fragment is attention-scheduled (no review_states), the
+    // AUDIO CARD is FSRS-scheduled (has one).
+    expect(
+      handle.db.select().from(reviewStates).where(eq(reviewStates.elementId, element.id)).get(),
+    ).toBeTruthy();
+    expect(
+      handle.db.select().from(reviewStates).where(eq(reviewStates.elementId, clipId)).get(),
+    ).toBeUndefined();
+  });
+
+  it("honors an EXPLICIT media_ref over the derived one (e.g. audio on the answer)", () => {
+    const { mediaSourceId, clipId } = seedClipFragment(handle);
+    const service = new CardService(handle.db);
+
+    const { element, mediaRef } = service.createFromExtract({
+      extractId: clipId,
+      kind: "qa",
+      prompt: "How is this phrase pronounced?",
+      answer: "",
+      mediaRef: { sourceElementId: mediaSourceId, startMs: 50_000, endMs: 60_000, on: "answer" },
+    });
+
+    expect(mediaRef?.on).toBe("answer");
+    expect(mediaRef?.startMs).toBe(50_000);
+    const row = handle.db.select().from(cards).where(eq(cards.elementId, element.id)).get();
+    expect(JSON.parse(row?.mediaRef ?? "null").on).toBe("answer");
+  });
+
+  it("does NOT set a media_ref for a normal text extract", () => {
+    const { extractId } = seedExtract(handle);
+    const service = new CardService(handle.db);
+
+    const { element, mediaRef } = service.createFromExtract({
+      extractId,
+      kind: "qa",
+      prompt: "Q?",
+      answer: "A.",
+    });
+
+    expect(mediaRef).toBeNull();
+    const row = handle.db.select().from(cards).where(eq(cards.elementId, element.id)).get();
+    expect(row?.mediaRef).toBeNull();
+  });
+
+  it("inherits the clip's source location so jump-to-source seeks the clip (lineage)", () => {
+    const { clipId } = seedClipFragment(handle);
+    const sources = new SourceRepository(handle.db);
+    const clipLocation = sources.findLocationForElement(clipId);
+    const service = new CardService(handle.db);
+
+    const { sourceLocationId } = service.createFromExtract({
+      extractId: clipId,
+      kind: "qa",
+      prompt: "",
+      answer: "translation",
+    });
+
+    expect(sourceLocationId).toBe(clipLocation?.id);
   });
 });

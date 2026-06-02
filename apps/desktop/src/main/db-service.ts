@@ -25,6 +25,7 @@ import type {
   ElementStatus,
   IsoTimestamp,
   MarkType,
+  MediaRef,
   Priority,
   PriorityLabel,
   ReviewLog,
@@ -36,6 +37,7 @@ import type {
 import {
   canonicalizeUrl,
   lowerPriority,
+  parseMediaRef,
   priorityFromLabel,
   priorityToLabel,
   raisePriority,
@@ -1895,7 +1897,7 @@ export class DbService {
     if (!extract || extract.deletedAt) {
       throw new Error(`DbService.createCard: extract ${extractId} not found`);
     }
-    const { element, siblingGroupId, sourceLocationId } = this.cards.createFromExtract({
+    const { element, siblingGroupId, sourceLocationId, mediaRef } = this.cards.createFromExtract({
       extractId,
       kind: request.kind as CardKind,
       ...(request.prompt !== undefined ? { prompt: request.prompt } : {}),
@@ -1907,6 +1909,19 @@ export class DbService {
       ...(request.siblingGroupId
         ? { siblingGroupId: request.siblingGroupId as SiblingGroupId }
         : {}),
+      // Audio-card carrier (T075): an explicit ref wins; when omitted the service
+      // derives it from a clip `media_fragment` extract (defaulting the loop to prompt).
+      // The contract's `sourceElementId` is a validated string; brand it for the domain.
+      ...(request.mediaRef != null
+        ? {
+            mediaRef: {
+              ...request.mediaRef,
+              sourceElementId: request.mediaRef.sourceElementId as ElementId,
+            },
+          }
+        : request.mediaRef === null
+          ? { mediaRef: null }
+          : {}),
     });
     return {
       card: {
@@ -1920,6 +1935,7 @@ export class DbService {
         parentId: element.parentId,
         sourceId: element.sourceId,
         siblingGroupId,
+        mediaRef,
       },
       sourceLocationId,
     };
@@ -1974,6 +1990,8 @@ export class DbService {
         parentId: c.parentId,
         sourceId: c.sourceId,
         siblingGroupId: c.siblingGroupId,
+        // An occlusion card is never an audio card (the audio carrier is text-card only).
+        mediaRef: null,
       })),
     };
   }
@@ -2273,6 +2291,21 @@ export class DbService {
       }
     }
 
+    // Audio-card render data (T075): the looped clip + face, resolved from the card's
+    // `cards.media_ref` ONLY for an audio card (null otherwise). We also resolve the
+    // media source's kind (`local`/`youtube` + video id) so the review face can play
+    // WITHOUT a second `getMediaData` round-trip. The face seeks the ORIGINAL media —
+    // no re-encoding. A malformed cell degrades to "no audio" (parseMediaRef returns
+    // null), never a thrown review read.
+    const mediaRef: MediaRef | null = parseMediaRef(card.card.mediaRef);
+    let mediaSource: ReviewCardView["mediaSource"] = null;
+    let youtubeId: string | null = null;
+    if (mediaRef) {
+      const resolved = this.resolveAudioMediaSource(mediaRef.sourceElementId as ElementId);
+      mediaSource = resolved.mediaSource;
+      youtubeId = resolved.youtubeId;
+    }
+
     return {
       id: element.id,
       kind: card.card.kind,
@@ -2313,7 +2346,32 @@ export class DbService {
       siblingGroupId: this.reviewSessionService.siblingGroupOf(element.id),
       // Image-occlusion render data (T071) — null for non-occlusion cards.
       occlusion,
+      // Audio-card render data (T075) — null for non-audio cards. The clip window +
+      // face to loop, plus the resolved media-source kind so the face plays directly.
+      mediaRef,
+      mediaSource,
+      youtubeId,
     };
+  }
+
+  /**
+   * Resolve a media `source` element id → its playable kind for an audio card (T075):
+   * `"local"` (a vault asset played via `media://`) or `"youtube"` (an IFrame Player) +
+   * the YouTube video id. Read-only; mirrors {@link getMediaData}'s discriminator off
+   * the authoritative `sources.media_kind` so the review face and the reader agree.
+   */
+  private resolveAudioMediaSource(mediaSourceElementId: ElementId): {
+    mediaSource: "local" | "youtube";
+    youtubeId: string | null;
+  } {
+    const provenance = this.repos.sources.findById(mediaSourceElementId)?.source ?? null;
+    if (provenance?.mediaKind === "youtube") {
+      return {
+        mediaSource: "youtube",
+        youtubeId: provenance.canonicalUrl ? parseYouTubeId(provenance.canonicalUrl) : null,
+      };
+    }
+    return { mediaSource: "local", youtubeId: null };
   }
 
   /**

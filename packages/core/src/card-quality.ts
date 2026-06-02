@@ -44,7 +44,9 @@ export type CardQualityCheckId =
   | "missing-source"
   // T072: a code body's length is judged in LINES, not chars/words (the char/word
   // thresholds would over-warn on legitimate code).
-  | "code-too-long";
+  | "code-too-long"
+  // T075: an audio card whose looped clip is over ~30 s warns (minimum-information).
+  | "long-audio-clip";
 
 /** One row of the quality checklist. */
 export interface CardQualityCheck {
@@ -69,8 +71,24 @@ export interface CardQualityReport {
   readonly hasWarning: boolean;
 }
 
+/**
+ * The audio signals (T075) shared by both card kinds: whether a looped clip carries
+ * the prompt / answer face (so the empty-prompt/empty-answer `block` doesn't mis-fire
+ * on an audio-only card — the audio IS that face's content), and the clip's length in
+ * ms (so an over-long clip warns per the minimum-information principle). All optional,
+ * backward-compatible — a text card omits them and behaves exactly as before.
+ */
+export interface AudioQualitySignals {
+  /** True when a looped audio clip is the PROMPT face (an audio-prompt card). */
+  readonly hasMediaPrompt?: boolean;
+  /** True when a looped audio clip is the ANSWER face (an audio-answer card). */
+  readonly hasMediaAnswer?: boolean;
+  /** The looped clip's length in milliseconds, when this is an audio card. */
+  readonly audioClipMs?: number | null;
+}
+
 /** Discriminated quality input for a Q&A card. */
-export interface QaQualityInput {
+export interface QaQualityInput extends AudioQualitySignals {
   readonly kind: "qa";
   /** The card front / question. */
   readonly prompt: string;
@@ -81,7 +99,7 @@ export interface QaQualityInput {
 }
 
 /** Discriminated quality input for a cloze card. */
-export interface ClozeQualityInput {
+export interface ClozeQualityInput extends AudioQualitySignals {
   readonly kind: "cloze";
   /** The canonical `{{c1::answer}}` cloze text. */
   readonly cloze: string;
@@ -137,6 +155,13 @@ export const MAX_CLOZE_DELETIONS = 1;
  * SKIP the char/word + ambiguous-pronoun heuristics (which are meaningless on code).
  */
 export const CODE_MAX_LINES = 12;
+
+/**
+ * Max LENGTH (ms) of an audio card's looped clip before "long audio clip — consider a
+ * shorter span" warns (T075). The minimum-information principle applies to audio too: a
+ * 30-second clip usually bundles more than one phrase/idea. 30 s = 30_000 ms.
+ */
+export const LONG_AUDIO_CLIP_MS = 30_000;
 
 /**
  * A fenced code block — ```` ```lang\n…\n``` ````. T072's code cards carry a code body
@@ -219,6 +244,26 @@ function leadsWithAmbiguousPronoun(text: string): boolean {
 export function evaluateCardQuality(input: CardQualityInput): CardQualityReport {
   const checks: CardQualityCheck[] = input.kind === "qa" ? evaluateQa(input) : evaluateCloze(input);
 
+  // Long-audio-clip warn (T075) — shared across kinds, shown only for an audio card
+  // (a non-null `audioClipMs`). The minimum-information principle: a clip much over
+  // ~30 s usually bundles more than one idea; advisory, never a blocker.
+  if (typeof input.audioClipMs === "number") {
+    const seconds = Math.round(input.audioClipMs / 1000);
+    checks.push(
+      input.audioClipMs > LONG_AUDIO_CLIP_MS
+        ? {
+            id: "long-audio-clip",
+            severity: "warn",
+            message: `Long audio clip (${seconds}s) — consider a shorter span`,
+          }
+        : {
+            id: "long-audio-clip",
+            severity: "ok",
+            message: `Focused audio clip (${seconds}s)`,
+          },
+    );
+  }
+
   // Missing source is shared across kinds and shown last (least urgent advisory).
   checks.push(
     input.hasSource
@@ -243,15 +288,21 @@ function evaluateQa(input: QaQualityInput): CardQualityCheck[] {
   const prompt = input.prompt.trim();
   const answer = input.answer.trim();
 
-  // Hollow-card blocker: either side empty → cannot activate.
-  if (prompt.length === 0 || answer.length === 0) {
+  // T075: a looped audio clip IS the content of the face it plays on, so an
+  // audio-prompt card with empty text is NOT a hollow prompt (and likewise the answer).
+  // Treat a face the audio covers as "filled" for the hollow-card blocker.
+  const promptFilled = prompt.length > 0 || input.hasMediaPrompt === true;
+  const answerFilled = answer.length > 0 || input.hasMediaAnswer === true;
+
+  // Hollow-card blocker: either side empty (and not carried by audio) → cannot activate.
+  if (!promptFilled || !answerFilled) {
     checks.push({
       id: "empty",
       severity: "block",
       message:
-        prompt.length === 0 && answer.length === 0
+        !promptFilled && !answerFilled
           ? "Empty card — add a question and an answer"
-          : prompt.length === 0
+          : !promptFilled
             ? "Empty question — add a prompt"
             : "Empty answer — add the fact to recall",
     });

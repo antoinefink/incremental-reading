@@ -698,6 +698,22 @@ export interface RegionRectInput {
   readonly y1: number;
 }
 
+/** Which face of an audio card additionally plays the looped clip (T075). */
+export type MediaRefFace = "prompt" | "answer" | "both";
+
+/**
+ * The audio-card presentation carrier (T075) — which clip of the original media to
+ * LOOP, and on which face. `sourceElementId` is the media `source` (the player seeks
+ * the ORIGINAL by time, no re-encoding); `startMs`/`endMs` the clip window; `on` the
+ * face that plays it. Mirrors the contract `MediaRefSchema`.
+ */
+export interface MediaRef {
+  readonly sourceElementId: string;
+  readonly startMs: number;
+  readonly endMs: number;
+  readonly on: MediaRefFace;
+}
+
 /** Crop a PDF page region into a scheduled `media_fragment` extract (T065). */
 export interface SourcesExtractRegionRequest {
   readonly sourceElementId: string;
@@ -1202,6 +1218,12 @@ export interface CardsCreateRequest {
   readonly priority?: ExtractionPriorityLabel;
   /** Optional sibling group id (to group with a prior sibling); minted when absent. */
   readonly siblingGroupId?: string;
+  /**
+   * Audio-card carrier (T075). When supplied, the card LOOPS this clip on the chosen
+   * face. When omitted and `extractId` is a clip `media_fragment`, the main side
+   * derives it (defaulting the loop to the prompt). `null` for a text card.
+   */
+  readonly mediaRef?: MediaRef | null;
 }
 
 /** A flat summary of a freshly created card element. */
@@ -1220,6 +1242,8 @@ export interface CardSummary {
   readonly sourceId: string | null;
   /** The sibling group the card joined (thread into the next sibling's create). */
   readonly siblingGroupId: string;
+  /** The audio-card clip reference (T075) when this is an audio card, else `null`. */
+  readonly mediaRef: MediaRef | null;
 }
 
 export interface CardsCreateResult {
@@ -1533,6 +1557,21 @@ export interface ReviewCardView {
    * `region` on the front; on reveal it clears the box and shows `label`.
    */
   readonly occlusion: ReviewOcclusion | null;
+  /**
+   * Audio-card render data (T075) — present ONLY for a card whose `media_ref` is set,
+   * `null` otherwise. The clip window + face to LOOP. The review face plays it by
+   * seeking the original media (no re-encoding) on the `mediaRef.on` face — the front
+   * loops `{prompt,both}`, the reveal `{answer,both}`, never leaking an audio answer.
+   */
+  readonly mediaRef: MediaRef | null;
+  /**
+   * The resolved media-source kind for the audio clip (T075) — `"local"` (played via
+   * `media://<mediaRef.sourceElementId>`) or `"youtube"` (an IFrame Player) — so the
+   * face plays WITHOUT a second `getMediaData` round-trip. `null` for a non-audio card.
+   */
+  readonly mediaSource: "local" | "youtube" | null;
+  /** The YouTube video id for a youtube audio source (T075), else `null`. */
+  readonly youtubeId: string | null;
 }
 
 /** The image-occlusion data the review face needs (T071). */

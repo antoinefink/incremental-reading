@@ -53,6 +53,7 @@ import type {
   CardKind,
   ElementId,
   IsoTimestamp,
+  MediaRef,
   Priority,
   SiblingGroupId,
   SourceLocationId,
@@ -94,6 +95,17 @@ export interface CreateCardFromExtractInput {
    */
   readonly siblingGroupId?: SiblingGroupId;
   /**
+   * Audio-card presentation carrier (T075). When supplied EXPLICITLY (the renderer
+   * passes "loop this clip on the prompt/answer/both"), it is written verbatim to
+   * `cards.media_ref`. When OMITTED and the originating extract is a clip
+   * `media_fragment` (its `source_locations` row carries a `clip` window), the service
+   * DERIVES the ref from that clip + the media `sourceId` and defaults `on: "prompt"`
+   * — so the builder can author an audio card by passing just the clip extract id. An
+   * explicit ref always wins (e.g. to put the audio on the answer). `null`/omitted for
+   * every text/occlusion card. Audio is a presentation modifier, not a new `kind`.
+   */
+  readonly mediaRef?: MediaRef | null;
+  /**
    * The first FSRS schedule time (T036) — when this authored card becomes due.
    * Defaults to "now" so a freshly created card immediately enters the due deck
    * and can be reviewed (its first grade runs the real FSRS interval math). Passed
@@ -112,6 +124,8 @@ export interface CreateCardResult {
   readonly siblingGroupId: SiblingGroupId;
   /** The inherited source-location anchor id (lineage), or `null` when the extract has none. */
   readonly sourceLocationId: string | null;
+  /** The resolved audio-card clip reference (T075), or `null` for a text/occlusion card. */
+  readonly mediaRef: MediaRef | null;
 }
 
 /** Build a short fallback title from a card's body. */
@@ -163,8 +177,26 @@ export class CardService {
     // exact source location, so jump-to-source in review (M7) lands correctly.
     const parentId = input.extractId;
     const sourceId = extract.sourceId ?? input.extractId;
-    const sourceLocationId: SourceLocationId | null =
-      this.sources.findLocationForElement(input.extractId)?.id ?? null;
+    const extractLocation = this.sources.findLocationForElement(input.extractId);
+    const sourceLocationId: SourceLocationId | null = extractLocation?.id ?? null;
+
+    // Audio-card carrier (T075). An explicit ref (the renderer chose the face) always
+    // wins. Otherwise, when the originating extract is a clip `media_fragment` — its
+    // location carries a `clip` window onto a media `sourceElementId` — DERIVE the ref
+    // from that window + media source, defaulting the loop to the prompt face. The card
+    // is self-contained: it copies the window so it needn't re-resolve the fragment. A
+    // non-clip extract yields `null` (every text card). The clip references the original
+    // media by time — no re-encoding.
+    const mediaRef: MediaRef | null =
+      input.mediaRef ??
+      (extract.type === "media_fragment" && extractLocation?.clip
+        ? {
+            sourceElementId: extractLocation.sourceElementId,
+            startMs: extractLocation.clip.startMs,
+            endMs: extractLocation.clip.endMs,
+            on: "prompt",
+          }
+        : null);
 
     // Priority: inherit the extract's numeric priority unless overridden.
     const priority: Priority = input.priority ?? extract.priority;
@@ -208,6 +240,7 @@ export class CardService {
         parentId,
         sourceId,
         sourceLocationId,
+        mediaRef,
         firstScheduledAt,
       });
 
@@ -240,7 +273,7 @@ export class CardService {
       return created;
     });
 
-    return { element, card, siblingGroupId, sourceLocationId };
+    return { element, card, siblingGroupId, sourceLocationId, mediaRef };
   }
 
   /**

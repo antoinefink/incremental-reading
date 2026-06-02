@@ -479,6 +479,21 @@ export function ExtractView() {
   // image URL, this signal doesn't depend on the async bytes fetch succeeding.
   const isImageExtract = element?.type === "media_fragment" && location?.region != null;
 
+  // A clip extract (T074): a `media_fragment` whose source location carries a `clip`
+  // window onto a media source — the tell that this is an audio-card candidate (T075).
+  // The audio card loops the SAME window on the ORIGINAL media (no re-encoding); the
+  // builder opens in audio mode pre-seeded with this clip. A region (image) extract has
+  // no clip, so the two never overlap.
+  const audioClip =
+    element?.type === "media_fragment" && location?.clip && location.sourceElementId
+      ? {
+          sourceElementId: location.sourceElementId,
+          startMs: location.clip.startMs,
+          endMs: location.clip.endMs,
+        }
+      : undefined;
+  const isClipExtract = audioClip != null;
+
   return (
     <div className="reader-screen extract-view" data-testid="route-extract">
       <header className="reader-header" data-testid="extract-header">
@@ -764,8 +779,12 @@ export function ExtractView() {
               disabled={busy}
               onClick={onConvert}
             >
-              <Icon name={isImageExtract ? "layers" : "card"} size={14} />{" "}
-              {isImageExtract ? "Occlude image" : "Convert to card"}
+              <Icon name={isImageExtract ? "layers" : isClipExtract ? "play" : "card"} size={14} />{" "}
+              {isImageExtract
+                ? "Occlude image"
+                : isClipExtract
+                  ? "Create audio card"
+                  : "Convert to card"}
             </button>
             <button
               type="button"
@@ -805,6 +824,7 @@ export function ExtractView() {
             extractId={id}
             extractPriority={element?.priority ?? 0.5}
             isImageExtract={isImageExtract}
+            {...(audioClip ? { audioClip } : {})}
             // The card inherits a source location iff the extract has one — feeds the
             // T035 "missing source" quality check. The renderer ships only the boolean.
             hasSource={inspector?.location != null || inspector?.source != null}

@@ -6,6 +6,7 @@ import {
   CLOZE_MAX_WORDS,
   CODE_MAX_LINES,
   evaluateCardQuality,
+  LONG_AUDIO_CLIP_MS,
   MAX_CLOZE_DELETIONS,
   PROMPT_MAX_CHARS,
   parseCloze,
@@ -291,5 +292,81 @@ describe("evaluateCardQuality — code-aware (T072)", () => {
     });
     expect(check(report, "answer-too-long").message).not.toMatch(/line/i);
     expect(report.checks.find((c) => c.id === "ambiguous-pronoun")).toBeDefined();
+  });
+});
+
+describe("evaluateCardQuality — audio cards (T075)", () => {
+  it("does NOT flag an audio-prompt card with an empty TEXT prompt (the audio is the prompt)", () => {
+    const report = evaluateCardQuality({
+      kind: "qa",
+      prompt: "", // no written prompt — the looped clip IS the prompt
+      answer: "the written translation",
+      hasSource: true,
+      hasMediaPrompt: true,
+      audioClipMs: 4000,
+    });
+    // Not hollow: the audio carries the prompt face, the written answer the answer face.
+    expect(check(report, "empty").severity).toBe("ok");
+    expect(report.hasBlocker).toBe(false);
+  });
+
+  it("does NOT flag an audio-answer card with an empty TEXT answer", () => {
+    const report = evaluateCardQuality({
+      kind: "qa",
+      prompt: "How is this phrase pronounced?",
+      answer: "", // no written answer — the looped clip IS the answer
+      hasSource: true,
+      hasMediaAnswer: true,
+      audioClipMs: 3000,
+    });
+    expect(check(report, "empty").severity).toBe("ok");
+    expect(report.hasBlocker).toBe(false);
+  });
+
+  it("STILL blocks an audio-prompt card whose written ANSWER is empty (audio covers only the prompt)", () => {
+    const report = evaluateCardQuality({
+      kind: "qa",
+      prompt: "",
+      answer: "", // neither the audio (prompt-only) nor text fills the answer
+      hasSource: true,
+      hasMediaPrompt: true,
+      audioClipMs: 4000,
+    });
+    expect(check(report, "empty").severity).toBe("block");
+    expect(report.hasBlocker).toBe(true);
+  });
+
+  it("warns on a long audio clip (> 30 s) and is silent on a short one", () => {
+    const longReport = evaluateCardQuality({
+      kind: "qa",
+      prompt: "",
+      answer: "translation",
+      hasSource: true,
+      hasMediaPrompt: true,
+      audioClipMs: LONG_AUDIO_CLIP_MS + 5000,
+    });
+    const longRow = check(longReport, "long-audio-clip");
+    expect(longRow.severity).toBe("warn");
+    expect(longRow.message).toMatch(/short/i);
+
+    const shortReport = evaluateCardQuality({
+      kind: "qa",
+      prompt: "",
+      answer: "translation",
+      hasSource: true,
+      hasMediaPrompt: true,
+      audioClipMs: 4000,
+    });
+    expect(check(shortReport, "long-audio-clip").severity).toBe("ok");
+  });
+
+  it("adds NO long-audio-clip row for a text card (no audioClipMs signal)", () => {
+    const report = evaluateCardQuality({
+      kind: "qa",
+      prompt: "How is intelligence defined?",
+      answer: "As skill-acquisition efficiency.",
+      hasSource: true,
+    });
+    expect(report.checks.find((c) => c.id === "long-audio-clip")).toBeUndefined();
   });
 });

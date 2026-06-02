@@ -129,6 +129,9 @@ const h = vi.hoisted(() => {
     flagged: false,
     siblingGroupId: null,
     occlusion: null,
+    mediaRef: null,
+    mediaSource: null,
+    youtubeId: null,
   };
   const previews: Record<ReviewRating, ReviewIntervalPreview> = {
     again: { dueAt: "2026-05-30T08:10:00.000Z", scheduledDays: 0.007, label: "10m" },

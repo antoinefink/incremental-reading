@@ -48,8 +48,24 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "../components/Icon";
 import { priorityLabel } from "../components/inspector/primitives";
-import { appApi, type CardKind, type PriorityLabel } from "../lib/appApi";
+import { appApi, type CardKind, type MediaRefFace, type PriorityLabel } from "../lib/appApi";
+import { ClipMiniPlayer } from "./ClipMiniPlayer";
 import { OcclusionEditor } from "./OcclusionEditor";
+
+/**
+ * The audio-clip context (T075) for an audio card. When present, the builder authors an
+ * AUDIO card that loops this clip of the original media on the chosen face — the
+ * `media_ref` is built from this + the face toggle and sent to `cards.create`. The
+ * window is the originating clip `media_fragment`'s `source_locations.clip`.
+ */
+export interface AudioClipContext {
+  /** The media `source` element id (the original asset the card seeks). */
+  readonly sourceElementId: string;
+  /** The clip start in milliseconds. */
+  readonly startMs: number;
+  /** The clip end in milliseconds. */
+  readonly endMs: number;
+}
 
 /**
  * The builder's tabs. `qa`/`cloze` are the text-card tabs; `image_occlusion`
@@ -72,6 +88,13 @@ export interface CardBuilderProps {
    * disabled with a hint. Defaults to `false`.
    */
   readonly isImageExtract?: boolean;
+  /**
+   * The audio-clip context (T075) when the extract is a clip `media_fragment`. When
+   * present the builder authors an AUDIO card: a prompt/answer/both face toggle + a mini
+   * clip player are shown and the chosen `media_ref` is sent to `cards.create`. Absent
+   * for a text/image extract (a normal text card). Defaults to `undefined`.
+   */
+  readonly audioClip?: AudioClipContext;
   /**
    * Whether the extract carries a source location the card will inherit (lineage to
    * source). Feeds the T035 "missing source" quality check; defaults to `false` so a
@@ -104,6 +127,7 @@ export function CardBuilder({
   extractId,
   extractPriority,
   isImageExtract = false,
+  audioClip,
   hasSource = false,
   seedBody,
   initialTab = "qa",
@@ -113,6 +137,7 @@ export function CardBuilder({
   onClose,
 }: CardBuilderProps) {
   const defaultLabel = priorityLabel(extractPriority);
+  const isAudio = audioClip != null;
 
   // An image extract opens straight on the occlusion tab — its text-card tabs
   // would have no body. A text extract opens on the requested text tab.
@@ -121,6 +146,9 @@ export function CardBuilder({
   const [back, setBack] = useState(seedBody?.trim() ?? "");
   const [cloze, setCloze] = useState(initialClozeText ?? seedBody?.trim() ?? "");
   const [priority, setPriority] = useState<PriorityLabel>(defaultLabel);
+  // The face the audio clip loops on (T075). Default `prompt` (the spoken-phrase →
+  // written-translation pattern); the user can move it to the answer or both.
+  const [audioOn, setAudioOn] = useState<MediaRefFace>("prompt");
   const [revealed, setRevealed] = useState(false);
   const [busy, setBusy] = useState(false);
   // The sibling group the FIRST card from this extract minted; threaded into the
@@ -148,12 +176,21 @@ export function CardBuilder({
   // `block`-severity check (empty Q&A side / no cloze deletion) gates Create; `warn`s
   // are advisory and never block (the card-quality rule: warnings inform).
   const quality = useMemo(() => {
+    // Audio signals (T075): a clip on the prompt/answer face is that face's content, so
+    // an audio-only side is NOT flagged "empty"; the clip length warns if over-long.
+    const audioSignals = isAudio
+      ? {
+          hasMediaPrompt: audioOn === "prompt" || audioOn === "both",
+          hasMediaAnswer: audioOn === "answer" || audioOn === "both",
+          audioClipMs: audioClip ? audioClip.endMs - audioClip.startMs : null,
+        }
+      : {};
     const input: CardQualityInput =
       tab === "qa"
-        ? { kind: "qa", prompt: front, answer: back, hasSource }
-        : { kind: "cloze", cloze, hasSource };
+        ? { kind: "qa", prompt: front, answer: back, hasSource, ...audioSignals }
+        : { kind: "cloze", cloze, hasSource, ...audioSignals };
     return evaluateCardQuality(input);
-  }, [tab, front, back, cloze, hasSource]);
+  }, [tab, front, back, cloze, hasSource, isAudio, audioOn, audioClip]);
 
   // Create is allowed with warnings; only a `block`-severity check (the hollow-card
   // set) disables it. This is the create-time precondition M7's activation reuses.
@@ -201,6 +238,19 @@ export function CardBuilder({
         kind: tab,
         priority,
         ...(siblingGroupId ? { siblingGroupId } : {}),
+        // Audio card (T075): build the `media_ref` from the clip context + the face
+        // toggle. The window comes from the originating clip `media_fragment`; the card
+        // loops the ORIGINAL media by time (no re-encoding). Omitted for a text card.
+        ...(isAudio && audioClip
+          ? {
+              mediaRef: {
+                sourceElementId: audioClip.sourceElementId,
+                startMs: audioClip.startMs,
+                endMs: audioClip.endMs,
+                on: audioOn,
+              },
+            }
+          : {}),
         ...(tab === "qa"
           ? { prompt: front.trim(), answer: back.trim() }
           : // Canonicalize `{{ }}` → numbered `{{c1::…}}` before sending so the
@@ -210,7 +260,9 @@ export function CardBuilder({
       });
       // Thread the (minted/reused) group so the next card from this extract is a sibling.
       setSiblingGroupId(result.card.siblingGroupId);
-      onToast(tab === "qa" ? "Q&A card created" : "Cloze card created");
+      onToast(
+        isAudio ? "Audio card created" : tab === "qa" ? "Q&A card created" : "Cloze card created",
+      );
       onCardCreated();
       // Leave the builder ready for another card: keep the body context, clear the
       // authored prompt so the user does not accidentally re-create the same card.
@@ -233,6 +285,9 @@ export function CardBuilder({
     front,
     back,
     cloze,
+    isAudio,
+    audioClip,
+    audioOn,
     onToast,
     onCardCreated,
   ]);
@@ -299,6 +354,40 @@ export function CardBuilder({
       </div>
 
       <div className="card-builder__body">
+        {/* Audio card (T075): a clip extract authors an AUDIO card. The clip loops here
+            (mini player) and the face toggle decides whether the audio is the prompt, the
+            answer, or both — the WRITTEN side becomes optional for the audio-covered face
+            (e.g. a spoken phrase as the prompt + a written translation as the answer). */}
+        {isAudio && audioClip ? (
+          <div className="cb-audio" data-testid="cb-audio">
+            <div className="insp-sec__title">Audio clip</div>
+            <ClipMiniPlayer
+              sourceElementId={audioClip.sourceElementId}
+              startMs={audioClip.startMs}
+              endMs={audioClip.endMs}
+            />
+            {/* biome-ignore lint/a11y/useSemanticElements: a toggle group of buttons, not a form fieldset */}
+            <div className="cb-audio__faces" role="group" aria-label="Audio plays on">
+              {(["prompt", "answer", "both"] as const).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  className="cb-audio__face"
+                  data-active={audioOn === f ? "true" : "false"}
+                  data-testid={`cb-audio-on-${f}`}
+                  onClick={() => setAudioOn(f)}
+                >
+                  {f === "prompt" ? "Prompt" : f === "answer" ? "Answer" : "Both"}
+                </button>
+              ))}
+            </div>
+            <div className="cb-field__hint">
+              The audio is the {audioOn === "both" ? "prompt and answer" : audioOn} — add a written{" "}
+              {audioOn === "prompt" ? "answer" : audioOn === "answer" ? "prompt" : "side"} if
+              useful.
+            </div>
+          </div>
+        ) : null}
         {tab === "qa" ? (
           <>
             <div className="cb-field">

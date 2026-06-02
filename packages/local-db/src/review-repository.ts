@@ -21,6 +21,7 @@ import type {
   ElementId,
   FsrsState,
   IsoTimestamp,
+  MediaRef,
   Priority,
   ReviewLog,
   ReviewRating,
@@ -66,6 +67,13 @@ export interface CreateCardInput {
    * `sourceLocationId`); the existing card-authoring callers leave it unset.
    */
   readonly sourceUri?: string | null;
+  /**
+   * Audio-card presentation carrier (T075) — when supplied, written verbatim (as JSON)
+   * to `cards.media_ref` so the card LOOPS this clip of the original media on the
+   * chosen face. `null`/omitted for every text/occlusion card. This is a presentation
+   * modifier, not a new `kind` — no new op (`create_card` already covers the card row).
+   */
+  readonly mediaRef?: MediaRef | null;
   /**
    * An imported FSRS-state SEED (T070) — used by Anki import to PRESERVE review
    * history when available. When supplied, `createCardWithin` writes the
@@ -209,6 +217,10 @@ export class ReviewRepository {
         cloze: input.cloze ?? null,
         sourceLocationId: input.sourceLocationId ?? null,
         sourceUri: input.sourceUri ?? null,
+        // Audio-card carrier (T075): the clip-to-loop reference, JSON-encoded. `null`
+        // for every text/occlusion card. Self-contained — the window is copied from
+        // the originating clip fragment so the card needn't re-resolve it.
+        mediaRef: input.mediaRef ? JSON.stringify(input.mediaRef) : null,
       })
       .run();
     // The review_states row. WITHOUT a seed it carries fsrsState "new"; its dueAt is

@@ -143,6 +143,30 @@
   padding-top: 20px;
   border-top: 1px solid var(--border);
 }
+
+/* ---------- audio card (T075): the looped clip player on a card face ---------- */
+.rcard__audio {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.rcard__audio-el {
+  width: 100%;
+  max-width: 460px;
+}
+.rcard__audio-iframe {
+  width: 100%;
+  max-width: 460px;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--border);
+  border-radius: var(--r-2, 8px);
+}
+.rcard__audio-cap {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
 .card-sep {
   height: 1px;
   background: var(--border);

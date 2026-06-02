@@ -48,6 +48,19 @@ export const cards = sqliteTable(
      */
     sourceUri: text("source_uri"),
     /**
+     * Audio-card presentation carrier (T075) — JSON `{ sourceElementId, startMs,
+     * endMs, on }` (see `@interleave/core` `MediaRef`). When non-null this card LOOPS
+     * a clip of the original media (`sourceElementId`, the media `source`) over the
+     * `[startMs, endMs)` window on the `on` face (`prompt`/`answer`/`both`) — an
+     * AUDIO card. `null` for every text/occlusion card (a pure widening). Audio is a
+     * presentation modifier on the existing card model, NOT a new `kind`: an audio
+     * Q&A is `kind: "qa"` with `media_ref`, an audio cloze is `kind: "cloze"` with
+     * `media_ref`, so every `kind`-switched path (cloze parsing, card-quality, sibling
+     * burying, leech, FSRS) keeps working unchanged. The clip references the original
+     * by time — no re-encoding, no `ffmpeg`.
+     */
+    mediaRef: text("media_ref"),
+    /**
      * Durable leech flag (T040). A card is automatically flagged a leech once its
      * cumulative `review_states.lapses` reaches the leech threshold (4 — see
      * `@interleave/scheduler` `isLeech`); the flag is set in the SAME transaction as
