@@ -132,7 +132,9 @@ export class ExtractionService {
     // the ONLY thing that differs for a sub-extract — the rest of the path is the
     // T021 extraction verbatim (same element/body/relation/tags/schedule/mark).
     const locationSource = input.parentId ?? input.sourceElementId;
-    const label = input.label ?? this.deriveLabel(locationSource, input.blockIds[0]);
+    // Thread the extract's page (PDF, T064) into the label so a PDF extract reads
+    // "Page N · ¶M"; null/absent for a text source keeps the existing "¶M".
+    const label = input.label ?? this.deriveLabel(locationSource, input.blockIds[0], input.page);
     // The body seed is computed BEFORE the transaction (pure CPU work, no DB).
     const conversion = plainTextToProseMirrorDoc(input.selectedText);
     // Read the source's inherited tags up front (a read; the writes happen in tx).
@@ -211,11 +213,15 @@ export class ExtractionService {
   }
 
   /** Derive a human label for the anchor from the source's ordered blocks. */
-  private deriveLabel(sourceElementId: ElementId, firstBlockId: BlockId | undefined): string {
+  private deriveLabel(
+    sourceElementId: ElementId,
+    firstBlockId: BlockId | undefined,
+    page?: number | null,
+  ): string {
     if (!firstBlockId) return "Selected text";
     const blocks: LabelBlock[] = this.documents
       .listBlocks(sourceElementId)
       .map((b) => ({ stableBlockId: b.stableBlockId, blockType: b.blockType, order: b.order }));
-    return deriveSourceLocationLabel(blocks, firstBlockId);
+    return deriveSourceLocationLabel(blocks, firstBlockId, page);
   }
 }

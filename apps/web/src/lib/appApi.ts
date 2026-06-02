@@ -544,6 +544,35 @@ export type SourcesImportUrlResult =
       readonly matches: readonly SourceDuplicateSummary[];
     };
 
+/** Import a local `.pdf` (T064) — MAIN opens the file picker; carries no path. */
+export interface SourcesImportPdfRequest {
+  readonly priority?: PriorityLabelInput;
+  readonly reasonAdded?: string;
+}
+
+/** The PDF-import result (T064) — `"imported"` or `"cancelled"` (picker dismissed). */
+export type SourcesImportPdfResult =
+  | {
+      readonly status: "imported";
+      readonly id: string;
+      readonly item: InboxItemSummary;
+    }
+  | {
+      readonly status: "cancelled";
+    };
+
+/** Serve a PDF source's original bytes to the renderer for rendering (T064). */
+export interface SourcesGetPdfDataRequest {
+  readonly elementId: string;
+}
+
+export interface SourcesGetPdfDataResult {
+  /** The original PDF bytes, or `null` when the source is not a PDF / has no snapshot. */
+  readonly bytes: ArrayBuffer | null;
+  /** The number of pages (derived from `document_blocks.page`), or 0 when unknown. */
+  readonly pageCount: number;
+}
+
 /**
  * A renderer-safe projection of a background-runner job (T058). The renderer
  * observes the local job queue (e.g. a Maintenance "background activity" view)
@@ -705,6 +734,17 @@ export interface DocumentsGetResult {
    * extracts is M4. Derived main-side from the source's child extract locations.
    */
   readonly extractedBlockIds: readonly string[];
+  /**
+   * The source body format (T064) — `"pdf"` for a paginated PDF source (the reader
+   * swaps in the PDF reading mode), else `null` (the ordinary editor body).
+   */
+  readonly sourceFormat: "pdf" | null;
+  /**
+   * For a PAGINATED (PDF) source: the block→page map (stable block id → 1-based
+   * page) off `document_blocks.page`, so the reader sets a page read-point + derives
+   * the page of a selected block. Empty for non-paginated bodies.
+   */
+  readonly blockPages: Readonly<Record<string, number>>;
 }
 
 /** One stable block descriptor (T016), derived renderer-side via `toBlockInputs`. */
@@ -1644,6 +1684,8 @@ export interface AppApi {
   readonly sources: {
     importManual(request: SourcesImportManualRequest): Promise<SourcesImportManualResult>;
     importUrl(request: SourcesImportUrlRequest): Promise<SourcesImportUrlResult>;
+    importPdf(request: SourcesImportPdfRequest): Promise<SourcesImportPdfResult>;
+    getPdfData(request: SourcesGetPdfDataRequest): Promise<SourcesGetPdfDataResult>;
   };
   readonly capture: {
     getPairing(): Promise<CapturePairingResult>;
@@ -1860,6 +1902,19 @@ export const appApi = {
   /** Fetch + clean + snapshot a live URL into an inbox source (T060). */
   importUrlSource(request: SourcesImportUrlRequest): Promise<SourcesImportUrlResult> {
     return requireAppApi().sources.importUrl(request);
+  },
+  /**
+   * Import a local `.pdf` into an inbox source (T064) — opens a MAIN file picker,
+   * streams the original into the vault, parses per-page text, and creates a
+   * paginated source. `"cancelled"` when the picker is dismissed; a thrown
+   * `PdfImportError` (a `code: message` line) surfaces a friendly message.
+   */
+  importPdfSource(request: SourcesImportPdfRequest): Promise<SourcesImportPdfResult> {
+    return requireAppApi().sources.importPdf(request);
+  },
+  /** Serve a PDF source's original bytes to the renderer for rendering (T064). */
+  getSourcePdfData(request: SourcesGetPdfDataRequest): Promise<SourcesGetPdfDataResult> {
+    return requireAppApi().sources.getPdfData(request);
   },
   /** Read the browser-capture pairing state (token + enabled/running/port) (T062). */
   getCapturePairing(): Promise<CapturePairingResult> {

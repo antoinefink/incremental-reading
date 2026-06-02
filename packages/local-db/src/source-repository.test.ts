@@ -110,6 +110,57 @@ describe("SourceRepository.createWithDocument (T060 pre-built conversion)", () =
     expect(ops).toContain("update_document");
   });
 
+  it("persists per-block page numbers for a paginated (PDF) conversion (T064)", () => {
+    const repo = new SourceRepository(handle.db);
+    // A 2-page PDF-style conversion: each row carries its 1-based page.
+    const conversion: PlainTextConversion = {
+      doc: {
+        type: "doc",
+        content: [
+          {
+            type: "heading",
+            attrs: { level: 3, blockId: "pg-1-h" as BlockId },
+            content: [{ type: "text", text: "Page 1" }],
+          },
+          {
+            type: "paragraph",
+            attrs: { blockId: "pg-1-p" as BlockId },
+            content: [{ type: "text", text: "First page body." }],
+          },
+          {
+            type: "heading",
+            attrs: { level: 3, blockId: "pg-2-h" as BlockId },
+            content: [{ type: "text", text: "Page 2" }],
+          },
+        ],
+      },
+      plainText: "Page 1\nFirst page body.\n\nPage 2",
+      blocks: [
+        { blockType: "heading", order: 0, stableBlockId: "pg-1-h" as BlockId, page: 1 },
+        { blockType: "paragraph", order: 1, stableBlockId: "pg-1-p" as BlockId, page: 1 },
+        { blockType: "heading", order: 2, stableBlockId: "pg-2-h" as BlockId, page: 2 },
+      ],
+    };
+    const result = repo.createWithDocument({
+      title: "A PDF",
+      priority: priorityFromLabel("C"),
+      conversion,
+    });
+    const blocks = new DocumentRepository(handle.db).listBlocks(result.element.id);
+    expect(blocks.map((b) => b.page)).toEqual([1, 1, 2]);
+  });
+
+  it("stores page = null for a non-paginated (HTML/text) conversion (T064)", () => {
+    const repo = new SourceRepository(handle.db);
+    const result = repo.createWithDocument({
+      title: "HTML source",
+      priority: priorityFromLabel("C"),
+      conversion: buildConversion(), // no per-block page → null
+    });
+    const blocks = new DocumentRepository(handle.db).listBlocks(result.element.id);
+    expect(blocks.every((b) => b.page === null)).toBe(true);
+  });
+
   it("falls back to converting the raw body when no conversion is supplied", () => {
     const repo = new SourceRepository(handle.db);
     const result = repo.createWithDocument({

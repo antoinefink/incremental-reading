@@ -49,6 +49,7 @@ import { useTextSelection } from "../../reader/useTextSelection";
 import { useActiveScope } from "../../shell/activeScope";
 import { Kbd } from "../../shell/Kbd";
 import { useSelection } from "../../shell/selection";
+import { PdfReader } from "./PdfReader";
 import { ProcessedSpanButtons } from "./ProcessedSpanButtons";
 import { useDocument } from "./useDocument";
 import { useHighlights } from "./useHighlights";
@@ -182,6 +183,8 @@ export function SourceReader() {
 
   const [inspector, setInspector] = useState<InspectorData | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  // PDF reading mode (T064): the active page N of M, shown in the rail.
+  const [pdfPage, setPdfPage] = useState<{ page: number; total: number }>({ page: 1, total: 0 });
   // The live Tiptap editor instance (for read-point capture/jump + decoration).
   const editorRef = useRef<Editor | null>(null);
   // A reactive mirror of the editor instance so the selection hook (T019) re-binds
@@ -534,6 +537,89 @@ export function SourceReader() {
   // 1-based fraction (matches the "block N of N" label) so a read-point on the LAST
   // block reads a full 100% rather than maxing at (total-1)/total.
   const progressPct = rp.progressFraction(doc.currentDoc) * 100;
+
+  // PDF reading mode (T064): a PDF source reuses the SAME header + inspector, but
+  // swaps the editor body for the `pdfjs-dist` canvas + selectable text layer. The
+  // read-point + extract are page-granular (handled inside `PdfReader`).
+  if (doc.sourceFormat === "pdf") {
+    const pdfPct = pdfPage.total > 0 ? (pdfPage.page / pdfPage.total) * 100 : 0;
+    return (
+      <div className="reader-screen" data-testid="route-source">
+        <SourceHeader data={inspector} />
+        <div className="reader-header" style={{ borderBottom: "1px solid var(--border)" }}>
+          <div className="reader-actions">
+            <span className="reader-meta reader-meta--mono" data-testid="reader-pdf-progress">
+              {pdfPage.total > 0 ? `page ${pdfPage.page} of ${pdfPage.total}` : "PDF"}
+            </span>
+            {openOriginalUrl ? (
+              <a
+                className="reader-btn"
+                href={openOriginalUrl}
+                target="_blank"
+                rel="noreferrer"
+                data-testid="reader-open-original"
+              >
+                <Icon name="external" size={14} /> Open original
+              </a>
+            ) : null}
+            <button
+              type="button"
+              className="reader-btn reader-btn--danger reader-btn--icon"
+              title="Delete source (recoverable from Trash · ⌘Z to undo)"
+              aria-label="Delete source"
+              data-testid="reader-delete"
+              onClick={() => void deleteSource()}
+            >
+              <Icon name="trash" size={14} />
+            </button>
+          </div>
+        </div>
+        <div className="pbar" style={{ margin: 0 }}>
+          <div
+            className="pbar__fill"
+            data-testid="reader-pbar-fill"
+            style={{ width: `${pdfPct}%` }}
+          />
+        </div>
+        <PdfReader
+          elementId={id}
+          blockPages={doc.blockPages}
+          onActivePageChange={(page, total) => {
+            setPdfPage({ page, total });
+            // A page change advances reading progress; the inspector re-reads lineage.
+            requestInspectorRefresh();
+          }}
+          toast={toast}
+        />
+        {flash ? (
+          <div className="reader-flash" data-testid="reader-flash" role="status">
+            <span
+              style={{
+                position: "fixed",
+                bottom: 24,
+                left: "50%",
+                transform: "translateX(-50%)",
+                background: "var(--text)",
+                color: "var(--canvas)",
+                padding: "9px 16px",
+                borderRadius: "var(--r-full)",
+                fontSize: "var(--t-sm)",
+                fontWeight: 500,
+                boxShadow: "var(--shadow-lg)",
+                zIndex: 90,
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+              }}
+            >
+              <Icon name="check" size={14} />
+              {flash}
+            </span>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="reader-screen" data-testid="route-source">

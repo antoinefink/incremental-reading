@@ -874,6 +874,62 @@ export type SourcesImportUrlResult =
     };
 
 // ---------------------------------------------------------------------------
+// sources.importPdf() / sources.getPdfData()  (T064 — local PDF import)
+// ---------------------------------------------------------------------------
+
+/**
+ * PDF import (T064). The renderer cannot choose a filesystem path itself (no fs
+ * access), so the command carries ONLY a priority/reason; the MAIN handler opens
+ * a native file picker (filtered to `.pdf`), gets the chosen absolute path, and
+ * runs `PdfImportService.importFromFile` (read + validate + stream into the vault
+ * + parse + create an `inbox` source — all main-side). A large PDF never crosses
+ * the IPC bridge as a payload; the picker keeps the path main-side.
+ */
+export const SourcesImportPdfRequestSchema = z.object({
+  /** Coarse A/B/C/D priority; defaults `C` main-side so new material never dominates. */
+  priority: PriorityLabelSchema.optional(),
+  reasonAdded: z.string().trim().max(2048).optional(),
+});
+export type SourcesImportPdfRequest = z.infer<typeof SourcesImportPdfRequestSchema>;
+
+/**
+ * The PDF-import result. `"imported"` carries the new source + inbox summary;
+ * `"cancelled"` is the user dismissing the native picker (a non-error outcome,
+ * distinct from a thrown `PdfImportError` which the modal catch maps to a friendly
+ * line via its `code`).
+ */
+export type SourcesImportPdfResult =
+  | {
+      readonly status: "imported";
+      readonly id: string;
+      readonly item: InboxItemSummary;
+    }
+  | {
+      readonly status: "cancelled";
+    };
+
+/**
+ * Serve a PDF source's ORIGINAL bytes to the renderer for rendering (T064). The
+ * renderer never resolves a vault path — it passes only the source element id;
+ * MAIN reads `sources.snapshotKey` (the `sources/<id>/original.pdf` relative path),
+ * resolves it under `assetsDir`, and returns the bytes (capped to the import size)
+ * for the `pdfjs-dist` canvas. The single ArrayBuffer transfer at open is
+ * acceptable (Chromium handles it); a future scaled variant can stream over a
+ * privileged protocol without a breaking change.
+ */
+export const SourcesGetPdfDataRequestSchema = z.object({
+  elementId: ElementIdSchema,
+});
+export type SourcesGetPdfDataRequest = z.infer<typeof SourcesGetPdfDataRequestSchema>;
+
+export interface SourcesGetPdfDataResult {
+  /** The original PDF bytes, or `null` when the source is not a PDF / has no snapshot. */
+  readonly bytes: ArrayBuffer | null;
+  /** The number of pages (derived from `document_blocks.page`), or 0 when unknown. */
+  readonly pageCount: number;
+}
+
+// ---------------------------------------------------------------------------
 // jobs.list() / jobs.subscribe()  (T058 — observe the local background runner)
 // ---------------------------------------------------------------------------
 
@@ -1124,6 +1180,20 @@ export interface DocumentsGetResult {
    * M4. Empty for elements with no extracted anchors (or non-sources).
    */
   readonly extractedBlockIds: readonly string[];
+  /**
+   * The source body format (T064). `"pdf"` for a paginated PDF source (the reader
+   * swaps in the `pdfjs-dist` PDF reading mode), else `null` (the ordinary
+   * editor body). Derived main-side from the presence of a `.pdf` `snapshotKey` /
+   * a `source_pdf` asset.
+   */
+  readonly sourceFormat: "pdf" | null;
+  /**
+   * For a PAGINATED source (PDF, T064): the block→page map (stable block id →
+   * 1-based page) read off `document_blocks.page`, so the reader can set a
+   * page-granular read-point and derive the page of a selected block for the
+   * extract's `source_locations.page`. Empty for non-paginated bodies.
+   */
+  readonly blockPages: Readonly<Record<string, number>>;
 }
 
 /**
@@ -2711,6 +2781,14 @@ export interface AppApi {
     importManual(request: SourcesImportManualRequest): Promise<SourcesImportManualResult>;
     /** Fetch + clean + snapshot a live URL into an `inbox` source (T060). */
     importUrl(request: SourcesImportUrlRequest): Promise<SourcesImportUrlResult>;
+    /**
+     * Import a local `.pdf` into an `inbox` source (T064) — opens a MAIN file
+     * picker, streams the original into the vault, parses per-page text, and
+     * creates a paginated source. `"cancelled"` when the picker is dismissed.
+     */
+    importPdf(request: SourcesImportPdfRequest): Promise<SourcesImportPdfResult>;
+    /** Serve a PDF source's original bytes to the renderer for rendering (T064). */
+    getPdfData(request: SourcesGetPdfDataRequest): Promise<SourcesGetPdfDataResult>;
   };
   readonly capture: {
     /** Read the browser-capture pairing state (token + enabled/running/port) (T062). */

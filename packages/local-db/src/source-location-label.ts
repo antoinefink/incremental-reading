@@ -31,19 +31,26 @@ export interface LabelBlock {
  * a source whose ordered blocks are `blocks`. Returns "¶N" for a paragraph (1-based
  * among all blocks in document order) or "<Type> · ¶N" for a non-paragraph block
  * (e.g. "Heading · ¶3"). Falls back to "Selected text" when the block is unknown.
+ *
+ * For a PAGINATED source (a PDF — T064), pass the extract's 1-based `page` and the
+ * label is prefixed with the page: "Page N · ¶M" (so a PDF extract reads back to
+ * its page). When `page` is null/absent the existing non-paginated labels are
+ * unchanged — the new param is purely additive.
  */
 export function deriveSourceLocationLabel(
   blocks: readonly LabelBlock[],
   firstBlockId: string,
+  page?: number | null,
 ): string {
   const sorted = [...blocks].sort((a, b) => a.order - b.order);
   const index = sorted.findIndex((b) => b.stableBlockId === firstBlockId);
   if (index < 0) return "Selected text";
   const paraNumber = index + 1;
   const block = sorted[index];
-  if (block && block.blockType !== "paragraph") {
-    const typeLabel = block.blockType.charAt(0).toUpperCase() + block.blockType.slice(1);
-    return `${typeLabel} · ¶${paraNumber}`;
-  }
-  return `¶${paraNumber}`;
+  const base =
+    block && block.blockType !== "paragraph"
+      ? `${block.blockType.charAt(0).toUpperCase() + block.blockType.slice(1)} · ¶${paraNumber}`
+      : `¶${paraNumber}`;
+  // A paginated source prefixes the page so the label reads "Page N · ¶M".
+  return page != null ? `Page ${page} · ${base}` : base;
 }

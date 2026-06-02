@@ -60,6 +60,8 @@ function getResult(text: string, blockId: string): DocumentsGetResult {
       updatedAt: "2026-05-30T00:00:00.000Z",
     },
     extractedBlockIds: [],
+    sourceFormat: null,
+    blockPages: {},
   };
 }
 

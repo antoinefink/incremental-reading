@@ -164,6 +164,13 @@ export interface ProseMirrorBlock {
   readonly order: number;
   /** The stable id extracts/read-points/sync anchor to (T016). */
   readonly stableBlockId: BlockId;
+  /**
+   * The 1-based PAGE number this block belongs to, for PAGINATED sources (PDFs,
+   * T064) → persisted to `document_blocks.page`. Omitted/`null` for non-paginated
+   * HTML/text bodies (the paragraph/HTML converters never set it). Backward
+   * compatible — `createWithDocumentWithin` writes `block.page ?? null`.
+   */
+  readonly page?: number | null;
 }
 
 /** The full result of converting pasted plain text. */

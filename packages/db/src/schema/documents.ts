@@ -47,6 +47,13 @@ export const documentBlocks = sqliteTable(
      * imports and saves — the load-bearing anchor for lineage. Unique per doc.
      */
     stableBlockId: text("stable_block_id").notNull(),
+    /**
+     * The 1-based PAGE number this block belongs to, for PAGINATED sources (PDFs,
+     * T064). `null` for non-paginated HTML/text bodies. The canonical block→page
+     * map the page-granular read-point + the page-level source-location path read
+     * (a pure widening — no backfill; existing rows stay `null`).
+     */
+    page: integer("page"),
   },
   (table) => [
     uniqueIndex("document_blocks_stable_idx").on(table.documentId, table.stableBlockId),

@@ -62,15 +62,31 @@ const IMPORT_OPTS: {
   icon: IconName;
   label: string;
   hint: string;
-  /** When set, clicking opens the matching modal (or routes to Settings for capture). */
-  action?: "manual" | "url" | "capture";
+  /** When set, clicking opens the matching modal / picker (or routes to Settings). */
+  action?: "manual" | "url" | "capture" | "pdf";
 }[] = [
   { icon: "link", label: "Paste URL", hint: "Fetch & clean the page", action: "url" },
   { icon: "paste", label: "Paste text", hint: "Plain text", action: "manual" },
-  { icon: "upload", label: "Upload PDF / EPUB", hint: "Books & papers — coming soon" },
+  { icon: "source", label: "Import PDF", hint: "Read a PDF incrementally", action: "pdf" },
   { icon: "globe", label: "Browser capture", hint: "Pair the extension", action: "capture" },
   { icon: "text", label: "Manual note", hint: "Your own idea", action: "manual" },
 ];
+
+/** Map a thrown PDF-import `code: message` error line to a friendly message. */
+function pdfImportMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  // The main handler throws `code: message`; strip a leading code we recognize.
+  const codes: Record<string, string> = {
+    not_pdf: "That file is not a PDF.",
+    too_large: "That PDF is too large to import.",
+    too_many_pages: "That PDF has too many pages to import.",
+    encrypted: "That PDF is password-protected.",
+    unreadable: "That PDF could not be read.",
+  };
+  const sep = raw.indexOf(":");
+  const code = sep > 0 ? raw.slice(0, sep).trim() : "";
+  return codes[code] ?? "Could not import that PDF.";
+}
 
 /** A single left-list row for one inbox source. */
 function InboxRow({
@@ -382,6 +398,26 @@ export function InboxScreen() {
 
   const onSelect = useCallback((id: string) => setSelId(id), []);
 
+  // Import a local PDF (T064) — the MAIN process opens the native file picker,
+  // streams the original into the vault, parses per-page text, and creates an
+  // `inbox` source. On success refresh + select it; on a typed PdfImportError
+  // surface a friendly message; a cancelled picker is a no-op.
+  const onImportPdf = useCallback(async () => {
+    if (!isDesktop() || busy) return;
+    setBusy(true);
+    try {
+      const result = await appApi.importPdfSource({});
+      if (result.status === "imported") {
+        await refresh(result.id);
+        setError(null);
+      }
+    } catch (e) {
+      setError(pdfImportMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, refresh]);
+
   const onTriage = useCallback(
     async (kind: "accept" | "keepForLater" | "delete") => {
       if (!selId || busy) return;
@@ -475,16 +511,22 @@ export function InboxScreen() {
         </div>
         <div className="flex flex-wrap gap-2.5">
           {IMPORT_OPTS.map((o) => {
-            const enabled = o.action === "manual" || o.action === "url" || o.action === "capture";
+            const enabled =
+              o.action === "manual" ||
+              o.action === "url" ||
+              o.action === "capture" ||
+              o.action === "pdf";
             const onClick =
               o.action === "url"
                 ? () => setUrlModalOpen(true)
                 : o.action === "manual"
                   ? () => setModalOpen(true)
-                  : o.action === "capture"
-                    ? // Route to the Settings "Browser capture" pairing card (T062).
-                      () => void navigate({ to: "/settings", hash: "browser-capture" })
-                    : undefined;
+                  : o.action === "pdf"
+                    ? () => void onImportPdf()
+                    : o.action === "capture"
+                      ? // Route to the Settings "Browser capture" pairing card (T062).
+                        () => void navigate({ to: "/settings", hash: "browser-capture" })
+                      : undefined;
             return (
               <button
                 key={o.label}

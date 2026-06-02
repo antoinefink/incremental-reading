@@ -1,0 +1,98 @@
+/**
+ * PDF reading mode styles (T064). The canvas + an absolutely-positioned,
+ * transparent `.textLayer` (pdfjs's selection substrate) overlay it so the user
+ * can select text. The `.textLayer` CSS rules mirror pdfjs's reference viewer so
+ * text spans land exactly over the rendered glyphs.
+ */
+
+.pdf-reader {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.pdf-reader-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.pdf-reader-pagecount {
+  margin-left: auto;
+  font-size: var(--t-sm);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.pdf-reader-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 24px 0 64px;
+  background: var(--surface-2);
+}
+
+.pdf-reader-state {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: var(--t-sm);
+}
+
+.pdf-reader-state--error {
+  color: var(--danger);
+}
+
+.pdf-page {
+  position: relative;
+  background: #fff;
+  box-shadow: var(--shadow-md);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.pdf-page-canvas {
+  display: block;
+}
+
+/* --- pdfjs text layer (selection substrate) -------------------------------- */
+
+.pdf-page-text.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 1;
+  line-height: 1;
+  text-align: initial;
+  forced-color-adjust: none;
+  z-index: 2;
+}
+
+.pdf-page-text.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.pdf-page-text.textLayer ::selection {
+  background: var(--accent-soft, rgba(80, 130, 255, 0.35));
+}
+
+.pdf-page-text.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: -1;
+  cursor: default;
+  user-select: none;
+}

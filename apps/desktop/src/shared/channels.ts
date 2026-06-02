@@ -25,6 +25,8 @@ export const IPC_CHANNELS = {
   lineageGet: "lineage:get",
   sourcesImportManual: "sources:importManual",
   sourcesImportUrl: "sources:importUrl",
+  sourcesImportPdf: "sources:importPdf",
+  sourcesGetPdfData: "sources:getPdfData",
   captureGetPairing: "capture:getPairing",
   captureRegenerateToken: "capture:regenerateToken",
   captureSetEnabled: "capture:setEnabled",

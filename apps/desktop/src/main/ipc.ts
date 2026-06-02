@@ -9,7 +9,7 @@
  */
 
 import type { Job, JobJsonValue } from "@interleave/core";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import {
   AnalyticsGetRequestSchema,
   BackupsCreateRequestSchema,
@@ -70,7 +70,9 @@ import {
   SettingsGetRequestSchema,
   SettingsUpdateManyRequestSchema,
   SettingsUpdateRequestSchema,
+  SourcesGetPdfDataRequestSchema,
   SourcesImportManualRequestSchema,
+  SourcesImportPdfRequestSchema,
   SourcesImportUrlRequestSchema,
   type SourcesImportUrlResult,
   TagsAddRequestSchema,
@@ -91,6 +93,7 @@ import type { DbService } from "./db-service";
 import type { UrlImportJobPayload } from "./job-apply-handlers";
 import type { JobRunner } from "./job-runner";
 import type { AppPaths } from "./paths";
+import { PdfImportError } from "./pdf-import-service";
 import { UrlImportError } from "./url-import-service";
 
 /** Extra main-process context the backup handler (T047) needs (absolute paths). */
@@ -258,6 +261,41 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
     throw new UrlImportError(code as UrlImportError["code"], message);
   });
 
+  // PDF import (T064) — the renderer cannot pick a filesystem path (no fs access),
+  // so MAIN opens a native file picker (filtered to `.pdf`), resolves the chosen
+  // absolute path, and runs the PdfImportService (read + validate + stream into the
+  // vault + parse + create an `inbox` source). The user can cancel the picker — a
+  // non-error `{ status: "cancelled" }`. A thrown `PdfImportError` rejects the
+  // invoke (the renderer modal's catch maps its `code` to a friendly line). The
+  // E2E stubs the picker via INTERLEAVE_PDF_IMPORT_PATH (unpackaged only), mirroring
+  // the INTERLEAVE_ALLOW_LOOPBACK_IMPORT escape pattern.
+  ipcMain.handle(IPC_CHANNELS.sourcesImportPdf, async (event, rawRequest: unknown) => {
+    const request = SourcesImportPdfRequestSchema.parse(rawRequest);
+    const filePath = await pickPdfPath(event);
+    if (!filePath) return { status: "cancelled" } as const;
+    try {
+      return await dbService.importPdf({
+        filePath,
+        ...(request.priority ? { priority: request.priority } : {}),
+        ...(request.reasonAdded !== undefined ? { reasonAdded: request.reasonAdded } : {}),
+      });
+    } catch (err) {
+      // Re-throw a typed PdfImportError as a `code: message` line so the renderer
+      // modal can map the `code` to a friendly message (mirrors the URL path).
+      if (err instanceof PdfImportError) {
+        throw new Error(`${err.code}: ${err.message}`);
+      }
+      throw err;
+    }
+  });
+
+  // Serve a PDF source's original bytes to the renderer for rendering (T064). MAIN
+  // owns the path; the renderer passes only an element id. Read-only.
+  ipcMain.handle(IPC_CHANNELS.sourcesGetPdfData, (_event, rawRequest: unknown) => {
+    const request = SourcesGetPdfDataRequestSchema.parse(rawRequest);
+    return dbService.getPdfData(request);
+  });
+
   // Browser-capture pairing (T062). The TRUSTED desktop renderer reads the
   // per-install pairing token (to display it), regenerates it, and toggles the
   // loopback capture server. These route to the CaptureController (single source
@@ -279,6 +317,33 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
       throw new Error("jobs: handler registered without a background runner");
     }
     return context.runner;
+  }
+
+  /**
+   * Resolve the absolute path of the `.pdf` to import (T064). In a normal run this
+   * opens the native open dialog filtered to PDFs and returns the chosen path (or
+   * `null` if the user cancels). In an UNPACKAGED build (DEV/E2E) the env override
+   * `INTERLEAVE_PDF_IMPORT_PATH` short-circuits the picker so the Electron E2E can
+   * drive import deterministically — mirroring the `INTERLEAVE_ALLOW_LOOPBACK_IMPORT`
+   * escape (never honored in a packaged app).
+   */
+  async function pickPdfPath(event: Electron.IpcMainInvokeEvent): Promise<string | null> {
+    const override = process.env.INTERLEAVE_PDF_IMPORT_PATH;
+    if (!app.isPackaged && override && override.length > 0) return override;
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = win
+      ? await dialog.showOpenDialog(win, {
+          title: "Import PDF",
+          properties: ["openFile"],
+          filters: [{ name: "PDF", extensions: ["pdf"] }],
+        })
+      : await dialog.showOpenDialog({
+          title: "Import PDF",
+          properties: ["openFile"],
+          filters: [{ name: "PDF", extensions: ["pdf"] }],
+        });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0] ?? null;
   }
 
   ipcMain.handle(IPC_CHANNELS.captureGetPairing, () => {

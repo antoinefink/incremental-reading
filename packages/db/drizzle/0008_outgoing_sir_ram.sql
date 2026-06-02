@@ -1,0 +1,1 @@
+ALTER TABLE `document_blocks` ADD `page` integer;

@@ -16,6 +16,8 @@
  * through the repository seam.
  */
 
+import fsp from "node:fs/promises";
+import path from "node:path";
 import type {
   BlockId,
   CardKind,
@@ -161,8 +163,11 @@ import type {
   SettingsUpdateManyResult,
   SettingsUpdateResult,
   SettingValue,
+  SourcesGetPdfDataRequest,
+  SourcesGetPdfDataResult,
   SourcesImportManualRequest,
   SourcesImportManualResult,
+  SourcesImportPdfResult,
   TagsAddRequest,
   TagsAddResult,
   TagsListResult,
@@ -192,6 +197,7 @@ import {
   CAPTURE_PORT_KEY,
   CAPTURE_TOKEN_KEY,
 } from "./capture-pairing";
+import { PdfImportService } from "./pdf-import-service";
 import { UrlImportService } from "./url-import-service";
 
 /**
@@ -248,6 +254,12 @@ export class DbService {
    * that never touches the vault can still open the DB.
    */
   private assetVault: AssetVaultService | null = null;
+  /**
+   * The PDF-import orchestrator (T064) — read + validate + stream the original PDF
+   * into the vault + parse + create an `inbox` source. Built lazily on first read
+   * (it needs `assetsDir` + the `assetVaultService`, both available after open()).
+   */
+  private pdfImport: PdfImportService | null = null;
   /** The vault asset-root, injected at open() time; required for URL import. */
   private assetsDir: string | null = null;
   /** DEV/E2E-only: permit loopback/private hosts in URL import (see open()). */
@@ -346,6 +358,7 @@ export class DbService {
     this.undoService = null;
     this.urlImport = null;
     this.assetVault = null;
+    this.pdfImport = null;
     this.assetsDir = null;
     this.allowLoopbackImport = false;
     this.migrated = false;
@@ -767,6 +780,79 @@ export class DbService {
   }
 
   /**
+   * The PDF-import service (T064), lazily built on first read against the open DB +
+   * the vault `assetsDir` + the `assetVaultService` (so the original PDF streams in
+   * through the SAME T059 importer). Returns the SAME instance every call. Throws a
+   * clear error if `assetsDir` was not provided (a contract-only test that never
+   * imports) — mirrors {@link urlImportService} / {@link assetVaultService}.
+   */
+  get pdfImportService(): PdfImportService {
+    if (this.pdfImport) return this.pdfImport;
+    const repositories = this.repos;
+    if (!this.assetsDir) {
+      throw new Error(
+        "DbService: PDF import requires an assets directory — call open() with { assetsDir }",
+      );
+    }
+    this.pdfImport = new PdfImportService({
+      db: this.require().db,
+      repositories,
+      assetsDir: this.assetsDir,
+      assetVault: this.assetVaultService,
+    });
+    return this.pdfImport;
+  }
+
+  /**
+   * Import a local `.pdf` (T064) — the IPC handler has already resolved the chosen
+   * absolute `filePath` via the MAIN file picker. Delegates to
+   * {@link PdfImportService.importFromFile}; a thrown `PdfImportError` propagates to
+   * the IPC layer (rejected invoke → the modal's friendly-message catch).
+   */
+  async importPdf(input: {
+    filePath: string;
+    priority?: PriorityLabel;
+    reasonAdded?: string | null;
+  }): Promise<SourcesImportPdfResult> {
+    const { id, item } = await this.pdfImportService.importFromFile(input);
+    return { status: "imported", id, item };
+  }
+
+  /**
+   * Serve a PDF source's ORIGINAL bytes to the renderer for rendering (T064). MAIN
+   * reads the source's `.pdf` `snapshotKey`, resolves it under `assetsDir`, and
+   * returns the bytes (the renderer passes only an element id; main owns the path).
+   * Returns `{ bytes: null }` when the source is not a PDF / has no snapshot.
+   */
+  async getPdfData(request: SourcesGetPdfDataRequest): Promise<SourcesGetPdfDataResult> {
+    const elementId = request.elementId as ElementId;
+    const provenance = this.repos.sources.findById(elementId)?.source ?? null;
+    const snapshotKey = provenance?.snapshotKey ?? null;
+    const pageCount = this.pdfPageCount(elementId);
+    if (!this.assetsDir || !snapshotKey?.toLowerCase().endsWith(".pdf")) {
+      return { bytes: null, pageCount };
+    }
+    const abs = path.join(this.assetsDir, ...snapshotKey.split("/"));
+    try {
+      const buf = await fsp.readFile(abs);
+      // Return a standalone ArrayBuffer slice (not the pooled Node Buffer's).
+      const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+      return { bytes: ab, pageCount };
+    } catch {
+      return { bytes: null, pageCount };
+    }
+  }
+
+  /** The page count of a PDF source, from the max `document_blocks.page`, or 0. */
+  private pdfPageCount(elementId: ElementId): number {
+    let max = 0;
+    for (const block of this.repos.documents.listBlocks(elementId)) {
+      if (typeof block.page === "number" && block.page > max) max = block.page;
+    }
+    return max;
+  }
+
+  /**
    * Verify the asset vault's integrity (T059) — re-hash every live asset's stored
    * bytes (streamed) and compare to the recorded `assets.content_hash`. Read-only;
    * returns the renderer-safe report (asset ids + extra-file relative paths). The
@@ -918,11 +1004,24 @@ export class DbService {
   getDocument(request: DocumentsGetRequest): DocumentsGetResult {
     const elementId = request.elementId as ElementId;
     const doc = this.repos.documents.findById(elementId);
-    if (!doc) return { document: null, extractedBlockIds: [] };
+    if (!doc) {
+      return { document: null, extractedBlockIds: [], sourceFormat: null, blockPages: {} };
+    }
     // Derive the source's already-extracted block ids from its child extracts'
     // source locations (lineage stays main-side; the reader only DISPLAYS them in
     // M3). Distinct + stable-ordered so the reader can mark `mark.extracted`.
     const extractedBlockIds = this.collectExtractedBlockIds(elementId);
+    // Paginated-source detection (T064): a `.pdf` snapshot key marks a PDF source.
+    // The block→page map is read off `document_blocks.page` so the reader can set a
+    // page read-point + derive the page of a selected block for the extract anchor.
+    const snapshotKey = this.repos.sources.findById(elementId)?.source.snapshotKey ?? null;
+    const isPdf = typeof snapshotKey === "string" && snapshotKey.toLowerCase().endsWith(".pdf");
+    const blockPages: Record<string, number> = {};
+    if (isPdf) {
+      for (const block of this.repos.documents.listBlocks(elementId)) {
+        if (typeof block.page === "number") blockPages[block.stableBlockId] = block.page;
+      }
+    }
     return {
       document: {
         prosemirrorJson: doc.prosemirrorJson,
@@ -931,6 +1030,8 @@ export class DbService {
         updatedAt: doc.updatedAt,
       },
       extractedBlockIds,
+      sourceFormat: isPdf ? "pdf" : null,
+      blockPages,
     };
   }
 

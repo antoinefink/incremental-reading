@@ -63,7 +63,10 @@ import {
   SettingsPatchSchema,
   SettingsUpdateManyRequestSchema,
   SettingsUpdateRequestSchema,
+  SourcesGetPdfDataRequestSchema,
   SourcesImportManualRequestSchema,
+  SourcesImportPdfRequestSchema,
+  type SourcesImportPdfResult,
   type SourcesImportUrlRequest,
   SourcesImportUrlRequestSchema,
   type SourcesImportUrlResult,
@@ -95,6 +98,8 @@ describe("IPC channels", () => {
         "lineage:get",
         "sources:importManual",
         "sources:importUrl",
+        "sources:importPdf",
+        "sources:getPdfData",
         "capture:getPairing",
         "capture:regenerateToken",
         "capture:setEnabled",
@@ -236,6 +241,53 @@ describe("SourcesImportUrlRequestSchema (T060)", () => {
     if (result.status !== "duplicate") throw new Error("expected duplicate");
     expect(result.matches[0]?.elementId).toBe("el_existing");
     expect(result.matches[0]?.matchedBy).toBe("canonicalUrl");
+  });
+});
+
+describe("SourcesImportPdfRequestSchema (T064)", () => {
+  it("accepts an empty request (the picker carries no path)", () => {
+    const parsed = SourcesImportPdfRequestSchema.parse({});
+    expect(parsed.priority).toBeUndefined();
+    expect(parsed.reasonAdded).toBeUndefined();
+  });
+
+  it("accepts an optional priority + reason", () => {
+    const parsed = SourcesImportPdfRequestSchema.parse({ priority: "B", reasonAdded: "a paper" });
+    expect(parsed.priority).toBe("B");
+    expect(parsed.reasonAdded).toBe("a paper");
+  });
+
+  it("rejects an invalid priority", () => {
+    expect(() => SourcesImportPdfRequestSchema.parse({ priority: "Z" })).toThrow();
+  });
+
+  it("the result discriminates imported vs cancelled", () => {
+    const imported: SourcesImportPdfResult = {
+      status: "imported",
+      id: "el_pdf",
+      item: {
+        id: "el_pdf",
+        type: "source",
+        status: "inbox",
+        stage: "raw_source",
+        priority: 0.4,
+        title: "A PDF",
+        srcType: "Manual note",
+        author: null,
+        accessedAt: "2026-06-01T00:00:00.000Z",
+        charCount: 10,
+        previewSnippet: "Page 1",
+      },
+    };
+    const cancelled: SourcesImportPdfResult = { status: "cancelled" };
+    expect(imported.status).toBe("imported");
+    if (imported.status === "imported") expect(imported.id).toBe("el_pdf");
+    expect(cancelled.status).toBe("cancelled");
+  });
+
+  it("SourcesGetPdfDataRequestSchema requires an elementId", () => {
+    expect(SourcesGetPdfDataRequestSchema.parse({ elementId: "el_1" }).elementId).toBe("el_1");
+    expect(() => SourcesGetPdfDataRequestSchema.parse({})).toThrow();
   });
 });
 

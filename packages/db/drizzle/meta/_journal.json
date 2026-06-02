@@ -57,6 +57,13 @@
       "when": 1780352708335,
       "tag": "0007_parched_killmonger",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1780359156231,
+      "tag": "0008_outgoing_sir_ram",
+      "breakpoints": true
     }
   ]
 }

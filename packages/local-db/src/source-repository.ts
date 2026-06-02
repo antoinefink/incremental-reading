@@ -268,6 +268,9 @@ export class SourceRepository {
             blockType: block.blockType,
             order: block.order,
             stableBlockId: block.stableBlockId,
+            // The 1-based page for a paginated (PDF, T064) block; `null` for the
+            // HTML/text path (its converters never set `page`).
+            page: block.page ?? null,
           })
           .run();
       }

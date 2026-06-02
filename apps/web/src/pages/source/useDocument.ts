@@ -45,6 +45,17 @@ export interface UseDocumentResult {
    * is M4. Empty until the document has loaded (or when the source has none).
    */
   readonly extractedBlockIds: readonly string[];
+  /**
+   * The source body format (T064) — `"pdf"` for a paginated PDF source (the reader
+   * swaps in the PDF reading mode), else `null`. Loaded with the document.
+   */
+  readonly sourceFormat: "pdf" | null;
+  /**
+   * For a PAGINATED (PDF) source: the block→page map (stable block id → 1-based
+   * page), so the PDF reader sets a page read-point + derives the page of a
+   * selected block. Empty for non-paginated bodies.
+   */
+  readonly blockPages: Readonly<Record<string, number>>;
   /** The persisted plain-text mirror most recently loaded/saved. */
   readonly plainText: string;
   /** Whether a save is in flight. */
@@ -76,6 +87,8 @@ export function useDocument(elementId: string | null | undefined): UseDocumentRe
   const [initialDoc, setInitialDoc] = useState<unknown>(null);
   const [currentDoc, setCurrentDoc] = useState<unknown>(null);
   const [extractedBlockIds, setExtractedBlockIds] = useState<readonly string[]>([]);
+  const [sourceFormat, setSourceFormat] = useState<"pdf" | null>(null);
+  const [blockPages, setBlockPages] = useState<Readonly<Record<string, number>>>({});
   const [plainText, setPlainText] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -122,6 +135,8 @@ export function useDocument(elementId: string | null | undefined): UseDocumentRe
         setInitialDoc(loaded);
         setCurrentDoc(loaded);
         setExtractedBlockIds(result.extractedBlockIds);
+        setSourceFormat(result.sourceFormat ?? null);
+        setBlockPages(result.blockPages ?? {});
         setPlainText(doc?.plainText ?? "");
         setStatus("ready");
       })
@@ -241,6 +256,8 @@ export function useDocument(elementId: string | null | undefined): UseDocumentRe
     initialDoc,
     currentDoc,
     extractedBlockIds,
+    sourceFormat,
+    blockPages,
     plainText,
     saving,
     error,

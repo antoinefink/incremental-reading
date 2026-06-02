@@ -64,7 +64,9 @@ import type {
   SettingsGetRequest,
   SettingsUpdateManyRequest,
   SettingsUpdateRequest,
+  SourcesGetPdfDataRequest,
   SourcesImportManualRequest,
+  SourcesImportPdfRequest,
   SourcesImportUrlRequest,
   TagsAddRequest,
   TagsRemoveRequest,
@@ -114,6 +116,10 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.sourcesImportManual, request),
     importUrl: (request: SourcesImportUrlRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.sourcesImportUrl, request),
+    importPdf: (request: SourcesImportPdfRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.sourcesImportPdf, request),
+    getPdfData: (request: SourcesGetPdfDataRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.sourcesGetPdfData, request),
   },
   capture: {
     getPairing: () => ipcRenderer.invoke(IPC_CHANNELS.captureGetPairing),
