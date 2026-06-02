@@ -62,6 +62,7 @@ import {
   OcclusionService,
   QueueActionService,
   QueueQuery,
+  RecoveryModeService,
   type Repositories,
   type ReviewOutcome,
   ReviewSessionService,
@@ -92,6 +93,7 @@ import type {
   CardsSuspendResult,
   CardsUpdateRequest,
   CardsUpdateResult,
+  CatchUpPreview,
   ConceptMemberSummary,
   ConceptsAssignRequest,
   ConceptsAssignResult,
@@ -145,16 +147,19 @@ import type {
   QueueActRequest,
   QueueActResult,
   QueueAutoPostponeRequest,
+  QueueCatchUpRequest,
   QueueListRequest,
   QueueListResult,
   QueueScheduleRequest,
   QueueScheduleResult,
   QueueUndoRequest,
   QueueUndoResult,
+  QueueVacationRequest,
   ReadPointGetRequest,
   ReadPointGetResult,
   ReadPointSetRequest,
   ReadPointSetResult,
+  RecoveryApplyResult,
   ReviewCardRequest,
   ReviewCardResult,
   ReviewCardView,
@@ -206,6 +211,7 @@ import type {
   TrashRestoreRequest,
   TrashRestoreResult,
   UndoLastResult,
+  VacationPreview,
   VaultCollectOrphansRequest,
   VaultCollectOrphansResult,
   VaultOrphansResult,
@@ -271,6 +277,8 @@ export class DbService {
   private queueAction: QueueActionService | null = null;
   /** The overload AUTO-POSTPONE apply seam (T077) — preview + apply, one `batchId` per sweep. */
   private autoPostpone: AutoPostponeService | null = null;
+  /** The CATCH-UP & VACATION apply seam (T078) — previewed, reversible, one `batchId` per plan. */
+  private recoveryMode: RecoveryModeService | null = null;
   private extraction: ExtractionService | null = null;
   private extractReview: ExtractService | null = null;
   private cardService: CardService | null = null;
@@ -450,6 +458,10 @@ export class DbService {
     // runs the pure `planAutoPostpone`, and applies each victim through its CORRECT
     // scheduler (attention reschedule / FSRS card defer) under one `batchId`.
     this.autoPostpone = new AutoPostponeService(this.handle.db, this.repositories);
+    // The CATCH-UP & VACATION apply seam (T078): previews the cost (the per-day load curve
+    // before vs after + what slips) and applies the plan — reschedule attention / FSRS card
+    // defer / vacation suspend — under one `batchId`, reusing the existing ops only.
+    this.recoveryMode = new RecoveryModeService(this.handle.db, this.repositories);
     this.inboxQuery = new InboxQuery(this.repositories);
     this.extraction = new ExtractionService(this.handle.db);
     this.extractReview = new ExtractService(this.handle.db);
@@ -491,6 +503,7 @@ export class DbService {
     this.library = null;
     this.queueAction = null;
     this.autoPostpone = null;
+    this.recoveryMode = null;
     this.inboxQuery = null;
     this.extraction = null;
     this.extractReview = null;
@@ -852,6 +865,64 @@ export class DbService {
    */
   applyAutoPostpone(request: QueueAutoPostponeRequest): AutoPostponeApplyResult {
     return this.autoPostponeService.apply({
+      ...(request.asOf ? { asOf: request.asOf as IsoTimestamp } : {}),
+    });
+  }
+
+  /** The CATCH-UP & VACATION apply seam (T078), bound to the open database. */
+  private get recoveryModeService(): RecoveryModeService {
+    if (!this.recoveryMode) {
+      throw new Error("DbService: database is not open");
+    }
+    return this.recoveryMode;
+  }
+
+  /**
+   * Preview the CATCH-UP plan (T078) — READ-ONLY. Spreads the overdue backlog forward over
+   * `spreadDays` so each day ≤ budget (high-value/fragile first) and returns the COST (the
+   * per-day load curve before vs after + the slips). No mutation, no op.
+   */
+  previewCatchUp(request: QueueCatchUpRequest): CatchUpPreview {
+    return this.recoveryModeService.previewCatchUp({
+      ...(request.asOf ? { asOf: request.asOf as IsoTimestamp } : {}),
+      ...(request.spreadDays !== undefined ? { spreadDays: request.spreadDays } : {}),
+    });
+  }
+
+  /**
+   * Apply the CATCH-UP plan (T078) — TRANSACTIONAL. Reschedules attention items + defers cards
+   * to their EXACT planned days (memory state untouched, no review log), all under ONE `batchId`
+   * so the plan undoes as one (T044). Returns the count + the batch id; no new op types.
+   */
+  applyCatchUp(request: QueueCatchUpRequest): RecoveryApplyResult {
+    return this.recoveryModeService.applyCatchUp({
+      ...(request.asOf ? { asOf: request.asOf as IsoTimestamp } : {}),
+      ...(request.spreadDays !== undefined ? { spreadDays: request.spreadDays } : {}),
+    });
+  }
+
+  /**
+   * Preview the VACATION plan (T078) — READ-ONLY. Finds what would come due in `[awayStart,
+   * awayEnd]`, chooses suspend (fragile cards) vs shift-past-return (the rest), and returns the
+   * COST (the after-return load curve + slips). No mutation, no op.
+   */
+  previewVacation(request: QueueVacationRequest): VacationPreview {
+    return this.recoveryModeService.previewVacation({
+      awayStart: request.awayStart as IsoTimestamp,
+      awayEnd: request.awayEnd as IsoTimestamp,
+      ...(request.asOf ? { asOf: request.asOf as IsoTimestamp } : {}),
+    });
+  }
+
+  /**
+   * Apply the VACATION plan (T078) — TRANSACTIONAL. Suspends fragile cards (prior status captured
+   * in the op pre-image for resume) + shifts the rest past return, all under ONE `batchId` so the
+   * plan undoes (and vacation resumes) as one. Returns the moved + suspended counts + the batch id.
+   */
+  applyVacation(request: QueueVacationRequest): RecoveryApplyResult {
+    return this.recoveryModeService.applyVacation({
+      awayStart: request.awayStart as IsoTimestamp,
+      awayEnd: request.awayEnd as IsoTimestamp,
       ...(request.asOf ? { asOf: request.asOf as IsoTimestamp } : {}),
     });
   }

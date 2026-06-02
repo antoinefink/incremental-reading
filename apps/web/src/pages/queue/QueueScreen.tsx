@@ -45,6 +45,7 @@ import "./queue.css";
 import { jitterOrder } from "./jitter";
 import { OverloadBanner } from "./OverloadBanner";
 import { actionFor, DueBadge, metaFor, titleFor } from "./queueRow";
+import { RecoveryPanel } from "./RecoveryPanel";
 
 /** The non-open queue actions a row exposes, with their icon + label (T030). */
 type RowActionKind = QueueActAction["kind"];
@@ -432,6 +433,25 @@ export function QueueScreen() {
     [refresh],
   );
 
+  /**
+   * After a successful catch-up or vacation apply (T078): re-read the queue (the plan moved /
+   * suspended items) and raise a "… N · Undo" snackbar. Undo reverses the whole batch through
+   * the general command-level `undo.last` (restoring both due fields + any suspended status).
+   */
+  const onRecoveryApplied = useCallback(
+    (label: string, count: number) => {
+      void refresh();
+      if (count > 0) {
+        setUndoState({
+          id: "recovery",
+          message: `${label} ${count} item${count === 1 ? "" : "s"}`,
+          undo: { kind: "batch", previousStatus: "scheduled" },
+        });
+      }
+    },
+    [refresh],
+  );
+
   if (!desktop) {
     return (
       <div
@@ -506,6 +526,12 @@ export function QueueScreen() {
             onPostponed={onPostponed}
           />
         ) : null}
+
+        {/* catch-up & vacation (T078): recover from a backlog (spread overdue forward) or
+            pre-adjust the away-window load — BOTH show the cost (the before/after per-day load
+            curve + what slips) before committing. Always available; the planning + spread math
+            lives main-side (pure `planCatchUp`/`planVacation`), the renderer only shows it. */}
+        {data ? <RecoveryPanel {...(asOf ? { asOf } : {})} onApplied={onRecoveryApplied} /> : null}
 
         {/* session controls (the Segmented modes are wired in T031/T076) */}
         <div className="sessionbar">

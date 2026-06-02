@@ -60,9 +60,11 @@ import {
   PickImportFileRequestSchema,
   QueueActRequestSchema,
   QueueAutoPostponeRequestSchema,
+  QueueCatchUpRequestSchema,
   QueueListRequestSchema,
   QueueScheduleRequestSchema,
   QueueUndoRequestSchema,
+  QueueVacationRequestSchema,
   ReadPointGetRequestSchema,
   ReadPointSetRequestSchema,
   ReviewGradeRequestSchema,
@@ -125,6 +127,10 @@ describe("IPC channels", () => {
         "queue:undo",
         "queue:autoPostpone",
         "queue:autoPostpone:apply",
+        "queue:catchUp",
+        "queue:catchUp:apply",
+        "queue:vacation",
+        "queue:vacation:apply",
         "lineage:get",
         "sources:importManual",
         "sources:importUrl",
@@ -1342,6 +1348,51 @@ describe("QueueAutoPostponeRequestSchema (T077)", () => {
       "2027-06-01T12:00:00.000Z",
     );
     expect(() => QueueAutoPostponeRequestSchema.parse({ asOf: "whenever" })).toThrow();
+  });
+});
+
+describe("QueueCatchUpRequestSchema (T078)", () => {
+  it("accepts an empty object, an asOf, and a positive integer spreadDays", () => {
+    expect(QueueCatchUpRequestSchema.parse({})).toEqual({});
+    const parsed = QueueCatchUpRequestSchema.parse({
+      asOf: "2027-06-01T12:00:00.000Z",
+      spreadDays: 7,
+    });
+    expect(parsed.asOf).toBe("2027-06-01T12:00:00.000Z");
+    expect(parsed.spreadDays).toBe(7);
+  });
+
+  it("rejects a non-positive / non-integer spreadDays and a garbage asOf", () => {
+    expect(() => QueueCatchUpRequestSchema.parse({ spreadDays: 0 })).toThrow();
+    expect(() => QueueCatchUpRequestSchema.parse({ spreadDays: -3 })).toThrow();
+    expect(() => QueueCatchUpRequestSchema.parse({ spreadDays: 2.5 })).toThrow();
+    expect(() => QueueCatchUpRequestSchema.parse({ asOf: "whenever" })).toThrow();
+  });
+});
+
+describe("QueueVacationRequestSchema (T078)", () => {
+  it("accepts a valid away window (awayEnd ≥ awayStart, trimmed)", () => {
+    const parsed = QueueVacationRequestSchema.parse({
+      awayStart: "  2027-06-10T00:00:00.000Z  ",
+      awayEnd: "2027-06-20T00:00:00.000Z",
+    });
+    expect(parsed.awayStart).toBe("2027-06-10T00:00:00.000Z");
+    expect(parsed.awayEnd).toBe("2027-06-20T00:00:00.000Z");
+  });
+
+  it("rejects awayEnd before awayStart, and a missing/garbage bound", () => {
+    expect(() =>
+      QueueVacationRequestSchema.parse({
+        awayStart: "2027-06-20T00:00:00.000Z",
+        awayEnd: "2027-06-10T00:00:00.000Z",
+      }),
+    ).toThrow();
+    expect(() =>
+      QueueVacationRequestSchema.parse({ awayStart: "2027-06-10T00:00:00.000Z" }),
+    ).toThrow();
+    expect(() =>
+      QueueVacationRequestSchema.parse({ awayStart: "soon", awayEnd: "later" }),
+    ).toThrow();
   });
 });
 

@@ -786,6 +786,122 @@ export interface AutoPostponeApplyResult {
 }
 
 // ---------------------------------------------------------------------------
+// queue.catchUp() / queue.vacation()  (T078 — the catch-up & vacation modes)
+// ---------------------------------------------------------------------------
+
+/**
+ * The CATCH-UP & VACATION surface (T078) — the two human-facing overload tools, both built on
+ * T077's deterministic selection + safe application, both SHOWING THE COST of postponement
+ * (what slips, by how much) BEFORE committing.
+ *
+ *  - **Catch-up** recovers from a backlog: it spreads the overdue pile forward over `spreadDays`
+ *    so each day stays within the daily budget, high-value/fragile items to the EARLIEST days.
+ *  - **Vacation** pre-adjusts future load: it suspends (fragile cards) or shifts-past-return
+ *    (everything else) whatever would come due in `[awayStart, awayEnd]` and re-spreads the
+ *    shifted load after return within budget.
+ *
+ * Planning is the pure `planCatchUp`/`planVacation` (`@interleave/scheduler`); application is the
+ * `RecoveryModeService`, dispatching each item to its CORRECT scheduler — attention items
+ * reschedule on the attention scheduler (`reschedule_element`, ABSOLUTE date); cards defer on
+ * FSRS (`review_states.due_at` to the EXACT planned day, memory state untouched, no review log);
+ * vacation suspend is a status change (`update_element` → `suspended`, prior status captured for
+ * resume) — all under ONE shared `batchId` so the whole plan undoes as one (T044). No new op
+ * types (the closed 15-op set is unchanged), no schema migration.
+ *
+ * Previews are READ-ONLY (no mutation, no op); applies are transactional + reversible. Undo
+ * reuses the existing command-level/`batchId` undo (`undo.last`) — pre-images restore both
+ * `elements.due_at`/`review_states.due_at` and the suspended items' prior status. There is still
+ * no generic `db.query`.
+ */
+export const QueueCatchUpRequestSchema = z.object({
+  /** "Now" the backlog read + plan compare against (ISO-8601); defaults to the server clock. */
+  asOf: IsoTimestampInputSchema.optional(),
+  /** Over how many days to spread the backlog (≥ 1; clamped main-side). */
+  spreadDays: z.number().int().positive().optional(),
+});
+export type QueueCatchUpRequest = z.infer<typeof QueueCatchUpRequestSchema>;
+
+/**
+ * The vacation request — the away window + an optional clock. `awayEnd` MUST be ≥ `awayStart`
+ * (a malformed window is rejected at the IPC boundary so a bad range can never be applied).
+ */
+export const QueueVacationRequestSchema = z
+  .object({
+    /** The away window start (inclusive, ISO-8601). */
+    awayStart: IsoTimestampInputSchema,
+    /** The away window end (inclusive, ISO-8601). */
+    awayEnd: IsoTimestampInputSchema,
+    /** "Now" the value ranking compares against (ISO-8601); defaults to the server clock. */
+    asOf: IsoTimestampInputSchema.optional(),
+  })
+  .refine((value) => Date.parse(value.awayEnd) >= Date.parse(value.awayStart), {
+    message: "awayEnd must be on or after awayStart",
+    path: ["awayEnd"],
+  });
+export type QueueVacationRequest = z.infer<typeof QueueVacationRequestSchema>;
+
+/** One day of the before/after load curve — a calendar day + how many items are due that day. */
+export interface RecoveryLoadCurvePoint {
+  readonly date: string;
+  readonly count: number;
+}
+
+/** One item that NEWLY SLIPS — its old vs new due + by how many days (the explicit cost). */
+export interface RecoverySlipRow {
+  readonly id: string;
+  readonly title: string;
+  readonly fromDueAt: string | null;
+  readonly toDueAt: string;
+  readonly slipDays: number;
+}
+
+/**
+ * The shared COST preview both modes return — it QUANTIFIES the cost of postponement so the
+ * renderer can always show it BEFORE committing: total items moved, the new tail date, the days
+ * added, the per-day load curve before vs after, and the per-item `slips` list.
+ */
+export interface RecoveryCostPreview {
+  readonly moved: number;
+  readonly newTailDueAt: string | null;
+  readonly daysAdded: number;
+  readonly loadBefore: readonly RecoveryLoadCurvePoint[];
+  readonly loadAfter: readonly RecoveryLoadCurvePoint[];
+  readonly slips: readonly RecoverySlipRow[];
+}
+
+/** The read-only catch-up preview the renderer shows BEFORE committing. */
+export interface CatchUpPreview {
+  /** The per-day cap the backlog is spread under (the daily review budget). */
+  readonly budget: number;
+  /** How many days the backlog is spread over. */
+  readonly spreadDays: number;
+  /** The quantified cost of postponement. */
+  readonly cost: RecoveryCostPreview;
+}
+
+/** The read-only vacation preview the renderer shows BEFORE committing. */
+export interface VacationPreview {
+  readonly awayStart: string;
+  readonly awayEnd: string;
+  /** How many items are suspended for the away window. */
+  readonly suspendedCount: number;
+  /** How many items are shifted past return. */
+  readonly shiftedCount: number;
+  /** The quantified cost of postponement. */
+  readonly cost: RecoveryCostPreview;
+}
+
+/** The result of applying a recovery plan (catch-up or vacation). */
+export interface RecoveryApplyResult {
+  /** How many items were moved (rescheduled/deferred). */
+  readonly moved: number;
+  /** How many items were suspended (vacation only; `0` for catch-up). */
+  readonly suspended: number;
+  /** The shared batch id (the whole plan undoes as one via `undo.last`). */
+  readonly batchId: string;
+}
+
+// ---------------------------------------------------------------------------
 // lineage.get()  (T023 — the full navigable element hierarchy)
 // ---------------------------------------------------------------------------
 
@@ -3559,6 +3675,30 @@ export interface AppApi {
      * undoes as one. Returns the count + the batch id.
      */
     autoPostponeApply(request?: QueueAutoPostponeRequest): Promise<AutoPostponeApplyResult>;
+    /**
+     * Preview the CATCH-UP plan (T078) — READ-ONLY. Spreads the overdue backlog forward over
+     * `spreadDays` so each day ≤ budget (high-value/fragile first), and returns the COST (the
+     * per-day load curve before vs after + the slips) so the user sees it before committing.
+     */
+    catchUp(request?: QueueCatchUpRequest): Promise<CatchUpPreview>;
+    /**
+     * Apply the CATCH-UP plan (T078) — transactional. Reschedules attention items + defers cards
+     * to their EXACT planned days (memory state untouched, no review log), all under ONE
+     * `batchId` so the plan undoes as one. Returns the count + the batch id.
+     */
+    catchUpApply(request?: QueueCatchUpRequest): Promise<RecoveryApplyResult>;
+    /**
+     * Preview the VACATION plan (T078) — READ-ONLY. Finds what would come due in the away window,
+     * chooses suspend (fragile cards) vs shift-past-return (the rest), and returns the COST (the
+     * after-return load curve + slips) so the user sees it before committing.
+     */
+    vacation(request: QueueVacationRequest): Promise<VacationPreview>;
+    /**
+     * Apply the VACATION plan (T078) — transactional. Suspends fragile cards (prior status
+     * captured) + shifts the rest past return, all under ONE `batchId` so the plan undoes (and
+     * vacation resumes) as one. Returns the moved + suspended counts + the batch id.
+     */
+    vacationApply(request: QueueVacationRequest): Promise<RecoveryApplyResult>;
   };
   readonly lineage: {
     /** The full, depth-tagged lineage tree for one element (read-only) (T023). */

@@ -571,3 +571,88 @@
   gap: 8px;
   margin-top: 8px;
 }
+
+/* ── Catch-up & vacation (T078) ───────────────────────────────────────── */
+.q-recovery {
+  margin-bottom: 14px;
+}
+.q-recovery__actions {
+  display: flex;
+  gap: var(--s-2, 8px);
+}
+.q-recovery__preview {
+  margin-top: 10px;
+  padding: var(--s-3, 12px) var(--s-4, 14px);
+  border: 1px solid var(--border);
+  background: var(--surface-2, var(--surface));
+  border-radius: var(--r-md);
+}
+.q-recovery__range {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.q-recovery__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--t-sm);
+  color: var(--text-2);
+}
+.q-recovery__field input {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+}
+
+/* The before/after per-day LOAD CURVE — the headline "cost of postponement". */
+.q-loadcurve {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+}
+.q-loadcurve__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.q-loadcurve__label {
+  flex: none;
+  width: 48px;
+  font-size: var(--t-xs, 11px);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.q-loadcurve__bars {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 44px;
+  min-width: 0;
+}
+.q-loadcurve__bar {
+  flex: 1;
+  min-width: 2px;
+  min-height: 2px;
+  background: var(--accent-soft-bd, var(--accent-text));
+  border-radius: 1px;
+  opacity: 0.85;
+}
+.q-loadcurve__bar--over {
+  background: var(--danger, #d23);
+}
+.q-loadcurve__legend {
+  font-size: var(--t-xs, 11px);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}

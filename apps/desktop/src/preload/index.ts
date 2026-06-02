@@ -56,9 +56,11 @@ import type {
   PickImportFileRequest,
   QueueActRequest,
   QueueAutoPostponeRequest,
+  QueueCatchUpRequest,
   QueueListRequest,
   QueueScheduleRequest,
   QueueUndoRequest,
+  QueueVacationRequest,
   ReadPointGetRequest,
   ReadPointSetRequest,
   ReviewCardRequest,
@@ -129,6 +131,14 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.queueAutoPostpone, request ?? {}),
     autoPostponeApply: (request?: QueueAutoPostponeRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.queueAutoPostponeApply, request ?? {}),
+    catchUp: (request?: QueueCatchUpRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.queueCatchUp, request ?? {}),
+    catchUpApply: (request?: QueueCatchUpRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.queueCatchUpApply, request ?? {}),
+    vacation: (request: QueueVacationRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.queueVacation, request),
+    vacationApply: (request: QueueVacationRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.queueVacationApply, request),
   },
   lineage: {
     get: (request: LineageGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.lineageGet, request),

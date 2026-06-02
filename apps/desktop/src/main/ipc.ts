@@ -63,9 +63,11 @@ import {
   type PickImportFileResult,
   QueueActRequestSchema,
   QueueAutoPostponeRequestSchema,
+  QueueCatchUpRequestSchema,
   QueueListRequestSchema,
   QueueScheduleRequestSchema,
   QueueUndoRequestSchema,
+  QueueVacationRequestSchema,
   ReadPointGetRequestSchema,
   ReadPointSetRequestSchema,
   ReviewCardRequestSchema,
@@ -246,6 +248,26 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.queueAutoPostponeApply, (_event, rawRequest: unknown) => {
     const request = QueueAutoPostponeRequestSchema.parse(rawRequest ?? {});
     return dbService.applyAutoPostpone(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.queueCatchUp, (_event, rawRequest: unknown) => {
+    const request = QueueCatchUpRequestSchema.parse(rawRequest ?? {});
+    return dbService.previewCatchUp(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.queueCatchUpApply, (_event, rawRequest: unknown) => {
+    const request = QueueCatchUpRequestSchema.parse(rawRequest ?? {});
+    return dbService.applyCatchUp(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.queueVacation, (_event, rawRequest: unknown) => {
+    const request = QueueVacationRequestSchema.parse(rawRequest);
+    return dbService.previewVacation(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.queueVacationApply, (_event, rawRequest: unknown) => {
+    const request = QueueVacationRequestSchema.parse(rawRequest);
+    return dbService.applyVacation(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.lineageGet, (_event, rawRequest: unknown) => {

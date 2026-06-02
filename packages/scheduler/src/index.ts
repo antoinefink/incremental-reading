@@ -83,3 +83,18 @@ export {
   type SessionMode,
   scoreQueueItems,
 } from "./queue-score";
+export {
+  type CatchUpOptions,
+  type CatchUpPlan,
+  type LoadCurvePoint,
+  type PostponeCostPreview,
+  planCatchUp,
+  planVacation,
+  type RecoveryInput,
+  type RecoveryPlanItem,
+  type RecoveryScheduler,
+  type SlipRow,
+  type VacationOptions,
+  type VacationPlan,
+  type VacationSuspendItem,
+} from "./recovery-modes";

@@ -174,6 +174,15 @@ export {
 } from "./queue-query";
 export { QueueRepository } from "./queue-repository";
 export {
+  type CatchUpPreview,
+  DEFAULT_CATCHUP_SPREAD_DAYS,
+  MAX_CATCHUP_SPREAD_DAYS,
+  MIN_CATCHUP_SPREAD_DAYS,
+  type RecoveryApplyResult,
+  RecoveryModeService,
+  type VacationPreview,
+} from "./recovery-mode-service";
+export {
   type CardWithElement,
   type CreateCardInput,
   type LeechCard,

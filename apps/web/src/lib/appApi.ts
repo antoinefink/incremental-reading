@@ -408,6 +408,71 @@ export interface AutoPostponeApplyResult {
 }
 
 // ---------------------------------------------------------------------------
+// queue.catchUp() / queue.vacation()  (T078 — catch-up & vacation modes)
+// ---------------------------------------------------------------------------
+
+/** The catch-up request — an optional clock + how many days to spread the backlog over. */
+export interface QueueCatchUpRequest {
+  readonly asOf?: string;
+  readonly spreadDays?: number;
+}
+
+/** The vacation request — the away window + an optional clock (`awayEnd` ≥ `awayStart`). */
+export interface QueueVacationRequest {
+  readonly awayStart: string;
+  readonly awayEnd: string;
+  readonly asOf?: string;
+}
+
+/** One day of the before/after load curve — a calendar day + how many items are due that day. */
+export interface RecoveryLoadCurvePoint {
+  readonly date: string;
+  readonly count: number;
+}
+
+/** One item that NEWLY SLIPS — its old vs new due + by how many days (the explicit cost). */
+export interface RecoverySlipRow {
+  readonly id: string;
+  readonly title: string;
+  readonly fromDueAt: string | null;
+  readonly toDueAt: string;
+  readonly slipDays: number;
+}
+
+/** The shared COST preview both modes return (the headline "cost of postponement"). */
+export interface RecoveryCostPreview {
+  readonly moved: number;
+  readonly newTailDueAt: string | null;
+  readonly daysAdded: number;
+  readonly loadBefore: readonly RecoveryLoadCurvePoint[];
+  readonly loadAfter: readonly RecoveryLoadCurvePoint[];
+  readonly slips: readonly RecoverySlipRow[];
+}
+
+/** The read-only catch-up preview shown BEFORE committing. */
+export interface CatchUpPreview {
+  readonly budget: number;
+  readonly spreadDays: number;
+  readonly cost: RecoveryCostPreview;
+}
+
+/** The read-only vacation preview shown BEFORE committing. */
+export interface VacationPreview {
+  readonly awayStart: string;
+  readonly awayEnd: string;
+  readonly suspendedCount: number;
+  readonly shiftedCount: number;
+  readonly cost: RecoveryCostPreview;
+}
+
+/** The result of applying a recovery plan (catch-up or vacation). */
+export interface RecoveryApplyResult {
+  readonly moved: number;
+  readonly suspended: number;
+  readonly batchId: string;
+}
+
+// ---------------------------------------------------------------------------
 // queue.act()  (T030 — per-row, in-place queue actions)
 // ---------------------------------------------------------------------------
 
@@ -2147,6 +2212,10 @@ export interface AppApi {
     undo(request: QueueUndoRequest): Promise<QueueUndoResult>;
     autoPostpone(request?: QueueAutoPostponeRequest): Promise<AutoPostponePreview>;
     autoPostponeApply(request?: QueueAutoPostponeRequest): Promise<AutoPostponeApplyResult>;
+    catchUp(request?: QueueCatchUpRequest): Promise<CatchUpPreview>;
+    catchUpApply(request?: QueueCatchUpRequest): Promise<RecoveryApplyResult>;
+    vacation(request: QueueVacationRequest): Promise<VacationPreview>;
+    vacationApply(request: QueueVacationRequest): Promise<RecoveryApplyResult>;
   };
   readonly lineage: {
     get(request: LineageGetRequest): Promise<LineageGetResult>;
@@ -2400,6 +2469,37 @@ export const appApi = {
    */
   applyAutoPostpone(request?: QueueAutoPostponeRequest): Promise<AutoPostponeApplyResult> {
     return requireAppApi().queue.autoPostponeApply(request);
+  },
+  /**
+   * Preview the CATCH-UP plan (T078) — READ-ONLY. Spreads the overdue backlog forward so each
+   * day ≤ budget (high-value/fragile first) and returns the COST (the per-day load curve before
+   * vs after + the slips) so the user sees it before committing.
+   */
+  previewCatchUp(request?: QueueCatchUpRequest): Promise<CatchUpPreview> {
+    return requireAppApi().queue.catchUp(request);
+  },
+  /**
+   * Apply the CATCH-UP plan (T078) — transactional, one `batchId`. Reschedules attention items +
+   * defers cards to their EXACT planned days (memory state untouched, no review log). Undo via
+   * the existing batch undo (`undo.last`).
+   */
+  applyCatchUp(request?: QueueCatchUpRequest): Promise<RecoveryApplyResult> {
+    return requireAppApi().queue.catchUpApply(request);
+  },
+  /**
+   * Preview the VACATION plan (T078) — READ-ONLY. Finds what would come due in the away window,
+   * chooses suspend (fragile cards) vs shift-past-return (the rest), and returns the COST (the
+   * after-return load curve + slips) so the user sees it before committing.
+   */
+  previewVacation(request: QueueVacationRequest): Promise<VacationPreview> {
+    return requireAppApi().queue.vacation(request);
+  },
+  /**
+   * Apply the VACATION plan (T078) — transactional, one `batchId`. Suspends fragile cards (prior
+   * status captured) + shifts the rest past return. Resume via the existing batch undo (`undo.last`).
+   */
+  applyVacation(request: QueueVacationRequest): Promise<RecoveryApplyResult> {
+    return requireAppApi().queue.vacationApply(request);
   },
   /** The full, depth-tagged lineage tree for one element (read-only) (T023). */
   getLineage(request: LineageGetRequest): Promise<LineageGetResult> {
