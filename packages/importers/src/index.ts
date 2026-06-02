@@ -25,7 +25,9 @@ export {
   type ParsedFootnote,
   parseEpub,
 } from "./epub";
+export { extractHtmlTitle, htmlFileToProseMirrorDoc } from "./html-file";
 export { htmlToProseMirrorDoc } from "./html-to-prosemirror";
+export { markdownToProseMirrorDoc, proseMirrorDocToMarkdown } from "./markdown";
 export {
   aggregateOcrWords,
   type OcrResult,

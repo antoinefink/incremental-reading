@@ -135,6 +135,13 @@ export interface LaunchOptions {
    * the `INTERLEAVE_PDF_IMPORT_PATH` escape. Defaults unset (a real picker).
    */
   readonly epubImportPath?: string;
+  /**
+   * Stub the native Markdown file picker (T068) to return this absolute path, so the
+   * Markdown-import E2E can drive import deterministically without a real dialog. Sets
+   * `INTERLEAVE_MARKDOWN_IMPORT_PATH` (honored only in the unpackaged build), mirroring
+   * the `INTERLEAVE_EPUB_IMPORT_PATH` escape. Defaults unset (a real picker).
+   */
+  readonly markdownImportPath?: string;
 }
 
 /**
@@ -161,6 +168,9 @@ export async function launchApp(
       ...(options.captureEnabled ? { INTERLEAVE_CAPTURE_ENABLED: "1" } : {}),
       ...(options.pdfImportPath ? { INTERLEAVE_PDF_IMPORT_PATH: options.pdfImportPath } : {}),
       ...(options.epubImportPath ? { INTERLEAVE_EPUB_IMPORT_PATH: options.epubImportPath } : {}),
+      ...(options.markdownImportPath
+        ? { INTERLEAVE_MARKDOWN_IMPORT_PATH: options.markdownImportPath }
+        : {}),
       // Suppress the first-run onboarding overlay unless a spec opts in, so it
       // never covers the UI in the feature specs (all start empty). See main/index.ts.
       ...(options.showOnboarding ? {} : { INTERLEAVE_SUPPRESS_ONBOARDING: "1" }),

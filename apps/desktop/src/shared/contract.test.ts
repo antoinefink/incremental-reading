@@ -29,6 +29,8 @@ import {
   DocumentMarksAddRequestSchema,
   DocumentMarksListRequestSchema,
   DocumentMarksRemoveRequestSchema,
+  DocumentsExportMarkdownRequestSchema,
+  type DocumentsExportMarkdownResult,
   DocumentsGetRequestSchema,
   DocumentsSaveRequestSchema,
   ElementsSetPriorityRequestSchema,
@@ -69,9 +71,12 @@ import {
   SourcesGetOcrRequestSchema,
   SourcesGetPdfDataRequestSchema,
   SourcesGetRegionImageRequestSchema,
+  SourcesImportDocumentRequestSchema,
+  type SourcesImportDocumentResult,
   SourcesImportEpubRequestSchema,
   type SourcesImportEpubResult,
   SourcesImportManualRequestSchema,
+  SourcesImportMarkdownTextRequestSchema,
   SourcesImportPdfRequestSchema,
   type SourcesImportPdfResult,
   type SourcesImportUrlRequest,
@@ -110,6 +115,8 @@ describe("IPC channels", () => {
         "sources:getPdfData",
         "sources:pickImportFile",
         "sources:importEpub",
+        "sources:importDocument",
+        "sources:importMarkdownText",
         "sources:extractRegion",
         "sources:getRegionImage",
         "sources:runOcr",
@@ -124,6 +131,7 @@ describe("IPC channels", () => {
         "inbox:triage",
         "documents:get",
         "documents:save",
+        "documents:exportMarkdown",
         "documents:marks:add",
         "documents:marks:remove",
         "documents:marks:list",
@@ -352,6 +360,73 @@ describe("EPUB import schemas (T067)", () => {
     expect(result.status).toBe("imported");
     expect(result.bookId).toBe("el_book");
     expect(result.chapterCount).toBe(3);
+  });
+});
+
+describe("Markdown/HTML import-export schemas (T068)", () => {
+  it("PickImportFileRequestSchema accepts markdown + html kinds", () => {
+    expect(PickImportFileRequestSchema.parse({ kind: "markdown" }).kind).toBe("markdown");
+    expect(PickImportFileRequestSchema.parse({ kind: "html" }).kind).toBe("html");
+  });
+
+  it("SourcesImportDocumentRequestSchema requires a path + a markdown/html format", () => {
+    const parsed = SourcesImportDocumentRequestSchema.parse({
+      path: "/tmp/note.md",
+      format: "markdown",
+      priority: "C",
+    });
+    expect(parsed.format).toBe("markdown");
+    expect(() =>
+      SourcesImportDocumentRequestSchema.parse({ path: "", format: "markdown" }),
+    ).toThrow();
+    expect(() =>
+      SourcesImportDocumentRequestSchema.parse({ path: "/x.md", format: "pdf" }),
+    ).toThrow();
+    expect(() => SourcesImportDocumentRequestSchema.parse({ path: "/x.md" })).toThrow();
+  });
+
+  it("SourcesImportMarkdownTextRequestSchema requires non-empty text + optional title", () => {
+    const parsed = SourcesImportMarkdownTextRequestSchema.parse({
+      text: "# Hello",
+      title: "Hi",
+    });
+    expect(parsed.text).toBe("# Hello");
+    expect(parsed.title).toBe("Hi");
+    expect(() => SourcesImportMarkdownTextRequestSchema.parse({ text: "" })).toThrow();
+  });
+
+  it("DocumentsExportMarkdownRequestSchema requires a non-empty elementId", () => {
+    expect(DocumentsExportMarkdownRequestSchema.parse({ elementId: "el_1" }).elementId).toBe(
+      "el_1",
+    );
+    expect(() => DocumentsExportMarkdownRequestSchema.parse({ elementId: "" })).toThrow();
+    expect(() => DocumentsExportMarkdownRequestSchema.parse({})).toThrow();
+  });
+
+  it("the import + export results round-trip the imported/exported shapes", () => {
+    const imp: SourcesImportDocumentResult = {
+      status: "imported",
+      id: "el_md",
+      item: {
+        id: "el_md",
+        type: "source",
+        status: "inbox",
+        stage: "raw_source",
+        priority: 0.4,
+        title: "A Note",
+        srcType: "Manual note",
+        author: null,
+        accessedAt: "2026-06-01T00:00:00.000Z",
+        charCount: 10,
+        previewSnippet: "A Note",
+      },
+    };
+    expect(imp.id).toBe("el_md");
+    const exp: DocumentsExportMarkdownResult = {
+      relativePath: "el_md-a-note.md",
+      absPath: "/data/exports/el_md-a-note.md",
+    };
+    expect(exp.relativePath.endsWith(".md")).toBe(true);
   });
 });
 

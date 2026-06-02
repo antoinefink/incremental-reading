@@ -33,6 +33,7 @@ import type {
   DocumentMarksAddRequest,
   DocumentMarksListRequest,
   DocumentMarksRemoveRequest,
+  DocumentsExportMarkdownRequest,
   DocumentsGetRequest,
   DocumentsSaveRequest,
   ElementsSetPriorityRequest,
@@ -70,8 +71,10 @@ import type {
   SourcesGetOcrRequest,
   SourcesGetPdfDataRequest,
   SourcesGetRegionImageRequest,
+  SourcesImportDocumentRequest,
   SourcesImportEpubRequest,
   SourcesImportManualRequest,
+  SourcesImportMarkdownTextRequest,
   SourcesImportPdfRequest,
   SourcesImportUrlRequest,
   SourcesRunOcrRequest,
@@ -131,6 +134,10 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.sourcesPickImportFile, request),
     importEpub: (request: SourcesImportEpubRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.sourcesImportEpub, request),
+    importDocument: (request: SourcesImportDocumentRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.sourcesImportDocument, request),
+    importMarkdownText: (request: SourcesImportMarkdownTextRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.sourcesImportMarkdownText, request),
     extractRegion: (request: SourcesExtractRegionRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.sourcesExtractRegion, request),
     getRegionImage: (request: SourcesGetRegionImageRequest) =>
@@ -159,6 +166,8 @@ const appApi: AppApi = {
     get: (request: DocumentsGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.documentsGet, request),
     save: (request: DocumentsSaveRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.documentsSave, request),
+    exportMarkdown: (request: DocumentsExportMarkdownRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.documentsExportMarkdown, request),
     marks: {
       add: (request: DocumentMarksAddRequest) =>
         ipcRenderer.invoke(IPC_CHANNELS.documentsMarksAdd, request),

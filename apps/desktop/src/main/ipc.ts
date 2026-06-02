@@ -32,6 +32,7 @@ import {
   DocumentMarksAddRequestSchema,
   DocumentMarksListRequestSchema,
   DocumentMarksRemoveRequestSchema,
+  DocumentsExportMarkdownRequestSchema,
   DocumentsGetRequestSchema,
   DocumentsSaveRequestSchema,
   ElementsSetPriorityRequestSchema,
@@ -77,8 +78,10 @@ import {
   SourcesGetOcrRequestSchema,
   SourcesGetPdfDataRequestSchema,
   SourcesGetRegionImageRequestSchema,
+  SourcesImportDocumentRequestSchema,
   SourcesImportEpubRequestSchema,
   SourcesImportManualRequestSchema,
+  SourcesImportMarkdownTextRequestSchema,
   SourcesImportPdfRequestSchema,
   SourcesImportUrlRequestSchema,
   type SourcesImportUrlResult,
@@ -98,6 +101,7 @@ import {
 import { BackupService } from "./backup-service";
 import type { CaptureController } from "./capture-controller";
 import type { DbService } from "./db-service";
+import { DocumentImportError } from "./document-import-service";
 import { EpubImportError } from "./epub-import-service";
 import type { UrlImportJobPayload } from "./job-apply-handlers";
 import type { JobRunner } from "./job-runner";
@@ -341,6 +345,45 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
     }
   });
 
+  // Import a local `.md`/`.html` file (T068) — the renderer resolved the chosen path
+  // via `sources.pickImportFile`. MAIN reads + parses + creates an `inbox` source. A
+  // thrown `DocumentImportError` is re-thrown as a `code: message` line so the modal
+  // can map the `code` to a friendly message (mirrors the EPUB path).
+  ipcMain.handle(IPC_CHANNELS.sourcesImportDocument, async (_event, rawRequest: unknown) => {
+    const request = SourcesImportDocumentRequestSchema.parse(rawRequest);
+    try {
+      return await dbService.importDocument({
+        absPath: request.path,
+        format: request.format,
+        ...(request.priority ? { priority: request.priority } : {}),
+        ...(request.reasonAdded !== undefined ? { reasonAdded: request.reasonAdded } : {}),
+      });
+    } catch (err) {
+      if (err instanceof DocumentImportError) {
+        throw new Error(`${err.code}: ${err.message}`);
+      }
+      throw err;
+    }
+  });
+
+  // Import PASTED Markdown (T068) — the paste path, no file read.
+  ipcMain.handle(IPC_CHANNELS.sourcesImportMarkdownText, async (_event, rawRequest: unknown) => {
+    const request = SourcesImportMarkdownTextRequestSchema.parse(rawRequest);
+    try {
+      return await dbService.importMarkdownText({
+        text: request.text,
+        ...(request.title !== undefined ? { title: request.title } : {}),
+        ...(request.priority ? { priority: request.priority } : {}),
+        ...(request.reasonAdded !== undefined ? { reasonAdded: request.reasonAdded } : {}),
+      });
+    } catch (err) {
+      if (err instanceof DocumentImportError) {
+        throw new Error(`${err.code}: ${err.message}`);
+      }
+      throw err;
+    }
+  });
+
   // PDF region extraction (T065). The renderer crops the figure/table from the page
   // it rendered and ships the size-capped PNG + the normalized rect + page; MAIN
   // streams the bytes into the vault and creates a `media_fragment` region extract
@@ -544,6 +587,21 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.documentsSave, (_event, rawRequest: unknown) => {
     const request = DocumentsSaveRequestSchema.parse(rawRequest);
     return dbService.saveDocument(request);
+  });
+
+  // Export an element's document body to a `.md` in the `exports/` vault (T068) —
+  // async file I/O, read-only on the DB. A `DocumentImportError` is re-thrown as a
+  // friendly `code: message` line.
+  ipcMain.handle(IPC_CHANNELS.documentsExportMarkdown, async (_event, rawRequest: unknown) => {
+    const request = DocumentsExportMarkdownRequestSchema.parse(rawRequest);
+    try {
+      return await dbService.exportMarkdown({ elementId: request.elementId as never });
+    } catch (err) {
+      if (err instanceof DocumentImportError) {
+        throw new Error(`${err.code}: ${err.message}`);
+      }
+      throw err;
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.documentsMarksAdd, (_event, rawRequest: unknown) => {

@@ -588,6 +588,40 @@ export type SourcesImportEpubResult = {
   readonly item: InboxItemSummary;
 };
 
+/** Import a local `.md`/`.html` file (T068) — the renderer passes a chosen path + format. */
+export interface SourcesImportDocumentRequest {
+  readonly path: string;
+  readonly format: "markdown" | "html";
+  readonly priority?: PriorityLabelInput;
+  readonly reasonAdded?: string;
+}
+
+/** Import PASTED Markdown text (T068) — the paste path, no file read. */
+export interface SourcesImportMarkdownTextRequest {
+  readonly text: string;
+  readonly title?: string;
+  readonly priority?: PriorityLabelInput;
+  readonly reasonAdded?: string;
+}
+
+/** The document-import result (T068) — the new source + its inbox summary. */
+export type SourcesImportDocumentResult = {
+  readonly status: "imported";
+  readonly id: string;
+  readonly item: InboxItemSummary;
+};
+
+/** Export a document to Markdown (T068) — MAIN writes the `.md` to the `exports/` vault. */
+export interface DocumentsExportMarkdownRequest {
+  readonly elementId: string;
+}
+
+/** The Markdown-export result (T068) — the written `.md` path. */
+export type DocumentsExportMarkdownResult = {
+  readonly relativePath: string;
+  readonly absPath: string;
+};
+
 /** Serve a PDF source's original bytes to the renderer for rendering (T064). */
 export interface SourcesGetPdfDataRequest {
   readonly elementId: string;
@@ -1822,6 +1856,10 @@ export interface AppApi {
     getPdfData(request: SourcesGetPdfDataRequest): Promise<SourcesGetPdfDataResult>;
     pickImportFile(request: PickImportFileRequest): Promise<PickImportFileResult>;
     importEpub(request: SourcesImportEpubRequest): Promise<SourcesImportEpubResult>;
+    importDocument(request: SourcesImportDocumentRequest): Promise<SourcesImportDocumentResult>;
+    importMarkdownText(
+      request: SourcesImportMarkdownTextRequest,
+    ): Promise<SourcesImportDocumentResult>;
     extractRegion(request: SourcesExtractRegionRequest): Promise<SourcesExtractRegionResult>;
     getRegionImage(request: SourcesGetRegionImageRequest): Promise<SourcesGetRegionImageResult>;
     runOcr(request: SourcesRunOcrRequest): Promise<SourcesRunOcrResult>;
@@ -1842,6 +1880,7 @@ export interface AppApi {
   readonly documents: {
     get(request: DocumentsGetRequest): Promise<DocumentsGetResult>;
     save(request: DocumentsSaveRequest): Promise<DocumentsSaveResult>;
+    exportMarkdown(request: DocumentsExportMarkdownRequest): Promise<DocumentsExportMarkdownResult>;
     readonly marks: {
       add(request: DocumentMarksAddRequest): Promise<DocumentMarksAddResult>;
       remove(request: DocumentMarksRemoveRequest): Promise<DocumentMarksRemoveResult>;
@@ -2074,6 +2113,32 @@ export const appApi = {
    */
   importEpubSource(request: SourcesImportEpubRequest): Promise<SourcesImportEpubResult> {
     return requireAppApi().sources.importEpub(request);
+  },
+  /**
+   * Import a local `.md`/`.html` file into an inbox source (T068) — the renderer passes
+   * a path chosen via {@link pickImportFile} + the format; MAIN reads + parses +
+   * persists, all main-side. A thrown `DocumentImportError` surfaces a friendly message.
+   */
+  importDocumentSource(
+    request: SourcesImportDocumentRequest,
+  ): Promise<SourcesImportDocumentResult> {
+    return requireAppApi().sources.importDocument(request);
+  },
+  /** Import PASTED Markdown into an inbox source (T068) — the paste path, no file read. */
+  importMarkdownText(
+    request: SourcesImportMarkdownTextRequest,
+  ): Promise<SourcesImportDocumentResult> {
+    return requireAppApi().sources.importMarkdownText(request);
+  },
+  /**
+   * Export a document (source/extract/topic) to a `.md` in the managed `exports/` vault
+   * (T068). Read-only on the DB; returns the written path. MAIN owns the path — the
+   * renderer never picks it.
+   */
+  exportDocumentMarkdown(
+    request: DocumentsExportMarkdownRequest,
+  ): Promise<DocumentsExportMarkdownResult> {
+    return requireAppApi().documents.exportMarkdown(request);
   },
   /**
    * Crop a PDF page region into a scheduled `media_fragment` extract (T065) — ships

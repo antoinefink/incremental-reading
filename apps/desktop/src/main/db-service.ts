@@ -208,6 +208,11 @@ import {
   CAPTURE_PORT_KEY,
   CAPTURE_TOKEN_KEY,
 } from "./capture-pairing";
+import {
+  type DocumentImportResult,
+  DocumentImportService,
+  type MarkdownExportResult,
+} from "./document-import-service";
 import { EpubImportService } from "./epub-import-service";
 import type { JobRunner } from "./job-runner";
 import { OcrService } from "./ocr-service";
@@ -282,6 +287,14 @@ export class DbService {
    */
   private epubImport: EpubImportService | null = null;
   /**
+   * The Markdown/HTML document-import + Markdown-export orchestrator (T068) — parse a
+   * local `.md`/`.html` (or pasted Markdown) into an `inbox` source, and serialize a
+   * stored document back to a `.md` in the `exports/` vault. Built lazily on first
+   * read (Markdown import needs no vault; HTML import + export need `assetsDir`/
+   * `exportsDir`, injected at open()).
+   */
+  private documentImport: DocumentImportService | null = null;
+  /**
    * The PDF region-extract orchestrator (T065) — crop a figure/table region into a
    * scheduled `media_fragment` extract (vault image + page+region source location).
    * Built lazily (it needs the extraction service + the `assetVaultService`).
@@ -301,6 +314,8 @@ export class DbService {
   private runner: JobRunner | null = null;
   /** The vault asset-root, injected at open() time; required for URL import. */
   private assetsDir: string | null = null;
+  /** The exports-root (`<dataDir>/exports`), injected at open(); for Markdown export (T068). */
+  private exportsDir: string | null = null;
   /** DEV/E2E-only: permit loopback/private hosts in URL import (see open()). */
   private allowLoopbackImport = false;
   private migrated = false;
@@ -329,6 +344,8 @@ export class DbService {
       nativeBinding?: string | undefined;
       /** The asset-vault root (`<dataDir>/assets`) — required for URL import (T060). */
       assetsDir?: string | undefined;
+      /** The exports root (`<dataDir>/exports`) — required for Markdown export (T068). */
+      exportsDir?: string | undefined;
       /** DEV/E2E-only: permit loopback/private hosts in URL import (the SSRF guard escape). */
       allowLoopbackImport?: boolean | undefined;
     } = {},
@@ -339,6 +356,7 @@ export class DbService {
       : openDatabase(dbPath);
     migrateDatabase(this.handle.db, options.migrationsDir);
     this.assetsDir = options.assetsDir ?? null;
+    this.exportsDir = options.exportsDir ?? null;
     this.allowLoopbackImport = options.allowLoopbackImport ?? false;
     this.repositories = createRepositories(this.handle.db);
     this.inspector = new InspectorQuery(this.repositories);
@@ -399,10 +417,12 @@ export class DbService {
     this.assetVault = null;
     this.pdfImport = null;
     this.epubImport = null;
+    this.documentImport = null;
     this.pdfRegion = null;
     this.ocr = null;
     this.runner = null;
     this.assetsDir = null;
+    this.exportsDir = null;
     this.allowLoopbackImport = false;
     this.migrated = false;
   }
@@ -894,6 +914,60 @@ export class DbService {
     reasonAdded?: string | null;
   }): Promise<SourcesImportEpubResult> {
     return await this.epubImportService.importFromFile(input);
+  }
+
+  /**
+   * The Markdown/HTML import + Markdown-export orchestrator (T068), lazily built on
+   * first read against the open DB + repos + the vault `assetsDir` + the `exportsDir`.
+   * Throws a clear error if either dir was not provided — mirrors
+   * {@link epubImportService}.
+   */
+  get documentImportService(): DocumentImportService {
+    if (this.documentImport) return this.documentImport;
+    if (!this.assetsDir || !this.exportsDir) {
+      throw new Error(
+        "DbService: document import/export requires assets + exports directories — call open() with { assetsDir, exportsDir }",
+      );
+    }
+    this.documentImport = new DocumentImportService({
+      db: this.require().db,
+      repositories: this.repos,
+      assetsDir: this.assetsDir,
+      exportsDir: this.exportsDir,
+    });
+    return this.documentImport;
+  }
+
+  /**
+   * Import a local `.md`/`.html` file (T068) — the IPC handler resolved the chosen
+   * path via the MAIN file picker. Delegates to {@link DocumentImportService}; a thrown
+   * `DocumentImportError` propagates to the IPC layer.
+   */
+  async importDocument(input: {
+    absPath: string;
+    format: "markdown" | "html";
+    priority?: PriorityLabel;
+    reasonAdded?: string | null;
+  }): Promise<DocumentImportResult> {
+    return await this.documentImportService.importFromFile(input);
+  }
+
+  /** Import pasted Markdown (T068) — the paste path, no file read. */
+  async importMarkdownText(input: {
+    text: string;
+    title?: string | null;
+    priority?: PriorityLabel;
+    reasonAdded?: string | null;
+  }): Promise<DocumentImportResult> {
+    return await this.documentImportService.importFromText(input);
+  }
+
+  /**
+   * Export an element's document body to a `.md` in the `exports/` vault (T068).
+   * Read-only on the DB (no mutation, no op-log entry). Returns the written path.
+   */
+  async exportMarkdown(input: { elementId: ElementId }): Promise<MarkdownExportResult> {
+    return await this.documentImportService.exportToMarkdown(input);
   }
 
   /**

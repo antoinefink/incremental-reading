@@ -43,6 +43,9 @@ export function NewSourceModal({ open, onClose, onCreated }: NewSourceModalProps
   const [accessedAt, setAccessedAt] = useState(todayDateInput);
   const [body, setBody] = useState("");
   const [priority, setPriority] = useState<PriorityLabelInput>("C");
+  // When on, the body is parsed as Markdown (T068) — routed to `importMarkdownText`
+  // so headings/code/links/lists become the structured document body, not flat text.
+  const [asMarkdown, setAsMarkdown] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -63,6 +66,7 @@ export function NewSourceModal({ open, onClose, onCreated }: NewSourceModalProps
     setAccessedAt(todayDateInput());
     setBody("");
     setPriority("C");
+    setAsMarkdown(false);
     setError(null);
     setSubmitting(false);
     const id = window.setTimeout(() => inputRef.current?.focus(), 30);
@@ -74,6 +78,17 @@ export function NewSourceModal({ open, onClose, onCreated }: NewSourceModalProps
     if (trimmed.length === 0 || submitting) return;
     setSubmitting(true);
     try {
+      // Markdown path (T068): parse the body as Markdown into a structured source.
+      if (asMarkdown) {
+        if (body.trim().length === 0) {
+          setError("Add some Markdown to the body to import.");
+          setSubmitting(false);
+          return;
+        }
+        const { id } = await appApi.importMarkdownText({ text: body, title: trimmed, priority });
+        onCreated(id);
+        return;
+      }
       // Build the request omitting empty optional fields (exactOptionalPropertyTypes:
       // a missing key is correct, an explicit `undefined` is not).
       const request: SourcesImportManualRequest = { title: trimmed, priority };
@@ -101,7 +116,18 @@ export function NewSourceModal({ open, onClose, onCreated }: NewSourceModalProps
       setError(e instanceof Error ? e.message : String(e));
       setSubmitting(false);
     }
-  }, [title, url, author, publishedAt, accessedAt, body, priority, submitting, onCreated]);
+  }, [
+    title,
+    url,
+    author,
+    publishedAt,
+    accessedAt,
+    body,
+    priority,
+    asMarkdown,
+    submitting,
+    onCreated,
+  ]);
 
   // Esc to close, ⌘↵ to submit while open.
   useEffect(() => {
@@ -238,9 +264,24 @@ export function NewSourceModal({ open, onClose, onCreated }: NewSourceModalProps
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 rows={8}
-                placeholder="Paste the article text here. Blank lines separate paragraphs…"
+                placeholder={
+                  asMarkdown
+                    ? "Paste Markdown here. # Headings, **bold**, `code`, - lists are preserved…"
+                    : "Paste the article text here. Blank lines separate paragraphs…"
+                }
                 className={`${fieldClass} resize-y font-read leading-relaxed`}
               />
+            </label>
+
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                data-testid="new-source-markdown"
+                checked={asMarkdown}
+                onChange={(e) => setAsMarkdown(e.target.checked)}
+                className="size-4 rounded border-border accent-[var(--accent)]"
+              />
+              <span className="text-sm text-text-2">Treat body as Markdown</span>
             </label>
 
             <div>

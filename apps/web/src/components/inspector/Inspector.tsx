@@ -482,6 +482,76 @@ function OrganizeSection({
   );
 }
 
+/** Element types that carry an exportable document body (T068 Markdown export). */
+const EXPORTABLE_TYPES = new Set<ElementSummary["type"]>([
+  "source",
+  "topic",
+  "extract",
+  "synthesis_note",
+]);
+
+/**
+ * "Export to Markdown" action (T068) — serializes the element's stored document
+ * body to a `.md` in the managed `exports/` vault (MAIN owns the path) and surfaces
+ * the written location. Read-only on the DB (no mutation). Desktop-only; renders
+ * nothing in a bare renderer.
+ */
+function ExportMarkdownSection({ elementId }: { elementId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (!isDesktop()) return null;
+
+  const onExport = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    setDone(null);
+    try {
+      const result = await appApi.exportDocumentMarkdown({ elementId });
+      setDone(result.relativePath);
+    } catch (e) {
+      setError(e instanceof Error ? friendlyExportError(e.message) : "Could not export.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="insp-sec" data-testid="export-section">
+      <div className="insp-sec__title">Export</div>
+      <button
+        type="button"
+        className="insp-add__btn"
+        data-testid="export-markdown"
+        disabled={busy}
+        onClick={() => void onExport()}
+      >
+        <Icon name={busy ? "clock" : "download"} size={12} className={busy ? "animate-spin" : ""} />
+        {busy ? "Exporting…" : "Export to Markdown"}
+      </button>
+      {done ? (
+        <p className="insp-empty" data-testid="export-done">
+          Exported to exports/{done}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="insp-empty" data-testid="export-error" style={{ color: "var(--danger)" }}>
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Map a thrown export `code: message` line to a friendly message. */
+function friendlyExportError(message: string): string {
+  const sep = message.indexOf(":");
+  const code = sep > 0 ? message.slice(0, sep).trim() : "";
+  if (code === "not_supported") return "This element has no document to export.";
+  return "Could not export to Markdown.";
+}
+
 /** The full metadata view for one inspected element. */
 function InspectorBody({
   data,
@@ -570,6 +640,9 @@ function InspectorBody({
           </MetaRow>
         </div>
       </div>
+
+      {/* Export to Markdown (T068) — document-bearing elements only. */}
+      {EXPORTABLE_TYPES.has(element.type) && <ExportMarkdownSection elementId={element.id} />}
 
       {/* Scheduler — the FSRS vs attention split, surfaced explicitly. */}
       <div className="insp-sec" data-testid="scheduler-section">

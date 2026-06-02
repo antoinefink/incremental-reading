@@ -20,25 +20,50 @@ import { Kbd } from "../../shell/Kbd";
 
 const PRIORITY_LABELS: readonly PriorityLabelInput[] = ["A", "B", "C", "D"];
 
-/** The file kinds this modal can import (only `epub` is wired in T067). */
-export type ImportFileKind = "epub";
+/** The file kinds this modal can import (EPUB from T067; Markdown/HTML from T068). */
+export type ImportFileKind = "epub" | "markdown" | "html";
 
-/** Per-kind copy + picker config. */
-const KIND_CONFIG: Record<ImportFileKind, { title: string; choose: string; ext: string }> = {
-  epub: { title: "Import EPUB", choose: "Choose EPUB…", ext: ".epub" },
+/** Per-kind copy + picker config + hint shown before a file is chosen. */
+const KIND_CONFIG: Record<
+  ImportFileKind,
+  { title: string; choose: string; ext: string; hint: string }
+> = {
+  epub: {
+    title: "Import EPUB",
+    choose: "Choose EPUB…",
+    ext: ".epub",
+    hint: "The whole book imports locally as chapters — its original .epub is kept in your vault.",
+  },
+  markdown: {
+    title: "Import Markdown",
+    choose: "Choose Markdown…",
+    ext: ".md",
+    hint: "The Markdown imports locally as a source — headings, code, links and lists are preserved.",
+  },
+  html: {
+    title: "Import HTML",
+    choose: "Choose HTML…",
+    ext: ".html",
+    hint: "The HTML is sanitized and imported locally — its original .html is kept in your vault.",
+  },
 };
 
-/** Map a thrown EPUB-import `code: message` error line to a friendly message. */
+/** Map a thrown import `code: message` error line to a friendly message. */
 function friendlyError(message: string): string {
   const codes: Record<string, string> = {
+    // EPUB (T067).
     not_epub: "That file is not an EPUB.",
     not_a_zip: "That file is not a valid EPUB.",
     no_opf: "That EPUB is malformed (no package file).",
     no_spine: "That EPUB declares no readable chapters.",
     empty_book: "That EPUB has no chapter content.",
     drm: "That EPUB is DRM-protected and can't be imported.",
-    too_large: "That EPUB is too large to import.",
-    unreadable: "That EPUB could not be read.",
+    // Document import (T068).
+    not_supported: "That file type isn't supported.",
+    empty: "There's nothing to import in that file.",
+    // Shared.
+    too_large: "That file is too large to import.",
+    unreadable: "That file could not be read.",
   };
   const sep = message.indexOf(":");
   const code = sep > 0 ? message.slice(0, sep).trim() : "";
@@ -51,30 +76,47 @@ function basename(absPath: string): string {
   return parts[parts.length - 1] ?? absPath;
 }
 
+/** The selectable file kinds, in display order. */
+const KIND_ORDER: readonly ImportFileKind[] = ["epub", "markdown", "html"];
+
+/** Short label for the kind selector chips. */
+const KIND_LABEL: Record<ImportFileKind, string> = {
+  epub: "EPUB",
+  markdown: "Markdown",
+  html: "HTML",
+};
+
 export type ImportFileModalProps = {
   open: boolean;
-  /** The file kind to import (selects the picker filter + copy). */
-  kind: ImportFileKind;
+  /** The file kind to start on (the user can switch between EPUB / Markdown / HTML). */
+  initialKind?: ImportFileKind;
   onClose: () => void;
-  /** Called with the new BOOK source id after a successful import. */
+  /** Called with the new source/book id after a successful import. */
   onImported: (id: string) => void;
 };
 
-export function ImportFileModal({ open, kind, onClose, onImported }: ImportFileModalProps) {
+export function ImportFileModal({
+  open,
+  initialKind = "epub",
+  onClose,
+  onImported,
+}: ImportFileModalProps) {
+  const [kind, setKind] = useState<ImportFileKind>(initialKind);
   const config = KIND_CONFIG[kind];
   const [path, setPath] = useState<string | null>(null);
   const [priority, setPriority] = useState<PriorityLabelInput>("C");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset on open.
+  // Reset on open (seed the kind from the prop the chip passed).
   useEffect(() => {
     if (!open) return;
+    setKind(initialKind);
     setPath(null);
     setPriority("C");
     setError(null);
     setSubmitting(false);
-  }, [open]);
+  }, [open, initialKind]);
 
   // Open the native picker (main-side) and remember the chosen path.
   const choose = useCallback(async () => {
@@ -89,21 +131,25 @@ export function ImportFileModal({ open, kind, onClose, onImported }: ImportFileM
     }
   }, [kind, submitting]);
 
-  // Import the chosen file (main parses + persists).
+  // Import the chosen file (main parses + persists). Dispatch on the file kind:
+  // EPUB → the book/chapter importer; Markdown/HTML → the document importer.
   const submit = useCallback(async () => {
     if (!path || submitting || !isDesktop()) return;
     setSubmitting(true);
     setError(null);
     try {
-      const result = await appApi.importEpubSource({ path, priority });
-      if (result.status === "imported") {
-        onImported(result.bookId);
+      if (kind === "epub") {
+        const result = await appApi.importEpubSource({ path, priority });
+        if (result.status === "imported") onImported(result.bookId);
+      } else {
+        const result = await appApi.importDocumentSource({ path, format: kind, priority });
+        if (result.status === "imported") onImported(result.id);
       }
     } catch (e) {
       setError(friendlyError(e instanceof Error ? e.message : String(e)));
       setSubmitting(false);
     }
-  }, [path, priority, submitting, onImported]);
+  }, [kind, path, priority, submitting, onImported]);
 
   // Esc to close, ⌘↵ to import while open.
   useEffect(() => {
@@ -163,6 +209,37 @@ export function ImportFileModal({ open, kind, onClose, onImported }: ImportFileM
 
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
             <div>
+              <span className="mb-1.5 block font-medium text-sm text-text-2">Format</span>
+              <div className="flex gap-1.5" data-testid="import-file-kind">
+                {KIND_ORDER.map((k) => {
+                  const active = kind === k;
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      data-testid={`import-file-kind-${k}`}
+                      aria-pressed={active}
+                      onClick={() => {
+                        // Switching the format clears the chosen path (its extension
+                        // no longer matches) so the user re-picks for the new kind.
+                        setKind(k);
+                        setPath(null);
+                        setError(null);
+                      }}
+                      className={
+                        active
+                          ? "inline-flex flex-1 items-center justify-center rounded-md border border-accent-soft-bd bg-accent-soft px-2 py-1 font-medium text-accent-text text-sm"
+                          : "inline-flex flex-1 items-center justify-center rounded-md border border-border bg-surface px-2 py-1 font-medium text-sm text-text-2 hover:text-text"
+                      }
+                    >
+                      {KIND_LABEL[k]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
               <button
                 type="button"
                 data-testid="import-file-choose"
@@ -177,10 +254,7 @@ export function ImportFileModal({ open, kind, onClose, onImported }: ImportFileM
                   {basename(path)}
                 </p>
               ) : (
-                <p className="mt-2 text-text-3 text-xs">
-                  The whole book imports locally as chapters — its original {config.ext} is kept in
-                  your vault.
-                </p>
+                <p className="mt-2 text-text-3 text-xs">{config.hint}</p>
               )}
             </div>
 

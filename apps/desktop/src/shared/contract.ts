@@ -981,6 +981,68 @@ export type SourcesImportEpubResult = {
 };
 
 // ---------------------------------------------------------------------------
+// sources.importDocument() / importMarkdownText() / documents.exportMarkdown()
+//   (T068 — local Markdown & HTML import/export)
+// ---------------------------------------------------------------------------
+
+/**
+ * Import a local `.md`/`.markdown` or `.html`/`.htm` file (T068). After the renderer
+ * has a chosen path (via {@link PickImportFileRequestSchema} with kind
+ * `markdown`/`html`), it calls this with the path + format; MAIN reads + parses the
+ * bytes (Markdown via `markdown-it`, HTML via sanitize+HTML→PM) and creates an `inbox`
+ * source in one transaction. The body never crosses the IPC bridge — only the path.
+ */
+export const SourcesImportDocumentRequestSchema = z.object({
+  path: z.string().min(1),
+  format: z.enum(["markdown", "html"]),
+  priority: PriorityLabelSchema.optional(),
+  reasonAdded: z.string().trim().max(2048).optional(),
+});
+export type SourcesImportDocumentRequest = z.infer<typeof SourcesImportDocumentRequestSchema>;
+
+/**
+ * Import PASTED Markdown text (T068) — the paste path, no file read. MAIN parses the
+ * text + creates an `inbox` source. The optional `title` overrides the first-heading /
+ * default title.
+ */
+export const SourcesImportMarkdownTextRequestSchema = z.object({
+  text: z.string().min(1),
+  title: z.string().trim().max(512).optional(),
+  priority: PriorityLabelSchema.optional(),
+  reasonAdded: z.string().trim().max(2048).optional(),
+});
+export type SourcesImportMarkdownTextRequest = z.infer<
+  typeof SourcesImportMarkdownTextRequestSchema
+>;
+
+/**
+ * The document-import result (Markdown/HTML file OR pasted Markdown). Discriminated on
+ * `status` so future arms can be added without a breaking change; `"imported"` carries
+ * the new source id + its inbox summary.
+ */
+export type SourcesImportDocumentResult = {
+  readonly status: "imported";
+  readonly id: string;
+  readonly item: InboxItemSummary;
+};
+
+/**
+ * Export a document (source/extract/topic) to Markdown (T068). MAIN loads the stored
+ * ProseMirror doc, serializes it, and writes the `.md` into the managed `exports/`
+ * vault dir, returning the path. Read-only on the DB (no mutation, no op-log entry).
+ */
+export const DocumentsExportMarkdownRequestSchema = z.object({
+  elementId: z.string().min(1),
+});
+export type DocumentsExportMarkdownRequest = z.infer<typeof DocumentsExportMarkdownRequestSchema>;
+
+/** The export result — the relative + absolute path of the written `.md`. */
+export type DocumentsExportMarkdownResult = {
+  readonly relativePath: string;
+  readonly absPath: string;
+};
+
+// ---------------------------------------------------------------------------
 // sources.extractRegion() / sources.getRegionImage()  (T065 — PDF region extract)
 // ---------------------------------------------------------------------------
 
@@ -3028,6 +3090,16 @@ export interface AppApi {
      */
     importEpub(request: SourcesImportEpubRequest): Promise<SourcesImportEpubResult>;
     /**
+     * Import a local `.md`/`.html` file into an `inbox` source (T068) — MAIN reads +
+     * parses the bytes (Markdown via `markdown-it`, HTML via sanitize+HTML→PM) and
+     * creates the source in one transaction. The body never crosses the bridge.
+     */
+    importDocument(request: SourcesImportDocumentRequest): Promise<SourcesImportDocumentResult>;
+    /** Import PASTED Markdown text into an `inbox` source (T068) — no file read. */
+    importMarkdownText(
+      request: SourcesImportMarkdownTextRequest,
+    ): Promise<SourcesImportDocumentResult>;
+    /**
      * Crop a PDF page region into a scheduled `media_fragment` extract (T065) —
      * the renderer ships the cropped PNG + the normalized rect + page; MAIN streams
      * the bytes into the vault and creates the region extract + its page+region
@@ -3073,6 +3145,11 @@ export interface AppApi {
     get(request: DocumentsGetRequest): Promise<DocumentsGetResult>;
     /** Upsert an element's document body; logs `update_document` (T015). */
     save(request: DocumentsSaveRequest): Promise<DocumentsSaveResult>;
+    /**
+     * Export an element's document body to a `.md` in the managed `exports/` vault
+     * (T068). Read-only on the DB (no mutation, no op-log entry); returns the path.
+     */
+    exportMarkdown(request: DocumentsExportMarkdownRequest): Promise<DocumentsExportMarkdownResult>;
     /** Document-mark annotations (highlight / extracted-span / processed-span) (T020). */
     readonly marks: {
       /** Add a mark over a stable block range; logs `update_document` (T020). */

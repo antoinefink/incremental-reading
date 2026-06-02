@@ -71,7 +71,7 @@ const IMPORT_OPTS: {
   { icon: "link", label: "Paste URL", hint: "Fetch & clean the page", action: "url" },
   { icon: "paste", label: "Paste text", hint: "Plain text", action: "manual" },
   { icon: "source", label: "Import PDF", hint: "Read a PDF incrementally", action: "pdf" },
-  { icon: "library", label: "Import file", hint: "EPUB book", action: "file" },
+  { icon: "library", label: "Import file", hint: "EPUB, Markdown, HTML", action: "file" },
   { icon: "globe", label: "Browser capture", hint: "Pair the extension", action: "capture" },
   { icon: "text", label: "Manual note", hint: "Your own idea", action: "manual" },
 ];
@@ -648,7 +648,7 @@ export function InboxScreen() {
 
       <ImportFileModal
         open={fileModalOpen}
-        kind="epub"
+        initialKind="epub"
         onClose={() => setFileModalOpen(false)}
         onImported={(id) => {
           setFileModalOpen(false);

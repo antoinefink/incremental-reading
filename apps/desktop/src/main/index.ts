@@ -66,6 +66,8 @@ function bootstrap(): void {
     // The vault asset-root the URL-import service (T060) writes snapshots into;
     // injected once at open() so the IPC handler never threads a path per-call.
     assetsDir: paths.assetsDir,
+    // The exports-root the Markdown-export service (T068) writes `.md` files into.
+    exportsDir: paths.exportsDir,
     // DEV/E2E-only SSRF-guard escape: the URL-import E2E serves its article
     // fixture from a 127.0.0.1 server (the guard normally blocks loopback). Honor
     // INTERLEAVE_ALLOW_LOOPBACK_IMPORT ONLY in an unpackaged build, mirroring the
