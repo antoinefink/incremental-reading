@@ -169,6 +169,8 @@ import type {
   SettingValue,
   SourcesAcceptOcrRequest,
   SourcesAcceptOcrResult,
+  SourcesExtractClipRequest,
+  SourcesExtractClipResult,
   SourcesExtractRegionRequest,
   SourcesExtractRegionResult,
   SourcesGetMediaDataRequest,
@@ -229,6 +231,7 @@ import {
 import { EpubImportService } from "./epub-import-service";
 import { type HighlightImportResult, HighlightImportService } from "./highlight-import-service";
 import type { JobRunner } from "./job-runner";
+import { MediaClipService } from "./media-clip-service";
 import { MediaImportService } from "./media-import-service";
 import { OcrService } from "./ocr-service";
 import { PdfImportService } from "./pdf-import-service";
@@ -343,6 +346,13 @@ export class DbService {
    * Built lazily (it needs the extraction service + the `assetVaultService`).
    */
   private pdfRegion: PdfRegionService | null = null;
+  /**
+   * The media clip-extract orchestrator (T074) — clip a video/audio span into a
+   * scheduled `media_fragment` (start timestamp + clip window source location). Built
+   * lazily (it needs the extraction service); asset-free (the clip references the
+   * original media — no re-encoding).
+   */
+  private mediaClip: MediaClipService | null = null;
   /**
    * The OCR orchestrator (T066) — write the page PNG to the vault + enqueue the
    * `ocr` job; apply the worker result into `ocr_pages` + the durable vault json;
@@ -487,6 +497,7 @@ export class DbService {
     this.ankiImport = null;
     this.ankiExport = null;
     this.pdfRegion = null;
+    this.mediaClip = null;
     this.ocr = null;
     this.runner = null;
     this.assetsDir = null;
@@ -1314,6 +1325,42 @@ export class DbService {
       assetVault: this.assetVaultService,
     });
     return this.pdfRegion;
+  }
+
+  /**
+   * The media clip-extract service (T074), lazily built on first read against the
+   * open DB + repos + the extraction service. Asset-free (the clip references the
+   * original media — no vault step), so it needs NO `assetVaultService`/`assetsDir`.
+   */
+  private get mediaClipService(): MediaClipService {
+    if (this.mediaClip) return this.mediaClip;
+    this.mediaClip = new MediaClipService({
+      db: this.require().db,
+      repositories: this.repos,
+      extraction: this.extractionService,
+    });
+    return this.mediaClip;
+  }
+
+  /**
+   * Clip a media span into a scheduled `media_fragment` (T074). The renderer ships
+   * only the `{ startMs, endMs }` + the source id + the anchor block id + the
+   * (optional) transcript segment (already validated at the IPC boundary); MAIN
+   * creates the fragment + its start-timestamp + clip-window source location in one
+   * transaction. NO bytes are cut/re-encoded — the clip references the original media.
+   */
+  async extractClip(request: SourcesExtractClipRequest): Promise<SourcesExtractClipResult> {
+    // `await` so a synchronous validation throw in MediaClipService surfaces as a
+    // rejected promise at the IPC boundary (not a sync throw the handler misses).
+    return await this.mediaClipService.extractClip({
+      sourceElementId: request.sourceElementId as ElementId,
+      startMs: request.startMs,
+      endMs: request.endMs,
+      anchorBlockId: request.anchorBlockId,
+      transcriptSegment: request.transcriptSegment ?? null,
+      caption: request.caption ?? null,
+      ...(request.priority ? { priority: request.priority } : {}),
+    });
   }
 
   /**

@@ -36,6 +36,7 @@ export const IPC_CHANNELS = {
   sourcesImportHighlights: "sources:importHighlights",
   sourcesExtractRegion: "sources:extractRegion",
   sourcesGetRegionImage: "sources:getRegionImage",
+  sourcesExtractClip: "sources:extractClip",
   sourcesRunOcr: "sources:runOcr",
   sourcesGetOcr: "sources:getOcr",
   sourcesAcceptOcr: "sources:acceptOcr",

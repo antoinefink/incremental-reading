@@ -78,6 +78,7 @@ import {
   SettingsUpdateManyRequestSchema,
   SettingsUpdateRequestSchema,
   SourcesAcceptOcrRequestSchema,
+  SourcesExtractClipRequestSchemaRefined,
   SourcesExtractRegionRequestSchema,
   SourcesGetMediaDataRequestSchema,
   SourcesGetOcrRequestSchema,
@@ -518,6 +519,15 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.sourcesGetRegionImage, (_event, rawRequest: unknown) => {
     const request = SourcesGetRegionImageRequestSchema.parse(rawRequest);
     return dbService.getRegionImage(request);
+  });
+
+  // Clip a media span into a scheduled `media_fragment` (T074). The renderer ships
+  // only the `{ startMs, endMs }` + the source id + the anchor block id + the
+  // (optional) transcript segment; MAIN creates the fragment + its clip source
+  // location in one transaction. NO re-encoding — the clip references the original.
+  ipcMain.handle(IPC_CHANNELS.sourcesExtractClip, async (_event, rawRequest: unknown) => {
+    const request = SourcesExtractClipRequestSchemaRefined.parse(rawRequest);
+    return await dbService.extractClip(request);
   });
 
   // Run OCR on a scanned/text-free PDF page (T066). The renderer ships the rendered

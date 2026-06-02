@@ -58,6 +58,7 @@ import {
 } from "../lib/appApi";
 import { useDocument } from "../pages/source/useDocument";
 import { CardBuilder } from "./CardBuilder";
+import { ClipMiniPlayer } from "./ClipMiniPlayer";
 import { useNavigateToLocation } from "./navigateToLocation";
 import { SelectionToolbar, type SelectionToolbarAction } from "./SelectionToolbar";
 import { useTextSelection } from "./useTextSelection";
@@ -561,6 +562,36 @@ export function ExtractView() {
                 }}
               >
                 <Icon name="source" size={12} /> {location.label ?? "Jump to page region"}
+              </button>
+            </div>
+          ) : null}
+          {/* A media clip (T074): a looping mini player + a jump-to-source affordance
+              that seeks the media reader to the clip start. Shown for a `media_fragment`
+              extract with a clip window. */}
+          {element?.type === "media_fragment" && location?.clip ? (
+            <div className="extract-clip" data-testid="extract-clip">
+              <div className="insp-sec__title">Clip</div>
+              {location.sourceElementId ? (
+                <ClipMiniPlayer
+                  sourceElementId={location.sourceElementId}
+                  startMs={location.clip.startMs}
+                  endMs={location.clip.endMs}
+                />
+              ) : null}
+              <button
+                type="button"
+                className="extract-jump"
+                data-testid="extract-clip-jump"
+                onClick={() => {
+                  if (!location?.clip) return;
+                  void navigate({
+                    to: "/source/$id",
+                    params: { id: location.sourceElementId },
+                    search: { t: location.clip.startMs, n: Date.now() } as Record<string, unknown>,
+                  });
+                }}
+              >
+                <Icon name="source" size={12} /> {location.label ?? "Jump to clip"}
               </button>
             </div>
           ) : null}

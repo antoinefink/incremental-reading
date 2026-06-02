@@ -91,9 +91,10 @@ describe("sha256 / sha256File (T047)", () => {
 
 describe("resolveSchemaVersion (T047)", () => {
   it("maps the applied-migration count to the latest tag via the real journal", () => {
-    // The packaged journal currently has 16 entries (0000…0015). With all applied,
-    // the latest tag is the media `document_blocks.timestamp_ms` + `sources.media_kind`
-    // widening (T073); fewer applied resolve to the prior tags.
+    // The packaged journal currently has 17 entries (0000…0016). With all applied,
+    // the latest tag is the media `source_locations.clip` widening (T074); fewer
+    // applied resolve to the prior tags.
+    expect(resolveSchemaVersion(MIGRATIONS_DIR, 17)).toBe("0016_married_prima");
     expect(resolveSchemaVersion(MIGRATIONS_DIR, 16)).toBe("0015_flaky_william_stryker");
     expect(resolveSchemaVersion(MIGRATIONS_DIR, 15)).toBe("0014_remarkable_yellow_claw");
     expect(resolveSchemaVersion(MIGRATIONS_DIR, 14)).toBe("0013_charming_senator_kelly");

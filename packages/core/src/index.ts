@@ -68,6 +68,7 @@ export {
 } from "./cloze";
 // The universal element + lineage neighbours (./element).
 export type {
+  ClipWindow,
   Element,
   ElementLocation,
   ElementRelation,

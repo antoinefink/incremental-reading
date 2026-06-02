@@ -195,6 +195,10 @@ export interface LocationSummary {
   readonly page: number | null;
   /** The PDF region bbox (T065) for a `media_fragment` region extract, else `null`. */
   readonly region: RegionRectInput | null;
+  /** The media clip window (T074) for a `media_fragment` clip extract, else `null`. */
+  readonly clip: ClipWindowSummary | null;
+  /** The media clip start in ms (T074) — mirrors `clip.startMs`; else `null`. */
+  readonly timestampMs: number | null;
   /** The source element this location points INTO — the reader to open on jump (T022). */
   readonly sourceElementId: string;
   /** Ordered STABLE block ids the selection spans (the scroll target is the first). */
@@ -737,6 +741,59 @@ export interface SourcesExtractRegionResult {
   readonly id: string;
   readonly element: RegionExtractSummary;
   readonly location: RegionLocationSummary;
+}
+
+/** Clip a media span into a scheduled `media_fragment` extract (T074). */
+export interface SourcesExtractClipRequest {
+  readonly sourceElementId: string;
+  /** The clip start in integer milliseconds. */
+  readonly startMs: number;
+  /** The clip end in integer milliseconds (`endMs > startMs`). */
+  readonly endMs: number;
+  /** The stable block id the clip anchors to (the first cue in range, or placeholder). */
+  readonly anchorBlockId: string;
+  /** The transcript segment under the range (when a transcript exists), else null. */
+  readonly transcriptSegment?: string | null;
+  /** Optional user caption; defaults to the "Clip M:SS–M:SS" label main-side. */
+  readonly caption?: string | null;
+  /** Optional A/B/C/D priority override; else INHERITS the source's priority. */
+  readonly priority?: PriorityLabelInput;
+}
+
+/** A clip window `{ startMs, endMs }` (integer ms) — the IPC mirror of `ClipWindow` (T074). */
+export interface ClipWindowSummary {
+  readonly startMs: number;
+  readonly endMs: number;
+}
+
+/** The created clip extract's `media_fragment` summary (T074). */
+export interface ClipExtractSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly status: string;
+  readonly stage: string;
+  readonly priority: number;
+  readonly title: string;
+  readonly dueAt: string | null;
+  readonly sourceId: string | null;
+  readonly parentId: string | null;
+}
+
+/** The created clip extract's stored clip source-location anchor (T074). */
+export interface ClipLocationSummary {
+  readonly id: string;
+  readonly sourceElementId: string;
+  /** The start timestamp in milliseconds (mirrors `clip.startMs`). */
+  readonly timestampMs: number | null;
+  /** The clip window `{ startMs, endMs }`, else `null`. */
+  readonly clip: ClipWindowSummary | null;
+  readonly label: string | null;
+}
+
+export interface SourcesExtractClipResult {
+  readonly id: string;
+  readonly element: ClipExtractSummary;
+  readonly location: ClipLocationSummary;
 }
 
 /** Serve a region extract's cropped image bytes to the renderer (T065). */
@@ -2015,6 +2072,7 @@ export interface AppApi {
     ): Promise<SourcesImportHighlightsResult>;
     extractRegion(request: SourcesExtractRegionRequest): Promise<SourcesExtractRegionResult>;
     getRegionImage(request: SourcesGetRegionImageRequest): Promise<SourcesGetRegionImageResult>;
+    extractClip(request: SourcesExtractClipRequest): Promise<SourcesExtractClipResult>;
     runOcr(request: SourcesRunOcrRequest): Promise<SourcesRunOcrResult>;
     getOcr(request: SourcesGetOcrRequest): Promise<SourcesGetOcrResult>;
     acceptOcr(request: SourcesAcceptOcrRequest): Promise<SourcesAcceptOcrResult>;
@@ -2334,6 +2392,15 @@ export const appApi = {
   /** Serve a region extract's cropped image bytes to the renderer (T065). */
   getRegionImage(request: SourcesGetRegionImageRequest): Promise<SourcesGetRegionImageResult> {
     return requireAppApi().sources.getRegionImage(request);
+  },
+  /**
+   * Clip a media span into a scheduled `media_fragment` extract (T074) — ships only
+   * the `{ startMs, endMs }` + the source id + the anchor block id + the (optional)
+   * transcript segment; MAIN creates the fragment + its clip source location in one
+   * transaction. NO re-encoding — the clip references the original media.
+   */
+  extractClip(request: SourcesExtractClipRequest): Promise<SourcesExtractClipResult> {
+    return requireAppApi().sources.extractClip(request);
   },
   /**
    * Run OCR on a scanned/text-free PDF page (T066) — ships the rendered page PNG;

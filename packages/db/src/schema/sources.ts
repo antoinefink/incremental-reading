@@ -86,6 +86,14 @@ export const sourceLocations = sqliteTable(
      * region; pure widening, no backfill (existing rows get `null`).
      */
     region: text("region"),
+    /**
+     * Clip window JSON `{ startMs, endMs }` for a video/audio clip extract (T074),
+     * else `null`. A clip is a TIME WINDOW onto the original media (the location's
+     * `timestamp_ms` is the clip's start); NO bytes are cut/re-encoded — the player
+     * seeks the original between `startMs`/`endMs`. Pure widening, no backfill
+     * (existing rows get `null`).
+     */
+    clip: text("clip"),
     /** Human-readable label, e.g. "Chapter 2 · ¶4". */
     label: text("label"),
     /** Verbatim snapshot of the selected text at extraction time. */

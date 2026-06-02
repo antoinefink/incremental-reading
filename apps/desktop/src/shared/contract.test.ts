@@ -73,6 +73,7 @@ import {
   SettingsUpdateManyRequestSchema,
   SettingsUpdateRequestSchema,
   SourcesAcceptOcrRequestSchema,
+  SourcesExtractClipRequestSchemaRefined,
   SourcesExtractRegionRequestSchema,
   SourcesGetMediaDataRequestSchema,
   type SourcesGetMediaDataResult,
@@ -134,6 +135,7 @@ describe("IPC channels", () => {
         "sources:importHighlights",
         "sources:extractRegion",
         "sources:getRegionImage",
+        "sources:extractClip",
         "sources:runOcr",
         "sources:getOcr",
         "sources:acceptOcr",
@@ -715,6 +717,58 @@ describe("SourcesExtractRegionRequestSchema (T065)", () => {
   it("SourcesGetRegionImageRequestSchema requires an elementId", () => {
     expect(SourcesGetRegionImageRequestSchema.parse({ elementId: "el_1" }).elementId).toBe("el_1");
     expect(() => SourcesGetRegionImageRequestSchema.parse({})).toThrow();
+  });
+});
+
+describe("SourcesExtractClipRequestSchema (T074)", () => {
+  const base = {
+    sourceElementId: "el_media",
+    startMs: 42_000,
+    endMs: 75_000,
+    anchorBlockId: "cue-3",
+  };
+
+  it("accepts a valid clip request (and optional transcript/caption/priority)", () => {
+    const parsed = SourcesExtractClipRequestSchemaRefined.parse({
+      ...base,
+      transcriptSegment: "the spoken phrase",
+      caption: "Key phrase",
+      priority: "B",
+    });
+    expect(parsed.startMs).toBe(42_000);
+    expect(parsed.endMs).toBe(75_000);
+    expect(parsed.transcriptSegment).toBe("the spoken phrase");
+    expect(parsed.priority).toBe("B");
+  });
+
+  it("accepts a bare clip request (no transcript/caption/priority)", () => {
+    const parsed = SourcesExtractClipRequestSchemaRefined.parse(base);
+    expect(parsed.anchorBlockId).toBe("cue-3");
+  });
+
+  it("rejects an inverted/zero-length window (endMs <= startMs)", () => {
+    expect(() =>
+      SourcesExtractClipRequestSchemaRefined.parse({ ...base, startMs: 75_000, endMs: 42_000 }),
+    ).toThrow();
+    expect(() =>
+      SourcesExtractClipRequestSchemaRefined.parse({ ...base, startMs: 10_000, endMs: 10_000 }),
+    ).toThrow();
+  });
+
+  it("rejects a negative or non-integer timestamp", () => {
+    expect(() => SourcesExtractClipRequestSchemaRefined.parse({ ...base, startMs: -1 })).toThrow();
+    expect(() =>
+      SourcesExtractClipRequestSchemaRefined.parse({ ...base, startMs: 100.5 }),
+    ).toThrow();
+  });
+
+  it("rejects an over-long transcript segment (length cap at the bridge)", () => {
+    expect(() =>
+      SourcesExtractClipRequestSchemaRefined.parse({
+        ...base,
+        transcriptSegment: "x".repeat(8001),
+      }),
+    ).toThrow();
   });
 });
 

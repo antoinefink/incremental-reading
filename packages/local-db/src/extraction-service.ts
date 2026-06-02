@@ -44,6 +44,7 @@
 
 import type {
   BlockId,
+  ClipWindow,
   Element,
   ElementId,
   ElementLocation,
@@ -56,7 +57,11 @@ import { addDays, rawExtractIntervalDays } from "@interleave/scheduler";
 import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
 import { newElementId, nowIso } from "./ids";
-import { deriveSourceLocationLabel, type LabelBlock } from "./source-location-label";
+import {
+  deriveClipLabel,
+  deriveSourceLocationLabel,
+  type LabelBlock,
+} from "./source-location-label";
 import { SourceRepository } from "./source-repository";
 
 // The starter `raw_extract +1..7d` interval math now lives ONCE in
@@ -125,6 +130,30 @@ export interface CreateRegionExtractInput {
   readonly caption?: string | null;
   /** The OCR/text under the region when resolved; else a generated snapshot. */
   readonly selectedText?: string | null;
+}
+
+/** Arguments to create a media CLIP extract (T074 — a `media_fragment`). */
+export interface CreateClipExtractInput {
+  /** Optional pre-minted element id (symmetry with the region path); else minted. */
+  readonly elementId?: ElementId;
+  /** The media source element this clip was selected over (the lineage root + parent). */
+  readonly sourceElementId: ElementId;
+  /** The clip start in integer milliseconds (the location's `timestamp_ms`). */
+  readonly startMs: number;
+  /** The clip end in integer milliseconds (`endMs > startMs`). */
+  readonly endMs: number;
+  /**
+   * The stable block id the clip anchors to — the first transcript cue in range, or
+   * the title-heading/placeholder block for a transcript-less source. Jump-to-source
+   * lands here.
+   */
+  readonly anchorBlockId: BlockId;
+  /** The transcript text spanning the range (when a transcript exists), else null. */
+  readonly transcriptSegment?: string | null;
+  /** Optional caption override; otherwise the generated "Clip M:SS–M:SS" label. */
+  readonly caption?: string | null;
+  /** The inherited (source) priority for the fragment. */
+  readonly priority: Priority;
 }
 
 /** Build a short title from a selection (first ~80 chars, single line). */
@@ -318,6 +347,98 @@ export class ExtractionService {
       }
 
       // 5) initial ATTENTION due date + status scheduled (a region fragment is an
+      //    attention-scheduled topic, NEVER FSRS — no review_states row).
+      const dueAt = addDays(nowIso(), rawExtractIntervalDays(input.priority));
+      const scheduled = this.elements.rescheduleWithin(tx, element.id, dueAt, "scheduled");
+
+      return { element: scheduled, location };
+    });
+  }
+
+  /**
+   * Create a media CLIP extract (T074) — a `media_fragment` element anchoring a
+   * `{ startMs, endMs }` time window onto the original media. Mirrors
+   * {@link createRegionExtract} but: the `source_locations` anchor carries
+   * `timestampMs = startMs` + a `clip = { startMs, endMs }` window (NOT a page+region),
+   * the body is the transcript segment under the range (or a generated caption when
+   * transcript-less), the label reads "Clip M:SS–M:SS", and there is NO asset — a clip
+   * is a TIME WINDOW on the existing media, not a cut/re-encoded sub-file (the reader
+   * + the T075 audio card seek the original between the two times, keeping the app
+   * `ffmpeg`-free). Everything else matches the extraction path: a `derived_from` edge,
+   * inherited priority/tags, and an initial ATTENTION `due_at` (NEVER FSRS — no
+   * `review_states` row). All of it commits in ONE transaction (`create_element` +
+   * `create_extract`). Returns the new `media_fragment` + its clip source-location.
+   *
+   * Validation of `0 ≤ startMs < endMs ≤ durationMs` is the caller's job (the
+   * main-side `MediaClipService`, which knows the media `durationMs`); this method
+   * asserts only the cheap `startMs < endMs` invariant so a corrupt window never
+   * reaches the DB.
+   */
+  createClipExtract(input: CreateClipExtractInput): ExtractionResult {
+    const startMs = Math.floor(input.startMs);
+    const endMs = Math.floor(input.endMs);
+    if (!(startMs >= 0 && endMs > startMs)) {
+      throw new Error(
+        `ExtractionService.createClipExtract: invalid clip window [${input.startMs}, ${input.endMs})`,
+      );
+    }
+    const elementId = input.elementId ?? newElementId();
+    const label = deriveClipLabel(startMs, endMs);
+    // The title prefers an explicit caption, then a trimmed transcript prefix, then
+    // the clip label — never empty (the snapshot must never dead-end).
+    const segment = (input.transcriptSegment ?? "").trim();
+    const title = (input.caption ?? "").trim() || (segment ? titleFromSelection(segment) : label);
+    // The body holds the transcript segment (as paragraphs) when present, else a
+    // caption paragraph ("Clip M:SS–M:SS") so the fragment reads as a mini-topic.
+    const conversion = plainTextToProseMirrorDoc(segment || label);
+    // `selectedText` snapshots the transcript segment under the range; else the label.
+    const selectedText = segment || label;
+    const clip: ClipWindow = { startMs, endMs };
+    const inheritedTags = this.elements.listTags(input.sourceElementId);
+
+    return this.db.transaction((tx) => {
+      // 1) media_fragment element + its clip source-location anchor.
+      const { element, location } = this.sources.createExtractWithin(tx, {
+        id: elementId,
+        elementType: "media_fragment",
+        sourceElementId: input.sourceElementId,
+        parentId: input.sourceElementId,
+        locationSourceElementId: input.sourceElementId,
+        title,
+        priority: input.priority,
+        stage: "raw_extract",
+        selectedText,
+        blockIds: [input.anchorBlockId],
+        timestampMs: startMs,
+        clip,
+        label,
+      });
+
+      // 2) seed the transcript-segment/caption body + its stable blocks.
+      this.documents.upsertWithin(tx, {
+        elementId: element.id,
+        prosemirrorJson: conversion.doc,
+        plainText: conversion.plainText,
+        blocks: conversion.blocks.map((b) => ({
+          blockType: b.blockType,
+          order: b.order,
+          stableBlockId: b.stableBlockId,
+        })),
+      });
+
+      // 3) derived_from edge media_fragment → source (lineage is sacred).
+      this.elements.addRelationWithin(tx, {
+        fromElementId: element.id,
+        toElementId: input.sourceElementId,
+        relationType: "derived_from",
+      });
+
+      // 4) inherit the source's tags (priority inherited via the element above).
+      for (const tagName of inheritedTags) {
+        this.elements.addTagWithin(tx, element.id, tagName);
+      }
+
+      // 5) initial ATTENTION due date + status scheduled (a clip fragment is an
       //    attention-scheduled topic, NEVER FSRS — no review_states row).
       const dueAt = addDays(nowIso(), rawExtractIntervalDays(input.priority));
       const scheduled = this.elements.rescheduleWithin(tx, element.id, dueAt, "scheduled");

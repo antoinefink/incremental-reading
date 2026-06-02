@@ -70,6 +70,7 @@ import type {
   SettingsUpdateManyRequest,
   SettingsUpdateRequest,
   SourcesAcceptOcrRequest,
+  SourcesExtractClipRequest,
   SourcesExtractRegionRequest,
   SourcesGetMediaDataRequest,
   SourcesGetOcrRequest,
@@ -154,6 +155,8 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.sourcesExtractRegion, request),
     getRegionImage: (request: SourcesGetRegionImageRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.sourcesGetRegionImage, request),
+    extractClip: (request: SourcesExtractClipRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.sourcesExtractClip, request),
     runOcr: (request: SourcesRunOcrRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.sourcesRunOcr, request),
     getOcr: (request: SourcesGetOcrRequest) =>

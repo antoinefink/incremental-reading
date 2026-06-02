@@ -54,3 +54,23 @@ export function deriveSourceLocationLabel(
   // A paginated source prefixes the page so the label reads "Page N · ¶M".
   return page != null ? `Page ${page} · ${base}` : base;
 }
+
+/** Format an integer-millisecond offset as `m:ss` / `h:mm:ss` for a clip label. */
+function formatClipTime(ms: number): string {
+  const total = Math.floor(Math.max(0, ms) / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
+
+/**
+ * Derive a media CLIP label (T074) — "Clip M:SS–M:SS" from a `{ startMs, endMs }`
+ * window. A media `media_fragment`'s source location reads back to its time span the
+ * way the user sees the scrubber; the "¶N"/"Page N · ¶M" labels stay for text/PDF.
+ * Pure + framework-free (no DB), like {@link deriveSourceLocationLabel}.
+ */
+export function deriveClipLabel(startMs: number, endMs: number): string {
+  return `Clip ${formatClipTime(startMs)}–${formatClipTime(endMs)}`;
+}

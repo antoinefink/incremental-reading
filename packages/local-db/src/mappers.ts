@@ -9,6 +9,7 @@
 
 import type {
   Asset,
+  ClipWindow,
   Document,
   Element,
   ElementId,
@@ -83,9 +84,31 @@ export function rowToSourceLocation(row: SourceLocationRow): ElementLocation {
     // The PDF region bbox (T065), stored as JSON `{ x0, y0, x1, y1 }`; `null` for
     // text/page-only locations.
     region: parseRegion(row.region),
+    // The video/audio clip window (T074), stored as JSON `{ startMs, endMs }`;
+    // `null` for non-clip locations.
+    clip: parseClip(row.clip),
     label: row.label,
     selectedText: row.selectedText,
   };
+}
+
+/** Parse a stored `source_locations.clip` JSON cell into a {@link ClipWindow}, or `null`. */
+function parseClip(raw: string | null): ClipWindow | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<ClipWindow>;
+    if (
+      typeof value.startMs === "number" &&
+      typeof value.endMs === "number" &&
+      value.startMs >= 0 &&
+      value.endMs > value.startMs
+    ) {
+      return { startMs: value.startMs, endMs: value.endMs };
+    }
+  } catch {
+    // A malformed cell degrades to "no clip" rather than throwing on read.
+  }
+  return null;
 }
 
 /** Parse a stored `source_locations.region` JSON cell into a {@link RegionRect}, or `null`. */

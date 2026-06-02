@@ -18,7 +18,14 @@
  * value; until then this gives the inspector a faithful preview from seeded data.
  */
 
-import type { Element, ElementId, RegionRect, SourceLocationId, SourceRef } from "@interleave/core";
+import type {
+  ClipWindow,
+  Element,
+  ElementId,
+  RegionRect,
+  SourceLocationId,
+  SourceRef,
+} from "@interleave/core";
 import { priorityToLabel } from "@interleave/core";
 import type { Repositories } from "./index";
 import { resolveSourceRef } from "./source-ref-query";
@@ -89,6 +96,10 @@ export interface LocationSummary {
   readonly page: number | null;
   /** The PDF region bbox (T065) for a `media_fragment` region extract, else `null`. */
   readonly region: RegionRect | null;
+  /** The media clip window (T074) for a `media_fragment` clip extract, else `null`. */
+  readonly clip: ClipWindow | null;
+  /** The media clip start in ms (T074) — mirrors `clip.startMs`; else `null`. */
+  readonly timestampMs: number | null;
   /** The source element this location points INTO — the reader to open on jump (T022). */
   readonly sourceElementId: string;
   /** Ordered STABLE block ids the selection spans (the scroll target is the first). */
@@ -248,6 +259,9 @@ export class InspectorQuery {
           page: locationRow.page,
           // The PDF region bbox (T065) for a `media_fragment` region extract.
           region: locationRow.region,
+          // The media clip window (T074) for a `media_fragment` clip extract.
+          clip: locationRow.clip,
+          timestampMs: locationRow.timestampMs,
           // Jump target (T022): everything the renderer needs to open the source
           // reader and scroll/flash the originating block — no extra IPC.
           sourceElementId: locationRow.sourceElementId,

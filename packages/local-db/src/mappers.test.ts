@@ -1,18 +1,20 @@
 /**
- * Row → domain mapper tests (T065 — `source_locations.region` parsing).
+ * Row → domain mapper tests (T065 — `source_locations.region`; T074 —
+ * `source_locations.clip`).
  *
  * The region cell is JSON `{ x0, y0, x1, y1 }` (fractions) for a PDF region
- * extract, `null` otherwise. `rowToSourceLocation` must parse a well-formed rect,
- * degrade a malformed/partial cell to `null` (never throw on read), and keep a
- * `null` cell `null`.
+ * extract, `null` otherwise. The clip cell is JSON `{ startMs, endMs }` (integer ms)
+ * for a video/audio clip extract, `null` otherwise. `rowToSourceLocation` must parse
+ * a well-formed value, degrade a malformed/partial cell to `null` (never throw on
+ * read), and keep a `null` cell `null`.
  */
 
 import type { SourceLocationRow } from "@interleave/db";
 import { describe, expect, it } from "vitest";
 import { rowToSourceLocation } from "./mappers";
 
-/** A minimal `source_locations` row with an overridable `region` cell. */
-function row(region: string | null): SourceLocationRow {
+/** A minimal `source_locations` row with overridable `region`/`clip` cells. */
+function row(region: string | null, clip: string | null = null): SourceLocationRow {
   return {
     id: "loc-1",
     elementId: "el-1",
@@ -23,6 +25,7 @@ function row(region: string | null): SourceLocationRow {
     page: 3,
     timestampMs: null,
     region,
+    clip,
     label: "Page 3 · region",
     selectedText: "Figure on page 3",
   };
@@ -42,5 +45,25 @@ describe("rowToSourceLocation region (T065)", () => {
   it("degrades a malformed region cell to null (does not throw)", () => {
     expect(rowToSourceLocation(row("{not json")).region).toBeNull();
     expect(rowToSourceLocation(row(JSON.stringify({ x0: 0.1, y0: 0.2 }))).region).toBeNull();
+  });
+});
+
+describe("rowToSourceLocation clip (T074)", () => {
+  it("parses a well-formed clip window", () => {
+    const loc = rowToSourceLocation(row(null, JSON.stringify({ startMs: 42000, endMs: 75000 })));
+    expect(loc.clip).toEqual({ startMs: 42000, endMs: 75000 });
+  });
+
+  it("keeps a null clip null", () => {
+    expect(rowToSourceLocation(row(null, null)).clip).toBeNull();
+  });
+
+  it("degrades a malformed/inverted clip cell to null (does not throw)", () => {
+    expect(rowToSourceLocation(row(null, "{not json")).clip).toBeNull();
+    // Inverted (endMs <= startMs) and partial windows degrade to null.
+    expect(
+      rowToSourceLocation(row(null, JSON.stringify({ startMs: 9000, endMs: 9000 }))).clip,
+    ).toBeNull();
+    expect(rowToSourceLocation(row(null, JSON.stringify({ startMs: 1000 }))).clip).toBeNull();
   });
 });

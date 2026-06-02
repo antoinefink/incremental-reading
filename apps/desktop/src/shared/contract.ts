@@ -1307,6 +1307,82 @@ export interface SourcesGetRegionImageResult {
 }
 
 // ---------------------------------------------------------------------------
+// sources.extractClip()  (T074 — video/audio clip extract)
+// ---------------------------------------------------------------------------
+
+/** Max chars a transcript segment may carry across the IPC bridge for a clip (T074). */
+const MAX_CLIP_TRANSCRIPT_CHARS = 8000;
+
+/**
+ * Video/audio clip extraction (T074). The renderer selects a start/end timestamp (a
+ * scrubber range, or a run of transcript cues) and ships ONLY the `{ startMs, endMs }`
+ * + the source id + the anchor block id + the (optional) transcript segment under the
+ * range; MAIN creates a scheduled `media_fragment` whose `source_locations` row carries
+ * the start `timestamp_ms` + the clip window. NO bytes are cut/re-encoded — the clip is
+ * a time window onto the original media. The window is validated `startMs >= 0`,
+ * `endMs > startMs`, both integers; MAIN further checks `endMs ≤ durationMs`.
+ */
+export const SourcesExtractClipRequestSchema = z.object({
+  /** The media source element the clip was selected over (the lineage root). */
+  sourceElementId: ElementIdSchema,
+  /** The clip start in integer milliseconds. */
+  startMs: z.number().int().min(0),
+  /** The clip end in integer milliseconds. */
+  endMs: z.number().int().min(1),
+  /** The stable block id the clip anchors to (the first cue in range, or placeholder). */
+  anchorBlockId: z.string().min(1).max(128),
+  /** The transcript segment under the range (when a transcript exists), else null. */
+  transcriptSegment: z.string().max(MAX_CLIP_TRANSCRIPT_CHARS).nullable().optional(),
+  /** Optional user caption; defaults to the "Clip M:SS–M:SS" label main-side. */
+  caption: z.string().trim().max(512).nullable().optional(),
+  /** Optional A/B/C/D priority override; else INHERITS the source's priority. */
+  priority: PriorityLabelSchema.optional(),
+});
+export const SourcesExtractClipRequestSchemaRefined = SourcesExtractClipRequestSchema.refine(
+  (r) => r.endMs > r.startMs,
+  { message: "clip must have endMs > startMs" },
+);
+export type SourcesExtractClipRequest = z.infer<typeof SourcesExtractClipRequestSchema>;
+
+/** A clip window `{ startMs, endMs }` (integer ms), the IPC mirror of `ClipWindow`. */
+export interface ClipWindowSummary {
+  readonly startMs: number;
+  readonly endMs: number;
+}
+
+/** The created clip extract's `media_fragment` summary. */
+export interface ClipExtractSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly status: string;
+  readonly stage: string;
+  /** Numeric priority `0.0`–`1.0`; the UI derives the A/B/C/D label. */
+  readonly priority: number;
+  readonly title: string;
+  /** The attention `due_at` (ISO-8601) — a clip fragment is an attention item, never FSRS. */
+  readonly dueAt: string | null;
+  readonly sourceId: string | null;
+  readonly parentId: string | null;
+}
+
+/** The created clip extract's stored clip source-location anchor. */
+export interface ClipLocationSummary {
+  readonly id: string;
+  readonly sourceElementId: string;
+  /** The start timestamp in milliseconds (mirrors `clip.startMs`). */
+  readonly timestampMs: number | null;
+  /** The clip window `{ startMs, endMs }`, else `null`. */
+  readonly clip: ClipWindowSummary | null;
+  readonly label: string | null;
+}
+
+export interface SourcesExtractClipResult {
+  readonly id: string;
+  readonly element: ClipExtractSummary;
+  readonly location: ClipLocationSummary;
+}
+
+// ---------------------------------------------------------------------------
 // sources.runOcr() / sources.getOcr() / sources.acceptOcr()  (T066 — OCR fallback)
 // ---------------------------------------------------------------------------
 
@@ -3390,6 +3466,13 @@ export interface AppApi {
     extractRegion(request: SourcesExtractRegionRequest): Promise<SourcesExtractRegionResult>;
     /** Serve a region extract's cropped image bytes to the renderer (T065). */
     getRegionImage(request: SourcesGetRegionImageRequest): Promise<SourcesGetRegionImageResult>;
+    /**
+     * Clip a media span into a scheduled `media_fragment` (T074) — the renderer ships
+     * only the `{ startMs, endMs }` + the source id + the anchor block id + the
+     * (optional) transcript segment; MAIN creates the fragment + its clip source
+     * location in one transaction. NO re-encoding — the clip references the original.
+     */
+    extractClip(request: SourcesExtractClipRequest): Promise<SourcesExtractClipResult>;
     /**
      * Run OCR on one scanned/text-free PDF page (T066) — the renderer ships the
      * rendered page PNG; MAIN writes it to the vault + enqueues an `ocr` job on the

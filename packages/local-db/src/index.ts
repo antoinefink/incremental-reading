@@ -73,6 +73,7 @@ export {
   trimExtractText,
 } from "./extract-service";
 export {
+  type CreateClipExtractInput,
   type CreateExtractionInput,
   type CreateRegionExtractInput,
   type ExtractionResult,
@@ -193,7 +194,11 @@ export {
   type SourceDuplicateMatch,
   type SourceDuplicateMatchKind,
 } from "./source-dedup-query";
-export { deriveSourceLocationLabel, type LabelBlock } from "./source-location-label";
+export {
+  deriveClipLabel,
+  deriveSourceLocationLabel,
+  type LabelBlock,
+} from "./source-location-label";
 export { resolveSourceRef } from "./source-ref-query";
 export {
   type CreateExtractInput,

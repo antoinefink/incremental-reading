@@ -85,6 +85,19 @@ export interface RegionRect {
 }
 
 /**
+ * A time window over the original media (`source_locations.clip`, T074) — the
+ * `{ startMs, endMs }` span a video/audio clip extract (a `media_fragment`) covers.
+ * Integer milliseconds, `0 ≤ startMs < endMs`. A clip is NOT a cut/re-encoded
+ * sub-file: the reader + the T075 audio card seek the ORIGINAL media between the two
+ * times. The location's `timestampMs` mirrors `startMs` (the clip's start is the
+ * anchor); `clip` adds the end so a fixed-length window is recoverable.
+ */
+export interface ClipWindow {
+  readonly startMs: number;
+  readonly endMs: number;
+}
+
+/**
  * A precise position inside a source (`source_locations` table) — the anchor
  * that makes lineage *actionable* ("jump to the exact paragraph"). An extract or
  * card references one of these; it captures the stable block IDs, character
@@ -112,6 +125,12 @@ export interface ElementLocation {
    * extract (T065), else `null`. Anchors a figure/table crop to its page region.
    */
   readonly region: RegionRect | null;
+  /**
+   * Time window `{ startMs, endMs }` for a video/audio clip extract (T074), else
+   * `null`. Anchors a `media_fragment` clip to a span of the original media (the
+   * `timestampMs` mirrors `startMs`); NO re-encoding — the player seeks the original.
+   */
+  readonly clip: ClipWindow | null;
   /** Human-readable label, e.g. "Chapter 2 · ¶4". */
   readonly label: string | null;
   /** Verbatim snapshot of the selected text at extraction time. */

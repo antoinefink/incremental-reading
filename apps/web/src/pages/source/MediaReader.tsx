@@ -48,6 +48,10 @@ export interface MediaReaderProps {
   readonly prosemirrorJson: unknown;
   /** The block→time map (stable block id → cue start ms) from `documents.get`. */
   readonly blockTimestamps: Readonly<Record<string, number>>;
+  /** A clip-start seek target in ms (T074 — a clip's "open source" passes `?t=`). */
+  readonly seekToMs?: number | null;
+  /** Called after a clip `media_fragment` is created so the parent refreshes the inspector. */
+  readonly onClipExtracted?: () => void;
   /** Toast helper from the parent reader (status messages). */
   readonly toast: (message: string) => void;
 }
@@ -56,13 +60,20 @@ export interface MediaReaderProps {
  * Walk the constrained ProseMirror doc + the `blockTimestamps` map into an ordered
  * cue list. The body is a title heading + one paragraph per cue (T073); a paragraph
  * whose stable block id is in `blockTimestamps` is a cue.
+ *
+ * For a transcript-LESS body (title heading + ONE placeholder paragraph "No transcript
+ * available."), `placeholderBlockId` is that placeholder paragraph's stable block id —
+ * the literal anchor a transcript-less clip lands on (spec: "the placeholder block id").
+ * `titleBlockId` (the heading) remains the read-point anchor and the last-resort clip
+ * fallback.
  */
 function deriveCues(
   doc: unknown,
   blockTimestamps: Readonly<Record<string, number>>,
-): { cues: Cue[]; titleBlockId: string | null } {
+): { cues: Cue[]; titleBlockId: string | null; placeholderBlockId: string | null } {
   const cues: Cue[] = [];
   let titleBlockId: string | null = null;
+  let placeholderBlockId: string | null = null;
   const root = doc as { content?: unknown[] } | null;
   const content = Array.isArray(root?.content) ? root.content : [];
   for (const node of content) {
@@ -81,9 +92,13 @@ function deriveCues(
     const ts = blockTimestamps[blockId];
     if (typeof ts === "number") {
       cues.push({ blockId, timestampMs: ts, text });
+    } else if (placeholderBlockId == null) {
+      // The first non-heading block with NO timestamp is the transcript-less
+      // placeholder paragraph — the clip anchor for a transcript-less source.
+      placeholderBlockId = blockId;
     }
   }
-  return { cues, titleBlockId };
+  return { cues, titleBlockId, placeholderBlockId };
 }
 
 /** Format ms as `m:ss` / `h:mm:ss` for the transcript pane + chips. */
@@ -100,6 +115,8 @@ export function MediaReader({
   elementId,
   prosemirrorJson,
   blockTimestamps,
+  seekToMs,
+  onClipExtracted,
   toast,
 }: MediaReaderProps) {
   const desktop = isDesktop();
@@ -108,7 +125,14 @@ export function MediaReader({
   const [currentMs, setCurrentMs] = useState(0);
   const mediaElRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
 
-  const { cues, titleBlockId } = useMemo(
+  // Clip-select state (T074): an in-point / out-point pair the user sets on the
+  // player, a busy flag while the clip is created, and an editable caption.
+  const [clipInMs, setClipInMs] = useState<number | null>(null);
+  const [clipOutMs, setClipOutMs] = useState<number | null>(null);
+  const [clipCaption, setClipCaption] = useState("");
+  const [clipBusy, setClipBusy] = useState(false);
+
+  const { cues, titleBlockId, placeholderBlockId } = useMemo(
     () => deriveCues(prosemirrorJson, blockTimestamps),
     [prosemirrorJson, blockTimestamps],
   );
@@ -211,6 +235,123 @@ export function MediaReader({
     }
   }, [hasTranscript, activeCueIndex, cues, titleBlockId, currentMs, elementId, toast]);
 
+  // Seek to the clip-start target once (T074 — a clip's "open source" passes `?t=`).
+  const seekedRef = useRef(false);
+  useEffect(() => {
+    if (!desktop || seekedRef.current) return;
+    if (typeof seekToMs !== "number" || seekToMs < 0) return;
+    if (media?.mediaSource !== "local") return;
+    seekedRef.current = true;
+    seekTo(seekToMs);
+  }, [desktop, seekToMs, media?.mediaSource, seekTo]);
+
+  /** Mark the current playback time as the clip IN-point (`[`). */
+  const setClipIn = useCallback(() => {
+    const ms = Math.floor(currentMs);
+    setClipInMs(ms);
+    // If the out-point now precedes the in-point, drop it.
+    setClipOutMs((out) => (out != null && out <= ms ? null : out));
+  }, [currentMs]);
+
+  /** Mark the current playback time as the clip OUT-point (`]`). */
+  const setClipOut = useCallback(() => {
+    setClipOutMs(Math.floor(currentMs));
+  }, [currentMs]);
+
+  /** Clear the pending clip selection. */
+  const clearClip = useCallback(() => {
+    setClipInMs(null);
+    setClipOutMs(null);
+    setClipCaption("");
+  }, []);
+
+  // The valid pending window (in < out), else null.
+  const pendingClip = useMemo(() => {
+    if (clipInMs == null || clipOutMs == null) return null;
+    if (clipOutMs <= clipInMs) return null;
+    return { startMs: clipInMs, endMs: clipOutMs };
+  }, [clipInMs, clipOutMs]);
+
+  /**
+   * The anchor block id + transcript segment for the pending clip. The anchor is the
+   * FIRST cue whose start falls in `[startMs, endMs)`; when transcript-less it is the
+   * placeholder paragraph block id (spec: "the placeholder block id"), falling back to
+   * the title heading only if no placeholder exists. The segment joins the cue texts in
+   * range so the clip body holds the spoken text.
+   */
+  const clipAnchor = useMemo(() => {
+    if (!pendingClip) return null;
+    const inRange = cues.filter(
+      (c) => c.timestampMs >= pendingClip.startMs && c.timestampMs < pendingClip.endMs,
+    );
+    const anchorBlockId = inRange[0]?.blockId ?? placeholderBlockId ?? titleBlockId;
+    const transcriptSegment =
+      inRange
+        .map((c) => c.text)
+        .join(" ")
+        .trim() || null;
+    return anchorBlockId ? { anchorBlockId, transcriptSegment } : null;
+  }, [pendingClip, cues, placeholderBlockId, titleBlockId]);
+
+  // Pre-fill the caption with the transcript segment (once a window is set).
+  useEffect(() => {
+    if (pendingClip && clipAnchor?.transcriptSegment && clipCaption === "") {
+      setClipCaption(clipAnchor.transcriptSegment.slice(0, 200));
+    }
+  }, [pendingClip, clipAnchor, clipCaption]);
+
+  /** Create the clip `media_fragment` from the pending window. */
+  const createClip = useCallback(async () => {
+    if (!pendingClip || !clipAnchor || clipBusy) return;
+    setClipBusy(true);
+    try {
+      await appApi.extractClip({
+        sourceElementId: elementId,
+        startMs: pendingClip.startMs,
+        endMs: pendingClip.endMs,
+        anchorBlockId: clipAnchor.anchorBlockId,
+        transcriptSegment: clipAnchor.transcriptSegment,
+        caption: clipCaption.trim() || null,
+      });
+      toast(`Clip ${fmtTime(pendingClip.startMs)}–${fmtTime(pendingClip.endMs)} saved as a topic.`);
+      clearClip();
+      onClipExtracted?.();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not create the clip.");
+    } finally {
+      setClipBusy(false);
+    }
+  }, [
+    pendingClip,
+    clipAnchor,
+    clipBusy,
+    clipCaption,
+    elementId,
+    toast,
+    clearClip,
+    onClipExtracted,
+  ]);
+
+  // The `[` / `]` keyboard pair sets the in/out points (ignored while typing).
+  useEffect(() => {
+    if (!desktop) return;
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "[") {
+        e.preventDefault();
+        setClipIn();
+      } else if (e.key === "]") {
+        e.preventDefault();
+        setClipOut();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [desktop, setClipIn, setClipOut]);
+
   if (!desktop) {
     return (
       <div className="reader-state" data-testid="media-reader-nodesktop">
@@ -236,11 +377,66 @@ export function MediaReader({
         >
           <Icon name="bookmark" size={14} /> Set read-point
         </button>
+        <span className="media-reader-clip-controls">
+          <button
+            type="button"
+            className="reader-btn"
+            data-testid="media-clip-in"
+            title="Set clip in-point ( [ )"
+            onClick={setClipIn}
+          >
+            [ In{clipInMs != null ? ` ${fmtTime(clipInMs)}` : ""}
+          </button>
+          <button
+            type="button"
+            className="reader-btn"
+            data-testid="media-clip-out"
+            title="Set clip out-point ( ] )"
+            onClick={setClipOut}
+          >
+            Out{clipOutMs != null ? ` ${fmtTime(clipOutMs)}` : ""} ]
+          </button>
+        </span>
         <span className="media-reader-time" data-testid="media-current-time">
           {fmtTime(currentMs)}
           {media?.durationMs ? ` / ${fmtTime(media.durationMs)}` : ""}
         </span>
       </div>
+
+      {pendingClip ? (
+        <div className="media-reader-clip-popover" data-testid="media-clip-popover">
+          <div className="media-reader-clip-range">
+            Clip {fmtTime(pendingClip.startMs)}–{fmtTime(pendingClip.endMs)}
+          </div>
+          <input
+            type="text"
+            className="media-reader-clip-caption"
+            data-testid="media-clip-caption"
+            placeholder="Caption (optional)"
+            value={clipCaption}
+            onChange={(e) => setClipCaption(e.target.value)}
+          />
+          <div className="media-reader-clip-actions">
+            <button
+              type="button"
+              className="reader-btn reader-btn--primary"
+              data-testid="media-clip-confirm"
+              disabled={clipBusy || !clipAnchor}
+              onClick={() => void createClip()}
+            >
+              {clipBusy ? "Saving…" : "Clip this segment as a topic"}
+            </button>
+            <button
+              type="button"
+              className="reader-btn"
+              data-testid="media-clip-cancel"
+              onClick={clearClip}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {loadError ? (
         <p className="media-reader-error" data-testid="media-reader-error">
@@ -307,7 +503,28 @@ export function MediaReader({
                     }
                     data-testid="media-reader-cue"
                     data-active={i === activeCueIndex ? "true" : undefined}
-                    onClick={() => {
+                    title="Click to seek · Shift-click to set a clip in/out point"
+                    onClick={(e) => {
+                      // Shift-click is the transcript-cue alternate entry to clip
+                      // selection (T074): first Shift-click sets the in-point, the
+                      // next sets the out-point. A plain click seeks the player.
+                      if (e.shiftKey) {
+                        if (clipInMs == null || clipOutMs != null) {
+                          setClipInMs(cue.timestampMs);
+                          setClipOutMs(null);
+                          setClipCaption("");
+                        } else {
+                          // The window is half-open `[in, out)`, so land the out-point
+                          // at the END of the clicked cue — the next cue's start, or
+                          // `clickedCue + 1ms` for the last cue — so the clicked cue's
+                          // text is INCLUDED in the saved transcript segment.
+                          const nextCueStart = cues[i + 1]?.timestampMs;
+                          const cueEnd =
+                            typeof nextCueStart === "number" ? nextCueStart : cue.timestampMs + 1;
+                          setClipOutMs(Math.max(cueEnd, clipInMs + 1));
+                        }
+                        return;
+                      }
                       if (media?.mediaSource === "local") seekTo(cue.timestampMs);
                     }}
                   >
@@ -320,8 +537,8 @@ export function MediaReader({
           </div>
         ) : (
           <div className="media-reader-noscript" data-testid="media-reader-noscript">
-            No transcript available — play the media and set timestamp read-points; clip by
-            selecting a start/end time (coming in T074).
+            No transcript available — play the media and set timestamp read-points; clip a segment
+            by setting an in-point ( [ ) and an out-point ( ] ), then save it as a topic.
           </div>
         )}
       </div>

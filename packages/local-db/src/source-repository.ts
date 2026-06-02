@@ -16,6 +16,7 @@
 
 import type {
   BlockId,
+  ClipWindow,
   DistillationStage,
   Element,
   ElementId,
@@ -191,6 +192,12 @@ export interface CreateExtractInput {
    * table crop to its page + bbox; `null` for ordinary text extraction.
    */
   readonly region?: RegionRect | null;
+  /**
+   * Time window `{ startMs, endMs }` for a video/audio clip extract (T074), else
+   * `null`. When set (together with `elementType: "media_fragment"`) the extract
+   * anchors a clip to a span of the original media; `null` otherwise.
+   */
+  readonly clip?: ClipWindow | null;
   readonly label?: string | null;
   /**
    * The element TYPE the extract mints (T065). Defaults to `"extract"` (text
@@ -578,6 +585,7 @@ export class SourceRepository {
       page: input.page ?? null,
       timestampMs: input.timestampMs ?? null,
       region: input.region ?? null,
+      clip: input.clip ?? null,
       label: input.label ?? null,
       selectedText: input.selectedText,
     };
@@ -593,6 +601,8 @@ export class SourceRepository {
         timestampMs: location.timestampMs,
         // The PDF region bbox (T065) is stored as JSON; `null` for text/page-only.
         region: location.region ? JSON.stringify(location.region) : null,
+        // The video/audio clip window (T074) is stored as JSON; `null` otherwise.
+        clip: location.clip ? JSON.stringify(location.clip) : null,
         label: location.label,
         selectedText: location.selectedText,
       })
@@ -644,6 +654,7 @@ export class SourceRepository {
       page: input.page ?? null,
       timestampMs: null,
       region: null,
+      clip: null,
       label: input.label ?? null,
       selectedText: input.selectedText ?? "",
     };
@@ -658,6 +669,7 @@ export class SourceRepository {
         page: location.page,
         timestampMs: location.timestampMs,
         region: null,
+        clip: null,
         label: location.label,
         selectedText: location.selectedText,
       })

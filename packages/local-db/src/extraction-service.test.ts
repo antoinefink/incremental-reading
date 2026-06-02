@@ -469,6 +469,95 @@ describe("ExtractionService.createExtraction — sub-extracts (T025)", () => {
   });
 });
 
+describe("ExtractionService.createClipExtract (T074 — media clip)", () => {
+  it("creates a media_fragment + a clip source-location (timestamp + window)", () => {
+    const sourceId = seedSource(handle);
+    const blocks = blockIdsOf(handle, sourceId);
+    const service = new ExtractionService(handle.db);
+
+    const { element, location } = service.createClipExtract({
+      sourceElementId: sourceId,
+      startMs: 42_000,
+      endMs: 75_000,
+      anchorBlockId: blocks[0] as BlockId,
+      transcriptSegment: "the spoken phrase under the range",
+      priority: 0.625,
+    });
+
+    // It is an attention-scheduled media_fragment with full lineage to the source.
+    expect(element.type).toBe("media_fragment");
+    expect(element.stage).toBe("raw_extract");
+    expect(element.status).toBe("scheduled");
+    expect(element.dueAt).not.toBeNull();
+    expect(element.sourceId).toBe(sourceId);
+    expect(element.parentId).toBe(sourceId);
+
+    // NEVER FSRS — no review_states row for a media_fragment clip.
+    expect(
+      handle.db.select().from(reviewStates).where(eq(reviewStates.elementId, element.id)).get(),
+    ).toBeUndefined();
+
+    // The location carries timestamp_ms = startMs + the clip window + the label.
+    expect(location.timestampMs).toBe(42_000);
+    expect(location.clip).toEqual({ startMs: 42_000, endMs: 75_000 });
+    expect(location.label).toBe("Clip 0:42–1:15");
+    expect(location.blockIds).toEqual([blocks[0]]);
+    expect(location.selectedText).toBe("the spoken phrase under the range");
+
+    // Persisted: the clip cell round-trips through the DB.
+    const row = handle.db
+      .select()
+      .from(sourceLocations)
+      .where(eq(sourceLocations.elementId, element.id))
+      .get();
+    expect(row?.timestampMs).toBe(42_000);
+    expect(JSON.parse(row?.clip ?? "null")).toEqual({ startMs: 42_000, endMs: 75_000 });
+
+    // The op log carries create_element + create_extract for the fragment.
+    const ops = handle.db
+      .select()
+      .from(operationLog)
+      .where(eq(operationLog.elementId, element.id))
+      .all()
+      .map((o) => o.opType);
+    expect(ops).toContain("create_element");
+    expect(ops).toContain("create_extract");
+  });
+
+  it("falls back to the clip label when no transcript segment is given", () => {
+    const sourceId = seedSource(handle);
+    const blocks = blockIdsOf(handle, sourceId);
+    const service = new ExtractionService(handle.db);
+
+    const { element, location } = service.createClipExtract({
+      sourceElementId: sourceId,
+      startMs: 0,
+      endMs: 5_000,
+      anchorBlockId: blocks[0] as BlockId,
+      transcriptSegment: null,
+      priority: 0.375,
+    });
+    expect(element.title).toBe("Clip 0:00–0:05");
+    expect(location.selectedText).toBe("Clip 0:00–0:05");
+    expect(location.clip).toEqual({ startMs: 0, endMs: 5_000 });
+  });
+
+  it("rejects an inverted/zero-length window", () => {
+    const sourceId = seedSource(handle);
+    const blocks = blockIdsOf(handle, sourceId);
+    const service = new ExtractionService(handle.db);
+    expect(() =>
+      service.createClipExtract({
+        sourceElementId: sourceId,
+        startMs: 10_000,
+        endMs: 10_000,
+        anchorBlockId: blocks[0] as BlockId,
+        priority: 0.5,
+      }),
+    ).toThrow(/invalid clip window/);
+  });
+});
+
 describe("rawExtractIntervalDays", () => {
   it("returns sooner intervals for higher priority", () => {
     expect(rawExtractIntervalDays(0.875)).toBe(1); // A

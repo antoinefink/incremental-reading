@@ -46,6 +46,31 @@
   background: var(--surface-2, var(--surface));
 }
 
+/* A media clip (T074): a looping mini player in the inspector/extract detail. */
+.extract-clip {
+  margin-bottom: 18px;
+}
+
+.extract-clip__player {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 8px);
+  background: var(--surface-2, var(--surface));
+}
+
+/* The YouTube-clip "play the segment" link (no local bytes — seeks the web player). */
+.extract-clip__youtube-link {
+  color: var(--accent, var(--text));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.extract-clip__youtube-link:hover {
+  color: var(--accent-hover, var(--accent, var(--text)));
+}
+
 .extract-passage {
   font-family: var(--font-serif, Georgia, serif);
   font-size: var(--t-base);

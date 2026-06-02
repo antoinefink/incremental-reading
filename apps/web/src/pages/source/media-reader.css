@@ -156,3 +156,44 @@
   flex: 1;
   min-width: 0;
 }
+
+/* Clip-select controls (T074) — in/out points + the confirm popover. */
+.media-reader-clip-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.media-reader-clip-popover {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.media-reader-clip-range {
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.media-reader-clip-caption {
+  flex: 1;
+  min-width: 180px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--t-sm);
+}
+
+.media-reader-clip-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}

@@ -150,6 +150,8 @@ export function SourceReader() {
     // T065 — jump to a PDF page (+ optional region outline to flash).
     page?: number;
     region?: { x0: number; y0: number; x1: number; y1: number };
+    // T074 — seek a media reader to a clip start (milliseconds).
+    t?: number;
   };
   const jumpBlock = typeof search.block === "string" ? search.block : null;
   const jumpOffset = typeof search.offset === "number" ? search.offset : 0;
@@ -158,6 +160,9 @@ export function SourceReader() {
   // The PDF page/region jump target (T065). `region` is the normalized bbox to flash.
   const jumpPage = typeof search.page === "number" ? search.page : null;
   const jumpRegion = search.region && typeof search.region.x0 === "number" ? search.region : null;
+  // The media clip-start seek target (T074), in milliseconds — a clip's "open source"
+  // navigates `/source/$id?t=<startMs>` so the reader seeks to the clip start.
+  const jumpMs = typeof search.t === "number" ? search.t : null;
   const desktop = isDesktop();
   const { select } = useSelection();
   const navigate = useNavigate();
@@ -582,6 +587,8 @@ export function SourceReader() {
           elementId={id}
           prosemirrorJson={doc.currentDoc}
           blockTimestamps={doc.blockTimestamps}
+          seekToMs={jumpMs}
+          onClipExtracted={() => requestInspectorRefresh()}
           toast={toast}
         />
         {flash ? (
