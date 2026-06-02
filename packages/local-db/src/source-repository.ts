@@ -23,6 +23,7 @@ import type {
   IsoTimestamp,
   PlainTextConversion,
   Priority,
+  RegionRect,
   Source,
   SourceLocationId,
 } from "@interleave/core";
@@ -106,6 +107,13 @@ export interface SourceWithDocument {
 
 /** Arguments to extract a child element anchored at a source location. */
 export interface CreateExtractInput {
+  /**
+   * Optional explicit element id, pre-minted by the caller (T065). The region-
+   * extract service mints the `media_fragment` id up front so it can soft-delete
+   * the element by id if the subsequent (out-of-tx) image asset import fails.
+   * Omitted ⇒ the element repo mints one.
+   */
+  readonly id?: ElementId;
   /** The source element this extract derives from (lineage root + parent). */
   readonly sourceElementId: ElementId;
   /** Origin element the extract is lifted from; defaults to `sourceElementId`. */
@@ -130,7 +138,19 @@ export interface CreateExtractInput {
   readonly endOffset?: number | null;
   readonly page?: number | null;
   readonly timestampMs?: number | null;
+  /**
+   * Normalized bounding box for a PDF region extract (T065), else `null`. When set
+   * (together with `elementType: "media_fragment"`) the extract anchors a figure/
+   * table crop to its page + bbox; `null` for ordinary text extraction.
+   */
+  readonly region?: RegionRect | null;
   readonly label?: string | null;
+  /**
+   * The element TYPE the extract mints (T065). Defaults to `"extract"` (text
+   * extraction, unchanged); a PDF region passes `"media_fragment"` so the same
+   * tx-composable seam can create the image-fragment element + its region anchor.
+   */
+  readonly elementType?: "extract" | "media_fragment";
 }
 
 /** An extract element together with the source location anchoring its lineage. */
@@ -324,13 +344,15 @@ export class SourceRepository {
    */
   createExtractWithin(tx: DbClient, input: CreateExtractInput): ExtractWithLocation {
     const element = this.elementsRepo.createWithin(tx, {
-      type: "extract",
+      // A PDF region (T065) mints a `media_fragment`; everything else an `extract`.
+      type: input.elementType ?? "extract",
       status: "pending",
       stage: input.stage ?? "raw_extract",
       priority: input.priority,
       title: input.title,
       parentId: input.parentId ?? input.sourceElementId,
       sourceId: input.sourceElementId,
+      ...(input.id ? { id: input.id } : {}),
     });
 
     const locationId: SourceLocationId = newSourceLocationId();
@@ -347,6 +369,7 @@ export class SourceRepository {
       endOffset: input.endOffset ?? null,
       page: input.page ?? null,
       timestampMs: input.timestampMs ?? null,
+      region: input.region ?? null,
       label: input.label ?? null,
       selectedText: input.selectedText,
     };
@@ -360,6 +383,8 @@ export class SourceRepository {
         endOffset: location.endOffset,
         page: location.page,
         timestampMs: location.timestampMs,
+        // The PDF region bbox (T065) is stored as JSON; `null` for text/page-only.
+        region: location.region ? JSON.stringify(location.region) : null,
         label: location.label,
         selectedText: location.selectedText,
       })

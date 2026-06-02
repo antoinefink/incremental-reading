@@ -70,7 +70,9 @@ import {
   SettingsGetRequestSchema,
   SettingsUpdateManyRequestSchema,
   SettingsUpdateRequestSchema,
+  SourcesExtractRegionRequestSchema,
   SourcesGetPdfDataRequestSchema,
+  SourcesGetRegionImageRequestSchema,
   SourcesImportManualRequestSchema,
   SourcesImportPdfRequestSchema,
   SourcesImportUrlRequestSchema,
@@ -294,6 +296,23 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.sourcesGetPdfData, (_event, rawRequest: unknown) => {
     const request = SourcesGetPdfDataRequestSchema.parse(rawRequest);
     return dbService.getPdfData(request);
+  });
+
+  // PDF region extraction (T065). The renderer crops the figure/table from the page
+  // it rendered and ships the size-capped PNG + the normalized rect + page; MAIN
+  // streams the bytes into the vault and creates a `media_fragment` region extract
+  // (its page+region source location + lineage + attention schedule) in one
+  // transaction. The rect + PNG byteLength are validated/size-capped at the schema.
+  ipcMain.handle(IPC_CHANNELS.sourcesExtractRegion, async (_event, rawRequest: unknown) => {
+    const request = SourcesExtractRegionRequestSchema.parse(rawRequest);
+    return await dbService.extractRegion(request);
+  });
+
+  // Serve a region extract's cropped image bytes to the renderer (T065). MAIN owns
+  // the vault path; the renderer passes only the `media_fragment` element id.
+  ipcMain.handle(IPC_CHANNELS.sourcesGetRegionImage, (_event, rawRequest: unknown) => {
+    const request = SourcesGetRegionImageRequestSchema.parse(rawRequest);
+    return dbService.getRegionImage(request);
   });
 
   // Browser-capture pairing (T062). The TRUSTED desktop renderer reads the

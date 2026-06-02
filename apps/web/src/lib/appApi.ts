@@ -193,6 +193,8 @@ export interface LocationSummary {
   readonly label: string | null;
   readonly selectedText: string;
   readonly page: number | null;
+  /** The PDF region bbox (T065) for a `media_fragment` region extract, else `null`. */
+  readonly region: RegionRectInput | null;
   /** The source element this location points INTO — the reader to open on jump (T022). */
   readonly sourceElementId: string;
   /** Ordered STABLE block ids the selection spans (the scroll target is the first). */
@@ -571,6 +573,71 @@ export interface SourcesGetPdfDataResult {
   readonly bytes: ArrayBuffer | null;
   /** The number of pages (derived from `document_blocks.page`), or 0 when unknown. */
   readonly pageCount: number;
+}
+
+/** A normalized region rectangle (T065): fractions `0–1` of the page (`x0<x1`, `y0<y1`). */
+export interface RegionRectInput {
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+}
+
+/** Crop a PDF page region into a scheduled `media_fragment` extract (T065). */
+export interface SourcesExtractRegionRequest {
+  readonly sourceElementId: string;
+  /** The 1-based page the region sits on. */
+  readonly page: number;
+  /** The page's heading/first stable block id — the region's jump anchor. */
+  readonly pageBlockId: string;
+  /** The normalized bounding box (fractions 0–1). */
+  readonly region: RegionRectInput;
+  /** The cropped figure PNG bytes (produced in the renderer's `<canvas>`). */
+  readonly imagePng: ArrayBuffer;
+  /** Optional user caption; defaults to "Figure on page N" main-side. */
+  readonly caption?: string | null;
+  /** Optional A/B/C/D priority override; else INHERITS the source's priority. */
+  readonly priority?: PriorityLabelInput;
+}
+
+/** The created region extract's `media_fragment` summary (T065). */
+export interface RegionExtractSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly status: string;
+  readonly stage: string;
+  readonly priority: number;
+  readonly title: string;
+  readonly dueAt: string | null;
+  readonly sourceId: string | null;
+  readonly parentId: string | null;
+}
+
+/** The created region extract's stored region source-location anchor (T065). */
+export interface RegionLocationSummary {
+  readonly id: string;
+  readonly sourceElementId: string;
+  readonly page: number | null;
+  readonly region: RegionRectInput | null;
+  readonly label: string | null;
+}
+
+export interface SourcesExtractRegionResult {
+  readonly id: string;
+  readonly element: RegionExtractSummary;
+  readonly location: RegionLocationSummary;
+}
+
+/** Serve a region extract's cropped image bytes to the renderer (T065). */
+export interface SourcesGetRegionImageRequest {
+  readonly elementId: string;
+}
+
+export interface SourcesGetRegionImageResult {
+  /** The cropped PNG bytes, or `null` when the element has no image asset. */
+  readonly bytes: ArrayBuffer | null;
+  /** The image MIME (e.g. `image/png`), or `null`. */
+  readonly mime: string | null;
 }
 
 /**
@@ -1686,6 +1753,8 @@ export interface AppApi {
     importUrl(request: SourcesImportUrlRequest): Promise<SourcesImportUrlResult>;
     importPdf(request: SourcesImportPdfRequest): Promise<SourcesImportPdfResult>;
     getPdfData(request: SourcesGetPdfDataRequest): Promise<SourcesGetPdfDataResult>;
+    extractRegion(request: SourcesExtractRegionRequest): Promise<SourcesExtractRegionResult>;
+    getRegionImage(request: SourcesGetRegionImageRequest): Promise<SourcesGetRegionImageResult>;
   };
   readonly capture: {
     getPairing(): Promise<CapturePairingResult>;
@@ -1915,6 +1984,18 @@ export const appApi = {
   /** Serve a PDF source's original bytes to the renderer for rendering (T064). */
   getSourcePdfData(request: SourcesGetPdfDataRequest): Promise<SourcesGetPdfDataResult> {
     return requireAppApi().sources.getPdfData(request);
+  },
+  /**
+   * Crop a PDF page region into a scheduled `media_fragment` extract (T065) — ships
+   * the cropped PNG + the normalized rect + page; MAIN streams the bytes into the
+   * vault and creates the region extract + its page+region source location.
+   */
+  extractRegion(request: SourcesExtractRegionRequest): Promise<SourcesExtractRegionResult> {
+    return requireAppApi().sources.extractRegion(request);
+  },
+  /** Serve a region extract's cropped image bytes to the renderer (T065). */
+  getRegionImage(request: SourcesGetRegionImageRequest): Promise<SourcesGetRegionImageResult> {
+    return requireAppApi().sources.getRegionImage(request);
   },
   /** Read the browser-capture pairing state (token + enabled/running/port) (T062). */
   getCapturePairing(): Promise<CapturePairingResult> {

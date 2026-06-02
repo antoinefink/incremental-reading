@@ -71,6 +71,7 @@ export type {
   ElementLocation,
   ElementRelation,
   ReadPoint,
+  RegionRect,
 } from "./element";
 // Canonical enums — derived union types (./enums).
 export type {

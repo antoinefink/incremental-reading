@@ -146,11 +146,17 @@ export function SourceReader() {
     offset?: number;
     label?: string;
     n?: number;
+    // T065 — jump to a PDF page (+ optional region outline to flash).
+    page?: number;
+    region?: { x0: number; y0: number; x1: number; y1: number };
   };
   const jumpBlock = typeof search.block === "string" ? search.block : null;
   const jumpOffset = typeof search.offset === "number" ? search.offset : 0;
   const jumpLabel = typeof search.label === "string" ? search.label : null;
   const jumpNonce = search.n;
+  // The PDF page/region jump target (T065). `region` is the normalized bbox to flash.
+  const jumpPage = typeof search.page === "number" ? search.page : null;
+  const jumpRegion = search.region && typeof search.region.x0 === "number" ? search.region : null;
   const desktop = isDesktop();
   const { select } = useSelection();
   const navigate = useNavigate();
@@ -589,6 +595,8 @@ export function SourceReader() {
             // A page change advances reading progress; the inspector re-reads lineage.
             requestInspectorRefresh();
           }}
+          onRegionExtracted={() => requestInspectorRefresh()}
+          jump={jumpPage != null ? { page: jumpPage, region: jumpRegion } : null}
           toast={toast}
         />
         {flash ? (

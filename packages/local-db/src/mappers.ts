@@ -13,6 +13,7 @@ import type {
   Element,
   ElementId,
   ElementLocation,
+  RegionRect,
   ReviewLog,
   ReviewState,
   Source,
@@ -78,9 +79,31 @@ export function rowToSourceLocation(row: SourceLocationRow): ElementLocation {
     endOffset: row.endOffset,
     page: row.page,
     timestampMs: row.timestampMs,
+    // The PDF region bbox (T065), stored as JSON `{ x0, y0, x1, y1 }`; `null` for
+    // text/page-only locations.
+    region: parseRegion(row.region),
     label: row.label,
     selectedText: row.selectedText,
   };
+}
+
+/** Parse a stored `source_locations.region` JSON cell into a {@link RegionRect}, or `null`. */
+function parseRegion(raw: string | null): RegionRect | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<RegionRect>;
+    if (
+      typeof value.x0 === "number" &&
+      typeof value.y0 === "number" &&
+      typeof value.x1 === "number" &&
+      typeof value.y1 === "number"
+    ) {
+      return { x0: value.x0, y0: value.y0, x1: value.x1, y1: value.y1 };
+    }
+  } catch {
+    // A malformed cell degrades to "no region" rather than throwing on read.
+  }
+  return null;
 }
 
 export function rowToReviewState(row: ReviewStateRow): ReviewState {

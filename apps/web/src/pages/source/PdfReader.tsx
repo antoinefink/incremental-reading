@@ -51,8 +51,29 @@ export interface PdfReaderProps {
   readonly blockPages: Readonly<Record<string, number>>;
   /** Called when the active page changes (so the shell can show page N of M). */
   readonly onActivePageChange?: (page: number, total: number) => void;
+  /** Called after a region extract is created (so the shell can refresh the inspector). */
+  readonly onRegionExtracted?: () => void;
+  /** Optional jump target (T065): scroll to + flash a page region (a fraction rect). */
+  readonly jump?: { readonly page: number; readonly region?: RegionRect | null } | null;
   /** Toast helper from the parent reader (status messages). */
   readonly toast: (message: string) => void;
+}
+
+/** A normalized region rect (fractions 0–1 of the page) the rubber-band produces. */
+interface RegionRect {
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+}
+
+/** A pending region crop awaiting confirm (the PNG + its page + normalized rect). */
+interface PendingRegion {
+  readonly page: number;
+  readonly region: RegionRect;
+  readonly imagePng: ArrayBuffer;
+  /** A data URL preview of the crop for the confirm popover. */
+  readonly previewUrl: string;
 }
 
 /** One rendered page's measured state. */
@@ -62,7 +83,14 @@ interface PageState {
   readonly height: number;
 }
 
-export function PdfReader({ elementId, blockPages, onActivePageChange, toast }: PdfReaderProps) {
+export function PdfReader({
+  elementId,
+  blockPages,
+  onActivePageChange,
+  onRegionExtracted,
+  jump,
+  toast,
+}: PdfReaderProps) {
   const desktop = isDesktop();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const docRef = useRef<PDFDocumentProxy | null>(null);
@@ -70,6 +98,16 @@ export function PdfReader({ elementId, blockPages, onActivePageChange, toast }: 
   const [activePage, setActivePage] = useState(1);
   const [status, setStatus] = useState<"loading" | "ready" | "error" | "empty">("loading");
   const [error, setError] = useState<string | null>(null);
+  // Region (figure) mode (T065): when on, dragging on a page draws a rubber-band
+  // rect that crops to a `media_fragment` image extract instead of selecting text.
+  const [regionMode, setRegionMode] = useState(false);
+  const [pending, setPending] = useState<PendingRegion | null>(null);
+  const [caption, setCaption] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  // Region outlines already extracted on a page (a light marker per page).
+  const [extractedRegions, setExtractedRegions] = useState<
+    readonly { page: number; region: RegionRect }[]
+  >([]);
 
   const firstBlockByPage = useMemo(() => pageToFirstBlock(blockPages), [blockPages]);
 
@@ -196,6 +234,67 @@ export function PdfReader({ elementId, blockPages, onActivePageChange, toast }: 
   }, [desktop, elementId, activePage, firstBlockByPage, pageOfNode, toast]);
 
   /**
+   * Receive a freshly cropped region from a page (the rubber-band on mouse-up):
+   * the page, the normalized rect, and the encoded PNG bytes. Stash it as a
+   * `PendingRegion` so the confirm popover can collect an optional caption before
+   * shipping it to MAIN. The PNG is produced from the page's own canvas (renderer-
+   * side) — no fs/parse here.
+   */
+  const onRegionCrop = useCallback((region: PendingRegion) => {
+    setCaption("");
+    setPending(region);
+  }, []);
+
+  /** Discard the pending region (Esc / Cancel), revoking its preview URL. */
+  const cancelPending = useCallback(() => {
+    setPending((prev) => {
+      if (prev) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+    setCaption("");
+  }, []);
+
+  /** Ship the confirmed region crop to MAIN → a scheduled `media_fragment` extract. */
+  const confirmRegion = useCallback(async () => {
+    if (!desktop || !pending || submitting) return;
+    const pageBlockId = firstBlockByPage.get(pending.page);
+    if (!pageBlockId) {
+      toast("Could not resolve the page for this region");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await appApi.extractRegion({
+        sourceElementId: elementId,
+        page: pending.page,
+        pageBlockId,
+        region: pending.region,
+        imagePng: pending.imagePng,
+        caption: caption.trim() || null,
+      });
+      setExtractedRegions((prev) => [...prev, { page: pending.page, region: pending.region }]);
+      toast(`Region extracted from page ${pending.page}`);
+      onRegionExtracted?.();
+      URL.revokeObjectURL(pending.previewUrl);
+      setPending(null);
+      setCaption("");
+    } catch {
+      toast("Could not extract the region");
+    } finally {
+      setSubmitting(false);
+    }
+  }, [
+    desktop,
+    pending,
+    submitting,
+    firstBlockByPage,
+    elementId,
+    caption,
+    toast,
+    onRegionExtracted,
+  ]);
+
+  /**
    * Persist a page-granular read-point. The target page is the page of the current
    * text selection (so "set read-point" while a passage on page N is selected lands
    * on page N), falling back to the active (scrolled) page when nothing is selected.
@@ -223,12 +322,18 @@ export function PdfReader({ elementId, blockPages, onActivePageChange, toast }: 
     }
   }, [desktop, elementId, activePage, firstBlockByPage, pageOfNode, toast]);
 
-  // Keyboard: `E` extracts the current page selection; `␣` sets the page read-point.
+  // Keyboard: `E` extracts the page selection; `R` toggles region mode; `␣` sets
+  // the page read-point; `Esc` cancels a pending region crop.
   useEffect(() => {
     if (!desktop) return;
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (e.key === "Escape" && pending) {
+        e.preventDefault();
+        cancelPending();
+        return;
+      }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key.toLowerCase() === "e") {
         const sel = window.getSelection();
@@ -236,6 +341,9 @@ export function PdfReader({ elementId, blockPages, onActivePageChange, toast }: 
           e.preventDefault();
           void onExtract();
         }
+      } else if (e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        setRegionMode((on) => !on);
       } else if (e.key === " " || e.code === "Space") {
         if (target?.isContentEditable) return;
         e.preventDefault();
@@ -244,7 +352,26 @@ export function PdfReader({ elementId, blockPages, onActivePageChange, toast }: 
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [desktop, onExtract, setReadPoint]);
+  }, [desktop, onExtract, setReadPoint, pending, cancelPending]);
+
+  // Jump-to-page-region (T065): when the route carries a `jump` target, scroll that
+  // page into view and flash its region outline briefly.
+  const [flashRegion, setFlashRegion] = useState<{ page: number; region: RegionRect } | null>(null);
+  useEffect(() => {
+    if (status !== "ready" || !jump) return;
+    const root = scrollRef.current;
+    const el = root?.querySelector<HTMLElement>(`[data-pdf-page="${jump.page}"]`);
+    el?.scrollIntoView({ block: "start", behavior: "smooth" });
+    if (jump.region) {
+      setFlashRegion({ page: jump.page, region: jump.region });
+      const t = setTimeout(() => setFlashRegion(null), 2200);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [status, jump]);
+
+  // Revoke any pending preview URL when the reader unmounts.
+  useEffect(() => () => cancelPending(), [cancelPending]);
 
   if (!desktop) {
     return (
@@ -277,6 +404,18 @@ export function PdfReader({ elementId, blockPages, onActivePageChange, toast }: 
         >
           <Icon name="extract" size={14} /> Extract selection
         </button>
+        <button
+          type="button"
+          className={`reader-btn${regionMode ? " reader-btn--primary" : ""}`}
+          data-testid="pdf-region-mode"
+          data-active={regionMode ? "true" : "false"}
+          aria-pressed={regionMode}
+          title="Draw a rectangle over a figure/table to extract it (R)"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setRegionMode((on) => !on)}
+        >
+          <Icon name="image" size={14} /> {regionMode ? "Region mode: on" : "Region"}
+        </button>
         <span className="pdf-reader-pagecount" data-testid="pdf-page-indicator">
           {status === "ready" ? `Page ${activePage} of ${pages.length}` : "—"}
         </span>
@@ -302,31 +441,112 @@ export function PdfReader({ elementId, blockPages, onActivePageChange, toast }: 
           onScroll={onScroll}
         >
           {pages.map((p) => (
-            <PdfPageView key={p.pageNumber} docRef={docRef} page={p} activePage={activePage} />
+            <PdfPageView
+              key={p.pageNumber}
+              docRef={docRef}
+              page={p}
+              activePage={activePage}
+              regionMode={regionMode}
+              onRegionCrop={onRegionCrop}
+              extractedRegions={extractedRegions.filter((r) => r.page === p.pageNumber)}
+              flashRegion={flashRegion?.page === p.pageNumber ? (flashRegion.region ?? null) : null}
+            />
           ))}
         </div>
       )}
+
+      {pending ? (
+        <div className="pdf-region-confirm" data-testid="pdf-region-confirm" role="dialog">
+          <div className="pdf-region-confirm__head">
+            <Icon name="image" size={14} /> Extract this region as a card topic
+          </div>
+          <img
+            className="pdf-region-confirm__preview"
+            src={pending.previewUrl}
+            alt="Selected region preview"
+          />
+          <input
+            className="pdf-region-confirm__caption"
+            data-testid="pdf-region-caption"
+            type="text"
+            placeholder={`Caption (optional) · page ${pending.page}`}
+            value={caption}
+            onChange={(e) => setCaption(e.target.value)}
+            // Enter confirms; Esc cancels (the global handler also handles Esc).
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void confirmRegion();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                cancelPending();
+              }
+            }}
+          />
+          <div className="pdf-region-confirm__actions">
+            <button
+              type="button"
+              className="reader-btn"
+              data-testid="pdf-region-cancel"
+              disabled={submitting}
+              onClick={cancelPending}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="reader-btn reader-btn--primary"
+              data-testid="pdf-region-confirm-btn"
+              disabled={submitting}
+              onClick={() => void confirmRegion()}
+            >
+              <Icon name="check" size={14} /> {submitting ? "Extracting…" : "Extract region"}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+/** A pixel rect drawn during a rubber-band drag (CSS coords within the page box). */
+interface DragRect {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
 }
 
 /**
  * One page slot — a fixed-size box (so the scroller height is correct without
  * rendering everything) that LAZILY draws its canvas + text layer only when it is
- * within the render window of the active page.
+ * within the render window of the active page. In region mode (T065) a transparent
+ * overlay captures a rubber-band drag; on release it crops the page canvas to the
+ * rect, encodes a PNG, and hands it (with the normalized rect) to the parent.
  */
 function PdfPageView({
   docRef,
   page,
   activePage,
+  regionMode,
+  onRegionCrop,
+  extractedRegions,
+  flashRegion,
 }: {
   docRef: React.MutableRefObject<PDFDocumentProxy | null>;
   page: PageState;
   activePage: number;
+  regionMode: boolean;
+  onRegionCrop: (region: PendingRegion) => void;
+  extractedRegions: readonly { page: number; region: RegionRect }[];
+  flashRegion: RegionRect | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const textRef = useRef<HTMLDivElement | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const renderedRef = useRef(false);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [drag, setDrag] = useState<DragRect | null>(null);
   const shouldRender = Math.abs(page.pageNumber - activePage) <= RENDER_WINDOW;
 
   useEffect(() => {
@@ -370,6 +590,95 @@ function PdfPageView({
     };
   }, [shouldRender, docRef, page.pageNumber]);
 
+  // --- region rubber-band (T065) -------------------------------------------
+
+  /** Clamp a CSS-pixel point to the page box. */
+  const clampToPage = useCallback((clientX: number, clientY: number): { x: number; y: number } => {
+    const box = overlayRef.current?.getBoundingClientRect();
+    if (!box) return { x: 0, y: 0 };
+    return {
+      x: Math.min(Math.max(clientX - box.left, 0), box.width),
+      y: Math.min(Math.max(clientY - box.top, 0), box.height),
+    };
+  }, []);
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!regionMode) return;
+      e.preventDefault();
+      overlayRef.current?.setPointerCapture(e.pointerId);
+      const p = clampToPage(e.clientX, e.clientY);
+      dragStartRef.current = p;
+      setDrag({ x: p.x, y: p.y, w: 0, h: 0 });
+    },
+    [regionMode, clampToPage],
+  );
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const start = dragStartRef.current;
+      if (!regionMode || !start) return;
+      const p = clampToPage(e.clientX, e.clientY);
+      setDrag({
+        x: Math.min(start.x, p.x),
+        y: Math.min(start.y, p.y),
+        w: Math.abs(p.x - start.x),
+        h: Math.abs(p.y - start.y),
+      });
+    },
+    [regionMode, clampToPage],
+  );
+
+  const onPointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const start = dragStartRef.current;
+      dragStartRef.current = null;
+      if (!regionMode || !start) return;
+      try {
+        overlayRef.current?.releasePointerCapture(e.pointerId);
+      } catch {
+        /* the capture may already be gone */
+      }
+      const box = overlayRef.current?.getBoundingClientRect();
+      const rect = drag;
+      setDrag(null);
+      // Ignore a tiny accidental drag (a click without a real rectangle).
+      if (!box || !rect || rect.w < 6 || rect.h < 6) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      // Normalize to fractions of the page's rendered (CSS) size.
+      const x0 = rect.x / box.width;
+      const y0 = rect.y / box.height;
+      const x1 = (rect.x + rect.w) / box.width;
+      const y1 = (rect.y + rect.h) / box.height;
+      // Crop the rendered canvas (backing store is at devicePixelRatio scale) to the
+      // rect. The canvas pixel size maps the page 1:1 in fractions, so multiply by
+      // the backing dimensions.
+      const sx = Math.round(x0 * canvas.width);
+      const sy = Math.round(y0 * canvas.height);
+      const sw = Math.max(1, Math.round((x1 - x0) * canvas.width));
+      const sh = Math.max(1, Math.round((y1 - y0) * canvas.height));
+      const out = document.createElement("canvas");
+      out.width = sw;
+      out.height = sh;
+      const octx = out.getContext("2d");
+      if (!octx) return;
+      octx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+      out.toBlob((blob) => {
+        if (!blob) return;
+        void blob.arrayBuffer().then((imagePng) => {
+          onRegionCrop({
+            page: page.pageNumber,
+            region: { x0, y0, x1, y1 },
+            imagePng,
+            previewUrl: URL.createObjectURL(blob),
+          });
+        });
+      }, "image/png");
+    },
+    [regionMode, drag, page.pageNumber, onRegionCrop],
+  );
+
   return (
     <div
       className="pdf-page"
@@ -379,6 +688,55 @@ function PdfPageView({
     >
       <canvas ref={canvasRef} className="pdf-page-canvas" />
       <div ref={textRef} className="pdf-page-text textLayer" />
+
+      {/* Already-extracted region outlines (a light marker, like extracted spans). */}
+      {extractedRegions.map((r) => (
+        <div
+          key={`${r.region.x0}:${r.region.y0}:${r.region.x1}:${r.region.y1}`}
+          className="pdf-region-mark"
+          style={regionStyle(r.region)}
+          aria-hidden="true"
+        />
+      ))}
+
+      {/* A jump-to-region flash outline (T065). */}
+      {flashRegion ? (
+        <div
+          className="pdf-region-mark pdf-region-mark--flash"
+          data-testid={`pdf-region-flash-${page.pageNumber}`}
+          style={regionStyle(flashRegion)}
+          aria-hidden="true"
+        />
+      ) : null}
+
+      {/* Region capture overlay — only active (and pointer-grabbing) in region mode. */}
+      {regionMode ? (
+        <div
+          ref={overlayRef}
+          className="pdf-region-overlay"
+          data-testid={`pdf-region-overlay-${page.pageNumber}`}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+        >
+          {drag ? (
+            <div
+              className="pdf-region-rubberband"
+              style={{ left: drag.x, top: drag.y, width: drag.w, height: drag.h }}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+/** Inline style positioning a normalized region rect over its page box (percent). */
+function regionStyle(r: RegionRect): React.CSSProperties {
+  return {
+    left: `${r.x0 * 100}%`,
+    top: `${r.y0 * 100}%`,
+    width: `${(r.x1 - r.x0) * 100}%`,
+    height: `${(r.y1 - r.y0) * 100}%`,
+  };
 }

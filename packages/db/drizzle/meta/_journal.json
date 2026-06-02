@@ -64,6 +64,13 @@
       "when": 1780359156231,
       "tag": "0008_outgoing_sir_ram",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1780361667391,
+      "tag": "0009_public_steel_serpent",
+      "breakpoints": true
     }
   ]
 }

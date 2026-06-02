@@ -91,6 +91,9 @@ export function ExtractView() {
   const doc = useDocument(id);
   const [inspector, setInspector] = useState<InspectorData | null>(null);
   const [lineage, setLineage] = useState<LineageData | null>(null);
+  // The cropped region image (T065) for a `media_fragment` extract — fetched
+  // through the typed asset-bytes command; the renderer never resolves the path.
+  const [regionImageUrl, setRegionImageUrl] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Card builder (T033/T034) — null when closed; the tab + any pre-wrapped cloze
@@ -134,6 +137,34 @@ export function ExtractView() {
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // Fetch the cropped region image for a `media_fragment` extract (T065). The bytes
+  // come through the typed `sources.getRegionImage` command (no path in the
+  // renderer); we hold an object URL for the <img> and revoke it on change/unmount.
+  useEffect(() => {
+    if (!desktop || !id || inspector?.element.type !== "media_fragment") {
+      setRegionImageUrl(null);
+      return;
+    }
+    let url: string | null = null;
+    let cancelled = false;
+    void appApi
+      .getRegionImage({ elementId: id })
+      .then((res) => {
+        if (cancelled || !res.bytes) return;
+        const blob = new Blob([res.bytes], { type: res.mime ?? "image/png" });
+        url = URL.createObjectURL(blob);
+        setRegionImageUrl(url);
+      })
+      .catch(() => {
+        /* the figure degrades to no preview */
+      });
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+      setRegionImageUrl(null);
+    };
+  }, [desktop, id, inspector?.element.type]);
 
   const onEditorReady = useCallback((instance: Editor | null) => {
     editorRef.current = instance;
@@ -486,6 +517,42 @@ export function ExtractView() {
       <div className={`extract-body${builder ? " extract-body--builder" : ""}`}>
         {/* LEFT — source context + lineage */}
         <aside className="extract-context" data-testid="extract-context">
+          {/* A PDF region figure (T065): the cropped image + a jump-to-page-region
+              affordance. Shown for a `media_fragment` extract with a region anchor. */}
+          {element?.type === "media_fragment" && location?.region ? (
+            <div className="extract-region" data-testid="extract-region-figure">
+              <div className="insp-sec__title">Figure</div>
+              {regionImageUrl ? (
+                <img
+                  className="extract-region__img"
+                  data-testid="extract-region-img"
+                  src={regionImageUrl}
+                  alt={element?.title ?? "Extracted figure"}
+                />
+              ) : (
+                <p className="dimmed">Figure image loads through the desktop bridge.</p>
+              )}
+              <button
+                type="button"
+                className="extract-jump"
+                data-testid="extract-region-jump"
+                onClick={() => {
+                  if (!location) return;
+                  void navigate({
+                    to: "/source/$id",
+                    params: { id: location.sourceElementId },
+                    search: {
+                      page: location.page ?? 1,
+                      ...(location.region ? { region: location.region } : {}),
+                      n: Date.now(),
+                    } as Record<string, unknown>,
+                  });
+                }}
+              >
+                <Icon name="source" size={12} /> {location.label ?? "Jump to page region"}
+              </button>
+            </div>
+          ) : null}
           <div className="insp-sec__title">Source context</div>
           {/* Source reference (T043) — the always-visible refblock: source
               title/URL/author/date + location + verbatim snippet, resolved from

@@ -27,6 +27,8 @@ export const IPC_CHANNELS = {
   sourcesImportUrl: "sources:importUrl",
   sourcesImportPdf: "sources:importPdf",
   sourcesGetPdfData: "sources:getPdfData",
+  sourcesExtractRegion: "sources:extractRegion",
+  sourcesGetRegionImage: "sources:getRegionImage",
   captureGetPairing: "capture:getPairing",
   captureRegenerateToken: "capture:regenerateToken",
   captureSetEnabled: "capture:setEnabled",

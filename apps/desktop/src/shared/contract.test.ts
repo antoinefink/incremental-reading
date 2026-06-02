@@ -63,7 +63,9 @@ import {
   SettingsPatchSchema,
   SettingsUpdateManyRequestSchema,
   SettingsUpdateRequestSchema,
+  SourcesExtractRegionRequestSchema,
   SourcesGetPdfDataRequestSchema,
+  SourcesGetRegionImageRequestSchema,
   SourcesImportManualRequestSchema,
   SourcesImportPdfRequestSchema,
   type SourcesImportPdfResult,
@@ -100,6 +102,8 @@ describe("IPC channels", () => {
         "sources:importUrl",
         "sources:importPdf",
         "sources:getPdfData",
+        "sources:extractRegion",
+        "sources:getRegionImage",
         "capture:getPairing",
         "capture:regenerateToken",
         "capture:setEnabled",
@@ -288,6 +292,76 @@ describe("SourcesImportPdfRequestSchema (T064)", () => {
   it("SourcesGetPdfDataRequestSchema requires an elementId", () => {
     expect(SourcesGetPdfDataRequestSchema.parse({ elementId: "el_1" }).elementId).toBe("el_1");
     expect(() => SourcesGetPdfDataRequestSchema.parse({})).toThrow();
+  });
+});
+
+describe("SourcesExtractRegionRequestSchema (T065)", () => {
+  const PNG = new ArrayBuffer(64);
+  const base = {
+    sourceElementId: "el_pdf",
+    page: 2,
+    pageBlockId: "pg-2-h",
+    region: { x0: 0.1, y0: 0.2, x1: 0.6, y1: 0.7 },
+    imagePng: PNG,
+  };
+
+  it("accepts a valid region request", () => {
+    const parsed = SourcesExtractRegionRequestSchema.parse(base);
+    expect(parsed.page).toBe(2);
+    expect(parsed.region).toEqual({ x0: 0.1, y0: 0.2, x1: 0.6, y1: 0.7 });
+    expect(parsed.imagePng.byteLength).toBe(64);
+  });
+
+  it("rejects an inverted rect (x0>=x1 or y0>=y1)", () => {
+    expect(() =>
+      SourcesExtractRegionRequestSchema.parse({
+        ...base,
+        region: { x0: 0.6, y0: 0.2, x1: 0.1, y1: 0.7 },
+      }),
+    ).toThrow();
+    expect(() =>
+      SourcesExtractRegionRequestSchema.parse({
+        ...base,
+        region: { x0: 0.1, y0: 0.7, x1: 0.6, y1: 0.2 },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects an out-of-range rect (outside 0..1)", () => {
+    expect(() =>
+      SourcesExtractRegionRequestSchema.parse({
+        ...base,
+        region: { x0: -0.1, y0: 0.2, x1: 0.6, y1: 0.7 },
+      }),
+    ).toThrow();
+    expect(() =>
+      SourcesExtractRegionRequestSchema.parse({
+        ...base,
+        region: { x0: 0.1, y0: 0.2, x1: 1.2, y1: 0.7 },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects an empty PNG and an oversize PNG (size-cap at the bridge)", () => {
+    expect(() =>
+      SourcesExtractRegionRequestSchema.parse({ ...base, imagePng: new ArrayBuffer(0) }),
+    ).toThrow();
+    expect(() =>
+      SourcesExtractRegionRequestSchema.parse({
+        ...base,
+        imagePng: new ArrayBuffer(9 * 1024 * 1024),
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a non-integer / non-positive page", () => {
+    expect(() => SourcesExtractRegionRequestSchema.parse({ ...base, page: 0 })).toThrow();
+    expect(() => SourcesExtractRegionRequestSchema.parse({ ...base, page: 1.5 })).toThrow();
+  });
+
+  it("SourcesGetRegionImageRequestSchema requires an elementId", () => {
+    expect(SourcesGetRegionImageRequestSchema.parse({ elementId: "el_1" }).elementId).toBe("el_1");
+    expect(() => SourcesGetRegionImageRequestSchema.parse({})).toThrow();
   });
 });
 

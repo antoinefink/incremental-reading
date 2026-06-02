@@ -264,3 +264,83 @@ describe("createWithDocumentWithin + AssetRepository.createWithin (T060 atomic s
     expect(new AssetRepository(handle.db).listForElement(id)).toHaveLength(0);
   });
 });
+
+describe("SourceRepository.createExtractWithin region/media_fragment (T065)", () => {
+  it("creates a media_fragment element + a region source location (page + bbox)", () => {
+    const repo = new SourceRepository(handle.db);
+    // A PDF source to anchor the region against.
+    const sourceId = newElementId();
+    repo.createWithDocument({
+      id: sourceId,
+      title: "A PDF",
+      priority: priorityFromLabel("B"),
+      conversion: {
+        doc: {
+          type: "doc",
+          content: [
+            {
+              type: "heading",
+              attrs: { level: 3, blockId: "pg-2-h" as BlockId },
+              content: [{ type: "text", text: "Page 2" }],
+            },
+          ],
+        },
+        plainText: "Page 2",
+        blocks: [{ blockType: "heading", order: 0, stableBlockId: "pg-2-h" as BlockId, page: 2 }],
+      },
+    });
+
+    const region = { x0: 0.1, y0: 0.2, x1: 0.6, y1: 0.7 };
+    const { element, location } = repo.createExtract({
+      sourceElementId: sourceId,
+      elementType: "media_fragment",
+      title: "Figure on page 2",
+      priority: priorityFromLabel("B"),
+      selectedText: "Figure on page 2",
+      blockIds: ["pg-2-h" as BlockId],
+      page: 2,
+      region,
+      label: "Page 2 · region",
+    });
+
+    // The element is a `media_fragment` (not a text `extract`).
+    expect(element.type).toBe("media_fragment");
+    expect(element.sourceId).toBe(sourceId);
+
+    // The persisted source location round-trips the page + the region rect.
+    const stored = new SourceRepository(handle.db).findLocationForElement(element.id);
+    expect(stored?.page).toBe(2);
+    expect(stored?.region).toEqual(region);
+    expect(stored?.label).toBe("Page 2 · region");
+
+    // A `create_extract` op was appended.
+    const ops = new OperationLogRepository(handle.db)
+      .listForElement(element.id)
+      .map((e) => e.opType);
+    expect(ops).toContain("create_extract");
+    expect(location.region).toEqual(region);
+  });
+
+  it("defaults to a text extract with region = null (unchanged path)", () => {
+    const repo = new SourceRepository(handle.db);
+    const sourceId = newElementId();
+    repo.createWithDocument({
+      id: sourceId,
+      title: "Text source",
+      priority: priorityFromLabel("C"),
+      body: "Alpha line.",
+    });
+    const { element } = repo.createExtract({
+      sourceElementId: sourceId,
+      title: "An extract",
+      priority: priorityFromLabel("C"),
+      selectedText: "Alpha",
+      blockIds: [
+        new DocumentRepository(handle.db).listBlocks(sourceId)[0]?.stableBlockId as BlockId,
+      ],
+    });
+    expect(element.type).toBe("extract");
+    const stored = new SourceRepository(handle.db).findLocationForElement(element.id);
+    expect(stored?.region).toBeNull();
+  });
+});

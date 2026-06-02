@@ -69,6 +69,12 @@ export const sourceLocations = sqliteTable(
     page: integer("page"),
     /** Media timestamp in milliseconds for audio/video sources, else `null`. */
     timestampMs: integer("timestamp_ms"),
+    /**
+     * Normalized bounding box JSON `{ x0, y0, x1, y1 }` (fractions 0–1) for a PDF
+     * region extract (T065), else `null`. Anchors a figure/table crop to its page
+     * region; pure widening, no backfill (existing rows get `null`).
+     */
+    region: text("region"),
     /** Human-readable label, e.g. "Chapter 2 · ¶4". */
     label: text("label"),
     /** Verbatim snapshot of the selected text at extraction time. */

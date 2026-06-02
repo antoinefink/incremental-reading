@@ -42,13 +42,20 @@
  * jump-to-source lands in the parent extract's document (where the text lives).
  */
 
-import type { BlockId, Element, ElementId, ElementLocation, Priority } from "@interleave/core";
+import type {
+  BlockId,
+  Element,
+  ElementId,
+  ElementLocation,
+  Priority,
+  RegionRect,
+} from "@interleave/core";
 import { plainTextToProseMirrorDoc } from "@interleave/core";
 import type { InterleaveDatabase } from "@interleave/db";
 import { addDays, rawExtractIntervalDays } from "@interleave/scheduler";
 import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
-import { nowIso } from "./ids";
+import { newElementId, nowIso } from "./ids";
 import { deriveSourceLocationLabel, type LabelBlock } from "./source-location-label";
 import { SourceRepository } from "./source-repository";
 
@@ -95,6 +102,29 @@ export interface CreateExtractionInput {
 export interface ExtractionResult {
   readonly element: Element;
   readonly location: ElementLocation;
+}
+
+/** Arguments to create a PDF REGION extract (T065 — a `media_fragment`). */
+export interface CreateRegionExtractInput {
+  /**
+   * Optional pre-minted element id so the caller can import the image asset keyed
+   * by it AFTER this transaction (and soft-delete by id on an asset-import failure).
+   */
+  readonly elementId?: ElementId;
+  /** The source (PDF) element this region was drawn over (the lineage root + parent). */
+  readonly sourceElementId: ElementId;
+  /** The 1-based page the region sits on. */
+  readonly page: number;
+  /** The page's heading/first stable block id — the region's anchor (jump target). */
+  readonly pageBlockId: BlockId;
+  /** The normalized bounding box `{ x0, y0, x1, y1 }` (fractions 0–1). */
+  readonly region: RegionRect;
+  /** The inherited (source) priority for the fragment. */
+  readonly priority: Priority;
+  /** An optional user caption; defaults to "Figure on page N". */
+  readonly caption?: string | null;
+  /** The OCR/text under the region when resolved; else a generated snapshot. */
+  readonly selectedText?: string | null;
 }
 
 /** Build a short title from a selection (first ~80 chars, single line). */
@@ -207,6 +237,90 @@ export class ExtractionService {
           attrs: { extractId: element.id },
         });
       }
+
+      return { element: scheduled, location };
+    });
+  }
+
+  /**
+   * Create a PDF REGION extract (T065) — a `media_fragment` element anchoring a
+   * figure/table crop to its page + bounding box. Mirrors {@link createExtraction}
+   * but: the element is a `media_fragment` (not a text `extract`), the
+   * `source_locations` anchor carries the `page` + the normalized `region` rect
+   * (not a text span), the body is a caption placeholder (the image is the LINKED
+   * asset, not an inline node — the constrained schema has no image node), and the
+   * parent body is NOT marked (there is no text span). Everything else matches the
+   * extraction path: a `derived_from` edge, inherited priority/tags, and an
+   * initial ATTENTION `due_at` (NEVER FSRS). All of it commits in ONE transaction.
+   *
+   * The image asset is imported SEPARATELY (out of this transaction) by the
+   * main-side `PdfRegionService`, keyed by the returned element id — so this method
+   * accepts a pre-minted `elementId` (it returns the same id) and the caller owns
+   * the asset import + its rollback. Returns the new element + its region anchor.
+   */
+  createRegionExtract(input: CreateRegionExtractInput): ExtractionResult {
+    const elementId = input.elementId ?? newElementId();
+    const page = input.page;
+    const title = (input.caption ?? "").trim() || `Figure on page ${page}`;
+    // The region anchors to the page's heading block (so jump-to-source lands on
+    // the page); the label reads "Page N · region".
+    const blockIds: readonly BlockId[] = [input.pageBlockId];
+    const label = `Page ${page} · region`;
+    // `selectedText` is the OCR/text under the region when the caller resolved it
+    // (from intersecting PDF lines), else a generated label — never empty (the
+    // snapshot must never dead-end).
+    const selectedText = (input.selectedText ?? "").trim() || title;
+    // A minimal caption body — the cropped image is shown from the linked asset by
+    // the extract/inspector view, not embedded inline.
+    const conversion = plainTextToProseMirrorDoc(title);
+    const inheritedTags = this.elements.listTags(input.sourceElementId);
+
+    return this.db.transaction((tx) => {
+      // 1) media_fragment element + its region source-location anchor.
+      const { element, location } = this.sources.createExtractWithin(tx, {
+        id: elementId,
+        elementType: "media_fragment",
+        sourceElementId: input.sourceElementId,
+        parentId: input.sourceElementId,
+        locationSourceElementId: input.sourceElementId,
+        title,
+        priority: input.priority,
+        stage: "raw_extract",
+        selectedText,
+        blockIds,
+        page,
+        region: input.region,
+        label,
+      });
+
+      // 2) seed the caption body + its stable block.
+      this.documents.upsertWithin(tx, {
+        elementId: element.id,
+        prosemirrorJson: conversion.doc,
+        plainText: conversion.plainText,
+        blocks: conversion.blocks.map((b) => ({
+          blockType: b.blockType,
+          order: b.order,
+          stableBlockId: b.stableBlockId,
+        })),
+      });
+
+      // 3) derived_from edge media_fragment → source (lineage is sacred).
+      this.elements.addRelationWithin(tx, {
+        fromElementId: element.id,
+        toElementId: input.sourceElementId,
+        relationType: "derived_from",
+      });
+
+      // 4) inherit the source's tags (priority inherited via the element above).
+      for (const tagName of inheritedTags) {
+        this.elements.addTagWithin(tx, element.id, tagName);
+      }
+
+      // 5) initial ATTENTION due date + status scheduled (a region fragment is an
+      //    attention-scheduled topic, NEVER FSRS — no review_states row).
+      const dueAt = addDays(nowIso(), rawExtractIntervalDays(input.priority));
+      const scheduled = this.elements.rescheduleWithin(tx, element.id, dueAt, "scheduled");
 
       return { element: scheduled, location };
     });

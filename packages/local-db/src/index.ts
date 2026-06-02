@@ -74,6 +74,7 @@ export {
 } from "./extract-service";
 export {
   type CreateExtractionInput,
+  type CreateRegionExtractInput,
   type ExtractionResult,
   ExtractionService,
   rawExtractIntervalDays,

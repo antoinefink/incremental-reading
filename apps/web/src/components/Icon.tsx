@@ -51,6 +51,7 @@ import {
   GripVertical,
   Highlighter,
   Hourglass,
+  Image,
   Inbox,
   Info,
   Keyboard,
@@ -113,6 +114,7 @@ const ICONS = {
   concept: Share2,
   concepts: Share2,
   media: SquarePlay,
+  image: Image,
   topic: Folder,
   synthesis: NotebookPen,
   // Actions / status

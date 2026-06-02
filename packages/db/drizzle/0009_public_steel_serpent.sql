@@ -1,0 +1,1 @@
+ALTER TABLE `source_locations` ADD `region` text;

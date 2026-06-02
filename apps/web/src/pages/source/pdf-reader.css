@@ -96,3 +96,100 @@
   cursor: default;
   user-select: none;
 }
+
+/* --- region (figure) extraction (T065) ------------------------------------ */
+
+/* The rubber-band capture overlay sits ABOVE the text layer so a drag in region
+   mode never starts a text selection; it is only mounted in region mode. */
+.pdf-region-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.pdf-region-rubberband {
+  position: absolute;
+  border: 1.5px solid var(--accent, #4f7cff);
+  background: color-mix(in oklch, var(--accent, #4f7cff) 18%, transparent);
+  pointer-events: none;
+}
+
+/* A light persistent/flashing outline over an extracted region. */
+.pdf-region-mark {
+  position: absolute;
+  z-index: 2;
+  border: 1.5px solid color-mix(in oklch, var(--accent, #4f7cff) 70%, transparent);
+  border-radius: 2px;
+  background: color-mix(in oklch, var(--accent, #4f7cff) 8%, transparent);
+  pointer-events: none;
+}
+
+.pdf-region-mark--flash {
+  animation: pdf-region-flash 2.2s ease-out;
+}
+
+@keyframes pdf-region-flash {
+  0%,
+  40% {
+    border-color: var(--accent, #4f7cff);
+    background: color-mix(in oklch, var(--accent, #4f7cff) 28%, transparent);
+  }
+  100% {
+    border-color: color-mix(in oklch, var(--accent, #4f7cff) 70%, transparent);
+    background: color-mix(in oklch, var(--accent, #4f7cff) 8%, transparent);
+  }
+}
+
+/* The confirm popover after a region is drawn. */
+.pdf-region-confirm {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 280px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg, 0 12px 32px rgba(0, 0, 0, 0.22));
+}
+
+.pdf-region-confirm__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pdf-region-confirm__preview {
+  display: block;
+  max-width: 100%;
+  max-height: 160px;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+.pdf-region-confirm__caption {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--t-sm);
+}
+
+.pdf-region-confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

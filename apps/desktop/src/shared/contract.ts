@@ -296,6 +296,8 @@ export interface LocationSummary {
   readonly label: string | null;
   readonly selectedText: string;
   readonly page: number | null;
+  /** The PDF region bbox (T065) for a `media_fragment` region extract, else `null`. */
+  readonly region: RegionRectInput | null;
   /** The source element this location points INTO (the reader to open on jump). */
   readonly sourceElementId: string;
   /** Ordered STABLE block ids the selection spans (the scroll target is the first). */
@@ -927,6 +929,108 @@ export interface SourcesGetPdfDataResult {
   readonly bytes: ArrayBuffer | null;
   /** The number of pages (derived from `document_blocks.page`), or 0 when unknown. */
   readonly pageCount: number;
+}
+
+// ---------------------------------------------------------------------------
+// sources.extractRegion() / sources.getRegionImage()  (T065 — PDF region extract)
+// ---------------------------------------------------------------------------
+
+/** Max bytes a single cropped figure PNG may cross the IPC bridge (T065). */
+const MAX_REGION_PNG_BYTES = 8 * 1024 * 1024; // 8 MB — one figure crop is far under this.
+
+/**
+ * A normalized region rectangle (T065): fractions `0–1` of the page's rendered
+ * width/height (scale-independent). Validated `0≤·≤1`, `x0<x1`, `y0<y1` so an
+ * inverted/out-of-range rect cannot cross the bridge.
+ */
+export const RegionRectSchema = z
+  .object({
+    x0: z.number().min(0).max(1),
+    y0: z.number().min(0).max(1),
+    x1: z.number().min(0).max(1),
+    y1: z.number().min(0).max(1),
+  })
+  .refine((r) => r.x0 < r.x1 && r.y0 < r.y1, {
+    message: "region must have x0<x1 and y0<y1",
+  });
+export type RegionRectInput = z.infer<typeof RegionRectSchema>;
+
+/**
+ * PDF region extraction (T065). The renderer crops the figure/table from the page
+ * it already rendered to a `<canvas>` and ships the small PNG `ArrayBuffer` + the
+ * normalized rect + page; MAIN streams the bytes into the vault (`media/<asset_id>/
+ * original.png`) and creates a `media_fragment` extract whose `source_locations`
+ * row carries the page + region. The PNG byteLength is size-capped so a hostile/
+ * huge crop cannot cross the bridge.
+ */
+export const SourcesExtractRegionRequestSchema = z.object({
+  /** The PDF source element the region was drawn over (the lineage root). */
+  sourceElementId: ElementIdSchema,
+  /** The 1-based page the region sits on. */
+  page: z.number().int().min(1),
+  /** The page's heading/first stable block id — the region's jump anchor. */
+  pageBlockId: z.string().min(1).max(128),
+  /** The normalized bounding box (fractions 0–1). */
+  region: RegionRectSchema,
+  /** The cropped figure PNG bytes (produced in the renderer's `<canvas>`). */
+  imagePng: z
+    .instanceof(ArrayBuffer)
+    .refine((b) => b.byteLength > 0 && b.byteLength <= MAX_REGION_PNG_BYTES, {
+      message: `imagePng must be 1..${MAX_REGION_PNG_BYTES} bytes`,
+    }),
+  /** Optional user caption; defaults to "Figure on page N" main-side. */
+  caption: z.string().trim().max(512).nullable().optional(),
+  /** Optional A/B/C/D priority override; else INHERITS the source's priority. */
+  priority: PriorityLabelSchema.optional(),
+});
+export type SourcesExtractRegionRequest = z.infer<typeof SourcesExtractRegionRequestSchema>;
+
+/** The created region extract's `media_fragment` summary. */
+export interface RegionExtractSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly status: string;
+  readonly stage: string;
+  /** Numeric priority `0.0`–`1.0`; the UI derives the A/B/C/D label. */
+  readonly priority: number;
+  readonly title: string;
+  /** The attention `due_at` (ISO-8601) — a region fragment is an attention item, never FSRS. */
+  readonly dueAt: string | null;
+  readonly sourceId: string | null;
+  readonly parentId: string | null;
+}
+
+/** The created region extract's stored region source-location anchor. */
+export interface RegionLocationSummary {
+  readonly id: string;
+  readonly sourceElementId: string;
+  readonly page: number | null;
+  readonly region: RegionRectInput | null;
+  readonly label: string | null;
+}
+
+export interface SourcesExtractRegionResult {
+  readonly id: string;
+  readonly element: RegionExtractSummary;
+  readonly location: RegionLocationSummary;
+}
+
+/**
+ * Serve a region extract's cropped IMAGE bytes to the renderer (T065) for the
+ * inspector/extract detail view — the renderer passes only the `media_fragment`
+ * element id; MAIN resolves the owning `image` asset's vault path and returns the
+ * bytes (the renderer never resolves a path).
+ */
+export const SourcesGetRegionImageRequestSchema = z.object({
+  elementId: ElementIdSchema,
+});
+export type SourcesGetRegionImageRequest = z.infer<typeof SourcesGetRegionImageRequestSchema>;
+
+export interface SourcesGetRegionImageResult {
+  /** The cropped PNG bytes, or `null` when the element has no image asset. */
+  readonly bytes: ArrayBuffer | null;
+  /** The image MIME (e.g. `image/png`), or `null`. */
+  readonly mime: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -2789,6 +2893,15 @@ export interface AppApi {
     importPdf(request: SourcesImportPdfRequest): Promise<SourcesImportPdfResult>;
     /** Serve a PDF source's original bytes to the renderer for rendering (T064). */
     getPdfData(request: SourcesGetPdfDataRequest): Promise<SourcesGetPdfDataResult>;
+    /**
+     * Crop a PDF page region into a scheduled `media_fragment` extract (T065) —
+     * the renderer ships the cropped PNG + the normalized rect + page; MAIN streams
+     * the bytes into the vault and creates the region extract + its page+region
+     * source location in one transaction.
+     */
+    extractRegion(request: SourcesExtractRegionRequest): Promise<SourcesExtractRegionResult>;
+    /** Serve a region extract's cropped image bytes to the renderer (T065). */
+    getRegionImage(request: SourcesGetRegionImageRequest): Promise<SourcesGetRegionImageResult>;
   };
   readonly capture: {
     /** Read the browser-capture pairing state (token + enabled/running/port) (T062). */

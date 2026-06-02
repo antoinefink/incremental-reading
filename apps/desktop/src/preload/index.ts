@@ -64,7 +64,9 @@ import type {
   SettingsGetRequest,
   SettingsUpdateManyRequest,
   SettingsUpdateRequest,
+  SourcesExtractRegionRequest,
   SourcesGetPdfDataRequest,
+  SourcesGetRegionImageRequest,
   SourcesImportManualRequest,
   SourcesImportPdfRequest,
   SourcesImportUrlRequest,
@@ -120,6 +122,10 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.sourcesImportPdf, request),
     getPdfData: (request: SourcesGetPdfDataRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.sourcesGetPdfData, request),
+    extractRegion: (request: SourcesExtractRegionRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.sourcesExtractRegion, request),
+    getRegionImage: (request: SourcesGetRegionImageRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.sourcesGetRegionImage, request),
   },
   capture: {
     getPairing: () => ipcRenderer.invoke(IPC_CHANNELS.captureGetPairing),

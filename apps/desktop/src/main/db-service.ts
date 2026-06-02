@@ -163,8 +163,12 @@ import type {
   SettingsUpdateManyResult,
   SettingsUpdateResult,
   SettingValue,
+  SourcesExtractRegionRequest,
+  SourcesExtractRegionResult,
   SourcesGetPdfDataRequest,
   SourcesGetPdfDataResult,
+  SourcesGetRegionImageRequest,
+  SourcesGetRegionImageResult,
   SourcesImportManualRequest,
   SourcesImportManualResult,
   SourcesImportPdfResult,
@@ -198,6 +202,7 @@ import {
   CAPTURE_TOKEN_KEY,
 } from "./capture-pairing";
 import { PdfImportService } from "./pdf-import-service";
+import { PdfRegionService } from "./pdf-region-service";
 import { UrlImportService } from "./url-import-service";
 
 /**
@@ -260,6 +265,12 @@ export class DbService {
    * (it needs `assetsDir` + the `assetVaultService`, both available after open()).
    */
   private pdfImport: PdfImportService | null = null;
+  /**
+   * The PDF region-extract orchestrator (T065) — crop a figure/table region into a
+   * scheduled `media_fragment` extract (vault image + page+region source location).
+   * Built lazily (it needs the extraction service + the `assetVaultService`).
+   */
+  private pdfRegion: PdfRegionService | null = null;
   /** The vault asset-root, injected at open() time; required for URL import. */
   private assetsDir: string | null = null;
   /** DEV/E2E-only: permit loopback/private hosts in URL import (see open()). */
@@ -359,6 +370,7 @@ export class DbService {
     this.urlImport = null;
     this.assetVault = null;
     this.pdfImport = null;
+    this.pdfRegion = null;
     this.assetsDir = null;
     this.allowLoopbackImport = false;
     this.migrated = false;
@@ -850,6 +862,69 @@ export class DbService {
       if (typeof block.page === "number" && block.page > max) max = block.page;
     }
     return max;
+  }
+
+  /**
+   * The PDF region-extract service (T065), lazily built on first read against the
+   * open DB + repos + the extraction service + the `assetVaultService` (so the
+   * cropped PNG streams in through the SAME T059 importer). Throws a clear error if
+   * `assetsDir` was not provided — mirrors {@link pdfImportService}.
+   */
+  private get pdfRegionService(): PdfRegionService {
+    if (this.pdfRegion) return this.pdfRegion;
+    if (!this.assetsDir) {
+      throw new Error(
+        "DbService: PDF region extraction requires an assets directory — call open() with { assetsDir }",
+      );
+    }
+    this.pdfRegion = new PdfRegionService({
+      db: this.require().db,
+      repositories: this.repos,
+      extraction: this.extractionService,
+      assetVault: this.assetVaultService,
+    });
+    return this.pdfRegion;
+  }
+
+  /**
+   * Crop a PDF page region into a scheduled `media_fragment` extract (T065). The
+   * renderer ships the cropped PNG + the normalized rect + page (already validated/
+   * size-capped at the IPC boundary); MAIN streams the bytes into the vault and
+   * creates the region extract + its page+region source location in one transaction.
+   */
+  async extractRegion(request: SourcesExtractRegionRequest): Promise<SourcesExtractRegionResult> {
+    return await this.pdfRegionService.extractRegion({
+      sourceElementId: request.sourceElementId as ElementId,
+      page: request.page,
+      pageBlockId: request.pageBlockId,
+      region: request.region,
+      imagePng: request.imagePng,
+      caption: request.caption ?? null,
+      ...(request.priority ? { priority: request.priority } : {}),
+    });
+  }
+
+  /**
+   * Serve a region extract's cropped image bytes to the renderer (T065). MAIN reads
+   * the owning `image` asset's vault path; the renderer passes only the element id.
+   * Returns `{ bytes: null }` when the element has no image asset.
+   */
+  async getRegionImage(
+    request: SourcesGetRegionImageRequest,
+  ): Promise<SourcesGetRegionImageResult> {
+    const elementId = request.elementId as ElementId;
+    const asset = this.repos.assets.listForElementByKind(elementId, "image")[0] ?? null;
+    if (!this.assetsDir || !asset) {
+      return { bytes: null, mime: null };
+    }
+    const abs = path.join(this.assetsDir, ...asset.location.vaultPath.relativePath.split("/"));
+    try {
+      const buf = await fsp.readFile(abs);
+      const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+      return { bytes: ab, mime: asset.mime };
+    } catch {
+      return { bytes: null, mime: null };
+    }
   }
 
   /**

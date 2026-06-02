@@ -33,6 +33,19 @@
   overflow-y: auto;
 }
 
+/* PDF region figure (T065) — the cropped image on a media_fragment extract. */
+.extract-region {
+  margin-bottom: 18px;
+}
+
+.extract-region__img {
+  display: block;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 8px);
+  background: var(--surface-2, var(--surface));
+}
+
 .extract-passage {
   font-family: var(--font-serif, Georgia, serif);
   font-size: var(--t-base);

@@ -11,8 +11,11 @@
  *      layer is selectable), tracks a PAGE read-point, and shows page N of M;
  *   3. setting a read-point on page 2 + extracting page-2 text creates an extract
  *      linked to page 2 (its source-location label reads "Page 2 · …");
- *   4. after an APP RESTART against the same data dir, the source, its body, its
- *      `original.pdf`, the page-2 read-point, and the page-linked extract survive.
+ *   4. drawing a rectangle over page 1 in region mode crops it to a `media_fragment`
+ *      image extract whose source location carries the page + region bbox (T065);
+ *   5. after an APP RESTART against the same data dir, the source, its body, its
+ *      `original.pdf`, the page-2 read-point, the page-linked extract, and the
+ *      region extract + its cropped image all survive.
  *
  * The renderer reaches all of this only through `window.appApi` — no fs/SQL.
  */
@@ -192,7 +195,100 @@ test("setting a page-2 read-point + extracting page text links the extract to pa
   await app.close();
 });
 
-test("the PDF source, read-point, and page-linked extract survive an app restart", async () => {
+test("drawing a region on a page creates a media_fragment image extract (T065)", async () => {
+  const app = await launch();
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+  await captureBaseUrl(page);
+
+  const id = await firstInboxId(page);
+  await page.goto(`${baseUrl}/source/${id}`);
+  await page.waitForLoadState("domcontentloaded");
+  await expect(page.getByTestId("pdf-reader")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("pdf-page-1")).toBeVisible();
+  // Wait for page 1's canvas to actually paint (the crop reads its pixels).
+  await page.waitForFunction(() => {
+    const c = document.querySelector('[data-pdf-page="1"] canvas') as HTMLCanvasElement | null;
+    return !!c && c.width > 0 && c.height > 0;
+  });
+
+  // Enable region (figure) mode — the rubber-band overlay mounts on each page.
+  await page.getByTestId("pdf-region-mode").click();
+  const overlay = page.getByTestId("pdf-region-overlay-1");
+  await expect(overlay).toBeVisible();
+
+  // Drag a rectangle over page 1 (a chunk of the page's interior).
+  const box = await overlay.boundingBox();
+  if (!box) throw new Error("region overlay has no bounding box");
+  const startX = box.x + box.width * 0.2;
+  const startY = box.y + box.height * 0.2;
+  const endX = box.x + box.width * 0.7;
+  const endY = box.y + box.height * 0.6;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + (endX - startX) / 2, startY + (endY - startY) / 2);
+  await page.mouse.move(endX, endY);
+  await page.mouse.up();
+
+  // The confirm popover appears with the crop preview; confirm the extract.
+  await expect(page.getByTestId("pdf-region-confirm")).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId("pdf-region-caption").fill("A figure on page 1");
+  await page.getByTestId("pdf-region-confirm-btn").click();
+  await expect(page.getByTestId("reader-flash")).toContainText("Region extracted");
+
+  // Through the bridge: a scheduled `media_fragment` extract with a page+region
+  // source location now hangs under the source, and its cropped image is served.
+  const result = await page.evaluate(async (sourceId) => {
+    const api = window.appApi as unknown as {
+      inspector: {
+        list(): Promise<{ elements: { id: string; type: string }[] }>;
+        get(req: { id: string }): Promise<{
+          data: {
+            element: { type: string };
+            location: {
+              page: number | null;
+              region: { x0: number; y0: number; x1: number; y1: number } | null;
+              label: string | null;
+            } | null;
+            source: { id: string } | null;
+          } | null;
+        }>;
+      };
+      sources: {
+        getRegionImage(req: {
+          elementId: string;
+        }): Promise<{ bytes: ArrayBuffer | null; mime: string | null }>;
+      };
+    };
+    const { elements } = await api.inspector.list();
+    for (const el of elements) {
+      if (el.type !== "media_fragment") continue;
+      const { data } = await api.inspector.get({ id: el.id });
+      if (data?.source?.id === sourceId && data.location?.region) {
+        const img = await api.sources.getRegionImage({ elementId: el.id });
+        return {
+          id: el.id,
+          page: data.location.page,
+          hasRegion: !!data.location.region,
+          label: data.location.label,
+          hasImage: !!img.bytes,
+          mime: img.mime,
+        };
+      }
+    }
+    return null;
+  }, id);
+  expect(result).not.toBeNull();
+  expect(result?.page).toBe(1);
+  expect(result?.hasRegion).toBe(true);
+  expect(result?.label ?? "").toContain("region");
+  expect(result?.hasImage).toBe(true);
+  expect(result?.mime).toBe("image/png");
+
+  await app.close();
+});
+
+test("the PDF source, read-point, page-linked extract, and region extract survive an app restart", async () => {
   const app = await launch();
   const page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");
@@ -205,7 +301,7 @@ test("the PDF source, read-point, and page-linked extract survive an app restart
   const id = await firstInboxId(page);
   expect(fs.existsSync(path.join(dataDir, "assets", "sources", id, "original.pdf"))).toBe(true);
 
-  // The read-point + the page-2 extract persisted.
+  // The read-point + the page-2 extract + the page-1 region extract persisted.
   const state = await page.evaluate(async (sourceId) => {
     const api = window.appApi as unknown as {
       readPoints: {
@@ -215,24 +311,41 @@ test("the PDF source, read-point, and page-linked extract survive an app restart
         list(): Promise<{ elements: { id: string; type: string }[] }>;
         get(req: { id: string }): Promise<{
           data: {
-            location: { page: number | null } | null;
+            location: {
+              page: number | null;
+              region: { x0: number; y0: number; x1: number; y1: number } | null;
+            } | null;
             source: { id: string } | null;
           } | null;
         }>;
+      };
+      sources: {
+        getRegionImage(req: {
+          elementId: string;
+        }): Promise<{ bytes: ArrayBuffer | null; mime: string | null }>;
       };
     };
     const { readPoint } = await api.readPoints.get({ elementId: sourceId });
     const { elements } = await api.inspector.list();
     let pageTwoExtract = false;
+    let regionExtractWithImage = false;
     for (const el of elements) {
-      if (el.type !== "extract") continue;
-      const { data } = await api.inspector.get({ id: el.id });
-      if (data?.source?.id === sourceId && data.location?.page === 2) pageTwoExtract = true;
+      if (el.type === "extract") {
+        const { data } = await api.inspector.get({ id: el.id });
+        if (data?.source?.id === sourceId && data.location?.page === 2) pageTwoExtract = true;
+      } else if (el.type === "media_fragment") {
+        const { data } = await api.inspector.get({ id: el.id });
+        if (data?.source?.id === sourceId && data.location?.region) {
+          const img = await api.sources.getRegionImage({ elementId: el.id });
+          if (img.bytes) regionExtractWithImage = true;
+        }
+      }
     }
-    return { hasReadPoint: !!readPoint, pageTwoExtract };
+    return { hasReadPoint: !!readPoint, pageTwoExtract, regionExtractWithImage };
   }, id);
   expect(state.hasReadPoint).toBe(true);
   expect(state.pageTwoExtract).toBe(true);
+  expect(state.regionExtractWithImage).toBe(true);
 
   // The reader still renders the PDF after restart.
   await page.goto(`${baseUrl}/source/${id}`);

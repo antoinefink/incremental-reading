@@ -50,6 +50,7 @@ Lucide renamed several icons recently; current names are listed (legacy alias in
 | `task` | `SquareCheckBig` (was `CheckSquare`) |
 | `concept` | `Share2` |
 | `media` | `SquarePlay` (was `PlaySquare`) |
+| `image` | `Image` |
 | `topic` | `Folder` |
 | `synthesis` | `NotebookPen` |
 

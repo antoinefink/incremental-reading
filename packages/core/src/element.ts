@@ -71,6 +71,20 @@ export interface ElementRelation {
 }
 
 /**
+ * A normalized rectangle over a paginated page (`source_locations.region`, T065).
+ * `x0/y0/x1/y1` are FRACTIONS `0–1` of the page's rendered width/height
+ * (scale-independent, so the region maps back correctly at any zoom). `x0<x1` and
+ * `y0<y1`. Used by a PDF region extract (a `media_fragment`) to anchor a figure/
+ * table crop to its page + bounding box.
+ */
+export interface RegionRect {
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+}
+
+/**
  * A precise position inside a source (`source_locations` table) — the anchor
  * that makes lineage *actionable* ("jump to the exact paragraph"). An extract or
  * card references one of these; it captures the stable block IDs, character
@@ -93,6 +107,11 @@ export interface ElementLocation {
   readonly page: number | null;
   /** Media timestamp in milliseconds for audio/video sources, else `null`. */
   readonly timestampMs: number | null;
+  /**
+   * Normalized bounding box `{ x0, y0, x1, y1 }` (fractions 0–1) for a PDF region
+   * extract (T065), else `null`. Anchors a figure/table crop to its page region.
+   */
+  readonly region: RegionRect | null;
   /** Human-readable label, e.g. "Chapter 2 · ¶4". */
   readonly label: string | null;
   /** Verbatim snapshot of the selected text at extraction time. */
