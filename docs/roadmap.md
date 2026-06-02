@@ -257,6 +257,7 @@ Detailed specs: [`tasks/M14-pdf-ocr.md`](./tasks/M14-pdf-ocr.md) (T064–T066) �
   Done when: cards export to Anki-compatible packages/CSV with source refs, and Anki cards import as card elements preserving review history when available.
 
 ## M15 — Rich media cards (T071–T075)
+Detailed specs: [`tasks/M15-occlusion-formula.md`](./tasks/M15-occlusion-formula.md) (T071–T072) · [`tasks/M15-media.md`](./tasks/M15-media.md) (T073–T075)
 
 > Local-first: image/video/audio bytes live in the **asset vault** (T059), transcoding/clipping
 > runs on the **local background runner** (T058); no app-level S3, no server processing.
