@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../components/Icon";
+import { OptimizationPanel } from "../components/OptimizationPanel";
 import {
   type AppSettings,
   appApi,
@@ -56,6 +57,7 @@ const FALLBACK_SETTINGS: AppSettings = {
   displayName: "",
   retentionByBand: {},
   retentionByBandEnabled: false,
+  fsrsParamsGlobal: null,
 };
 
 /** Max length of the display name (mirrors `@interleave/core` `DISPLAY_NAME_MAX`). */
@@ -624,6 +626,8 @@ export function Settings() {
           />
         ))}
       </SectionPanel>
+
+      <OptimizationPanel />
 
       <SectionPanel title="Interface">
         <SettingRow

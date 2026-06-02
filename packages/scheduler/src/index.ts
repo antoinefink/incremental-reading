@@ -69,6 +69,26 @@ export {
   SCHEDULER_REVIEW_RATINGS,
 } from "./card-scheduler";
 export { addDays, MS_PER_DAY } from "./date-util";
+export {
+  defaultParams,
+  type FitScore,
+  FSRS_PARAM_COUNT,
+  type FsrsOptimizer,
+  hasSufficientData,
+  historyCalibrationOptimizer,
+  MIN_CARDS_FOR_FIT,
+  MIN_REVIEWS_FOR_FIT,
+  nextIntervalDaysForParams,
+  type OptimizationSuggestion,
+  type OptimizationSuggestionParts,
+  type OptimizerHistory,
+  type OptimizerOptions,
+  type OptimizerReview,
+  optimizationSuggestionFromParts,
+  sanitizeParams,
+  scoreParameters,
+  suggestParameters,
+} from "./fsrs-optimizer";
 export { isLeech, LEECH_LAPSE_THRESHOLD } from "./leech";
 export {
   DECLUMP_MAX_PUSHDOWN,

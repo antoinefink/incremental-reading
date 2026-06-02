@@ -97,6 +97,19 @@ export interface AppSettings {
    * resolver when present, independent of this flag.
    */
   readonly retentionByBandEnabled: boolean;
+  /**
+   * The optimized GLOBAL FSRS parameter preset (T080) — a JSON-encoded 21-number
+   * FSRS-6 `w` vector, or `null` = inherit ts-fsrs `default_w`. Written ONLY by the
+   * optimization apply (the suggest/apply flow), never auto-applied. Read by the
+   * per-card scheduler factory: `concepts.fsrs_params` (the card's concept preset)
+   * overrides this; this overrides `default_w`. Stored here (the queryable store)
+   * exactly like {@link retentionByBand} — a `settings` write (no op, T011). The
+   * structural shape (a finite 21-number array) is validated at this coercion choke
+   * point; the full FSRS `checkParameters` validity is enforced at the
+   * `OptimizationService` write boundary (which can import `@interleave/scheduler`;
+   * core stays dependency-free).
+   */
+  readonly fsrsParamsGlobal: number[] | null;
 }
 
 /**
@@ -117,6 +130,7 @@ export const SETTINGS_KEYS = {
   displayName: "ui.displayName",
   retentionByBand: "review.retentionByBand",
   retentionByBandEnabled: "review.retentionByBand.enabled",
+  fsrsParamsGlobal: "review.fsrsParamsGlobal",
 } as const satisfies Record<keyof AppSettings, string>;
 
 /**
@@ -141,7 +155,28 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   // is static). An absent band = inherit, which stays correct dynamically (T079).
   retentionByBand: {},
   retentionByBandEnabled: false,
+  // `null` = inherit ts-fsrs `default_w` (the T036 behavior) until the optimization
+  // flow explicitly applies a fitted preset. Never auto-filled (T080).
+  fsrsParamsGlobal: null,
 };
+
+/** The FSRS-6 weight-vector length (`default_w` is 21 numbers in ts-fsrs@5.4.1). */
+export const FSRS_PARAM_VECTOR_LENGTH = 21;
+
+/**
+ * Coerce an arbitrary stored value into a valid global FSRS parameter vector
+ * (T080): a finite 21-number array, else `null` (inherit). This is the STRUCTURAL
+ * choke point — core stays dependency-free, so the full FSRS `checkParameters`
+ * validity (the clamp/range check) is enforced upstream at the `OptimizationService`
+ * write boundary (which imports `@interleave/scheduler`). A malformed / wrong-length
+ * / non-finite value degrades to `null` so a corrupt store can never reach FSRS.
+ */
+export function coerceFsrsParams(raw: unknown): number[] | null {
+  if (!Array.isArray(raw)) return null;
+  if (raw.length !== FSRS_PARAM_VECTOR_LENGTH) return null;
+  if (!raw.every((value) => typeof value === "number" && Number.isFinite(value))) return null;
+  return [...(raw as number[])];
+}
 
 /** Inclusive UI bounds for the daily review budget slider. */
 export const DAILY_REVIEW_BUDGET_MIN = 10;
@@ -269,6 +304,10 @@ export function coerceSettingValue<K extends keyof AppSettings>(
       return coerceRetentionByBand(raw) as AppSettings[K];
     case "retentionByBandEnabled":
       return (typeof raw === "boolean" ? raw : fallback) as AppSettings[K];
+    case "fsrsParamsGlobal":
+      // A finite 21-number array, else `null` (inherit `default_w`); the full
+      // FSRS validity is enforced at the OptimizationService write (T080).
+      return coerceFsrsParams(raw) as AppSettings[K];
     default:
       return fallback;
   }
@@ -314,6 +353,10 @@ export function appSettingsFromStored(stored: Readonly<Record<string, unknown>>)
     retentionByBandEnabled: coerceSettingValue(
       "retentionByBandEnabled",
       stored[SETTINGS_KEYS.retentionByBandEnabled],
+    ),
+    fsrsParamsGlobal: coerceSettingValue(
+      "fsrsParamsGlobal",
+      stored[SETTINGS_KEYS.fsrsParamsGlobal],
     ),
   };
 }

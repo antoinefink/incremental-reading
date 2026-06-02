@@ -203,6 +203,13 @@ export const JOB_TYPES = [
   "cleanup",
   "vault_verify",
   "vault_gc",
+  // The heavy on-device FSRS parameter fit (T080). A large review history is
+  // replayed + scored OFF the main thread (the DB-free worker runs the pure
+  // `suggestParameters`; main builds the `OptimizerHistory` payload and applies the
+  // result through `optimization.apply`). A small history fits INLINE in main (no
+  // job) — this is for large histories so the UI never blocks. Adding a type widens
+  // the `jobs.type` CHECK → ships with a Drizzle table-rebuild migration.
+  "fsrs_optimize",
 ] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 

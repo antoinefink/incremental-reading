@@ -122,6 +122,41 @@ describe("RetentionService.resolveForCard", () => {
   });
 });
 
+describe("RetentionService.resolveParamsForCard (T080)", () => {
+  const PARAMS_A = Array.from({ length: 21 }, (_, i) => 0.4 + i * 0.05);
+  const PARAMS_B = Array.from({ length: 21 }, (_, i) => 0.5 + i * 0.04);
+
+  it("inherits null when no global or concept preset is set", () => {
+    const card = makeCard(PRIORITY_LABEL_VALUE.B);
+    expect(retention.resolveParamsForCard(card)).toBeNull();
+  });
+
+  it("resolves the global preset (fsrs.params.global setting)", () => {
+    const card = makeCard(PRIORITY_LABEL_VALUE.B);
+    repos.settings.updateAppSettings({ fsrsParamsGlobal: PARAMS_A });
+    expect(retention.resolveParamsForCard(card)).toEqual(PARAMS_A);
+  });
+
+  it("a concept preset OVERRIDES the global preset (strictest concept wins)", () => {
+    const card = makeCard(PRIORITY_LABEL_VALUE.B);
+    repos.settings.updateAppSettings({ fsrsParamsGlobal: PARAMS_A });
+    const low = repos.concepts.createConcept({ name: "Background" });
+    const high = repos.concepts.createConcept({ name: "Fragile" });
+    repos.concepts.setConceptRetention(low.id, 0.85);
+    repos.concepts.setConceptRetention(high.id, 0.94);
+    repos.concepts.setConceptFsrsParams(low.id, PARAMS_A);
+    repos.concepts.setConceptFsrsParams(high.id, PARAMS_B);
+    repos.concepts.assignConcept(card, low.id);
+    repos.concepts.assignConcept(card, high.id);
+    // The strictest (highest-target) concept's preset wins.
+    expect(retention.resolveParamsForCard(card)).toEqual(PARAMS_B);
+  });
+
+  it("returns null for a non-card id", () => {
+    expect(retention.resolveParamsForCard("not-a-card" as ElementId)).toBeNull();
+  });
+});
+
 describe("RetentionService.setCardRetention", () => {
   it("writes the column + logs update_element, and clearing inherits again", () => {
     const card = makeCard(PRIORITY_LABEL_VALUE.B);

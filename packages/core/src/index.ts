@@ -179,6 +179,7 @@ export type { ReviewLog, ReviewState } from "./review";
 export type { AppSettings, KeyboardLayout, ThemePreference } from "./settings";
 export {
   appSettingsFromStored,
+  coerceFsrsParams,
   coerceRetentionByBand,
   coerceSettingsPatch,
   coerceSettingValue,
@@ -188,6 +189,7 @@ export {
   DESIRED_RETENTION_MAX,
   DESIRED_RETENTION_MIN,
   DISPLAY_NAME_MAX,
+  FSRS_PARAM_VECTOR_LENGTH,
   isKeyboardLayout,
   isThemePreference,
   KEYBOARD_LAYOUTS,

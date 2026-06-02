@@ -193,6 +193,8 @@ describe("IPC channels", () => {
         "retention:setConcept",
         "retention:setCard",
         "retention:resolveFor",
+        "optimization:suggest",
+        "optimization:apply",
         "tags:list",
         "tags:add",
         "tags:remove",

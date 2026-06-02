@@ -22,6 +22,7 @@ import os from "node:os";
 import path from "node:path";
 import type { JobJsonValue } from "@interleave/core";
 import { MIGRATIONS_DIR } from "@interleave/db";
+import { suggestParameters } from "@interleave/scheduler";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { WorkerMessage, WorkerRequest } from "../worker/messages";
 import { DbService } from "./db-service";
@@ -82,6 +83,41 @@ class SilentWorker implements WorkerHandle {
     this.posted.push(request);
   }
   onMessage(): void {}
+  kill(): void {}
+}
+
+/**
+ * A fake worker that runs the REAL pure bounded search (`suggestParameters`) for an
+ * `fsrs_optimize` job — mirroring the actual DB-free worker dispatch (the worker
+ * imports only `@interleave/scheduler`'s pure optimizer, never the DB). Asserts the
+ * runner's worker→apply→terminal path carries the suggestion (T080).
+ */
+class FsrsOptimizeWorker implements WorkerHandle {
+  private listener: ((message: WorkerMessage) => void) | null = null;
+  postMessage(request: WorkerRequest): void {
+    setTimeout(() => {
+      const payload = request.payload as unknown as {
+        history: Parameters<typeof suggestParameters>[0];
+      };
+      const suggestion = suggestParameters(payload.history);
+      this.listener?.({
+        kind: "result",
+        jobId: request.jobId,
+        data: {
+          params: [...suggestion.params.w],
+          baseline: { ...suggestion.baseline },
+          suggested: { ...suggestion.suggested },
+          improvement: suggestion.improvement,
+          reviewsScored: suggestion.reviewsScored,
+          method: suggestion.method,
+          sufficientData: suggestion.sufficientData,
+        } as unknown as JobJsonValue,
+      });
+    }, 0);
+  }
+  onMessage(listener: (message: WorkerMessage) => void): void {
+    this.listener = listener;
+  }
   kill(): void {}
 }
 
@@ -199,5 +235,37 @@ describe("JobRunner integration — apply + restart-resume", () => {
 
     runner2.stop();
     svc2.close();
+  });
+
+  it("runs an fsrs_optimize job off-main and surfaces the suggestion via the runner (T080)", async () => {
+    const svc = openDb();
+    const runner = makeRunner(svc, new FsrsOptimizeWorker());
+    runner.start();
+
+    // A (deterministic) history payload — the worker runs the real bounded search.
+    const history = Array.from({ length: 25 }, (_, c) => ({
+      cardId: `card-${c}`,
+      reviews: Array.from({ length: 5 }, (_, r) => ({
+        rating: (r % 4 === 0 ? "again" : "good") as "again" | "good",
+        reviewedAt: new Date(Date.UTC(2025, 0, 1) + (c * 5 + r) * 86_400_000).toISOString(),
+        elapsedDays: r === 0 ? 0 : 3,
+      })),
+    }));
+    const job = runner.enqueue("fsrs_optimize", { history } as unknown as JobJsonValue);
+    const terminal = await runner.waitForTerminal(job.id);
+
+    expect(terminal.status).toBe("succeeded");
+    // The runner surfaces the worker's suggestion (the pass-through apply handler).
+    const result = terminal.result as {
+      params: number[];
+      method: string;
+      sufficientData: boolean;
+    };
+    expect(result.params).toHaveLength(21);
+    expect(result.method).toBe("history-calibration");
+    expect(typeof result.sufficientData).toBe("boolean");
+
+    runner.stop();
+    svc.close();
   });
 });

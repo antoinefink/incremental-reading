@@ -59,6 +59,8 @@ import {
   type JobsListResult,
   LibraryBrowseRequestSchema,
   LineageGetRequestSchema,
+  OptimizationApplyRequestSchema,
+  OptimizationSuggestRequestSchema,
   PickImportFileRequestSchema,
   type PickImportFileResult,
   QueueActRequestSchema,
@@ -965,6 +967,17 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.retentionResolveFor, (_event, rawRequest: unknown) => {
     const request = RetentionResolveForRequestSchema.parse(rawRequest);
     return dbService.resolveRetentionFor(request);
+  });
+
+  // optimization.*  (T080 — on-device FSRS parameter optimization)
+  ipcMain.handle(IPC_CHANNELS.optimizationSuggest, (_event, rawRequest: unknown) => {
+    const request = OptimizationSuggestRequestSchema.parse(rawRequest);
+    return dbService.suggestOptimization(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.optimizationApply, (_event, rawRequest: unknown) => {
+    const request = OptimizationApplyRequestSchema.parse(rawRequest);
+    return dbService.applyOptimization(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.tagsList, () => {

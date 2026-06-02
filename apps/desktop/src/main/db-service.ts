@@ -24,6 +24,7 @@ import type {
   ElementId,
   ElementStatus,
   IsoTimestamp,
+  JobJsonValue,
   MarkType,
   MediaRef,
   Priority,
@@ -53,6 +54,7 @@ import {
   type DocumentMark,
   ExtractionService,
   ExtractService,
+  HEAVY_FIT_REVIEW_THRESHOLD,
   InboxQuery,
   InspectorQuery,
   type LibraryBrowseFilters,
@@ -60,6 +62,9 @@ import {
   LineageQuery,
   nowIso,
   OcclusionService,
+  type OptimizationScope,
+  OptimizationService,
+  type OptimizationSuggestionWithWorkload,
   QueueActionService,
   QueueQuery,
   RecoveryModeService,
@@ -70,7 +75,12 @@ import {
   resolveSourceRef,
   UndoService,
 } from "@interleave/local-db";
-import { CardSchedulerService, type IntervalPreview } from "@interleave/scheduler";
+import {
+  CardSchedulerService,
+  type IntervalPreview,
+  type OptimizationSuggestionParts,
+  optimizationSuggestionFromParts,
+} from "@interleave/scheduler";
 import { seedDemoCollection } from "@interleave/testing";
 import type {
   AnalyticsGetRequest,
@@ -145,6 +155,10 @@ import type {
   LibraryBrowseResult,
   LibraryItem,
   LineageGetResult,
+  OptimizationApplyRequest,
+  OptimizationApplyResult,
+  OptimizationSuggestRequest,
+  OptimizationSuggestResult,
   QueueActRequest,
   QueueActResult,
   QueueAutoPostponeRequest,
@@ -303,6 +317,14 @@ export class DbService {
    * IPC route through this. Card-only (the attention scheduler is untouched).
    */
   private retention: RetentionService | null = null;
+  /**
+   * The FSRS parameter-optimization seam (T080) — replays `review_logs` to SUGGEST
+   * (never auto-apply) a better global/per-concept parameter set with a workload
+   * preview, and APPLIES an accepted set to the queryable store
+   * (`fsrs.params.global` setting / `concepts.fsrs_params` column) that
+   * {@link schedulerForCard} reads. Card-only (FSRS), read-only until `apply`.
+   */
+  private optimization: OptimizationService | null = null;
   /**
    * The per-card FSRS scheduler CACHE (T079), keyed by ROUNDED resolved retention so we
    * build at most ~one `CardSchedulerService` per distinct target (not per card). A
@@ -504,6 +526,8 @@ export class DbService {
     // desired-retention target (per-card override → concept → priority band → global);
     // sources/topics/extracts stay on the separate attention scheduler, never here.
     this.retention = new RetentionService(this.handle.db);
+    // The FSRS parameter-optimization seam (T080) — suggest (read-only) + apply.
+    this.optimization = new OptimizationService(this.handle.db);
     this.schedulerCache = new Map();
     this.schedulerCacheGen = 0;
     // The attention-scheduler APPLY seam (T028): the only place explicit
@@ -2302,6 +2326,14 @@ export class DbService {
     return this.retention;
   }
 
+  /** The FSRS parameter-optimization seam (T080), bound to the open database. */
+  private get optimizationService(): OptimizationService {
+    if (!this.optimization) {
+      throw new Error("DbService: database is not open");
+    }
+    return this.optimization;
+  }
+
   /**
    * Build (or reuse) the FSRS card scheduler for ONE card (T079) — the seam every FSRS
    * call routes through. Resolves the card's effective desired-retention target via the
@@ -2320,13 +2352,23 @@ export class DbService {
       throw new Error("DbService: database is not open");
     }
     const { target } = this.retentionService.resolveForCard(cardElementId);
+    // The card's resolved optimized FSRS params (T080): concept preset → global
+    // preset → `null` (inherit ts-fsrs `default_w`). Passed through the documented
+    // `CardSchedulerServiceOptions.params` escape hatch so resolved scheduling uses
+    // the applied params; the scheduler is cached keyed by (retention, params sig).
+    const params = this.retentionService.resolveParamsForCard(cardElementId);
     // Round to 0.001 so near-identical targets share one cached scheduler; embed the
-    // cache generation so a settings/target write invalidates every cached scheduler.
+    // cache generation so a settings/target write invalidates every cached scheduler,
+    // and the params signature so a concept preset gets its own scheduler.
     const rounded = Math.round(target * 1000) / 1000;
-    const key = `${this.schedulerCacheGen}:${rounded}`;
+    const paramsSig = params ? JSON.stringify(params) : "default";
+    const key = `${this.schedulerCacheGen}:${rounded}:${paramsSig}`;
     const cached = this.schedulerCache.get(key);
     if (cached) return cached;
-    const scheduler = new CardSchedulerService({ desiredRetention: rounded });
+    const scheduler = new CardSchedulerService({
+      desiredRetention: rounded,
+      ...(params ? { params: { w: params } } : {}),
+    });
     this.schedulerCache.set(key, scheduler);
     return scheduler;
   }
@@ -2436,6 +2478,106 @@ export class DbService {
     }
     const { target, source } = this.retentionService.resolveForCard(cardId);
     return { target, source };
+  }
+
+  // -------------------------------------------------------------------------
+  // optimization.*  (T080 — on-device FSRS parameter optimization)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Estimate a better FSRS parameter set for a scope from the user's review history
+   * (T080) WITHOUT persisting anything, with a workload-impact preview. Card-only
+   * (FSRS); an honest history-calibration estimate, never claimed optimal.
+   *
+   * ROUTING: a SMALL history fits INLINE (the bounded search is fast, so the caller
+   * never blocks meaningfully); a LARGE history (≥ {@link HEAVY_FIT_REVIEW_THRESHOLD}
+   * review rows, when a background runner is attached) is dispatched to the off-main
+   * `fsrs_optimize` runner job so the heavy fit runs OFF the main thread — MAIN awaits
+   * only the job's terminal snapshot (mirroring the await-terminal `importUrl` path),
+   * then computes the DB-backed workload preview on the main side (the worker stays
+   * DB-free). Either way the result shape is identical; nothing is persisted.
+   */
+  async suggestOptimization(
+    request: OptimizationSuggestRequest,
+  ): Promise<OptimizationSuggestResult> {
+    const scope = request.scope as OptimizationScope;
+    const suggestion = await this.fitSuggestion(scope);
+    return {
+      params: [...suggestion.params.w],
+      baseline: suggestion.baseline,
+      suggested: suggestion.suggested,
+      improvement: suggestion.improvement,
+      reviewsScored: suggestion.reviewsScored,
+      method: suggestion.method,
+      sufficientData: suggestion.sufficientData,
+      workload: suggestion.workload,
+    };
+  }
+
+  /**
+   * Fit the suggestion for a scope, routing a LARGE history to the off-main runner
+   * (T080). Returns the suggestion + its DB-backed workload preview. The runner branch
+   * only engages when a runner is attached AND the history exceeds the heavy-fit
+   * threshold; otherwise (and for any runner/worker failure) it falls back to the
+   * bounded inline fit so a missing/failed runner never breaks the affordance.
+   */
+  private async fitSuggestion(
+    scope: OptimizationScope,
+  ): Promise<OptimizationSuggestionWithWorkload> {
+    const service = this.optimizationService;
+    const cardIds = service.cardIdsForScope(scope);
+    if (this.runner && service.reviewCount(cardIds) >= HEAVY_FIT_REVIEW_THRESHOLD) {
+      try {
+        return await this.fitSuggestionOnRunner(scope);
+      } catch {
+        // The heavy fit is an estimate, not load-bearing — degrade to the inline
+        // bounded search rather than surfacing a runner error to the user.
+      }
+    }
+    return service.suggest(scope);
+  }
+
+  /**
+   * Run the heavy fit on the background runner (T080): build the DB-free job payload,
+   * enqueue an `fsrs_optimize` job, await its terminal snapshot, and recombine the
+   * worker's suggestion with the DB-backed workload preview (computed here on MAIN so
+   * the worker never touches the DB). Throws on a non-success terminal so the caller
+   * can fall back to the inline fit.
+   */
+  private async fitSuggestionOnRunner(
+    scope: OptimizationScope,
+  ): Promise<OptimizationSuggestionWithWorkload> {
+    if (!this.runner) {
+      throw new Error("DbService: heavy FSRS fit requires a background runner");
+    }
+    const service = this.optimizationService;
+    const payload = service.buildJobPayload(scope);
+    const job = this.runner.enqueue("fsrs_optimize", payload as unknown as JobJsonValue);
+    const terminal = await this.runner.waitForTerminal(job.id);
+    if (terminal.status !== "succeeded" || !terminal.result) {
+      throw new Error(`DbService: fsrs_optimize job ${job.id} did not succeed`);
+    }
+    // Re-wrap the worker's plain-JSON `w` + scores into a typed suggestion behind the
+    // scheduler boundary (main never imports ts-fsrs), then attach the DB-backed
+    // workload preview here on MAIN (the worker stays DB-free).
+    const suggestion = optimizationSuggestionFromParts(
+      terminal.result as unknown as OptimizationSuggestionParts,
+    );
+    return service.withWorkload(suggestion, scope);
+  }
+
+  /**
+   * Apply an accepted FSRS parameter set (T080) — the only persisting optimization
+   * command. Writes the queryable preset (the `fsrs.params.global` setting or
+   * `concepts.fsrs_params` + an `update_element` audit) and bumps the per-card
+   * scheduler cache so the NEXT grade/preview re-resolves against the new params.
+   * No retroactive reschedule of existing cards.
+   */
+  applyOptimization(request: OptimizationApplyRequest): OptimizationApplyResult {
+    const scope = request.scope as OptimizationScope;
+    const result = this.optimizationService.apply(scope, request.params);
+    this.bumpSchedulerCache();
+    return result;
   }
 
   /**

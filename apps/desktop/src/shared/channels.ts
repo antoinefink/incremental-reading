@@ -91,6 +91,11 @@ export const IPC_CHANNELS = {
   retentionSetConcept: "retention:setConcept",
   retentionSetCard: "retention:setCard",
   retentionResolveFor: "retention:resolveFor",
+  // On-device FSRS parameter optimization (T080). `optimization:suggest` is
+  // read-only (estimate + workload preview); `optimization:apply` is the only
+  // persisting command (writes the queryable preset store).
+  optimizationSuggest: "optimization:suggest",
+  optimizationApply: "optimization:apply",
   tagsList: "tags:list",
   tagsAdd: "tags:add",
   tagsRemove: "tags:remove",

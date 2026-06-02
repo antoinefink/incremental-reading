@@ -72,6 +72,7 @@ describe("ConceptRepository.createConcept", () => {
       name: "Cognition",
       parentConceptId: null,
       desiredRetention: null,
+      fsrsParams: null,
     });
 
     // It logged `create_element` (the closed op set — no `create_concept`).
@@ -439,5 +440,33 @@ describe("ConceptRepository per-concept retention (T079)", () => {
     expect(concepts.retentionTargets().Gone).toBeCloseTo(0.92, 6);
     elements.softDelete(concept.id);
     expect(concepts.retentionTargets()).not.toHaveProperty("Gone");
+  });
+});
+
+describe("ConceptRepository per-concept FSRS params (T080)", () => {
+  const VALID_W = Array.from({ length: 21 }, (_, i) => 0.4 + i * 0.05);
+
+  it("setConceptFsrsParams writes the JSON column, logs update_element, and decodes back", () => {
+    const concept = concepts.createConcept({ name: "Optimized" });
+    expect(concepts.findById(concept.id)?.fsrsParams).toBeNull();
+
+    const updated = concepts.setConceptFsrsParams(concept.id, VALID_W);
+    expect(updated.fsrsParams).toHaveLength(21);
+    expect(concepts.findById(concept.id)?.fsrsParams).toEqual(VALID_W);
+
+    // The op is the AUDIT (the column is the store).
+    const ops = opLog.listForElement(concept.id);
+    expect(ops.some((o) => o.opType === "update_element")).toBe(true);
+
+    // Clearing it back to inherit.
+    const cleared = concepts.setConceptFsrsParams(concept.id, null);
+    expect(cleared.fsrsParams).toBeNull();
+  });
+
+  it("rejects a malformed vector by storing null (structural choke point)", () => {
+    const concept = concepts.createConcept({ name: "BadParams" });
+    // A wrong-length vector coerces to null (never a partial store).
+    const updated = concepts.setConceptFsrsParams(concept.id, [1, 2, 3]);
+    expect(updated.fsrsParams).toBeNull();
   });
 });

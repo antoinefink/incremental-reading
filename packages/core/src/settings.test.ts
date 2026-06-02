@@ -43,6 +43,7 @@ describe("AppSettings defaults", () => {
       displayName: "ui.displayName",
       retentionByBand: "review.retentionByBand",
       retentionByBandEnabled: "review.retentionByBand.enabled",
+      fsrsParamsGlobal: "review.fsrsParamsGlobal",
     });
   });
 
@@ -185,6 +186,7 @@ describe("stored ↔ model round-trip", () => {
       displayName: "Ada Lovelace",
       retentionByBand: {},
       retentionByBandEnabled: false,
+      fsrsParamsGlobal: null,
     });
   });
 
@@ -211,6 +213,8 @@ describe("stored ↔ model round-trip", () => {
       displayName: "Ada Lovelace",
       retentionByBand: { A: 0.93, D: 0.85 },
       retentionByBandEnabled: true,
+      // A valid 21-number FSRS-6 `w` vector round-trips through the JSON store (T080).
+      fsrsParamsGlobal: Array.from({ length: 21 }, (_, i) => 0.1 + i * 0.01),
     };
     const reloaded = appSettingsFromStored(settingsPatchToStored(original));
     expect(reloaded).toEqual(original);

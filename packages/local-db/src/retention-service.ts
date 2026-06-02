@@ -71,6 +71,44 @@ export class RetentionService {
   }
 
   /**
+   * Resolve a card's effective FSRS PARAMETER vector (T080) — the queryable preset
+   * the per-card scheduler factory passes through `CardSchedulerServiceOptions.params`
+   * (the documented escape hatch). Resolution order: the card's STRICTEST/first
+   * concept preset (`concepts.fsrs_params`) → the global preset
+   * (`settings.fsrsParamsGlobal`) → `null` (inherit ts-fsrs `default_w`). Returns
+   * `null` for a non-card / unknown id (a safe inherit). Read-only.
+   *
+   * "Strictest/first concept preset": among the card's concepts that carry a stored
+   * preset, the one whose concept name has the HIGHEST retention target wins (so the
+   * preset tracks the same fragile-concept-wins rule as the retention resolver);
+   * absent a target tie-break, the first membership order is used — deterministic.
+   */
+  resolveParamsForCard(cardElementId: ElementId): number[] | null {
+    const card = this.review.findCardById(cardElementId);
+    if (card?.element.type !== "card" || card.element.deletedAt) return null;
+    const conceptSummaries = this.concepts.conceptsForElement(cardElementId);
+    // Pick the concept preset belonging to the strictest (highest-target) concept;
+    // fall back to membership order for concepts without a target.
+    let best: { params: number[]; target: number; order: number } | null = null;
+    let order = 0;
+    for (const summary of conceptSummaries) {
+      if (summary.fsrsParams) {
+        const target = summary.desiredRetention ?? -1;
+        if (
+          best === null ||
+          target > best.target ||
+          (target === best.target && order < best.order)
+        ) {
+          best = { params: summary.fsrsParams, target, order };
+        }
+      }
+      order += 1;
+    }
+    if (best) return best.params;
+    return this.settings.getAppSettings().fsrsParamsGlobal;
+  }
+
+  /**
    * Resolve a card's effective desired-retention target + which rule won (T079).
    * Reads the card's `elements.priority`, its concept memberships mapped to NAMES (so
    * `conceptNames` matches `byConcept`'s name keys), and its `cards.desired_retention`

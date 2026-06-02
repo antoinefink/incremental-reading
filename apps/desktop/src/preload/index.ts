@@ -53,6 +53,8 @@ import type {
   JobsListRequest,
   LibraryBrowseRequest,
   LineageGetRequest,
+  OptimizationApplyRequest,
+  OptimizationSuggestRequest,
   PickImportFileRequest,
   QueueActRequest,
   QueueAutoPostponeRequest,
@@ -276,6 +278,12 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.retentionSetCard, request),
     resolveFor: (request: RetentionResolveForRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.retentionResolveFor, request),
+  },
+  optimization: {
+    suggest: (request: OptimizationSuggestRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.optimizationSuggest, request),
+    apply: (request: OptimizationApplyRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.optimizationApply, request),
   },
   tags: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.tagsList),

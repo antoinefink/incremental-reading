@@ -107,6 +107,13 @@ export interface AppSettings {
    * per-card override + the global default apply (a clean revert to T036).
    */
   readonly retentionByBandEnabled: boolean;
+  /**
+   * The optimized GLOBAL FSRS parameter preset (T080) — a 21-number FSRS-6 `w`
+   * vector, or `null` = inherit ts-fsrs `default_w`. Written only by the optimization
+   * apply flow; read by the per-card scheduler factory. The renderer never edits this
+   * directly — it applies a suggestion via `optimization.apply`.
+   */
+  readonly fsrsParamsGlobal: number[] | null;
 }
 
 export interface SettingsGetAllResult {
@@ -1955,6 +1962,60 @@ export interface RetentionResolveForResult {
   readonly source: RetentionSource | null;
 }
 
+// ---------------------------------------------------------------------------
+// optimization.*  (T080 — on-device FSRS parameter optimization)
+// ---------------------------------------------------------------------------
+
+/** The optimization scope — the global preset, or one concept's preset. */
+export type OptimizationScopeRequest =
+  | { readonly scope: "global" }
+  | { readonly scope: "concept"; readonly conceptId: string };
+
+export interface OptimizationSuggestRequest {
+  readonly scope: OptimizationScopeRequest;
+}
+
+/** A calibration score (lower is better). */
+export interface OptimizationFitScore {
+  readonly logLoss: number;
+  readonly rmse: number;
+  readonly reviewsScored: number;
+}
+
+/** A bucketed daily due count for the workload preview. */
+export interface OptimizationWorkloadDay {
+  readonly date: string;
+  readonly count: number;
+}
+
+/** The read-only workload-impact preview (before/after daily due counts + deltas). */
+export interface OptimizationWorkload {
+  readonly before: readonly OptimizationWorkloadDay[];
+  readonly after: readonly OptimizationWorkloadDay[];
+  readonly deltaDueNext7: number;
+  readonly deltaDueNext30: number;
+}
+
+export interface OptimizationSuggestResult {
+  readonly params: readonly number[];
+  readonly baseline: OptimizationFitScore;
+  readonly suggested: OptimizationFitScore;
+  readonly improvement: number;
+  readonly reviewsScored: number;
+  readonly method: "history-calibration";
+  readonly sufficientData: boolean;
+  readonly workload: OptimizationWorkload;
+}
+
+export interface OptimizationApplyRequest {
+  readonly scope: OptimizationScopeRequest;
+  readonly params: readonly number[];
+}
+
+export interface OptimizationApplyResult {
+  readonly applied: true;
+}
+
 /** The element's organize state after an assign/unassign/tag mutation. */
 export interface ElementOrganizeState {
   readonly elementId: string;
@@ -2385,6 +2446,10 @@ export interface AppApi {
     setConcept(request: RetentionSetConceptRequest): Promise<RetentionSetConceptResult>;
     setCard(request: RetentionSetCardRequest): Promise<RetentionSetCardResult>;
     resolveFor(request: RetentionResolveForRequest): Promise<RetentionResolveForResult>;
+  };
+  readonly optimization: {
+    suggest(request: OptimizationSuggestRequest): Promise<OptimizationSuggestResult>;
+    apply(request: OptimizationApplyRequest): Promise<OptimizationApplyResult>;
   };
   readonly tags: {
     list(): Promise<TagsListResult>;
@@ -2958,6 +3023,21 @@ export const appApi = {
    */
   resolveRetentionFor(request: RetentionResolveForRequest): Promise<RetentionResolveForResult> {
     return requireAppApi().retention.resolveFor(request);
+  },
+  /**
+   * Estimate a better FSRS parameter set from the review history (T080) — global or
+   * per-concept — with a workload-impact preview. Read-only (persists nothing; the
+   * user must explicitly apply). An honest history-calibration estimate.
+   */
+  suggestOptimization(request: OptimizationSuggestRequest): Promise<OptimizationSuggestResult> {
+    return requireAppApi().optimization.suggest(request);
+  },
+  /**
+   * Apply an accepted FSRS parameter set (T080) — the only persisting optimization
+   * command. Subsequent grades use the new params (no retroactive reschedule).
+   */
+  applyOptimization(request: OptimizationApplyRequest): Promise<OptimizationApplyResult> {
+    return requireAppApi().optimization.apply(request);
   },
   /** All tags with their live usage count (T041) — the library filterbar. */
   listTags(): Promise<TagsListResult> {

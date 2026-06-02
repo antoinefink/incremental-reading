@@ -157,6 +157,14 @@ export {
   OperationLogRepository,
 } from "./operation-log-repository";
 export {
+  HEAVY_FIT_REVIEW_THRESHOLD,
+  type OptimizationScope,
+  OptimizationService,
+  type OptimizationSuggestionWithWorkload,
+  type WorkloadDay,
+  type WorkloadImpact,
+} from "./optimization-service";
+export {
   CARD_DEFER_DAYS,
   type QueueActionKind,
   type QueueActionResult,

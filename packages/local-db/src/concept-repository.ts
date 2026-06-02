@@ -23,6 +23,7 @@
 
 import type { ElementId, RelationId } from "@interleave/core";
 import {
+  coerceFsrsParams,
   DESIRED_RETENTION_MAX,
   DESIRED_RETENTION_MIN,
   PRIORITY_LABEL_VALUE,
@@ -52,6 +53,14 @@ export interface ConceptSummary {
    * it; the per-card scheduler factory reads it via {@link retentionTargets}.
    */
   readonly desiredRetention: number | null;
+  /**
+   * Per-concept optimized FSRS parameter set (T080) — the 21-number FSRS-6 `w`
+   * vector, or `null` = inherit the global preset / `default_w`. Written ONLY by the
+   * optimization apply; read by the per-card scheduler factory via the retention
+   * resolver (`RetentionService.resolveParamsForCard`), which decodes a card's
+   * concept presets through {@link conceptsForElement}.
+   */
+  readonly fsrsParams: number[] | null;
 }
 
 /**
@@ -69,6 +78,8 @@ export interface ConceptNode {
   readonly memberCount: number;
   /** Per-concept FSRS desired-retention target (T079), or `null` = inherit. */
   readonly desiredRetention: number | null;
+  /** Per-concept optimized FSRS parameter set (T080), or `null` = inherit. */
+  readonly fsrsParams: number[] | null;
 }
 
 export class ConceptRepository {
@@ -76,6 +87,22 @@ export class ConceptRepository {
 
   constructor(private readonly db: InterleaveDatabase) {
     this.elementRepo = new ElementRepository(db);
+  }
+
+  /**
+   * Decode the JSON-encoded `concepts.fsrs_params` TEXT column into a validated
+   * 21-number FSRS-6 vector, or `null` (inherit) when absent/malformed. The
+   * structural validity (`coerceFsrsParams`) is the same choke point the global
+   * preset uses; a corrupt stored value degrades to `null` so it can never reach
+   * FSRS (T080).
+   */
+  private decodeFsrsParams(raw: string | null | undefined): number[] | null {
+    if (raw == null) return null;
+    try {
+      return coerceFsrsParams(JSON.parse(raw));
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -118,7 +145,7 @@ export class ConceptRepository {
       // `desiredRetention`/`fsrsParams` default to `null` (inherit) on create.
       tx.insert(concepts).values({ id: element.id, name, parentConceptId }).run();
 
-      return { id: element.id, name, parentConceptId, desiredRetention: null };
+      return { id: element.id, name, parentConceptId, desiredRetention: null, fsrsParams: null };
     });
   }
 
@@ -131,6 +158,7 @@ export class ConceptRepository {
       name: row.name,
       parentConceptId: (row.parentConceptId as ElementId | null) ?? null,
       desiredRetention: row.desiredRetention ?? null,
+      fsrsParams: this.decodeFsrsParams(row.fsrsParams),
     };
   }
 
@@ -240,6 +268,7 @@ export class ConceptRepository {
         childCount: childCounts.get(id) ?? 0,
         memberCount: memberCounts.get(id) ?? 0,
         desiredRetention: row.desiredRetention ?? null,
+        fsrsParams: this.decodeFsrsParams(row.fsrsParams),
       };
     });
   }
@@ -319,6 +348,52 @@ export class ConceptRepository {
         name: row.name,
         parentConceptId: (row.parentConceptId as ElementId | null) ?? null,
         desiredRetention: row.desiredRetention ?? null,
+        fsrsParams: this.decodeFsrsParams(row.fsrsParams),
+      };
+    });
+  }
+
+  /**
+   * Set (or clear) a concept's per-concept optimized FSRS parameter set (T080) — the
+   * JSON-encoded `concepts.fsrs_params` TEXT column — in ONE transaction, logging
+   * `update_element` on the OWNING `concept` element (the audit record; the column is
+   * the queryable store the scheduler reads). `params` is a finite 21-number FSRS-6
+   * vector (validated upstream by the OptimizationService via `@interleave/scheduler`
+   * `sanitizeParams`); `null` clears it (inherit the global preset). No new op type.
+   * Returns the refreshed summary.
+   */
+  setConceptFsrsParams(conceptId: ElementId, params: number[] | null): ConceptSummary {
+    const conceptEl = this.elementRepo.findById(conceptId);
+    if (!conceptEl || conceptEl.deletedAt || conceptEl.type !== "concept") {
+      throw new Error(`ConceptRepository.setConceptFsrsParams: concept ${conceptId} not found`);
+    }
+    // Structural validation choke point: only a finite 21-number vector is stored.
+    const validated = params === null ? null : coerceFsrsParams(params);
+    const encoded = validated === null ? null : JSON.stringify(validated);
+
+    return this.db.transaction((tx) => {
+      const before = tx.select().from(concepts).where(eq(concepts.id, conceptId)).get();
+      const prev = before?.fsrsParams ?? null;
+      tx.update(concepts).set({ fsrsParams: encoded }).where(eq(concepts.id, conceptId)).run();
+      tx.update(elements).set({ updatedAt: nowIso() }).where(eq(elements.id, conceptId)).run();
+      new OperationLogRepository(tx).append(tx, {
+        opType: "update_element",
+        elementId: conceptId,
+        // The op is the AUDIT (append-only); the column is the queryable store.
+        payload: { id: conceptId, fsrsParams: validated, prev: { fsrsParams: prev } },
+      });
+      const row = tx.select().from(concepts).where(eq(concepts.id, conceptId)).get();
+      if (!row) {
+        throw new Error(
+          `ConceptRepository.setConceptFsrsParams: concept ${conceptId} missing after write`,
+        );
+      }
+      return {
+        id: row.id as ElementId,
+        name: row.name,
+        parentConceptId: (row.parentConceptId as ElementId | null) ?? null,
+        desiredRetention: row.desiredRetention ?? null,
+        fsrsParams: this.decodeFsrsParams(row.fsrsParams),
       };
     });
   }

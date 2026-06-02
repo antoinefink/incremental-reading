@@ -382,6 +382,7 @@ describe("DbService", () => {
       displayName: "",
       retentionByBand: {},
       retentionByBandEnabled: false,
+      fsrsParamsGlobal: null,
     });
     second.close();
   });
@@ -2454,7 +2455,7 @@ describe("DbService — backup support (T047)", () => {
   it("getSchemaVersion returns the latest applied Drizzle migration tag", () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
-    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe("0018_early_puma");
+    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe("0019_graceful_veda");
     svc.close();
   });
 
@@ -2628,6 +2629,117 @@ describe("DbService — desired retention by priority/concept (T079)", () => {
     expect(
       second.getRetention().byConcept.find((c) => c.conceptId === created.concept.id)?.target,
     ).toBeCloseTo(0.95, 6);
+    second.close();
+  });
+});
+
+describe("DbService — FSRS parameter optimization (T080)", () => {
+  let dir: string;
+  let dbPath: string;
+  const ASOF = "2026-06-15T00:00:00.000Z";
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "interleave-optimize-"));
+    dbPath = path.join(dir, "app.sqlite");
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function maturedCard(svc: DbService): string {
+    const { element } = svc.repos.review.createCard({
+      kind: "qa",
+      title: "Matured",
+      priority: 0.375,
+      prompt: "Q",
+      answer: "A",
+    });
+    svc.raw.sqlite
+      .prepare(
+        `UPDATE review_states SET stability = 30, difficulty = 5, reps = 5, fsrs_state = 'review',
+         last_reviewed_at = '2026-05-16T00:00:00.000Z', due_at = ? WHERE element_id = ?`,
+      )
+      .run(ASOF, element.id);
+    return element.id;
+  }
+
+  const intervalDays = (svc: DbService, cardId: string): number => {
+    const { reviewState } = svc.gradeCard(cardId as never, "good", 1000, ASOF);
+    return (Date.parse(reviewState.dueAt ?? ASOF) - Date.parse(ASOF)) / 86_400_000;
+  };
+
+  // A valid, in-bounds 21-number FSRS-6 vector that schedules a CLEARLY different
+  // `good` interval than the ts-fsrs `default_w`. The decay `w[20]` is 0.8 (the FSRS-6
+  // ceiling) so the vector round-trips through `clipParameters`/`checkParameters`
+  // UNCHANGED — the stored value equals exactly what we applied.
+  const STEEP_W = [
+    0.4, 1.2, 3.1, 15.7, 7.2, 0.6, 1.0, 0.05, 1.5, 0.1, 1.0, 2.0, 0.05, 0.3, 1.5, 0.2, 3.0, 0.5,
+    0.6, 0.1, 0.8,
+  ];
+
+  it("applyOptimization (global) is read by schedulerForCard → changes the scheduled interval", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+
+    const baseline = maturedCard(svc);
+    const baselineInterval = intervalDays(svc, baseline);
+
+    svc.applyOptimization({ scope: { scope: "global" }, params: STEEP_W });
+    const afterCard = maturedCard(svc);
+    const afterInterval = intervalDays(svc, afterCard);
+
+    // The applied params reached FSRS via the scheduler factory → different interval.
+    expect(afterInterval).not.toBeCloseTo(baselineInterval, 1);
+    expect(svc.getAppSettings().settings.fsrsParamsGlobal).toEqual(STEEP_W);
+    svc.close();
+  });
+
+  it("a concept preset OVERRIDES the global preset for a member card (queryable store)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    svc.applyOptimization({ scope: { scope: "global" }, params: STEEP_W });
+
+    const card = maturedCard(svc);
+    const created = svc.createConcept({ name: "Tuned" });
+    svc.assignConcept({ elementId: card, conceptId: created.concept.id });
+    // The concept preset (the ts-fsrs default-ish w) overrides the steep global one.
+    const conceptW = [
+      0.21, 1.26, 2.3, 8.27, 6.4, 0.83, 2.28, 0.05, 1.6, 0.13, 1.0, 2.1, 0.05, 0.3, 2.6, 0.2, 3.4,
+      0.5, 0.6, 0.1, 0.15,
+    ];
+    svc.applyOptimization({
+      scope: { scope: "concept", conceptId: created.concept.id },
+      params: conceptW,
+    });
+
+    const stored = svc.repos.concepts.findById(created.concept.id as never)?.fsrsParams;
+    expect(stored).toEqual(conceptW);
+    svc.close();
+  });
+
+  it("suggestOptimization is read-only; insufficient history yields sufficientData false", async () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    maturedCard(svc);
+    const before = svc.getAppSettings().settings.fsrsParamsGlobal;
+    const suggestion = await svc.suggestOptimization({ scope: { scope: "global" } });
+    expect(suggestion.sufficientData).toBe(false);
+    expect(suggestion.params).toHaveLength(21);
+    expect(suggestion.method).toBe("history-calibration");
+    // Nothing was persisted by the suggest (no runner attached → inline fit).
+    expect(svc.getAppSettings().settings.fsrsParamsGlobal).toEqual(before);
+    svc.close();
+  });
+
+  it("applied global params SURVIVE a close + reopen (restart)", () => {
+    const first = new DbService();
+    first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    first.applyOptimization({ scope: { scope: "global" }, params: STEEP_W });
+    first.close();
+
+    const second = new DbService();
+    second.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(second.getAppSettings().settings.fsrsParamsGlobal).toEqual(STEEP_W);
     second.close();
   });
 });

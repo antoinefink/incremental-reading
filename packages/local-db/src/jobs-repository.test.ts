@@ -8,7 +8,10 @@
  * "jobs append NO operation_log row" infra rule.
  */
 
-import type { DbHandle } from "@interleave/db";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { type DbHandle, MIGRATIONS_DIR, migrateDatabase, openDatabase } from "@interleave/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { JobsRepository } from "./jobs-repository";
 import { OperationLogRepository } from "./operation-log-repository";
@@ -41,6 +44,14 @@ describe("JobsRepository", () => {
     expect(job.result).toBeNull();
     expect(job.error).toBeNull();
     expect(repo.findById(job.id)?.payload).toEqual({ url: "https://x.test" });
+  });
+
+  it("accepts the fsrs_optimize job type (T080 — the widened jobs_type_check CHECK)", () => {
+    // The 0019 table-rebuild migration widened the `jobs.type` CHECK to include
+    // `fsrs_optimize`; enqueuing it must NOT throw a CHECK-constraint error.
+    const job = repo.enqueue({ type: "fsrs_optimize", payload: { history: [] } });
+    expect(job.type).toBe("fsrs_optimize");
+    expect(repo.findById(job.id)?.type).toBe("fsrs_optimize");
   });
 
   it("claimNext flips exactly one row to running; a second claim returns null (no double-claim)", () => {
@@ -169,5 +180,74 @@ describe("JobsRepository", () => {
     repo.succeed(job.id, { ok: true });
     repo.recoverRunning();
     expect(ops.count()).toBe(before);
+  });
+});
+
+/**
+ * The 0019 migration is a `jobs` TABLE REBUILD (a new table + `INSERT…SELECT` +
+ * drop/rename) that widens the `jobs_type_check` CHECK to admit `fsrs_optimize`
+ * (T080). Because a rebuild copies rows out and back, this explicitly asserts the
+ * rebuild PRESERVES existing `jobs` rows: stage the schema at 0018 (the narrow
+ * CHECK), insert a job, apply ONLY 0019, then verify the pre-existing row survived
+ * unchanged AND the widened CHECK now accepts `fsrs_optimize`.
+ */
+describe("0019 jobs rebuild — row preservation", () => {
+  /** Copy migrations 0000..=0018 + a journal trimmed to those entries into a temp dir. */
+  function stageMigrationsThrough18(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "interleave-mig18-"));
+    const drizzle = path.join(dir, "drizzle");
+    const meta = path.join(drizzle, "meta");
+    fs.mkdirSync(meta, { recursive: true });
+    const journal = JSON.parse(
+      fs.readFileSync(path.join(MIGRATIONS_DIR, "meta", "_journal.json"), "utf8"),
+    ) as { entries: Array<{ idx: number; tag: string }> };
+    const kept = journal.entries.filter((e) => e.idx <= 18);
+    for (const entry of kept) {
+      fs.copyFileSync(
+        path.join(MIGRATIONS_DIR, `${entry.tag}.sql`),
+        path.join(drizzle, `${entry.tag}.sql`),
+      );
+    }
+    fs.writeFileSync(
+      path.join(meta, "_journal.json"),
+      JSON.stringify({ ...journal, entries: kept }),
+    );
+    return drizzle;
+  }
+
+  it("preserves a pre-existing jobs row across the 0019 table rebuild", () => {
+    const stagedDir = stageMigrationsThrough18();
+    const db = openDatabase(":memory:");
+    try {
+      // Schema at 0018 — the narrow CHECK (no `fsrs_optimize` yet).
+      migrateDatabase(db.db, stagedDir);
+      const repo18 = new JobsRepository(db.db);
+      const existing = repo18.enqueue({
+        type: "url_import",
+        payload: { url: "https://x.test/before-0019" },
+        maxAttempts: 7,
+      });
+      repo18.markProgress(existing.id, { ratio: 0.5, note: "mid-flight" });
+
+      // Apply ONLY 0019 (the same handle; the drizzle journal skips 0000..=0018).
+      migrateDatabase(db.db, MIGRATIONS_DIR);
+
+      // The pre-existing row survived the INSERT…SELECT rebuild, unchanged.
+      const repo19 = new JobsRepository(db.db);
+      const survived = repo19.findById(existing.id);
+      expect(survived).not.toBeNull();
+      expect(survived?.type).toBe("url_import");
+      expect(survived?.payload).toEqual({ url: "https://x.test/before-0019" });
+      expect(survived?.maxAttempts).toBe(7);
+      expect(survived?.progress.ratio).toBe(0.5);
+      expect(survived?.progress.note).toBe("mid-flight");
+
+      // And the widened CHECK now accepts the new type.
+      const optimized = repo19.enqueue({ type: "fsrs_optimize", payload: { history: [] } });
+      expect(repo19.findById(optimized.id)?.type).toBe("fsrs_optimize");
+    } finally {
+      db.sqlite.close();
+      fs.rmSync(path.dirname(stagedDir), { recursive: true, force: true });
+    }
   });
 });

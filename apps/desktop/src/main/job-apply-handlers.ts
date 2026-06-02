@@ -90,6 +90,15 @@ export function createJobApplyHandlers(deps: JobApplyHandlerDeps): JobApplyHandl
       const summary = await getOcrService().applyResult(payload, result);
       return summary as unknown as JobJsonValue;
     },
+    /**
+     * Surface a worker FSRS-fit suggestion (T080) — a PASS-THROUGH. The DB-free
+     * worker ran the pure bounded calibration search off-main on the MAIN-built
+     * history (the heavy fit); this handler writes NOTHING (optimization is never
+     * auto-applied), it only carries the suggestion through to the job's terminal
+     * result so the renderer can observe it via `jobs.list` / `jobs:updated` and let
+     * the user explicitly `optimization.apply` it. Idempotent (no side effect).
+     */
+    fsrs_optimize: (_job, resultData) => resultData,
     /** Re-hash stored bytes (streamed) and report integrity (read-only). */
     vault_verify: async () => {
       const report = await getAssetVaultService().verifyIntegrity();

@@ -3205,6 +3205,84 @@ export interface RetentionResolveForResult {
   readonly source: RetentionSource | null;
 }
 
+// ---------------------------------------------------------------------------
+// optimization.*  (T080 — on-device FSRS parameter optimization)
+//
+// Accumulated `review_logs` are replayed on-device to SUGGEST a better FSRS
+// parameter set (global preset or per-concept) with a workload-impact preview.
+// Suggestions are NEVER auto-applied — the user explicitly applies or dismisses.
+// The apply writes to a QUERYABLE store: the global preset → the `fsrs.params.global`
+// setting (no op); a per-concept preset → `concepts.fsrs_params` (+ update_element).
+// `schedulerForCard` reads those stores. CARD-ONLY (FSRS); ts-fsrs has NO optimizer
+// — this is an honest history-calibration estimate, NEVER claimed optimal.
+// ---------------------------------------------------------------------------
+
+/** The optimization scope — the global preset, or one concept's preset. */
+export const OptimizationScopeSchema = z.discriminatedUnion("scope", [
+  z.object({ scope: z.literal("global") }),
+  z.object({ scope: z.literal("concept"), conceptId: ElementIdSchema }),
+]);
+export type OptimizationScopeRequest = z.infer<typeof OptimizationScopeSchema>;
+
+/** `optimization.suggest({ scope })`. */
+export const OptimizationSuggestRequestSchema = z.object({
+  scope: OptimizationScopeSchema,
+});
+export type OptimizationSuggestRequest = z.infer<typeof OptimizationSuggestRequestSchema>;
+
+/** A calibration score (lower is better) for the before/after metric copy. */
+export interface OptimizationFitScore {
+  readonly logLoss: number;
+  readonly rmse: number;
+  readonly reviewsScored: number;
+}
+
+/** A bucketed daily due count for the workload preview. */
+export interface OptimizationWorkloadDay {
+  readonly date: string;
+  readonly count: number;
+}
+
+/** The read-only workload-impact preview (before/after daily due counts + deltas). */
+export interface OptimizationWorkload {
+  readonly before: readonly OptimizationWorkloadDay[];
+  readonly after: readonly OptimizationWorkloadDay[];
+  readonly deltaDueNext7: number;
+  readonly deltaDueNext30: number;
+}
+
+/**
+ * The suggestion view the renderer renders (the result of `optimization.suggest`).
+ * Carries the suggested `params` so the renderer can echo them back to
+ * `optimization.apply` unchanged (the renderer never computes params).
+ */
+export interface OptimizationSuggestResult {
+  /** The suggested 21-number FSRS-6 `w` vector (always valid/clamped). */
+  readonly params: readonly number[];
+  readonly baseline: OptimizationFitScore;
+  readonly suggested: OptimizationFitScore;
+  /** `baseline.logLoss - suggested.logLoss` (≥ 0; `0` = no improvement found). */
+  readonly improvement: number;
+  readonly reviewsScored: number;
+  /** The honest method label — always `"history-calibration"`, never "optimal". */
+  readonly method: "history-calibration";
+  /** `false` below the data floor — show the insufficient-data empty state. */
+  readonly sufficientData: boolean;
+  readonly workload: OptimizationWorkload;
+}
+
+/** `optimization.apply({ scope, params })` — the only persisting command. */
+export const OptimizationApplyRequestSchema = z.object({
+  scope: OptimizationScopeSchema,
+  /** The accepted 21-number FSRS-6 `w` vector (validated again at the service). */
+  params: z.array(z.number()).length(21),
+});
+export type OptimizationApplyRequest = z.infer<typeof OptimizationApplyRequestSchema>;
+
+export interface OptimizationApplyResult {
+  readonly applied: true;
+}
+
 /** `tags.list()` takes no arguments. */
 export const TagsListRequestSchema = z.void();
 
@@ -4076,6 +4154,23 @@ export interface AppApi {
      * rule won (card override / concept / band / global). Read-only.
      */
     resolveFor(request: RetentionResolveForRequest): Promise<RetentionResolveForResult>;
+  };
+  readonly optimization: {
+    /**
+     * Estimate a better FSRS parameter set from the user's review history (T080) —
+     * for the global preset or one concept's preset — with a workload-impact preview.
+     * Read-only: persists NOTHING (the user must explicitly `apply`). Below the data
+     * floor `sufficientData` is `false` (the suggestion equals the current params).
+     * An honest history-calibration estimate, never claimed optimal.
+     */
+    suggest(request: OptimizationSuggestRequest): Promise<OptimizationSuggestResult>;
+    /**
+     * Apply an accepted parameter set (T080) — the ONLY persisting command. Global
+     * scope → the `fsrs.params.global` setting (no op); concept scope →
+     * `concepts.fsrs_params` (+ an `update_element` audit). `schedulerForCard` then
+     * reads it so subsequent grades use the new params (no retroactive reschedule).
+     */
+    apply(request: OptimizationApplyRequest): Promise<OptimizationApplyResult>;
   };
   readonly tags: {
     /** All tags with their live usage count (T041) — the library filterbar. Read-only. */

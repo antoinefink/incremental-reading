@@ -23,6 +23,7 @@
  * over `process.parentPort`.
  */
 
+import { type OptimizerHistory, suggestParameters } from "@interleave/scheduler";
 import type { ParentPort } from "electron";
 import { fetchImportablePage, UrlFetchError } from "../main/url-fetch";
 import { type WorkerMessage, WorkerRequestSchema } from "./messages";
@@ -117,6 +118,44 @@ async function runOcr(jobId: string, payload: OcrPayload): Promise<void> {
   });
 }
 
+/**
+ * The `fsrs_optimize` job payload (T080). MAIN builds the DB-free
+ * {@link OptimizerHistory} (from `review_logs`) and the scope's current params and
+ * enqueues them here — the worker runs the PURE bounded calibration search
+ * (`suggestParameters`) OFF the main thread for a large history, and returns the
+ * suggestion. MAIN then computes the workload preview + applies on the user's
+ * explicit accept. The worker stays DB-FREE (it imports `@interleave/scheduler`'s
+ * pure optimizer only — no `@interleave/db`/repository).
+ */
+interface FsrsOptimizePayload {
+  readonly history: OptimizerHistory[];
+  readonly current?: number[];
+}
+
+/** Execute one `fsrs_optimize` job: run the pure bounded search off-main. */
+function runFsrsOptimize(jobId: string, payload: FsrsOptimizePayload): void {
+  post({ kind: "progress", jobId, progress: { ratio: 0.1, note: "scoring history" } });
+  const suggestion = suggestParameters(
+    payload.history,
+    payload.current ? { current: payload.current } : {},
+  );
+  post({ kind: "progress", jobId, progress: { ratio: 0.95, note: "done" } });
+  // Serialize the suggestion to a plain JSON shape (the params vector + scores).
+  post({
+    kind: "result",
+    jobId,
+    data: {
+      params: [...suggestion.params.w],
+      baseline: { ...suggestion.baseline },
+      suggested: { ...suggestion.suggested },
+      improvement: suggestion.improvement,
+      reviewsScored: suggestion.reviewsScored,
+      method: suggestion.method,
+      sufficientData: suggestion.sufficientData,
+    },
+  });
+}
+
 /** Dispatch one validated request to its job-execution function. */
 async function dispatch(jobId: string, type: string, payload: unknown): Promise<void> {
   try {
@@ -126,6 +165,9 @@ async function dispatch(jobId: string, type: string, payload: unknown): Promise<
         return;
       case "ocr":
         await runOcr(jobId, payload as OcrPayload);
+        return;
+      case "fsrs_optimize":
+        runFsrsOptimize(jobId, payload as FsrsOptimizePayload);
         return;
       case "vault_verify":
       case "vault_gc":
