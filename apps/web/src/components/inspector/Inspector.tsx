@@ -48,6 +48,8 @@ import {
   type TaskType,
 } from "../../lib/appApi";
 import { useNavigateToLocation } from "../../reader/navigateToLocation";
+import { ReviewModeButton } from "../../review/ReviewModeButton";
+import "../../review/review.css";
 import { useSelection } from "../../shell/selection";
 import { ConflictSection } from "../ConflictSection";
 import { Icon } from "../Icon";
@@ -501,6 +503,13 @@ const EXPORTABLE_TYPES = new Set<ElementSummary["type"]>([
   "extract",
   "synthesis_note",
 ]);
+
+/**
+ * Types whose lineage subtree can hold cards — the "Review this branch" affordance
+ * (T096) is offered on these (a `source`/`topic`/`extract` root reviews the cards
+ * under it, outside scheduling). A `card`/`task`/`concept` has no reviewable subtree.
+ */
+const BRANCH_REVIEWABLE_TYPES = new Set<ElementSummary["type"]>(["source", "topic", "extract"]);
 
 /**
  * "Export to Markdown" action (T068) — serializes the element's stored document
@@ -1995,6 +2004,24 @@ function InspectorBody({
             <span className="insp-sec__count">{lineage.nodes.length}</span>
           </div>
           <LineageTree nodes={lineage.nodes} onPick={onPickLineageNode} />
+          {/* T096 — review the CARDS in this branch (lineage subtree) as a targeted
+              session. For a source/topic/extract root this reviews its cards outside
+              scheduling; omitted when the subtree has no live cards. */}
+          {BRANCH_REVIEWABLE_TYPES.has(element.type) ? (
+            <div className="insp-branch-review" data-testid="inspector-branch-review">
+              <ReviewModeButton
+                selector={{ kind: "branch", rootId: element.id }}
+                hideWhileLoading
+                icon="layers"
+                label={(n) =>
+                  element.type === "source"
+                    ? `Review ${n} card${n === 1 ? "" : "s"} in this source`
+                    : `Review ${n} card${n === 1 ? "" : "s"} in this branch`
+                }
+                testId="inspector-review-branch"
+              />
+            </div>
+          ) : null}
         </div>
       )}
 

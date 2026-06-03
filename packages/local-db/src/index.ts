@@ -244,6 +244,12 @@ export {
 } from "./related-service";
 export { type RetentionCardResult, RetentionService } from "./retention-service";
 export {
+  type ReviewModeCount,
+  type ReviewModeDeck,
+  ReviewModeService,
+  type SemanticResolveContext,
+} from "./review-mode-service";
+export {
   type CardWithElement,
   type CreateCardInput,
   type LeechCard,

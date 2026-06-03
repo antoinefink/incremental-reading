@@ -2272,6 +2272,54 @@ export interface ReviewLeechesResult {
 }
 
 // ---------------------------------------------------------------------------
+// review.modeDeck() / review.modeCount()  (T096 — targeted review modes)
+// ---------------------------------------------------------------------------
+
+/**
+ * The typed selector for a TARGETED review mode (T096) — a discriminated union
+ * mirroring `@interleave/core`'s `ReviewModeSelector` (the single source of truth).
+ * A mode reviews a chosen card SUBSET OUTSIDE normal scheduling (the selection
+ * ignores `review_states.due_at` — a not-due card is selectable). The renderer never
+ * computes the selection; it sends this typed selector and the main side resolves it.
+ */
+export type ReviewModeSelector =
+  | { readonly kind: "concept"; readonly conceptId: string }
+  | { readonly kind: "source"; readonly sourceId: string }
+  | { readonly kind: "branch"; readonly rootId: string }
+  | { readonly kind: "search"; readonly query: string }
+  | { readonly kind: "semantic"; readonly query: string }
+  | { readonly kind: "stale" }
+  | { readonly kind: "leech" }
+  | { readonly kind: "random"; readonly size: number; readonly seed?: number };
+
+export interface ReviewModeDeckRequest {
+  readonly selector: ReviewModeSelector;
+  /** "Now" the selection (e.g. stale derivation) compares against; defaults to the clock. */
+  readonly asOf?: string;
+}
+
+export interface ReviewModeDeckResult {
+  /** The ordered reveal-ready card views (capped at `MAX_REVIEW_MODE_DECK`). */
+  readonly deck: readonly ReviewCardView[];
+  /** The TOTAL underlying selected count BEFORE the cap (so the UI can say "of N"). */
+  readonly total: number;
+  /** The calm mode label for the header ("Concept" / "Leeches" / …). */
+  readonly label: string;
+  /** True when the underlying set exceeded the cap and the deck was truncated. */
+  readonly truncated: boolean;
+}
+
+export interface ReviewModeCountRequest {
+  readonly selector: ReviewModeSelector;
+  readonly asOf?: string;
+}
+
+export interface ReviewModeCountResult {
+  readonly total: number;
+  readonly label: string;
+}
+
+// ---------------------------------------------------------------------------
 // concepts.* / tags.*  (T041 — organize: hierarchical concepts + flat tags)
 // ---------------------------------------------------------------------------
 
@@ -3316,6 +3364,8 @@ export interface AppApi {
     preview(request: ReviewPreviewRequest): Promise<ReviewPreviewResult>;
     grade(request: ReviewGradeRequest): Promise<ReviewGradeResult>;
     leeches(): Promise<ReviewLeechesResult>;
+    modeDeck(request: ReviewModeDeckRequest): Promise<ReviewModeDeckResult>;
+    modeCount(request: ReviewModeCountRequest): Promise<ReviewModeCountResult>;
   };
   readonly concepts: {
     create(request: ConceptsCreateRequest): Promise<ConceptsCreateResult>;
@@ -3968,6 +4018,19 @@ export const appApi = {
    */
   reviewLeeches(): Promise<ReviewLeechesResult> {
     return requireAppApi().review.leeches();
+  },
+  /**
+   * Resolve a TARGETED review-mode deck (T096) — the ordered reveal-ready card
+   * SUBSET for a concept/source/branch/search/semantic/stale/leech/random mode,
+   * OUTSIDE scheduling (the selection ignores `review_states.due_at`). Read-only;
+   * grading reuses the unchanged `reviewGrade`.
+   */
+  reviewModeDeck(request: ReviewModeDeckRequest): Promise<ReviewModeDeckResult> {
+    return requireAppApi().review.modeDeck(request);
+  },
+  /** The cheap subset count for a review-mode entry affordance (T096). Read-only. */
+  reviewModeCount(request: ReviewModeCountRequest): Promise<ReviewModeCountResult> {
+    return requireAppApi().review.modeCount(request);
   },
   /**
    * Create a hierarchical concept (T041) — the `concept`-type element + its

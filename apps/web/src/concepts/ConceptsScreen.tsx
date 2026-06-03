@@ -30,6 +30,8 @@ import {
 import "../components/inspector/inspector.css";
 import { appApi, type ConceptMemberSummary, type ConceptNode, isDesktop } from "../lib/appApi";
 import "../library/library.css";
+import { ReviewModeButton } from "../review/ReviewModeButton";
+import "../review/review.css";
 import "./concepts.css";
 
 /**
@@ -313,6 +315,14 @@ export function ConceptsScreen() {
                 <span className="cm-members__count">
                   {members.length} member{members.length === 1 ? "" : "s"}
                 </span>
+                {/* T096 — review every CARD in this concept (outside scheduling). Omitted
+                    when the concept has no live cards (the button resolves its own count). */}
+                <ReviewModeButton
+                  selector={{ kind: "concept", conceptId: selected.id }}
+                  hideWhileLoading
+                  label={(n) => `Review ${n} card${n === 1 ? "" : "s"}`}
+                  testId="concepts-review-mode"
+                />
               </div>
               <ConceptRetentionEditor
                 conceptId={selected.id}

@@ -23,8 +23,9 @@
  * on a global undo (⌘Z) so the dashboard stays live.
  */
 
+import { DEFAULT_RANDOM_AUDIT_SIZE } from "@interleave/core";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { Prio, SchedulerChip, TypeIcon } from "../../components/inspector/primitives";
 import { BudgetMeter } from "../../components/queue/BudgetMeter";
@@ -35,8 +36,11 @@ import {
   isDesktop,
   type QueueItemSummary,
   type QueueListResult,
+  type ReviewModeSelector,
   type SchedulerSignals,
 } from "../../lib/appApi";
+import { ReviewModeButton } from "../../review/ReviewModeButton";
+import "../../review/review.css";
 import { UNDO_EVENT } from "../../shell/nav";
 import "../../analytics/analytics.css";
 import "../queue/queue.css";
@@ -161,6 +165,18 @@ export function HomeScreen() {
   // in normal use the reads default to the server's "now".
   const search = useSearch({ strict: false }) as { asOf?: string };
   const asOf = typeof search.asOf === "string" ? search.asOf : undefined;
+  // T096 random audit: mint a seed ONCE when the home screen mounts and carry it in
+  // the selector so the audit launches the SAME sample its count was computed from
+  // (the seed travels in the descriptor, never persisted). `Math.random` here is only
+  // for picking which sample to audit — the SHUFFLE itself is deterministic main-side.
+  const randomAuditSelector = useMemo<ReviewModeSelector>(
+    () => ({
+      kind: "random",
+      size: DEFAULT_RANDOM_AUDIT_SIZE,
+      seed: Math.floor(Math.random() * 0x7fffffff),
+    }),
+    [],
+  );
   const [queue, setQueue] = useState<QueueListResult | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsGetResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -515,6 +531,32 @@ export function HomeScreen() {
                 <span className="home-tile__sub">{tile.sub}</span>
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* Targeted review modes (T096) — review a chosen card subset OUTSIDE normal
+            scheduling. The random audit always offers a fresh, seeded sample; the stale
+            review is omitted when nothing is stale (the button resolves its own count). */}
+        <div className="home-section">
+          <div className="home-section__head">
+            <span className="home-section__title">Targeted review</span>
+          </div>
+          <div className="home-review-modes" data-testid="home-review-modes">
+            <ReviewModeButton
+              selector={randomAuditSelector}
+              {...(asOf ? { asOf } : {})}
+              icon="target"
+              label={(n) => `Audit ${Math.min(n, DEFAULT_RANDOM_AUDIT_SIZE)} random cards`}
+              testId="home-review-random"
+            />
+            <ReviewModeButton
+              selector={{ kind: "stale" }}
+              {...(asOf ? { asOf } : {})}
+              hideWhileLoading
+              icon="clock"
+              label={(n) => `Review ${n} stale card${n === 1 ? "" : "s"}`}
+              testId="home-review-stale"
+            />
           </div>
         </div>
       </div>

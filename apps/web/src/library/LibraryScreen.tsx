@@ -35,6 +35,8 @@ import {
   type SearchResult,
   type SemanticSearchMode,
 } from "../lib/appApi";
+import { ReviewModeButton } from "../review/ReviewModeButton";
+import "../review/review.css";
 import "./library.css";
 
 type Tab = "results" | "map";
@@ -446,6 +448,28 @@ export function LibraryScreen() {
                       Keyword search · enable semantic search in Settings to find related material.
                     </div>
                   ) : null
+                ) : null}
+                {/* T096 — launch a TARGETED review over the CARDS matching this query
+                    (keyword always; semantic when enabled). Each button resolves its own
+                    subset count and is omitted when no cards match. */}
+                {debouncedQuery.trim().length > 0 ? (
+                  <div className="lib-review-modes" data-testid="library-review-modes">
+                    <ReviewModeButton
+                      selector={{ kind: "search", query: debouncedQuery.trim() }}
+                      hideWhileLoading
+                      label={(n) => `Review ${n} matching card${n === 1 ? "" : "s"}`}
+                      testId="library-review-search"
+                    />
+                    {semanticEnabled ? (
+                      <ReviewModeButton
+                        selector={{ kind: "semantic", query: debouncedQuery.trim() }}
+                        hideWhileLoading
+                        icon="sparkle"
+                        label={(n) => `Review ${n} related card${n === 1 ? "" : "s"}`}
+                        testId="library-review-semantic"
+                      />
+                    ) : null}
+                  </div>
                 ) : null}
                 {debouncedQuery.trim().length === 0 ? (
                   <div className="lib-empty" data-testid="library-prompt">

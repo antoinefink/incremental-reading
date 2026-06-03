@@ -238,6 +238,16 @@ export type {
 export { plainTextToProseMirrorDoc } from "./prosemirror";
 // FSRS card review state + durable logs — cards only (./review).
 export type { ReviewLog, ReviewState } from "./review";
+// Review-mode vocabulary (T096) — the closed targeted-review kinds + the typed selector.
+export type { ReviewModeKind, ReviewModeSelector } from "./review-mode";
+export {
+  DEFAULT_RANDOM_AUDIT_SIZE,
+  isReviewModeKind,
+  MAX_REVIEW_MODE_DECK,
+  REVIEW_MODE_KINDS,
+  REVIEW_MODE_LABEL,
+  reviewModeLabel,
+} from "./review-mode";
 // User/domain settings — the typed model scheduling + UI read (./settings).
 export type {
   AppSettings,

@@ -68,6 +68,100 @@
   border-color: var(--text-3);
 }
 
+/* ---------- targeted review-mode header (T096) ---------- */
+.rv-mode {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px var(--s-6, 24px);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2, var(--surface));
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  color: var(--text-2);
+}
+.rv-mode__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--r-pill, 999px);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  font-size: var(--t-xs);
+}
+.rv-mode__count {
+  font-weight: 500;
+  color: var(--text);
+}
+.rv-mode__hint {
+  color: var(--text-3);
+  font-size: var(--t-xs);
+}
+.rv-mode__exit {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+.rv-mode__exit:hover {
+  color: var(--text);
+  border-color: var(--text-3);
+}
+
+/* The reusable "Review these" entry affordance (T096) placed across surfaces. */
+.rv-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rv-mode-btn:hover {
+  color: var(--text);
+  border-color: var(--text-3);
+}
+.rv-mode-btn--loading {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Containers that group the "Review these" affordances across surfaces (T096). */
+.home-review-modes,
+.lib-review-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.lib-review-modes {
+  margin-bottom: 12px;
+}
+.insp-branch-review {
+  margin-top: 10px;
+}
+
 /* ---------- progress bar (kit `.pbar`) ---------- */
 .pbar {
   height: 4px;

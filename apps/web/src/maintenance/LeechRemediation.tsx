@@ -43,6 +43,7 @@ import {
   type PriorityLabel,
 } from "../lib/appApi";
 import { useNavigateToLocation } from "../reader/navigateToLocation";
+import { ReviewModeButton } from "../review/ReviewModeButton";
 import "../review/review.css";
 import "./leech-cleanup.css";
 
@@ -496,6 +497,15 @@ export function LeechRemediation() {
         <span className="lc-count" data-testid="leech-count">
           {cards.length} leech{cards.length === 1 ? "" : "es"}
         </span>
+        {/* T096 — review every leech as a targeted session (in addition to the per-card
+            rewrite/suspend/delete repairs). Omitted when there are no live leeches. */}
+        <ReviewModeButton
+          selector={{ kind: "leech" }}
+          hideWhileLoading
+          icon="leech"
+          label={(n) => `Review ${n} leech${n === 1 ? "" : "es"}`}
+          testId="leech-review-mode"
+        />
       </div>
 
       {error ? (

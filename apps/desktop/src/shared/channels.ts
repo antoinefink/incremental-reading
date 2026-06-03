@@ -109,6 +109,9 @@ export const IPC_CHANNELS = {
   reviewPreview: "review:preview",
   reviewGrade: "review:grade",
   reviewLeeches: "review:leeches",
+  // Targeted review modes (T096) — resolve a chosen card SUBSET outside scheduling.
+  reviewModeDeck: "review:mode:deck",
+  reviewModeCount: "review:mode:count",
   conceptsCreate: "concepts:create",
   conceptsList: "concepts:list",
   conceptsAssign: "concepts:assign",

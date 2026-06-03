@@ -47,12 +47,14 @@ import {
   JOB_TYPES,
   KEYBOARD_LAYOUTS,
   MARK_TYPES,
+  MAX_REVIEW_MODE_DECK,
   MEDIA_REF_FACES,
   type MediaRef,
   RELIABILITY_TIERS,
   REVIEW_RATINGS,
   type ReliabilityTier,
   type RendererSettings,
+  type ReviewModeSelector,
   SOURCE_TYPES,
   type SourceRef,
   type SourceType,
@@ -78,6 +80,7 @@ export type {
   ReliabilitySummary,
   ReliabilityTier,
   RendererSettings,
+  ReviewModeSelector,
   SourceRef,
   SourceType,
 } from "@interleave/core";
@@ -3556,6 +3559,80 @@ export interface ReviewLeechesResult {
 }
 
 // ---------------------------------------------------------------------------
+// review.modeDeck() / review.modeCount()  (T096 — targeted review modes)
+// ---------------------------------------------------------------------------
+
+/**
+ * Targeted review modes (T096). A mode reviews a CHOSEN SUBSET of cards OUTSIDE
+ * normal scheduling — by `concept` / `source` / `branch` (a lineage subtree) /
+ * `search` (keyword) / `semantic` (vector) / `stale` (T090) / `leech` (T040) /
+ * `random` audit. The selection IGNORES `review_states.due_at` (a not-due card is
+ * selectable); everything else about a review is unchanged — `review.grade`
+ * (untouched) still writes a durable `review_logs` row + advances FSRS. These two
+ * commands are READ-ONLY: `review.modeDeck` resolves the ordered card-id deck and
+ * maps each id through the SAME `toReviewCardView` the daily session ships (so the
+ * renderer gets reveal-ready views with no per-card round-trip); `review.modeCount`
+ * is the cheap count for the entry affordances. No mutation, no `operation_log`.
+ *
+ * The Zod selector mirrors `@interleave/core`'s {@link ReviewModeSelector} (the
+ * single source of truth) so the IPC validation can't drift from the domain union.
+ */
+
+/** A bounded query string for the `search`/`semantic` modes. */
+const ReviewModeQuerySchema = z.string().trim().min(1).max(512);
+
+/** The validated review-mode selector — a discriminated union mirroring the core type. */
+export const ReviewModeSelectorSchema: z.ZodType<ReviewModeSelector> = z.discriminatedUnion(
+  "kind",
+  [
+    z.object({ kind: z.literal("concept"), conceptId: ElementIdSchema }),
+    z.object({ kind: z.literal("source"), sourceId: ElementIdSchema }),
+    z.object({ kind: z.literal("branch"), rootId: ElementIdSchema }),
+    z.object({ kind: z.literal("search"), query: ReviewModeQuerySchema }),
+    z.object({ kind: z.literal("semantic"), query: ReviewModeQuerySchema }),
+    z.object({ kind: z.literal("stale") }),
+    z.object({ kind: z.literal("leech") }),
+    z.object({
+      kind: z.literal("random"),
+      size: z.number().int().min(1).max(MAX_REVIEW_MODE_DECK),
+      seed: z.number().int().optional(),
+    }),
+  ],
+) as z.ZodType<ReviewModeSelector>;
+
+export const ReviewModeDeckRequestSchema = z.object({
+  /** The typed selector describing the mode + its one parameter. */
+  selector: ReviewModeSelectorSchema,
+  /** "Now" the selection (e.g. stale derivation) compares against; defaults to the clock. */
+  asOf: IsoTimestampInputSchema.optional(),
+});
+export type ReviewModeDeckRequest = z.infer<typeof ReviewModeDeckRequestSchema>;
+
+export interface ReviewModeDeckResult {
+  /** The ordered reveal-ready card views (capped at `MAX_REVIEW_MODE_DECK`). */
+  readonly deck: readonly ReviewCardView[];
+  /** The TOTAL underlying selected count BEFORE the cap (so the UI can say "of N"). */
+  readonly total: number;
+  /** The calm mode label for the header ("Concept" / "Leeches" / …). */
+  readonly label: string;
+  /** True when the underlying set exceeded the cap and the deck was truncated. */
+  readonly truncated: boolean;
+}
+
+export const ReviewModeCountRequestSchema = z.object({
+  selector: ReviewModeSelectorSchema,
+  asOf: IsoTimestampInputSchema.optional(),
+});
+export type ReviewModeCountRequest = z.infer<typeof ReviewModeCountRequestSchema>;
+
+export interface ReviewModeCountResult {
+  /** The size of the subset the mode would review (cards only, outside scheduling). */
+  readonly total: number;
+  /** The calm mode label for the entry affordance. */
+  readonly label: string;
+}
+
+// ---------------------------------------------------------------------------
 // concepts.* / tags.*  (T041 — organize: hierarchical concepts + flat tags)
 // ---------------------------------------------------------------------------
 
@@ -5388,6 +5465,15 @@ export interface AppApi {
      * reuses `cards.update`/`suspend`/`delete`/`markLeech`.
      */
     leeches(): Promise<ReviewLeechesResult>;
+    /**
+     * Resolve a TARGETED review-mode deck (T096) — the ordered reveal-ready card
+     * SUBSET for a concept/source/branch/search/semantic/stale/leech/random mode,
+     * OUTSIDE normal scheduling (the selection ignores `review_states.due_at`).
+     * Read-only; grading reuses the unchanged `grade`. Cards only.
+     */
+    modeDeck(request: ReviewModeDeckRequest): Promise<ReviewModeDeckResult>;
+    /** The cheap subset count for a review-mode entry affordance (T096). Read-only. */
+    modeCount(request: ReviewModeCountRequest): Promise<ReviewModeCountResult>;
   };
   readonly concepts: {
     /**

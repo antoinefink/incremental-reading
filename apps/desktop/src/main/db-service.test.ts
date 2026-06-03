@@ -2293,6 +2293,201 @@ describe("DbService — review session (T037)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Targeted review modes (T096) — a chosen card subset reviewed OUTSIDE scheduling.
+// ---------------------------------------------------------------------------
+
+describe("DbService — review modes (T096)", () => {
+  /** A future clock so the seeded due card stays due; an explicit far-future card is NOT due. */
+  const ASOF = "2027-06-01T12:00:00.000Z";
+
+  /** The seeded DUE Q&A (non-leech, non-retired) card id with a past due_at. */
+  function seededDueCardId(svc: DbService): string {
+    const row = svc.raw.sqlite
+      .prepare(
+        `SELECT e.id AS id FROM elements e
+         JOIN cards c ON c.element_id = e.id
+         JOIN review_states rs ON rs.element_id = e.id
+         WHERE c.kind = 'qa' AND c.is_leech = 0 AND c.is_retired = 0
+           AND e.deleted_at IS NULL AND rs.due_at IS NOT NULL AND rs.due_at <= ? LIMIT 1`,
+      )
+      .get(ASOF) as { id: string } | undefined;
+    if (!row) throw new Error("seeded due Q&A card not found");
+    return row.id;
+  }
+
+  it("reviewModeDeck (concept) returns reveal-ready views for a chosen subset, including a NOT-due card", async () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    const dueCard = seededDueCardId(svc);
+    // Force a SECOND card far into the FUTURE so it is NOT due (would not appear in
+    // the daily session) — the load-bearing "outside scheduling" case.
+    const futureCard = svc.raw.sqlite
+      .prepare(
+        `SELECT e.id AS id FROM elements e
+         JOIN cards c ON c.element_id = e.id
+         JOIN review_states rs ON rs.element_id = e.id
+         WHERE c.kind = 'qa' AND c.is_leech = 0 AND c.is_retired = 0
+           AND e.deleted_at IS NULL AND e.id != ? LIMIT 1`,
+      )
+      .get(dueCard) as { id: string } | undefined;
+    if (!futureCard) throw new Error("need a second seeded card");
+    svc.raw.sqlite
+      .prepare("UPDATE review_states SET due_at = ? WHERE element_id = ?")
+      .run("2099-01-01T00:00:00.000Z", futureCard.id);
+
+    // Assign BOTH cards to a fresh concept.
+    const concept = svc.createConcept({ name: "Mode subset" }).concept;
+    svc.assignConcept({ elementId: dueCard, conceptId: concept.id });
+    svc.assignConcept({ elementId: futureCard.id, conceptId: concept.id });
+
+    const result = await svc.reviewModeDeck({
+      selector: { kind: "concept", conceptId: concept.id as never },
+      asOf: ASOF,
+    });
+    const ids = result.deck.map((c) => c.id);
+    expect(ids).toContain(dueCard);
+    // The NOT-due card IS in the mode deck (it would be absent from the daily session).
+    expect(ids).toContain(futureCard.id);
+    expect(result.label).toBe("Concept");
+    // The views are reveal-ready: the answer is present (the renderer hides it until reveal).
+    const view = result.deck.find((c) => c.id === dueCard);
+    expect(view?.schedulerSignals.kind).toBe("fsrs");
+    expect(view?.answer ?? view?.cloze).toBeTruthy();
+
+    // The not-due card is NOT in the daily due session — proving the selection differs.
+    const dueIds: string[] = [];
+    for (let i = 0; i < 500; i++) {
+      const res = svc.reviewSessionNext({ asOf: ASOF, exclude: dueIds });
+      if (!res.card) break;
+      dueIds.push(res.card.id);
+    }
+    expect(dueIds).not.toContain(futureCard.id);
+
+    svc.close();
+  });
+
+  it("grading a NOT-due mode card writes exactly one review_logs row + advances FSRS (unchanged grade path)", async () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    // A card pushed far into the future — NOT due, but selectable in a mode.
+    const cardId = seededDueCardId(svc);
+    svc.raw.sqlite
+      .prepare("UPDATE review_states SET due_at = ? WHERE element_id = ?")
+      .run("2099-01-01T00:00:00.000Z", cardId);
+    const concept = svc.createConcept({ name: "Gradable" }).concept;
+    svc.assignConcept({ elementId: cardId, conceptId: concept.id });
+
+    // It appears in the mode deck though it is not due.
+    const deck = await svc.reviewModeDeck({
+      selector: { kind: "concept", conceptId: concept.id as never },
+      asOf: ASOF,
+    });
+    expect(deck.deck.map((c) => c.id)).toContain(cardId);
+
+    const beforeState = svc.repos.review.findReviewState(cardId as never);
+    const beforeLogs = svc.repos.review.listReviewLogs(cardId as never).length;
+    const beforeOps = svc.raw.sqlite
+      .prepare("SELECT COUNT(*) AS n FROM operation_log WHERE op_type = 'add_review_log'")
+      .get() as { n: number };
+
+    // Grade it through the UNCHANGED review.grade path.
+    const result = svc.reviewGrade({ cardId, rating: "good", responseMs: 1500, asOf: ASOF });
+
+    // Exactly one new review_logs row + one add_review_log op, FSRS advanced.
+    expect(svc.repos.review.listReviewLogs(cardId as never).length).toBe(beforeLogs + 1);
+    const afterState = svc.repos.review.findReviewState(cardId as never);
+    expect(afterState?.reps).toBe((beforeState?.reps ?? 0) + 1);
+    expect(afterState?.dueAt).toBe(result.reviewState.dueAt);
+    const cardEl = svc.repos.elements.findById(cardId as never);
+    expect(cardEl?.dueAt).toBe(result.reviewState.dueAt);
+    const afterOps = svc.raw.sqlite
+      .prepare("SELECT COUNT(*) AS n FROM operation_log WHERE op_type = 'add_review_log'")
+      .get() as { n: number };
+    expect(afterOps.n).toBe(beforeOps.n + 1);
+
+    svc.close();
+  });
+
+  it("reviewModeCount returns the subset size + label (cheap, agrees with the deck)", async () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const cardId = seededDueCardId(svc);
+    const concept = svc.createConcept({ name: "Counted" }).concept;
+    svc.assignConcept({ elementId: cardId, conceptId: concept.id });
+
+    const count = await svc.reviewModeCount({
+      selector: { kind: "concept", conceptId: concept.id as never },
+      asOf: ASOF,
+    });
+    const deck = await svc.reviewModeDeck({
+      selector: { kind: "concept", conceptId: concept.id as never },
+      asOf: ASOF,
+    });
+    expect(count.total).toBe(deck.deck.length);
+    expect(count.label).toBe("Concept");
+
+    svc.close();
+  });
+
+  it("semantic mode degrades to keyword when semantics are disabled (no model, no network)", async () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    // Pick a real card and use a word from its prompt as the query.
+    const card = svc.raw.sqlite
+      .prepare(
+        `SELECT c.prompt AS prompt FROM cards c JOIN elements e ON e.id = c.element_id
+         WHERE c.kind = 'qa' AND e.deleted_at IS NULL AND c.prompt IS NOT NULL LIMIT 1`,
+      )
+      .get() as { prompt: string } | undefined;
+    const term = (card?.prompt ?? "the").split(/\s+/).find((w) => w.length > 3) ?? "the";
+
+    // Semantics are OFF by default in the seed — the semantic mode must equal keyword.
+    const keyword = await svc.reviewModeDeck({
+      selector: { kind: "search", query: term },
+      asOf: ASOF,
+    });
+    const semantic = await svc.reviewModeDeck({
+      selector: { kind: "semantic", query: term },
+      asOf: ASOF,
+    });
+    expect(semantic.deck.map((c) => c.id)).toEqual(keyword.deck.map((c) => c.id));
+
+    svc.close();
+  });
+
+  it("a graded mode card's rescheduling survives a close + reopen (restart analogue)", () => {
+    const first = new DbService();
+    first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(first.seedIfEmpty()).toBe(true);
+    const cardId = seededDueCardId(first);
+    first.raw.sqlite
+      .prepare("UPDATE review_states SET due_at = ? WHERE element_id = ?")
+      .run("2099-01-01T00:00:00.000Z", cardId);
+    const { reviewState } = first.reviewGrade({
+      cardId,
+      rating: "good",
+      responseMs: 2100,
+      asOf: ASOF,
+    });
+    const logsBefore = first.repos.review.listReviewLogs(cardId as never).length;
+    first.close();
+
+    const second = new DbService();
+    second.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(second.repos.review.findReviewState(cardId as never)?.dueAt).toBe(reviewState.dueAt);
+    expect(second.repos.review.listReviewLogs(cardId as never).length).toBe(logsBefore);
+    second.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Source/reference display (T043) — the enriched refblock on cards/extracts.
 // ---------------------------------------------------------------------------
 

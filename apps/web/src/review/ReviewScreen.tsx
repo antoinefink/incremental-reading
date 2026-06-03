@@ -22,8 +22,9 @@
  * T038/T040; T037 ships the reveal → grade → advance loop + jump-to-source.
  */
 
+import { DEFAULT_RANDOM_AUDIT_SIZE, isReviewModeKind, reviewModeLabel } from "@interleave/core";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConflictSection } from "../components/ConflictSection";
 import { Icon } from "../components/Icon";
 import { FsrsStats, Prio, SchedulerChip, Stage } from "../components/inspector/primitives";
@@ -34,6 +35,7 @@ import {
   isDesktop,
   type ReviewCardView,
   type ReviewIntervalPreview,
+  type ReviewModeSelector,
   type ReviewRating,
   type SchedulerSignals,
 } from "../lib/appApi";
@@ -95,6 +97,58 @@ function SessionClock({ startMs }: { startMs: number }) {
   );
 }
 
+/**
+ * Loose review-search params: the optional `asOf` (existing) + the T096 review-mode
+ * descriptor. The route declares NO `validateSearch` (loose search is the codebase
+ * convention — see `reader/navigateToLocation.ts`), so we read the params loosely and
+ * validate the `mode` kind with the `@interleave/core` `isReviewModeKind` guard before
+ * constructing a typed `ReviewModeSelector`. An unknown / malformed mode → `null`
+ * (the plain daily due session), never an error.
+ */
+interface ReviewSearch {
+  readonly asOf?: string;
+  /** The review-mode kind (T096): `concept`/`source`/`branch`/`search`/`semantic`/`stale`/`leech`/`random`. */
+  readonly mode?: string;
+  readonly conceptId?: string;
+  readonly sourceId?: string;
+  readonly rootId?: string;
+  readonly query?: string;
+  readonly size?: string;
+  readonly seed?: string;
+}
+
+/** Parse the loose search params into a typed {@link ReviewModeSelector}, or `null` (daily). */
+function parseReviewMode(search: ReviewSearch): ReviewModeSelector | null {
+  const kind = search.mode;
+  if (!isReviewModeKind(kind)) return null;
+  switch (kind) {
+    case "concept":
+      return search.conceptId ? { kind, conceptId: search.conceptId } : null;
+    case "source":
+      return search.sourceId ? { kind, sourceId: search.sourceId } : null;
+    case "branch":
+      return search.rootId ? { kind, rootId: search.rootId } : null;
+    case "search":
+    case "semantic":
+      return search.query ? { kind, query: search.query } : null;
+    case "stale":
+      return { kind };
+    case "leech":
+      return { kind };
+    case "random": {
+      const size = Number.parseInt(search.size ?? "", 10);
+      const seed = Number.parseInt(search.seed ?? "", 10);
+      return {
+        kind,
+        size: Number.isFinite(size) && size > 0 ? size : DEFAULT_RANDOM_AUDIT_SIZE,
+        ...(Number.isFinite(seed) ? { seed } : {}),
+      };
+    }
+    default:
+      return null;
+  }
+}
+
 export function ReviewScreen() {
   const desktop = isDesktop();
   const navigate = useNavigate();
@@ -103,8 +157,13 @@ export function ReviewScreen() {
 
   // The route declares no `validateSearch`; an optional `asOf` date-scopes the due
   // read (the E2E drives a fixed clock so the seeded near-future card reads as due).
-  const search = useSearch({ strict: false }) as { asOf?: string };
+  // The T096 review-mode descriptor (`mode` + its parameter) also rides loose search.
+  const search = useSearch({ strict: false }) as ReviewSearch;
   const asOf = typeof search.asOf === "string" ? search.asOf : undefined;
+  // A targeted review mode (T096), or `null` for the plain daily due session. Memoized
+  // so the deck-walk effects don't re-run on every render (the selector is stable).
+  const mode = useMemo(() => parseReviewMode(search), [search]);
+  const modeLabel = mode ? reviewModeLabel(mode.kind) : null;
 
   const [card, setCard] = useState<ReviewCardView | null>(null);
   const [remaining, setRemaining] = useState(0);
@@ -127,10 +186,19 @@ export function ReviewScreen() {
   // The progress bar's denominator subtracts these so a completed session reaches
   // 100% even when some cards were repaired away rather than reviewed.
   const [removed, setRemoved] = useState(0);
+  // T096 mode state: the deck was fetched + capped (`truncated`), and the underlying
+  // subset size (`modeTotal`) so the header can say "first 500 of N".
+  const [truncated, setTruncated] = useState(false);
+  const [modeTotal, setModeTotal] = useState(0);
 
   // The set of card ids already reviewed this session — passed to `session.next`
   // so the deck advances.
   const excludeRef = useRef<string[]>([]);
+  // T096: the FROZEN ordered mode deck (fetched ONCE on mount, walked by index). In
+  // mode, `loadNext` draws the next unseen card from this in-memory deck (with
+  // sibling burying) instead of calling the due-session read — the selection is
+  // already done MAIN-side. `null` until the deck is fetched (or in the daily session).
+  const modeDeckRef = useRef<ReviewCardView[] | null>(null);
   // The sibling group of the card shown most recently (opaque session state passed
   // to `session.next` so the MAIN side buries siblings — T039). The renderer never
   // computes sibling relationships; it only carries the previous card's group id
@@ -140,14 +208,66 @@ export function ReviewScreen() {
   const revealAtRef = useRef<number | null>(null);
 
   /**
-   * Load the next due card (excluding the already-seen set; burying recent
-   * siblings). Returns `true` on success and `false` if the read failed, so the
-   * grade path can clear the just-graded card on a post-grade advance failure
-   * (otherwise it would stay on screen and be re-gradable).
+   * Pick the next card from the FROZEN mode deck (T096): the first card not in the
+   * already-seen `exclude` set, burying the recent sibling group (session-ordering
+   * only — same window as the daily session). Returns the chosen card or `null` when
+   * the deck is drained. Mirrors `ReviewSessionService.nextReviewCard`'s burying but
+   * over the in-memory ordered deck (the selection was already done main-side).
+   */
+  const nextFromModeDeck = useCallback((): ReviewCardView | null => {
+    const deck = modeDeckRef.current;
+    if (!deck) return null;
+    const seen = new Set(excludeRef.current);
+    const remainingDeck = deck.filter((c) => !seen.has(c.id));
+    if (remainingDeck.length === 0) return null;
+    const recent = recentSiblingGroupRef.current;
+    if (recent) {
+      // Prefer the first card whose group was NOT just shown (else fall through so
+      // the deck still drains — burying never starves the session).
+      const nonSibling = remainingDeck.find((c) => c.siblingGroupId !== recent);
+      if (nonSibling) return nonSibling;
+    }
+    return remainingDeck[0] ?? null;
+  }, []);
+
+  /**
+   * Load the next card (excluding the already-seen set; burying recent siblings).
+   * In the daily session this reads `reviewSessionNext` (the FSRS due deck); in a
+   * TARGETED mode (T096) it walks the FROZEN mode deck fetched once on mount. Returns
+   * `true` on success and `false` if the read failed, so the grade path can clear the
+   * just-graded card on a post-grade advance failure (otherwise it would stay on
+   * screen and be re-gradable).
    */
   const loadNext = useCallback(async (): Promise<boolean> => {
     if (!isDesktop()) return false;
     try {
+      // ---- Targeted mode (T096): walk the in-memory ordered deck ----
+      if (mode) {
+        const next = nextFromModeDeck();
+        setError(null);
+        setRevealed(false);
+        setPreviews(null);
+        setContextDrawerOpen(false);
+        revealAtRef.current = null;
+        const deckSize = modeDeckRef.current?.length ?? 0;
+        if (!next) {
+          setCard(null);
+          setRemaining(0);
+          // A drained mode deck after at least one grade → the completion summary.
+          if (excludeRef.current.length > 0) {
+            setDone(true);
+            setEndMs(Date.now());
+          }
+          return true;
+        }
+        setCard(next);
+        setRemaining(Math.max(0, deckSize - excludeRef.current.length - 1));
+        recentSiblingGroupRef.current = next.siblingGroupId;
+        select(next.id);
+        return true;
+      }
+
+      // ---- Daily due session (T037) ----
       const recent = recentSiblingGroupRef.current;
       const res = await appApi.reviewSessionNext({
         exclude: excludeRef.current,
@@ -185,12 +305,37 @@ export function ReviewScreen() {
       setError(e instanceof Error ? e.message : String(e));
       return false;
     }
-  }, [asOf, select]);
+  }, [asOf, mode, nextFromModeDeck, select]);
 
-  // Load the first card on mount.
+  // Load the first card on mount. In a TARGETED mode (T096) fetch the FROZEN deck
+  // ONCE first (the selection is done main-side), then walk it; in the daily session
+  // `loadNext` reads the due deck directly.
   useEffect(() => {
-    void loadNext();
-  }, [loadNext]);
+    let cancelled = false;
+    void (async () => {
+      if (mode && isDesktop()) {
+        try {
+          const res = await appApi.reviewModeDeck({
+            selector: mode,
+            ...(asOf ? { asOf } : {}),
+          });
+          if (cancelled) return;
+          modeDeckRef.current = [...res.deck];
+          setTotal(res.deck.length);
+          setModeTotal(res.total);
+          setTruncated(res.truncated);
+        } catch (e) {
+          if (cancelled) return;
+          modeDeckRef.current = [];
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      }
+      if (!cancelled) await loadNext();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, asOf, loadNext]);
 
   /** Reveal the answer + fetch the four interval previews (lazily, on reveal). */
   const reveal = useCallback(async () => {
@@ -301,7 +446,12 @@ export function ReviewScreen() {
     });
   }, [card]);
 
-  /** Restart the session from the top (re-reads the due deck). */
+  /**
+   * Restart the session from the top. In the daily session this re-reads the due
+   * deck; in a TARGETED mode (T096) it re-walks the SAME frozen deck already in
+   * `modeDeckRef` (no re-fetch — the subset is stable, so a re-run reviews the same
+   * cards), keeping `total` at the deck size.
+   */
   const restart = useCallback(() => {
     excludeRef.current = [];
     recentSiblingGroupRef.current = null;
@@ -310,9 +460,9 @@ export function ReviewScreen() {
     setRemoved(0);
     setDone(false);
     setEndMs(null);
-    setTotal(0);
+    if (!mode) setTotal(0);
     void loadNext();
-  }, [loadNext]);
+  }, [loadNext, mode]);
 
   // While a card is in front of the user the review surface OWNS the keyboard
   // (Space + 1–4, plus `e`/`o`/`s` repairs); the global shell handler defers its
@@ -404,6 +554,32 @@ export function ReviewScreen() {
         </button>
       </div>
 
+      {/* Mode header (T096) — a calm chip row above the card describing the chosen
+          subset + an explicit "outside scheduling" hint + an exit-to-daily affordance.
+          Shown ONLY in a targeted mode (the daily session is unchanged). */}
+      {mode && modeLabel ? (
+        <div className="rv-mode" data-testid="review-mode-header">
+          <span className="rv-mode__chip" data-testid="review-mode-label">
+            <Icon name="target" size={13} />
+            {modeLabel}
+          </span>
+          <span className="rv-mode__count" data-testid="review-mode-count">
+            Reviewing {truncated ? `the first ${total}` : total} card{total === 1 ? "" : "s"}
+            {truncated ? ` of ${modeTotal}` : ""}
+          </span>
+          <span className="rv-mode__hint">· not limited to what's due</span>
+          <button
+            type="button"
+            className="rv-mode__exit"
+            data-testid="review-mode-exit"
+            onClick={() => navigate({ to: "/review", search: asOf ? { asOf } : {} })}
+          >
+            <Icon name="x" size={12} />
+            Exit mode
+          </button>
+        </div>
+      ) : null}
+
       {error ? (
         <p className="pq-error" data-testid="review-error" style={{ padding: "8px 24px" }}>
           {error}
@@ -418,10 +594,12 @@ export function ReviewScreen() {
                 <Icon name="checkCircle" size={26} />
               </div>
               <h2 className="rv-empty__title">Session complete</h2>
-              <p className="rv-empty__body">
+              <p className="rv-empty__body" data-testid="review-summary-body">
                 {reviewedCount} card{reviewedCount === 1 ? "" : "s"} reviewed in{" "}
-                {clockLabel((endMs ?? Date.now()) - startMs)}. Your due cards are rescheduled — they
-                return when FSRS says you're about to forget.
+                {clockLabel((endMs ?? Date.now()) - startMs)}.{" "}
+                {mode && modeLabel
+                  ? `Reviewed ${reviewedCount} of the ${modeLabel} subset — these cards are rescheduled through FSRS just like any review.`
+                  : "Your due cards are rescheduled — they return when FSRS says you're about to forget."}
               </p>
               <div className="rv-empty__actions">
                 <button
@@ -433,6 +611,17 @@ export function ReviewScreen() {
                   <Icon name="review" size={14} />
                   Review again
                 </button>
+                {mode ? (
+                  <button
+                    type="button"
+                    className="rv-btn"
+                    data-testid="review-back-daily"
+                    onClick={() => navigate({ to: "/review", search: asOf ? { asOf } : {} })}
+                  >
+                    <Icon name="brain" size={14} />
+                    Back to daily review
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="rv-btn rv-btn--primary"
@@ -682,12 +871,26 @@ export function ReviewScreen() {
               <div className="rv-empty__icon">
                 <Icon name="checkCircle" size={26} />
               </div>
-              <h2 className="rv-empty__title">No cards due</h2>
+              <h2 className="rv-empty__title">
+                {mode && modeLabel ? "No cards in this subset" : "No cards due"}
+              </h2>
               <p className="rv-empty__body">
-                Nothing is due for review right now. New cards arrive as you distill extracts into
-                atomic statements.
+                {mode && modeLabel
+                  ? `The ${modeLabel} subset has no cards to review right now.`
+                  : "Nothing is due for review right now. New cards arrive as you distill extracts into atomic statements."}
               </p>
               <div className="rv-empty__actions">
+                {mode ? (
+                  <button
+                    type="button"
+                    className="rv-btn"
+                    data-testid="review-empty-back-daily"
+                    onClick={() => navigate({ to: "/review", search: asOf ? { asOf } : {} })}
+                  >
+                    <Icon name="brain" size={14} />
+                    Back to daily review
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="rv-btn rv-btn--primary"

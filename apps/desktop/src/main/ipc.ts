@@ -93,6 +93,8 @@ import {
   ReviewCardRequestSchema,
   ReviewGradeRequestSchema,
   ReviewLeechesRequestSchema,
+  ReviewModeCountRequestSchema,
+  ReviewModeDeckRequestSchema,
   ReviewPreviewRequestSchema,
   ReviewSessionNextRequestSchema,
   SearchQueryRequestSchema,
@@ -1021,6 +1023,17 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.reviewLeeches, () => {
     ReviewLeechesRequestSchema.parse(undefined);
     return dbService.reviewLeeches();
+  });
+
+  // Targeted review modes (T096) — read-only subset selection, outside scheduling.
+  ipcMain.handle(IPC_CHANNELS.reviewModeDeck, (_event, rawRequest: unknown) => {
+    const request = ReviewModeDeckRequestSchema.parse(rawRequest);
+    return dbService.reviewModeDeck(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.reviewModeCount, (_event, rawRequest: unknown) => {
+    const request = ReviewModeCountRequestSchema.parse(rawRequest);
+    return dbService.reviewModeCount(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.conceptsCreate, (_event, rawRequest: unknown) => {

@@ -85,9 +85,11 @@ import {
   type RelatedResult,
   type Repositories,
   RetentionService,
+  ReviewModeService,
   type ReviewOutcome,
   ReviewSessionService,
   resolveSourceRef,
+  type SemanticResolveContext,
   SourceYieldQuery,
   type SynthesisData,
   type SynthesisLinkedElement,
@@ -240,6 +242,10 @@ import type {
   ReviewGradeRequest,
   ReviewGradeResult,
   ReviewLeechesResult,
+  ReviewModeCountRequest,
+  ReviewModeCountResult,
+  ReviewModeDeckRequest,
+  ReviewModeDeckResult,
   ReviewPreviewRequest,
   ReviewPreviewResult,
   ReviewSessionNextRequest,
@@ -420,6 +426,14 @@ export class DbService {
    */
   private cardRetirementService: CardRetirementService | null = null;
   private reviewSession: ReviewSessionService | null = null;
+  /**
+   * The targeted review-mode SELECTION seam (T096) — resolves a chosen card SUBSET
+   * (concept/source/branch/search/semantic/stale/leech/random) OUTSIDE normal
+   * scheduling (it ignores `review_states.due_at`). Read-only: it never mutates and
+   * appends nothing to the operation log — grading reuses the unchanged `review.grade`
+   * path. Constructed once per open DB (like {@link reviewSession}).
+   */
+  private reviewMode: ReviewModeService | null = null;
   /**
    * The retention RESOLVER seam (T079) — assembles the live {@link RetentionTargets}
    * (settings bands + per-concept targets) and resolves a card's effective FSRS target,
@@ -698,6 +712,10 @@ export class DbService {
     // The sibling-aware review-session ordering seam (T039): chooses the next due
     // card and buries siblings (session-ordering ONLY — it writes nothing).
     this.reviewSession = new ReviewSessionService(this.handle.db);
+    // The targeted review-mode SELECTION seam (T096): resolves a chosen card subset
+    // OUTSIDE scheduling (ignores `review_states.due_at`). Read-only — grading reuses
+    // the unchanged `review.grade` path.
+    this.reviewMode = new ReviewModeService(this.handle.db, this.repositories);
     // The retention RESOLVER (T079) + the per-card FSRS scheduler CACHE — generalizing
     // the single T036 scheduler. FSRS schedules CARDS ONLY against each card's RESOLVED
     // desired-retention target (per-card override → concept → priority band → global);
@@ -740,6 +758,7 @@ export class DbService {
     this.cardRemediationService = null;
     this.cardRetirementService = null;
     this.reviewSession = null;
+    this.reviewMode = null;
     this.retention = null;
     this.optimization = null;
     this.workload = null;
@@ -3734,6 +3753,74 @@ export class DbService {
       throw new Error("DbService: database is not open");
     }
     return this.reviewSession;
+  }
+
+  /** The {@link ReviewModeService} (targeted subset selection, T096). */
+  private get reviewModeService(): ReviewModeService {
+    if (!this.reviewMode) {
+      throw new Error("DbService: database is not open");
+    }
+    return this.reviewMode;
+  }
+
+  /**
+   * Resolve a TARGETED review-mode deck (T096) — the ordered card SUBSET for a
+   * `concept`/`source`/`branch`/`search`/`semantic`/`stale`/`leech`/`random` mode,
+   * mapped through the SAME {@link toReviewCardView} the daily session ships so the
+   * renderer gets reveal-ready views with no per-card round-trip. The selection
+   * IGNORES `review_states.due_at` (a not-due card is selectable) — that is the
+   * defining behavior; every other deck guard (live / `card` / not soft-deleted /
+   * not deleted / not suspended / not retired) holds.
+   *
+   * For the `semantic` selector it awaits the existing `embeddingService.embedQuery`
+   * (the `semanticSearch` path) and injects the vector, degrading to the keyword
+   * resolver when semantics are off / `vec0` is unavailable / the embed timed out.
+   * READ-ONLY: no mutation, no `operation_log`. Grading reuses the unchanged
+   * `review.grade`. Cards only — the two-scheduler split holds.
+   */
+  async reviewModeDeck(request: ReviewModeDeckRequest): Promise<ReviewModeDeckResult> {
+    const asOf = (request.asOf ?? new Date().toISOString()) as IsoTimestamp;
+    const asOfMs = Date.parse(asOf);
+    const semantic = await this.resolveSemanticContext(request.selector);
+    const deck = this.reviewModeService.deck(request.selector, asOf, semantic);
+    const views: ReviewCardView[] = [];
+    for (const id of deck.cardIds) {
+      const view = this.toReviewCardView(id, asOfMs);
+      // A view can be null only if the row was removed between selection + build (a
+      // race) — drop it rather than ship a null; the count below stays the underlying
+      // total so the header's "of N" still reflects the selected set.
+      if (view) views.push(view);
+    }
+    return { deck: views, total: deck.total, label: deck.label, truncated: deck.truncated };
+  }
+
+  /**
+   * The cheap count for the review-mode entry affordances (T096) — the SAME
+   * selection as {@link reviewModeDeck} but returning only the subset size + label
+   * (no full views built). Read-only.
+   */
+  async reviewModeCount(request: ReviewModeCountRequest): Promise<ReviewModeCountResult> {
+    const asOf = (request.asOf ?? new Date().toISOString()) as IsoTimestamp;
+    const semantic = await this.resolveSemanticContext(request.selector);
+    const { total, label } = this.reviewModeService.count(request.selector, asOf, semantic);
+    return { total, label };
+  }
+
+  /**
+   * Build the {@link SemanticResolveContext} for a `semantic` selector — embed the
+   * query via the existing `embeddingService.embedQuery` (the `semanticSearch` seam)
+   * ONLY when semantics are enabled AND `vec0` is available, else `null` so the
+   * service degrades to the keyword resolver. For every NON-semantic selector it
+   * returns `undefined` (no embed work). Mirrors `semanticSearch`'s gating exactly.
+   */
+  private async resolveSemanticContext(
+    selector: ReviewModeDeckRequest["selector"],
+  ): Promise<SemanticResolveContext | undefined> {
+    if (selector.kind !== "semantic") return undefined;
+    const settings = this.repos.settings.getAppSettings();
+    const enabled = settings.semanticSearchEnabled && this.vecAvailable;
+    const queryVector = enabled ? await this.embeddingService.embedQuery(selector.query) : null;
+    return { enabled, queryVector };
   }
 
   /**

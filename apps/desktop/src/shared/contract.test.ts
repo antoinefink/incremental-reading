@@ -7,6 +7,7 @@
  * generic `db.query`).
  */
 
+import { MAX_REVIEW_MODE_DECK } from "@interleave/core";
 import { describe, expect, it } from "vitest";
 import {
   AnalyticsGetRequestSchema,
@@ -72,6 +73,9 @@ import {
   ReadPointGetRequestSchema,
   ReadPointSetRequestSchema,
   ReviewGradeRequestSchema,
+  ReviewModeCountRequestSchema,
+  ReviewModeDeckRequestSchema,
+  ReviewModeSelectorSchema,
   ReviewPreviewRequestSchema,
   ReviewSessionNextRequestSchema,
   SearchQueryRequestSchema,
@@ -221,6 +225,8 @@ describe("IPC channels", () => {
         "review:preview",
         "review:grade",
         "review:leeches",
+        "review:mode:deck",
+        "review:mode:count",
         "concepts:create",
         "concepts:list",
         "concepts:assign",
@@ -2619,5 +2625,66 @@ describe("Synthesis-note schemas (T095)", () => {
       SynthesisScheduleReturnRequestSchema.safeParse({ noteId: "n-1", when: { kind: "manual" } })
         .success,
     ).toBe(false);
+  });
+});
+
+describe("Review-mode selector schemas (T096)", () => {
+  it("accepts every valid selector shape (the IPC validation boundary)", () => {
+    const valid = [
+      { kind: "concept", conceptId: "el_concept" },
+      { kind: "source", sourceId: "el_source" },
+      { kind: "branch", rootId: "el_root" },
+      { kind: "search", query: "spaced repetition" },
+      { kind: "semantic", query: "forgetting curve" },
+      { kind: "stale" },
+      { kind: "leech" },
+      { kind: "random", size: 20 },
+      { kind: "random", size: 20, seed: 12345 },
+    ] as const;
+    for (const selector of valid) {
+      const parsed = ReviewModeSelectorSchema.parse(selector);
+      expect(parsed).toEqual(selector);
+    }
+    // The query is trimmed (the schema's `.trim()`), mirroring the other text inputs.
+    expect(ReviewModeSelectorSchema.parse({ kind: "search", query: "  hi  " })).toEqual({
+      kind: "search",
+      query: "hi",
+    });
+  });
+
+  it("rejects malformed selectors (missing params, bad query, out-of-range size, unknown kind)", () => {
+    const invalid: unknown[] = [
+      { kind: "concept" }, // missing conceptId
+      { kind: "source" }, // missing sourceId
+      { kind: "branch" }, // missing rootId
+      { kind: "search" }, // missing query
+      { kind: "semantic", query: "" }, // empty query
+      { kind: "search", query: "   " }, // whitespace-only query (trims to empty)
+      { kind: "search", query: "x".repeat(513) }, // over-long query
+      { kind: "random" }, // missing size
+      { kind: "random", size: 0 }, // size below the min
+      { kind: "random", size: 1.5 }, // non-integer size
+      { kind: "random", size: MAX_REVIEW_MODE_DECK + 1 }, // size above the cap
+      { kind: "random", size: 20, seed: 1.5 }, // non-integer seed
+      { kind: "tag" }, // unknown kind (additive-only union)
+      {}, // no kind
+    ];
+    for (const selector of invalid) {
+      expect(ReviewModeSelectorSchema.safeParse(selector).success).toBe(false);
+    }
+  });
+
+  it("validates the deck/count request wrappers (selector + optional asOf)", () => {
+    const selector = { kind: "leech" } as const;
+    expect(ReviewModeDeckRequestSchema.parse({ selector }).selector).toEqual(selector);
+    expect(
+      ReviewModeDeckRequestSchema.parse({ selector, asOf: "  2026-06-01T00:00:00.000Z  " }).asOf,
+    ).toBe("2026-06-01T00:00:00.000Z");
+    expect(ReviewModeCountRequestSchema.parse({ selector }).selector).toEqual(selector);
+    // A malformed nested selector fails the wrapper too.
+    expect(ReviewModeDeckRequestSchema.safeParse({ selector: { kind: "concept" } }).success).toBe(
+      false,
+    );
+    expect(ReviewModeCountRequestSchema.safeParse({}).success).toBe(false); // missing selector
   });
 });
