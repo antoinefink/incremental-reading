@@ -39,7 +39,7 @@
     "@types/node": "^22.10.0",
     "@types/yazl": "^2.4.6",
     "drizzle-orm": "^0.45.2",
-    "electron": "^38.8.6",
+    "electron": "^39.8.5",
     "electron-builder": "^25.1.8",
     "esbuild": "^0.25.12",
     "yazl": "^3.3.1",
