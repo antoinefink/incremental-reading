@@ -32,6 +32,7 @@ const VALID_ROUTES = new Set([
   "/analytics",
   "/analytics/sources",
   "/settings",
+  "/synthesis/new",
 ]);
 
 describe("shell nav config", () => {

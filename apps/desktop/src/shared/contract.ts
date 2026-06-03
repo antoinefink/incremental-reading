@@ -3815,6 +3815,118 @@ export interface TasksGenerateFromExpiryResult {
 }
 
 // ---------------------------------------------------------------------------
+// synthesis.*  (T095 — incremental writing / synthesis notes)
+//
+// A synthesis note is the EXISTING core `synthesis_note` element type — a writing/
+// thinking surface that COLLECTS linked extracts/cards (explicit `references` edges)
+// and is SCHEDULED TO RETURN for refinement on the ATTENTION scheduler (NEVER FSRS —
+// a synthesis note is processed, not recalled). It is the "incremental writing"
+// counterpart to incremental reading. No new table, no new element type, no new op:
+// create → `create_element` (+ `update_document` for a body); link → `add_relation`
+// (`references`); unlink → `remove_relation`; edit body → `update_document`;
+// schedule-return → `reschedule_element`. A scheduled note flows through the EXISTING
+// `queue.list` (an attention item). There is still no generic `db.query`.
+// ---------------------------------------------------------------------------
+
+/** A bounded synthesis-note title (1–256 chars). */
+const SynthesisTitleSchema = z.string().trim().min(1).max(256);
+
+/** The explicit return choice a synthesis note accepts (reuses the queue's choice union). */
+const SynthesisWhenSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("tomorrow") }),
+  z.object({ kind: z.literal("nextWeek") }),
+  z.object({ kind: z.literal("nextMonth") }),
+  z.object({ kind: z.literal("manual"), date: z.string().trim().min(1).max(64) }),
+]);
+export type SynthesisWhen = z.infer<typeof SynthesisWhenSchema>;
+
+/** One referenced extract/card collected into a synthesis note. */
+export interface SynthesisLinkedView {
+  readonly id: string;
+  readonly type: string;
+  readonly title: string;
+  readonly stage: string;
+  /** Numeric priority (0..1); the UI derives the A/B/C/D label. */
+  readonly priority: number;
+  /** The `element_relations` row id (so the renderer can unlink it precisely). */
+  readonly relationId: string;
+}
+
+/** The full synthesis-note read — the note element + its linked material + due date. */
+export interface SynthesisDataView {
+  readonly element: ElementSummary;
+  readonly linked: readonly SynthesisLinkedView[];
+  /** The next attention return date, or `null` when unscheduled. */
+  readonly dueAt: string | null;
+}
+
+export const SynthesisCreateRequestSchema = z.object({
+  title: SynthesisTitleSchema,
+  /** Optional explicit priority band; default = the configured default source priority. */
+  priority: PriorityLabelSchema.optional(),
+  /** Optional initial ProseMirror body JSON (built renderer-side). */
+  bodyJson: z.unknown().optional(),
+  /** The flattened plain-text mirror of `bodyJson`. */
+  bodyPlainText: z.string().max(4_000_000).optional(),
+  /** The ordered stable block list for `bodyJson` (preserves the stable ids). */
+  blocks: z.array(DocumentBlockInputSchema).max(100_000).optional(),
+});
+export type SynthesisCreateRequest = z.infer<typeof SynthesisCreateRequestSchema>;
+
+export interface SynthesisCreateResultView {
+  readonly element: ElementSummary;
+}
+
+export const SynthesisLinkRequestSchema = z.object({
+  noteId: ElementIdSchema,
+  /** The extract/card to collect into the note. */
+  targetId: ElementIdSchema,
+});
+export type SynthesisLinkRequest = z.infer<typeof SynthesisLinkRequestSchema>;
+
+export const SynthesisUnlinkRequestSchema = z.object({
+  noteId: ElementIdSchema,
+  targetId: ElementIdSchema,
+});
+export type SynthesisUnlinkRequest = z.infer<typeof SynthesisUnlinkRequestSchema>;
+
+export interface SynthesisLinkResultView {
+  readonly data: SynthesisDataView;
+}
+
+export const SynthesisEditBodyRequestSchema = z.object({
+  noteId: ElementIdSchema,
+  prosemirrorJson: z.unknown(),
+  plainText: z.string().max(4_000_000),
+  blocks: z.array(DocumentBlockInputSchema).max(100_000).optional(),
+});
+export type SynthesisEditBodyRequest = z.infer<typeof SynthesisEditBodyRequestSchema>;
+
+export interface SynthesisEditBodyResult {
+  readonly data: SynthesisDataView;
+}
+
+export const SynthesisScheduleReturnRequestSchema = z.object({
+  noteId: ElementIdSchema,
+  when: SynthesisWhenSchema,
+});
+export type SynthesisScheduleReturnRequest = z.infer<typeof SynthesisScheduleReturnRequestSchema>;
+
+export interface SynthesisScheduleReturnResult {
+  readonly data: SynthesisDataView;
+}
+
+export const SynthesisGetRequestSchema = z.object({
+  noteId: ElementIdSchema,
+});
+export type SynthesisGetRequest = z.infer<typeof SynthesisGetRequestSchema>;
+
+export interface SynthesisGetResult {
+  /** The synthesis-note read, or `null` when the id is unknown / not a synthesis note. */
+  readonly data: SynthesisDataView | null;
+}
+
+// ---------------------------------------------------------------------------
 // retention.*  (T079 — desired retention by priority band / concept / card)
 //
 // A card's FSRS desired-retention target is RESOLVED from an ordered rule set
@@ -5319,6 +5431,30 @@ export interface AppApi {
     generateFromExpiry(
       request: TasksGenerateFromExpiryRequest,
     ): Promise<TasksGenerateFromExpiryResult>;
+  };
+  readonly synthesis: {
+    /**
+     * Create a synthesis note (T095) — the `synthesis_note` element + (optionally) an
+     * initial `documents` body, in one transaction (`create_element` + `update_document`).
+     * Stage `synthesis`; attention-scheduled later via {@link scheduleReturn} (never FSRS).
+     */
+    create(request: SynthesisCreateRequest): Promise<SynthesisCreateResultView>;
+    /**
+     * Collect an extract/card into a synthesis note (T095) — a `references` edge
+     * note→target (`add_relation`); idempotent; rejects a non-extract/non-card.
+     */
+    link(request: SynthesisLinkRequest): Promise<SynthesisLinkResultView>;
+    /** Remove a collected extract/card (T095) — `remove_relation`. */
+    unlink(request: SynthesisUnlinkRequest): Promise<SynthesisLinkResultView>;
+    /** Save the note's ProseMirror body (T095) — `update_document`, stable ids preserved. */
+    editBody(request: SynthesisEditBodyRequest): Promise<SynthesisEditBodyResult>;
+    /**
+     * Schedule the note to RETURN for refinement (T095) — tomorrow/next-week/next-month/
+     * manual, on the ATTENTION scheduler (`reschedule_element`). NEVER FSRS / `review_states`.
+     */
+    scheduleReturn(request: SynthesisScheduleReturnRequest): Promise<SynthesisScheduleReturnResult>;
+    /** The note + its linked extracts/cards + due date (T095). Read-only. */
+    get(request: SynthesisGetRequest): Promise<SynthesisGetResult>;
   };
   readonly retention: {
     /**

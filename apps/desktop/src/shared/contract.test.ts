@@ -111,6 +111,12 @@ import {
   type SourcesImportUrlResult,
   SourcesRunOcrRequestSchema,
   SourceYieldListRequestSchema,
+  SynthesisCreateRequestSchema,
+  SynthesisEditBodyRequestSchema,
+  SynthesisGetRequestSchema,
+  SynthesisLinkRequestSchema,
+  SynthesisScheduleReturnRequestSchema,
+  SynthesisUnlinkRequestSchema,
   TagsAddRequestSchema,
   TagsRemoveRequestSchema,
   TasksCompleteRequestSchema,
@@ -225,6 +231,12 @@ describe("IPC channels", () => {
         "tasks:complete",
         "tasks:postpone",
         "tasks:generateFromExpiry",
+        "synthesis:create",
+        "synthesis:link",
+        "synthesis:unlink",
+        "synthesis:editBody",
+        "synthesis:scheduleReturn",
+        "synthesis:get",
         "retention:get",
         "retention:setBand",
         "retention:setBandEnabled",
@@ -2539,5 +2551,73 @@ describe("Verification-task schemas (T092)", () => {
     expect(TasksGenerateFromExpiryRequestSchema.parse({})).toEqual({});
     // strict: an unexpected key is rejected.
     expect(TasksGenerateFromExpiryRequestSchema.safeParse({ extra: 1 }).success).toBe(false);
+  });
+});
+
+describe("Synthesis-note schemas (T095)", () => {
+  it("SynthesisCreateRequestSchema accepts a valid create and rejects bad input", () => {
+    const ok = SynthesisCreateRequestSchema.parse({
+      title: "Weaving definitions",
+      priority: "A",
+      bodyJson: { type: "doc", content: [] },
+      bodyPlainText: "thoughts",
+      blocks: [{ blockType: "paragraph", order: 0, stableBlockId: "blk_0" }],
+    });
+    expect(ok.title).toBe("Weaving definitions");
+    expect(ok.priority).toBe("A");
+
+    // A minimal create (title only) is valid.
+    expect(SynthesisCreateRequestSchema.parse({ title: "Bare note" }).title).toBe("Bare note");
+
+    // Bad: empty title; unknown priority band.
+    expect(SynthesisCreateRequestSchema.safeParse({ title: "   " }).success).toBe(false);
+    expect(SynthesisCreateRequestSchema.safeParse({ title: "x", priority: "Z" }).success).toBe(
+      false,
+    );
+  });
+
+  it("SynthesisLink / Unlink / EditBody / Get validate their shapes", () => {
+    expect(SynthesisLinkRequestSchema.parse({ noteId: "n-1", targetId: "e-1" }).targetId).toBe(
+      "e-1",
+    );
+    expect(SynthesisLinkRequestSchema.safeParse({ noteId: "n-1" }).success).toBe(false);
+
+    expect(SynthesisUnlinkRequestSchema.parse({ noteId: "n-1", targetId: "e-1" }).noteId).toBe(
+      "n-1",
+    );
+
+    const edit = SynthesisEditBodyRequestSchema.parse({
+      noteId: "n-1",
+      prosemirrorJson: { type: "doc", content: [] },
+      plainText: "refined",
+    });
+    expect(edit.plainText).toBe("refined");
+    expect(SynthesisEditBodyRequestSchema.safeParse({ noteId: "n-1" }).success).toBe(false);
+
+    expect(SynthesisGetRequestSchema.parse({ noteId: "n-1" }).noteId).toBe("n-1");
+    expect(SynthesisGetRequestSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("SynthesisScheduleReturnRequestSchema accepts the preset + manual choices and rejects bad input", () => {
+    for (const kind of ["tomorrow", "nextWeek", "nextMonth"] as const) {
+      expect(
+        SynthesisScheduleReturnRequestSchema.parse({ noteId: "n-1", when: { kind } }).when.kind,
+      ).toBe(kind);
+    }
+    const manual = SynthesisScheduleReturnRequestSchema.parse({
+      noteId: "n-1",
+      when: { kind: "manual", date: "  2026-07-01T12:00:00.000Z  " },
+    });
+    expect(manual.when).toEqual({ kind: "manual", date: "2026-07-01T12:00:00.000Z" });
+
+    // Bad: an unknown choice kind, and a manual choice with no date.
+    expect(
+      SynthesisScheduleReturnRequestSchema.safeParse({ noteId: "n-1", when: { kind: "someday" } })
+        .success,
+    ).toBe(false);
+    expect(
+      SynthesisScheduleReturnRequestSchema.safeParse({ noteId: "n-1", when: { kind: "manual" } })
+        .success,
+    ).toBe(false);
   });
 });

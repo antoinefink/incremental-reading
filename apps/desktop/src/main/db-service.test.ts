@@ -3342,3 +3342,60 @@ describe("DbService — listAiSuggestions grounding location (T094)", () => {
     svc.close();
   });
 });
+
+describe("DbService synthesis-note wiring (T095)", () => {
+  it("creates, links, edits, schedules + reads a synthesis note through the IPC seam (survives reopen)", () => {
+    let noteId: string;
+    {
+      const svc = new DbService();
+      svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+      const demo = seedDemoCollection(svc.repos, svc.raw.db);
+      const extractId = demo.extract.element.id;
+      const cardId = demo.qaCard.element.id;
+
+      // create → a `synthesis_note` element, stage `synthesis`, status `pending`.
+      const created = svc.createSynthesisNote({ title: "Weaving intelligence definitions" });
+      noteId = created.element.id;
+      expect(created.element.type).toBe("synthesis_note");
+      expect(created.element.stage).toBe("synthesis");
+
+      // link an extract + a card (references edges); idempotent on a duplicate.
+      svc.linkSynthesisElement({ noteId, targetId: extractId });
+      const linked = svc.linkSynthesisElement({ noteId, targetId: cardId });
+      expect(linked.data.linked.map((l) => l.id).sort()).toEqual([extractId, cardId].sort());
+      const dup = svc.linkSynthesisElement({ noteId, targetId: cardId });
+      expect(dup.data.linked).toHaveLength(2); // no duplicate
+
+      // editBody persists the body.
+      svc.editSynthesisBody({
+        noteId,
+        prosemirrorJson: { type: "doc", content: [{ type: "paragraph" }] },
+        plainText: "First synthesis pass.",
+        blocks: [{ blockType: "paragraph", order: 0, stableBlockId: "blk_syn_0" }],
+      });
+
+      // scheduleReturn → ATTENTION scheduler (scheduled, a future due date), NEVER FSRS.
+      const scheduled = svc.scheduleSynthesisReturn({ noteId, when: { kind: "nextWeek" } });
+      expect(scheduled.data.element.status).toBe("scheduled");
+      expect(scheduled.data.dueAt).toBeTruthy();
+      // No review_states row was written (the two-scheduler split).
+      const rs = svc.repos.review.findReviewState(noteId as never);
+      expect(rs).toBeNull();
+
+      svc.close();
+    }
+
+    // Reopen the SAME file: the note + its links + body + schedule all persisted.
+    {
+      const svc = new DbService();
+      svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+      const { data } = svc.getSynthesisNote({ noteId });
+      expect(data).not.toBeNull();
+      expect(data?.element.type).toBe("synthesis_note");
+      expect(data?.element.status).toBe("scheduled");
+      expect(data?.linked).toHaveLength(2);
+      expect(data?.dueAt).toBeTruthy();
+      svc.close();
+    }
+  });
+});

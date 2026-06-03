@@ -269,6 +269,14 @@ export const COMMAND_ITEMS: readonly CommandItem[] = [
     to: "/inbox",
     event: NEW_SOURCE_EVENT,
   },
+  // New synthesis note (T095) — the incremental-writing surface. Navigates to the
+  // `/synthesis/new` create entry (title prompt → `synthesis.create` → the editor).
+  {
+    group: "Create",
+    icon: "synthesis",
+    label: "New synthesis note…",
+    to: "/synthesis/new",
+  },
   ...ACTION_COMMAND_ITEMS,
 ];
 

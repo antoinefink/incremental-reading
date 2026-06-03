@@ -169,16 +169,19 @@ export function BrowseScreen() {
     (r: LibraryItem) => {
       // Open each type in its inspector/reader target. Sources/topics open the
       // source reader; extracts open the extract view; everything that lives under
-      // review (cards) opens the review session. Synthesis notes/tasks (no MVP
-      // dedicated reader yet) open their owning source when one exists, else stay put.
+      // review (cards) opens the review session; synthesis notes (T095) open their
+      // dedicated incremental-writing surface. Tasks (no MVP dedicated reader yet)
+      // open their owning source when one exists, else stay put.
       if (r.type === "source" || r.type === "topic") {
         void navigate({ to: "/source/$id", params: { id: r.id } });
       } else if (r.type === "extract") {
         void navigate({ to: "/extract/$id", params: { id: r.id } });
       } else if (r.type === "card") {
         void navigate({ to: "/review" });
+      } else if (r.type === "synthesis_note") {
+        void navigate({ to: "/synthesis/$id", params: { id: r.id } });
       } else if (r.sourceTitle) {
-        // synthesis_note / task with a known source — open the reader on its lineage root.
+        // task with a known source — open the reader on its lineage root.
         void navigate({ to: "/source/$id", params: { id: r.id } });
       }
     },

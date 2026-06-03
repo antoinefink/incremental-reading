@@ -123,6 +123,17 @@ export const IPC_CHANNELS = {
   tasksComplete: "tasks:complete",
   tasksPostpone: "tasks:postpone",
   tasksGenerateFromExpiry: "tasks:generateFromExpiry",
+  // Incremental writing / synthesis notes (T095) — the EXISTING `synthesis_note`
+  // element type made creatable + linkable + editable + schedulable. Collects
+  // extracts/cards via `references` (`add_relation`/`remove_relation`); returns on
+  // the ATTENTION scheduler (`reschedule_element`, never FSRS). Each mutation is one
+  // transaction + the correct existing op (no new op types, no new element type).
+  synthesisCreate: "synthesis:create",
+  synthesisLink: "synthesis:link",
+  synthesisUnlink: "synthesis:unlink",
+  synthesisEditBody: "synthesis:editBody",
+  synthesisScheduleReturn: "synthesis:scheduleReturn",
+  synthesisGet: "synthesis:get",
   // Desired retention by priority band / concept / card (T079).
   retentionGet: "retention:get",
   retentionSetBand: "retention:setBand",

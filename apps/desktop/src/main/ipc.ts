@@ -124,6 +124,12 @@ import {
   SourcesRunOcrRequestSchema,
   SourcesUpdateReliabilityRequestSchema,
   SourceYieldListRequestSchema,
+  SynthesisCreateRequestSchema,
+  SynthesisEditBodyRequestSchema,
+  SynthesisGetRequestSchema,
+  SynthesisLinkRequestSchema,
+  SynthesisScheduleReturnRequestSchema,
+  SynthesisUnlinkRequestSchema,
   TagsAddRequestSchema,
   TagsListRequestSchema,
   TagsRemoveRequestSchema,
@@ -1066,6 +1072,38 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.tasksGenerateFromExpiry, (_event, rawRequest: unknown) => {
     const request = TasksGenerateFromExpiryRequestSchema.parse(rawRequest);
     return dbService.generateVerificationTasks(request);
+  });
+
+  // Incremental writing / synthesis notes (T095) — create / link / unlink / editBody /
+  // scheduleReturn / get.
+  ipcMain.handle(IPC_CHANNELS.synthesisCreate, (_event, rawRequest: unknown) => {
+    const request = SynthesisCreateRequestSchema.parse(rawRequest);
+    return dbService.createSynthesisNote(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.synthesisLink, (_event, rawRequest: unknown) => {
+    const request = SynthesisLinkRequestSchema.parse(rawRequest);
+    return dbService.linkSynthesisElement(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.synthesisUnlink, (_event, rawRequest: unknown) => {
+    const request = SynthesisUnlinkRequestSchema.parse(rawRequest);
+    return dbService.unlinkSynthesisElement(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.synthesisEditBody, (_event, rawRequest: unknown) => {
+    const request = SynthesisEditBodyRequestSchema.parse(rawRequest);
+    return dbService.editSynthesisBody(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.synthesisScheduleReturn, (_event, rawRequest: unknown) => {
+    const request = SynthesisScheduleReturnRequestSchema.parse(rawRequest);
+    return dbService.scheduleSynthesisReturn(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.synthesisGet, (_event, rawRequest: unknown) => {
+    const request = SynthesisGetRequestSchema.parse(rawRequest);
+    return dbService.getSynthesisNote(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.retentionGet, () => {

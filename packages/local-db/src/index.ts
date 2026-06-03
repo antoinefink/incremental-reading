@@ -303,6 +303,17 @@ export {
   type SourceYieldSummary,
 } from "./source-yield-query";
 export {
+  type CreateSynthesisInput,
+  type EditSynthesisBodyInput,
+  SYNTHESIS_STAGE,
+  type SynthesisBlockInput,
+  type SynthesisCreateResult,
+  type SynthesisData,
+  type SynthesisLinkedElement,
+  type SynthesisLinkResult,
+  SynthesisService,
+} from "./synthesis-service";
+export {
   type CreateTaskInput,
   type GenerateVerificationResult,
   TASK_STAGE,
@@ -368,6 +379,14 @@ export interface Repositories {
    * `jobs`/`ocr_pages` row); grounding stored separately from the model output.
    */
   readonly aiSuggestions: import("./ai-suggestion-repository").AiSuggestionRepository;
+  /**
+   * Incremental writing / synthesis notes (T095) — create / link / unlink / edit body /
+   * schedule-return for the EXISTING `synthesis_note` element type. Collects extracts/
+   * cards via `references` edges; returns on the ATTENTION scheduler (never FSRS). No
+   * new table, no new op type, no new element type — reuses the element/document/
+   * relation/attention substrate.
+   */
+  readonly synthesis: import("./synthesis-service").SynthesisService;
 }
 
 import type { InterleaveDatabase } from "@interleave/db";
@@ -393,6 +412,7 @@ import { SourceDedupQuery } from "./source-dedup-query";
 import { resolveSourceRef } from "./source-ref-query";
 import { SourceRepository } from "./source-repository";
 import { SourceYieldQuery } from "./source-yield-query";
+import { SynthesisService } from "./synthesis-service";
 import { TaskService } from "./task-service";
 import { TrashRepository } from "./trash-query";
 
@@ -446,6 +466,7 @@ export function createRepositories(
     semanticSearch: new SemanticSearchRepository(search, embeddings),
     tasks: new TaskService(db),
     aiSuggestions: new AiSuggestionRepository(db),
+    synthesis: new SynthesisService(db),
     // Built last: it resolves an item's refblock through the SAME `resolveSourceRef`
     // the inspector/review/library use (needs the assembled repos), so it captures
     // `repos` for the lazy ref resolution. It is a DERIVED read — no op-log.

@@ -1,0 +1,370 @@
+/**
+ * Synthesis-note surface styles (T095) — the incremental-writing workspace.
+ *
+ * A two-column writing layout (CENTER editor · RIGHT linked-material + schedule +
+ * lineage) built on the design tokens (`design/tokens.css`) and reusing the reader's
+ * `.reader-screen`/`.reader-header`/`.reader-btn` classes. This file adds only the
+ * synthesis-specific layout, the linked-material panel, and the create/picker chrome.
+ */
+
+.synthesis-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.synthesis-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.synthesis-editor-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.synthesis-editor-col__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 22px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.synthesis-editor-col__title {
+  font-weight: 600;
+  font-size: var(--t-base);
+  color: var(--text);
+}
+
+.synthesis-editor {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 22px 60px;
+}
+
+/* ---- RIGHT — linked material, schedule, lineage ---- */
+.synthesis-panel {
+  border-left: 1px solid var(--border);
+  padding: 16px 16px 28px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.synthesis-sec__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.synthesis-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--t-xs);
+  font-weight: 500;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 4px 9px;
+  cursor: pointer;
+}
+.synthesis-add:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.synthesis-add:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.synthesis-linked {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.synthesis-linked__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+
+.synthesis-linked__open {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  text-align: left;
+}
+.synthesis-linked__open:hover {
+  color: var(--accent-text);
+}
+.synthesis-linked__open svg {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.synthesis-linked__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.synthesis-linked__remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 4px;
+  border: none;
+  background: none;
+  border-radius: var(--r-xs);
+  color: var(--text-3);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.synthesis-linked__remove:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.synthesis-linked__remove:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.synthesis-hint {
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  margin: 0 0 10px;
+}
+
+.synthesis-sched-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ---- Create entry (`/synthesis/new`) ---- */
+.synthesis-create {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 40px;
+}
+
+.synthesis-create__card {
+  width: 460px;
+  max-width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg, 12px);
+  padding: 28px 26px;
+  box-shadow: var(--shadow-lg);
+}
+
+.synthesis-create__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  margin-bottom: 14px;
+}
+
+.synthesis-create__title {
+  font-size: var(--t-lg, 1.1rem);
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 6px;
+}
+
+.synthesis-create__hint {
+  font-size: var(--t-sm);
+  color: var(--text-3, var(--text));
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+
+.synthesis-create__input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: var(--r-sm);
+  background: var(--canvas);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-base);
+  outline: none;
+  margin-bottom: 14px;
+}
+.synthesis-create__input:focus {
+  border-color: var(--accent);
+}
+
+.synthesis-create__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---- Add-to-note picker modal ---- */
+.synthesis-picker-overlay {
+  position: fixed;
+  inset: 0;
+  background: oklch(0.2 0.02 262 / 0.32);
+  backdrop-filter: blur(2px);
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+}
+
+.synthesis-picker {
+  position: relative;
+  z-index: 1;
+  width: 520px;
+  max-width: 90vw;
+  background: var(--raised, var(--surface));
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: var(--r-xl, 14px);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.synthesis-picker__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.synthesis-picker__title {
+  font-weight: 600;
+  font-size: var(--t-base);
+  color: var(--text);
+}
+
+.synthesis-picker__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  border-radius: var(--r-xs);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.synthesis-picker__close:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.synthesis-picker__input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.synthesis-picker__input svg {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.synthesis-picker__input input {
+  border: none;
+  background: none;
+  outline: none;
+  width: 100%;
+  font-family: var(--font-ui);
+  font-size: var(--t-base);
+  color: var(--text);
+}
+.synthesis-picker__input input::placeholder {
+  color: var(--text-3);
+}
+
+.synthesis-picker__list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.synthesis-picker__empty {
+  padding: 16px;
+  margin: 0;
+}
+
+.synthesis-picker__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  background: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  text-align: left;
+}
+.synthesis-picker__item:hover {
+  background: var(--accent-soft);
+}
+.synthesis-picker__item svg {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.synthesis-picker__item-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.synthesis-picker__item-type {
+  font-size: var(--t-2xs, var(--t-xs));
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+  flex-shrink: 0;
+}

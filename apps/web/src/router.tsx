@@ -48,6 +48,8 @@ import { SourceReader } from "./pages/source/SourceReader";
 import { ExtractView } from "./reader/ExtractView";
 import { ReviewScreen } from "./review/ReviewScreen";
 import { Shell } from "./shell/Shell";
+import { SynthesisCreate } from "./synthesis/SynthesisCreate";
+import { SynthesisNote } from "./synthesis/SynthesisNote";
 import { TrashScreen } from "./trash/TrashScreen";
 
 const rootRoute = createRootRoute({ component: Shell });
@@ -102,6 +104,31 @@ const extractRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/extract/$id",
   component: ExtractView,
+});
+
+/**
+ * New synthesis note (T095) — the `/synthesis/new` create entry. Prompts for a title,
+ * creates a `synthesis_note` element through `synthesis.create`, then redirects to the
+ * note's editor. Registered BEFORE `/synthesis/$id` so the literal `new` path wins over
+ * the dynamic param. Reachable from the command palette + the Library.
+ */
+const synthesisNewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/synthesis/new",
+  component: SynthesisCreate,
+});
+
+/**
+ * Synthesis note (T095) — the `/synthesis/$id` incremental-writing workspace. A
+ * `synthesis_note` element with an editable Tiptap body, a linked-material panel
+ * (collected extracts/cards via `references`, each jump-to-able), and a schedule-return
+ * control that returns the note on the ATTENTION scheduler (never FSRS). All over the
+ * typed `window.appApi.synthesis.*` surface; the renderer holds no SQL or scheduling.
+ */
+const synthesisRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/synthesis/$id",
+  component: SynthesisNote,
 });
 
 /**
@@ -279,6 +306,8 @@ const routeTree = rootRoute.addChildren([
   processRoute,
   sourceRoute,
   extractRoute,
+  synthesisNewRoute,
+  synthesisRoute,
   reviewRoute,
   leechCleanupRoute,
   retiredCardsRoute,

@@ -115,6 +115,12 @@ import type {
   SourcesRunOcrRequest,
   SourcesUpdateReliabilityRequest,
   SourceYieldListRequest,
+  SynthesisCreateRequest,
+  SynthesisEditBodyRequest,
+  SynthesisGetRequest,
+  SynthesisLinkRequest,
+  SynthesisScheduleReturnRequest,
+  SynthesisUnlinkRequest,
   TagsAddRequest,
   TagsRemoveRequest,
   TasksCompleteRequest,
@@ -325,6 +331,19 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.tasksPostpone, request),
     generateFromExpiry: (request: TasksGenerateFromExpiryRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.tasksGenerateFromExpiry, request),
+  },
+  synthesis: {
+    create: (request: SynthesisCreateRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.synthesisCreate, request),
+    link: (request: SynthesisLinkRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.synthesisLink, request),
+    unlink: (request: SynthesisUnlinkRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.synthesisUnlink, request),
+    editBody: (request: SynthesisEditBodyRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.synthesisEditBody, request),
+    scheduleReturn: (request: SynthesisScheduleReturnRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.synthesisScheduleReturn, request),
+    get: (request: SynthesisGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.synthesisGet, request),
   },
   retention: {
     get: () => ipcRenderer.invoke(IPC_CHANNELS.retentionGet),

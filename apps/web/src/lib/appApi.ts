@@ -2408,6 +2408,93 @@ export interface TasksGenerateFromExpiryResult {
 }
 
 // ---------------------------------------------------------------------------
+// synthesis.*  (T095 — incremental writing / synthesis notes)
+//
+// A synthesis note is the EXISTING core `synthesis_note` element type — a writing
+// surface that COLLECTS linked extracts/cards (`references` edges) and is SCHEDULED
+// TO RETURN on the ATTENTION scheduler (never FSRS). No new table/op/element type.
+// ---------------------------------------------------------------------------
+
+/** A lightweight element summary (mirrors the contract `ElementSummary`). */
+export interface SynthesisElementSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly status: string;
+  readonly stage: string;
+  readonly priority: number;
+  readonly title: string;
+  readonly dueAt: string | null;
+}
+
+/** One referenced extract/card collected into a synthesis note. */
+export interface SynthesisLinkedView {
+  readonly id: string;
+  readonly type: string;
+  readonly title: string;
+  readonly stage: string;
+  readonly priority: number;
+  readonly relationId: string;
+}
+
+/** The full synthesis-note read — the note element + its linked material + due date. */
+export interface SynthesisDataView {
+  readonly element: SynthesisElementSummary;
+  readonly linked: readonly SynthesisLinkedView[];
+  readonly dueAt: string | null;
+}
+
+/** The explicit return choice a synthesis note accepts (mirrors {@link QueueScheduleChoice}). */
+export type SynthesisWhen = QueueScheduleChoice;
+
+export interface SynthesisCreateRequest {
+  readonly title: string;
+  readonly priority?: PriorityLabel;
+  readonly bodyJson?: unknown;
+  readonly bodyPlainText?: string;
+  readonly blocks?: readonly DocumentBlockInputPayload[];
+}
+export interface SynthesisCreateResultView {
+  readonly element: SynthesisElementSummary;
+}
+
+export interface SynthesisLinkRequest {
+  readonly noteId: string;
+  readonly targetId: string;
+}
+export interface SynthesisUnlinkRequest {
+  readonly noteId: string;
+  readonly targetId: string;
+}
+export interface SynthesisLinkResultView {
+  readonly data: SynthesisDataView;
+}
+
+export interface SynthesisEditBodyRequest {
+  readonly noteId: string;
+  readonly prosemirrorJson: unknown;
+  readonly plainText: string;
+  readonly blocks?: readonly DocumentBlockInputPayload[];
+}
+export interface SynthesisEditBodyResult {
+  readonly data: SynthesisDataView;
+}
+
+export interface SynthesisScheduleReturnRequest {
+  readonly noteId: string;
+  readonly when: SynthesisWhen;
+}
+export interface SynthesisScheduleReturnResult {
+  readonly data: SynthesisDataView;
+}
+
+export interface SynthesisGetRequest {
+  readonly noteId: string;
+}
+export interface SynthesisGetResult {
+  readonly data: SynthesisDataView | null;
+}
+
+// ---------------------------------------------------------------------------
 // retention.*  (T079 — desired retention by priority band / concept / card)
 // ---------------------------------------------------------------------------
 
@@ -3246,6 +3333,14 @@ export interface AppApi {
       request: TasksGenerateFromExpiryRequest,
     ): Promise<TasksGenerateFromExpiryResult>;
   };
+  readonly synthesis: {
+    create(request: SynthesisCreateRequest): Promise<SynthesisCreateResultView>;
+    link(request: SynthesisLinkRequest): Promise<SynthesisLinkResultView>;
+    unlink(request: SynthesisUnlinkRequest): Promise<SynthesisLinkResultView>;
+    editBody(request: SynthesisEditBodyRequest): Promise<SynthesisEditBodyResult>;
+    scheduleReturn(request: SynthesisScheduleReturnRequest): Promise<SynthesisScheduleReturnResult>;
+    get(request: SynthesisGetRequest): Promise<SynthesisGetResult>;
+  };
   readonly retention: {
     get(): Promise<RetentionGetResult>;
     setBand(request: RetentionSetBandRequest): Promise<RetentionUpdatedResult>;
@@ -3932,6 +4027,39 @@ export const appApi = {
     request: TasksGenerateFromExpiryRequest = {},
   ): Promise<TasksGenerateFromExpiryResult> {
     return requireAppApi().tasks.generateFromExpiry(request);
+  },
+  /**
+   * Create a synthesis note (T095) — the `synthesis_note` element + (optionally) an
+   * initial body, in one transaction. Stage `synthesis`; attention-scheduled later via
+   * {@link scheduleSynthesisReturn} (never FSRS).
+   */
+  createSynthesisNote(request: SynthesisCreateRequest): Promise<SynthesisCreateResultView> {
+    return requireAppApi().synthesis.create(request);
+  },
+  /** Collect an extract/card into a synthesis note (T095) — a `references` edge (idempotent). */
+  linkSynthesisElement(request: SynthesisLinkRequest): Promise<SynthesisLinkResultView> {
+    return requireAppApi().synthesis.link(request);
+  },
+  /** Remove a collected extract/card from a synthesis note (T095). */
+  unlinkSynthesisElement(request: SynthesisUnlinkRequest): Promise<SynthesisLinkResultView> {
+    return requireAppApi().synthesis.unlink(request);
+  },
+  /** Save a synthesis note's body (T095) — `update_document`, stable block ids preserved. */
+  editSynthesisBody(request: SynthesisEditBodyRequest): Promise<SynthesisEditBodyResult> {
+    return requireAppApi().synthesis.editBody(request);
+  },
+  /**
+   * Schedule a synthesis note to RETURN for refinement (T095) on the ATTENTION
+   * scheduler — tomorrow/next-week/next-month/manual. Never FSRS.
+   */
+  scheduleSynthesisReturn(
+    request: SynthesisScheduleReturnRequest,
+  ): Promise<SynthesisScheduleReturnResult> {
+    return requireAppApi().synthesis.scheduleReturn(request);
+  },
+  /** The synthesis note + its linked extracts/cards + due date (T095). Read-only. */
+  getSynthesisNote(request: SynthesisGetRequest): Promise<SynthesisGetResult> {
+    return requireAppApi().synthesis.get(request);
   },
   /**
    * The current desired-retention targets (T079) — global, per-band enable + map, and

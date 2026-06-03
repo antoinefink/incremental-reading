@@ -183,6 +183,20 @@ describe("QueueQuery", () => {
     expect(items.find((i) => i.id === sourceId)?.linkedElementType).toBeNull();
   });
 
+  it("surfaces a scheduled synthesis note as an attention row (T095)", () => {
+    // A synthesis note (T095) is an ATTENTION item — once scheduled to return it
+    // appears in the due queue like an extract/topic, tagged `attention` (never FSRS).
+    const { element } = repos.synthesis.create({ title: "Weaving definitions" });
+    repos.synthesis.scheduleReturn(element.id, { manual: "2026-05-29T08:00:00.000Z" });
+
+    const { items } = queue.list({ asOf: NOW });
+    const row = items.find((i) => i.id === element.id);
+    expect(row).toBeDefined();
+    expect(row?.type).toBe("synthesis_note");
+    expect(row?.scheduler).toBe("attention");
+    expect(row?.schedulerSignals.kind).toBe("attention");
+  });
+
   it("sorts by priority desc, then due date asc", () => {
     buildDueSet();
     const { items } = queue.list({ asOf: NOW });

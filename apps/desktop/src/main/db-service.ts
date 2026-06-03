@@ -89,6 +89,8 @@ import {
   ReviewSessionService,
   resolveSourceRef,
   SourceYieldQuery,
+  type SynthesisData,
+  type SynthesisLinkedElement,
   UndoService,
   WorkloadService,
 } from "@interleave/local-db";
@@ -287,6 +289,19 @@ import type {
   SourcesUpdateReliabilityResult,
   SourceYieldListRequest,
   SourceYieldListResult,
+  SynthesisCreateRequest,
+  SynthesisCreateResultView,
+  SynthesisDataView,
+  SynthesisEditBodyRequest,
+  SynthesisEditBodyResult,
+  SynthesisGetRequest,
+  SynthesisGetResult,
+  SynthesisLinkedView,
+  SynthesisLinkRequest,
+  SynthesisLinkResultView,
+  SynthesisScheduleReturnRequest,
+  SynthesisScheduleReturnResult,
+  SynthesisUnlinkRequest,
   TagsAddRequest,
   TagsAddResult,
   TagsListResult,
@@ -4091,6 +4106,83 @@ export class DbService {
     return choice.kind === "manual" ? { manual: choice.date as IsoTimestamp } : choice.kind;
   }
 
+  // -------------------------------------------------------------------------
+  // synthesis.* (T095 — incremental writing / synthesis notes)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Create a synthesis note (T095) through {@link SynthesisService}: the
+   * `synthesis_note` element (`create_element`) + (optionally) an initial `documents`
+   * body (`update_document`), in ONE transaction. Stage `synthesis`; priority defaults
+   * to the configured default source priority. Attention-scheduled later via
+   * {@link scheduleSynthesisReturn} — NEVER FSRS. No new op/element type.
+   */
+  createSynthesisNote(request: SynthesisCreateRequest): SynthesisCreateResultView {
+    const { element } = this.repos.synthesis.create({
+      title: request.title,
+      ...(request.priority ? { priority: priorityFromLabel(request.priority) } : {}),
+      ...(request.bodyJson !== undefined ? { bodyJson: request.bodyJson } : {}),
+      ...(request.bodyPlainText !== undefined ? { bodyPlainText: request.bodyPlainText } : {}),
+      ...(request.blocks ? { blocks: request.blocks } : {}),
+    });
+    return { element: synthesisElementSummary(element) };
+  }
+
+  /**
+   * Collect an extract/card into a synthesis note (T095) — a `references` edge
+   * note→target (`add_relation`); idempotent; rejects a non-extract/non-card.
+   */
+  linkSynthesisElement(request: SynthesisLinkRequest): SynthesisLinkResultView {
+    const { data } = this.repos.synthesis.linkElement(
+      request.noteId as ElementId,
+      request.targetId as ElementId,
+    );
+    return { data: synthesisDataView(data) };
+  }
+
+  /** Remove a collected extract/card from a synthesis note (T095) — `remove_relation`. */
+  unlinkSynthesisElement(request: SynthesisUnlinkRequest): SynthesisLinkResultView {
+    const { data } = this.repos.synthesis.unlinkElement(
+      request.noteId as ElementId,
+      request.targetId as ElementId,
+    );
+    return { data: synthesisDataView(data) };
+  }
+
+  /**
+   * Save a synthesis note's ProseMirror body (T095) — `update_document`, preserving
+   * stable block ids (so the note's text can later be searched/extracted-from).
+   */
+  editSynthesisBody(request: SynthesisEditBodyRequest): SynthesisEditBodyResult {
+    const data = this.repos.synthesis.editBody({
+      noteId: request.noteId as ElementId,
+      prosemirrorJson: request.prosemirrorJson,
+      plainText: request.plainText,
+      ...(request.blocks ? { blocks: request.blocks } : {}),
+    });
+    return { data: synthesisDataView(data) };
+  }
+
+  /**
+   * Schedule a synthesis note to RETURN for refinement (T095) on the ATTENTION
+   * scheduler (`reschedule_element`, status → `scheduled`) — tomorrow/next-week/
+   * next-month/manual. NEVER writes a `review_states` row (the two-scheduler split).
+   */
+  scheduleSynthesisReturn(request: SynthesisScheduleReturnRequest): SynthesisScheduleReturnResult {
+    const when =
+      request.when.kind === "manual"
+        ? { manual: request.when.date as IsoTimestamp }
+        : request.when.kind;
+    const data = this.repos.synthesis.scheduleReturn(request.noteId as ElementId, when);
+    return { data: synthesisDataView(data) };
+  }
+
+  /** The synthesis note + its linked extracts/cards + due date (T095). Read-only. */
+  getSynthesisNote(request: SynthesisGetRequest): SynthesisGetResult {
+    const data = this.repos.synthesis.get(request.noteId as ElementId);
+    return { data: data ? synthesisDataView(data) : null };
+  }
+
   /** All tags with their live usage count (T041) — the library filterbar. Read-only. */
   listAllTags(): TagsListResult {
     return { tags: this.repos.elements.listAllTags() };
@@ -4679,5 +4771,41 @@ function markToPayload(mark: DocumentMark): DocumentMarkPayload {
     markType: mark.markType,
     range: [mark.range[0], mark.range[1]],
     attrs: mark.attrs,
+  };
+}
+
+/** Map a synthesis-note domain element onto the flat, JSON-serializable IPC summary (T095). */
+function synthesisElementSummary(
+  element: SynthesisData["element"],
+): SynthesisCreateResultView["element"] {
+  return {
+    id: element.id,
+    type: element.type,
+    status: element.status,
+    stage: element.stage,
+    priority: element.priority,
+    title: element.title,
+    dueAt: element.dueAt,
+  };
+}
+
+/** Map a referenced extract/card onto the flat IPC view (T095). */
+function synthesisLinkedView(linked: SynthesisLinkedElement): SynthesisLinkedView {
+  return {
+    id: linked.id,
+    type: linked.type,
+    title: linked.title,
+    stage: linked.stage,
+    priority: linked.priority,
+    relationId: linked.relationId,
+  };
+}
+
+/** Map the synthesis-note domain read onto the flat, JSON-serializable IPC view (T095). */
+function synthesisDataView(data: SynthesisData): SynthesisDataView {
+  return {
+    element: synthesisElementSummary(data.element),
+    linked: data.linked.map(synthesisLinkedView),
+    dueAt: data.dueAt,
   };
 }
