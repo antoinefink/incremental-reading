@@ -1,0 +1,48 @@
+/* Tooltip (see Tooltip.tsx). The wrapper shrink-wraps its single trigger and
+   stays out of the layout (inline-flex), so dropping it around a button inside a
+   flex toolbar like `.qitem__acts` doesn't disturb spacing. Keep it box-less (no
+   padding/margin) so it never changes the trigger's footprint — e.g. the
+   `.schedmenu` popover anchors to the trigger's height through this wrapper. */
+.tt {
+  display: inline-flex;
+}
+
+/* The portaled bubble. Position is set inline (fixed coords from the trigger's
+   rect); everything visual is token-driven. The inverted fill (`--text` on
+   `--surface`) is high-contrast and flips automatically in dark mode. */
+.tt__bubble {
+  position: fixed;
+  z-index: 300; /* above modals/popovers/drawers (max in use is 200) */
+  pointer-events: none;
+  max-width: 260px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  background: var(--text);
+  color: var(--surface);
+  font-family: var(--font-ui);
+  font-size: var(--t-2xs);
+  font-weight: 500;
+  line-height: 1.35;
+  /* No `white-space: nowrap`: short labels still sit on one line well under the
+     max-width, while a long label (the component is reusable) wraps instead of
+     overflowing the bubble. */
+  box-shadow: var(--shadow-lg);
+  animation: tt-fade var(--fast) var(--ease);
+}
+
+@keyframes tt-fade {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tt__bubble {
+    animation: none;
+  }
+}

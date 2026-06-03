@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { QueueScheduleChoice } from "../../lib/appApi";
 import { Icon } from "../Icon";
+import { Tooltip } from "../Tooltip";
 import "./schedule-menu.css";
 
 /** The three preset choices, in kit order, with their human label. */
@@ -78,19 +79,22 @@ export function ScheduleMenu({
 
   return (
     <span className="schedmenu" ref={rootRef} data-testid="schedule-menu">
-      <button
-        type="button"
-        className="qitem__act"
-        disabled={disabled}
-        title="Schedule for…"
-        aria-label="Schedule for tomorrow, next week, next month, or a manual date"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        data-testid="schedule-menu-trigger"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <Icon name="calendar" size={14} />
-      </button>
+      {/* Styled tooltip on the trigger; suppressed while the menu is open so the
+          bubble doesn't sit over the popover it just spawned. */}
+      <Tooltip label="Schedule for later" disabled={open}>
+        <button
+          type="button"
+          className="qitem__act"
+          disabled={disabled}
+          aria-label="Schedule for tomorrow, next week, next month, or a manual date"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          data-testid="schedule-menu-trigger"
+          onClick={() => setOpen((o) => !o)}
+        >
+          <Icon name="calendar" size={14} />
+        </button>
+      </Tooltip>
       {open ? (
         <div className="schedmenu__pop" role="menu" data-testid="schedule-menu-pop">
           {PRESETS.map((p) => (

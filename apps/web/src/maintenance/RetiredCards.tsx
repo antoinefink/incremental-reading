@@ -27,6 +27,7 @@ import { Icon } from "../components/Icon";
 import { Prio } from "../components/inspector/primitives";
 import "../components/inspector/inspector.css";
 import { appApi, isDesktop, type RetiredCardSummary } from "../lib/appApi";
+import { formatStability } from "../lib/formatFsrs";
 import "../review/review.css";
 import "./leech-cleanup.css";
 
@@ -148,7 +149,7 @@ export function RetiredCards() {
                   Retired
                 </span>
                 <span className="badge badge--soft" data-testid="retired-card-stability">
-                  {Math.round(card.stability)}d stability
+                  {formatStability(card.stability)}d stability
                 </span>
               </div>
               <div className="lc-card__body">

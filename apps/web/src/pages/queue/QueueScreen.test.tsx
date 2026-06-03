@@ -489,6 +489,69 @@ describe("QueueScreen", () => {
     );
   });
 
+  it("lower priority calls queue.act with the lower intent", async () => {
+    render(<QueueScreen />);
+    const rows = await screen.findAllByTestId("queue-item");
+    const extract = rows.find((el) => el.getAttribute("data-element-id") === "extract-1");
+    const lower = extract?.querySelector('[data-testid="queue-action-lower"]') as HTMLElement;
+
+    h.actOnQueueItem.mockResolvedValueOnce({
+      item: { ...h.extractRow, priority: 0.125 },
+      removed: false,
+      undo: null,
+    });
+
+    fireEvent.click(lower);
+    await waitFor(() =>
+      expect(h.actOnQueueItem).toHaveBeenCalledWith({
+        id: "extract-1",
+        action: { kind: "lower" },
+      }),
+    );
+  });
+
+  it("maps the ↑ arrow to raise and the ↓ arrow to lower (direction is not swapped)", async () => {
+    render(<QueueScreen />);
+    const rows = await screen.findAllByTestId("queue-item");
+    const extract = rows.find((el) => el.getAttribute("data-element-id") === "extract-1");
+    const raise = extract?.querySelector('[data-testid="queue-action-raise"]') as HTMLElement;
+    const lower = extract?.querySelector('[data-testid="queue-action-lower"]') as HTMLElement;
+
+    // Guard against an icon swap: the UP arrow must sit on the button that raises
+    // priority (toward A) and the DOWN arrow on the one that lowers it (toward D).
+    expect(raise.querySelector("svg")?.getAttribute("class")).toMatch(/arrow-up/);
+    expect(lower.querySelector("svg")?.getAttribute("class")).toMatch(/arrow-down/);
+    expect(raise).toHaveAttribute("aria-label", "Raise priority");
+    expect(lower).toHaveAttribute("aria-label", "Lower priority");
+  });
+
+  it("shows a styled tooltip with the action label on keyboard focus", async () => {
+    render(<QueueScreen />);
+    const rows = await screen.findAllByTestId("queue-item");
+    const extract = rows.find((el) => el.getAttribute("data-element-id") === "extract-1");
+    const del = extract?.querySelector('[data-testid="queue-action-delete"]') as HTMLElement;
+
+    expect(screen.queryByTestId("tooltip")).toBeNull();
+    fireEvent.focus(del);
+    expect(screen.getByTestId("tooltip")).toHaveTextContent("Delete");
+    fireEvent.blur(del);
+    expect(screen.queryByTestId("tooltip")).toBeNull();
+  });
+
+  it("shows the tooltip on pointer hover over a row action", async () => {
+    render(<QueueScreen />);
+    const rows = await screen.findAllByTestId("queue-item");
+    const extract = rows.find((el) => el.getAttribute("data-element-id") === "extract-1");
+    const raise = extract?.querySelector('[data-testid="queue-action-raise"]') as HTMLElement;
+
+    // The Tooltip wrapper (.tt) is the button's parent and carries the hover handlers.
+    const wrap = raise.parentElement as HTMLElement;
+    fireEvent.mouseEnter(wrap);
+    expect(screen.getByTestId("tooltip")).toHaveTextContent("Raise priority");
+    fireEvent.mouseLeave(wrap);
+    expect(screen.queryByTestId("tooltip")).toBeNull();
+  });
+
   it("delete removes the row and shows an undo snackbar that restores it", async () => {
     render(<QueueScreen />);
     const rows = await screen.findAllByTestId("queue-item");

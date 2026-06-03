@@ -30,6 +30,7 @@ import { Prio, SchedulerChip, TypeIcon } from "../../components/inspector/primit
 import { BudgetMeter } from "../../components/queue/BudgetMeter";
 import { QueueSnackbar } from "../../components/queue/QueueSnackbar";
 import { ScheduleMenu } from "../../components/queue/ScheduleMenu";
+import { Tooltip } from "../../components/Tooltip";
 import { AutoVirtualList } from "../../components/VirtualList";
 import "../../components/inspector/inspector.css";
 import {
@@ -202,18 +203,22 @@ function QueueItem({
           <ScheduleMenu disabled={busy} onSchedule={(choice) => onSchedule(item, choice)} />
         ) : null}
         {ROW_ACTIONS.map((a) => (
-          <button
-            key={a.kind}
-            type="button"
-            disabled={busy}
-            title={a.label}
-            aria-label={a.label}
-            data-testid={`queue-action-${a.kind}`}
-            className={`qitem__act${a.danger ? " qitem__act--danger" : ""}`}
-            onClick={() => onAction(item, a.kind)}
-          >
-            <Icon name={a.icon} size={14} />
-          </button>
+          // Styled (portaled) tooltip in place of the slow native `title`; the
+          // button keeps its `aria-label` as the accessible name. Suppressed while
+          // busy (the buttons are disabled then — don't surface an affordance for a
+          // control that can't be used).
+          <Tooltip key={a.kind} label={a.label} disabled={busy}>
+            <button
+              type="button"
+              disabled={busy}
+              aria-label={a.label}
+              data-testid={`queue-action-${a.kind}`}
+              className={`qitem__act${a.danger ? " qitem__act--danger" : ""}`}
+              onClick={() => onAction(item, a.kind)}
+            >
+              <Icon name={a.icon} size={14} />
+            </button>
+          </Tooltip>
         ))}
       </span>
     </div>

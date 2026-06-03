@@ -14,6 +14,7 @@
  */
 
 import type { SchedulerSignals } from "../../lib/appApi";
+import { formatDifficulty, formatStability } from "../../lib/formatFsrs";
 import { Icon, type IconName } from "../Icon";
 
 /** Canonical element-type → kit type-icon name + tone class suffix. */
@@ -138,7 +139,9 @@ export function SchedulerChip({ scheduler }: { scheduler: SchedulerSignals }) {
         {scheduler.stability !== null && (
           <>
             <span className="sched__sep">·</span>
-            <span>S {scheduler.stability}d</span>
+            <span title={`Stability ${scheduler.stability} days`}>
+              S {formatStability(scheduler.stability)}d
+            </span>
           </>
         )}
       </span>
@@ -172,8 +175,8 @@ export function FsrsStats({ scheduler }: { scheduler: SchedulerSignals }) {
   return (
     <div className="fsrs-stats" data-testid="fsrs-stats">
       <div className="fstat">
-        <span className="fstat__v">
-          {stability}
+        <span className="fstat__v" title={`${stability} days`}>
+          {formatStability(stability)}
           <span style={{ fontSize: "var(--t-xs)", color: "var(--text-3)" }}>d</span>
         </span>
         <span className="fstat__l">Stability</span>
@@ -187,8 +190,8 @@ export function FsrsStats({ scheduler }: { scheduler: SchedulerSignals }) {
         </span>
       </div>
       <div className="fstat">
-        <span className="fstat__v">
-          {difficulty}
+        <span className="fstat__v" title={`${difficulty} / 10`}>
+          {formatDifficulty(difficulty)}
           <span style={{ fontSize: "var(--t-xs)", color: "var(--text-3)" }}>/10</span>
         </span>
         <span className="fstat__l">Difficulty</span>
