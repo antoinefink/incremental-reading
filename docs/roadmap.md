@@ -333,6 +333,7 @@ Detailed specs: [`tasks/M18-semantic.md`](./tasks/M18-semantic.md) (T087–T089)
   Done when: scheduled `synthesis_note` elements collect linked extracts/cards and return for refinement.
 
 ## M19 — Review modes, desktop & encryption (T096–T098)
+Detailed specs: [`tasks/M19-review-modes.md`](./tasks/M19-review-modes.md) (T096) · T097 (Tauri) + T098 (E2E-encryption) are **out of scope** for the local-first program.
 
 - [ ] **T096 — Branch/subset/semantic review modes** · _deps: T087, T037_
   Done when: review by concept, source, search query, branch, stale items, leeches, or random audit works outside normal scheduling.
