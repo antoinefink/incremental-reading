@@ -1,0 +1,120 @@
+import { describe, expect, it, vi } from "vitest";
+import type { AppApi } from "../shared/contract";
+
+const electronMock = vi.hoisted(() => {
+  const state: { exposedName: string | null; exposedApi: unknown } = {
+    exposedName: null,
+    exposedApi: null,
+  };
+  return {
+    state,
+    exposeInMainWorld: vi.fn((name: string, api: unknown) => {
+      state.exposedName = name;
+      state.exposedApi = api;
+    }),
+    invoke: vi.fn(async (channel: string, payload?: unknown) => ({ channel, payload })),
+    on: vi.fn(),
+    removeListener: vi.fn(),
+  };
+});
+
+vi.mock("electron", () => ({
+  contextBridge: { exposeInMainWorld: electronMock.exposeInMainWorld },
+  ipcRenderer: {
+    invoke: electronMock.invoke,
+    on: electronMock.on,
+    removeListener: electronMock.removeListener,
+  },
+}));
+
+import { IPC_CHANNELS } from "../shared/channels";
+import "./index";
+
+function api(): AppApi {
+  return electronMock.state.exposedApi as AppApi;
+}
+
+describe("preload bridge", () => {
+  it("exposes only appApi in the isolated renderer world", () => {
+    expect(electronMock.exposeInMainWorld).toHaveBeenCalledTimes(1);
+    expect(electronMock.state.exposedName).toBe("appApi");
+    expect(api()).toEqual(
+      expect.objectContaining({ app: expect.any(Object), db: expect.any(Object) }),
+    );
+    expect((api().db as unknown as { query?: unknown }).query).toBeUndefined();
+    expect((api() as unknown as { fs?: unknown; ipcRenderer?: unknown }).fs).toBeUndefined();
+    expect((api() as unknown as { ipcRenderer?: unknown }).ipcRenderer).toBeUndefined();
+  });
+
+  it("routes invoke-only methods to their fixed IPC channels", async () => {
+    await api().app.health();
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.appHealth);
+
+    await api().sources.importManual({ title: "T", body: "Body", priority: "B" });
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.sourcesImportManual, {
+      title: "T",
+      body: "Body",
+      priority: "B",
+    });
+
+    await api().cards.delete({ cardId: "card-1" });
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.cardsDelete, {
+      cardId: "card-1",
+    });
+  });
+
+  it("normalizes optional request payloads to empty objects where the contract expects one", async () => {
+    await api().settings.get();
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.settingsGet, {});
+
+    await api().queue.list();
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.queueList, {});
+
+    await api().review.sessionNext();
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.reviewSessionNext, {});
+
+    await api().semantic.status();
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.semanticStatus, {});
+
+    await api().jobs.list();
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.jobsList, {});
+  });
+
+  it("forwards receive-only subscriptions without exposing raw events", () => {
+    const callback = vi.fn();
+    const unsubscribe = api().jobs.subscribe(callback);
+    const [channel, listener] = electronMock.on.mock.calls.at(-1) ?? [];
+    const summary = { id: "job-1", type: "import_url", status: "done" };
+
+    expect(channel).toBe(IPC_CHANNELS.jobsUpdated);
+    (listener as (event: unknown, summary: unknown) => void)({ sender: "raw-event" }, summary);
+    expect(callback).toHaveBeenCalledWith(summary);
+
+    unsubscribe();
+    expect(electronMock.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.jobsUpdated, listener);
+  });
+
+  it("returns unsubscribe functions for narrow native menu events", () => {
+    const showShortcuts = vi.fn();
+    const unsubscribeShortcuts = api().menu.onShowShortcuts(showShortcuts);
+    const shortcutsListener = electronMock.on.mock.calls.at(-1)?.[1] as () => void;
+    shortcutsListener();
+    expect(showShortcuts).toHaveBeenCalledTimes(1);
+    unsubscribeShortcuts();
+    expect(electronMock.removeListener).toHaveBeenCalledWith(
+      IPC_CHANNELS.menuShowShortcuts,
+      shortcutsListener,
+    );
+
+    const createBackup = vi.fn();
+    const unsubscribeBackup = api().menu.onCreateBackup(createBackup);
+    const backupListener = electronMock.on.mock.calls.at(-1)?.[1] as () => void;
+    backupListener();
+    expect(createBackup).toHaveBeenCalledTimes(1);
+    unsubscribeBackup();
+    expect(electronMock.removeListener).toHaveBeenCalledWith(
+      IPC_CHANNELS.menuCreateBackup,
+      backupListener,
+    );
+  });
+});
