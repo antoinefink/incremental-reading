@@ -95,6 +95,19 @@ function bootstrap(): void {
     }
   }
 
+  // 2b') Dev/E2E convenience: seed an empty database with the T099 MAINTENANCE
+  //      fixture (a duplicate source pair, a sourceless card, a broken source, and a
+  //      low-priority stale source) so the Maintenance E2E has deterministic dead
+  //      weight. Opt-in via INTERLEAVE_SEED_MAINTENANCE; never seeds a non-empty DB.
+  if (process.env.INTERLEAVE_SEED_MAINTENANCE === "1") {
+    try {
+      const planted = dbService.seedMaintenanceIfEmpty();
+      if (planted) console.log("[main] seeded maintenance fixture", planted.brokenSnapshotRelPath);
+    } catch (error) {
+      console.error("[main] seed-maintenance failed:", error);
+    }
+  }
+
   // 2c) E2E convenience: pre-set the "seen onboarding" flag so the first-run
   //     welcome overlay (T050) does not cover the UI in the existing feature
   //     specs (which all start from a fresh, empty data dir). Opt-in via

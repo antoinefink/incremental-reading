@@ -293,6 +293,20 @@ export function AnalyticsScreen() {
                   <span className="an-banner__title">No maintenance needed</span>
                 </div>
               ) : null}
+              {/* The Maintenance hub (T099) — always available: duplicates, orphan media,
+                  broken sources, lineage gaps, DB + vault integrity for a large collection. */}
+              <button
+                type="button"
+                className="an-banner"
+                data-testid="banner-maintenance"
+                onClick={() => void navigate({ to: "/maintenance" })}
+              >
+                <Icon name="shield" size={16} />
+                <span className="an-banner__title">
+                  Open maintenance — duplicates, orphans, integrity
+                </span>
+                <Icon name="chevronRight" size={14} />
+              </button>
             </div>
           </div>
         </div>

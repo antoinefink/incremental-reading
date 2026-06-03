@@ -65,6 +65,13 @@ import type {
   JobsListRequest,
   LibraryBrowseRequest,
   LineageGetRequest,
+  MaintenanceBulkArchiveRequest,
+  MaintenanceBulkPostponeRequest,
+  MaintenanceBulkTrashRequest,
+  MaintenanceDedupeRequest,
+  MaintenanceIntegrityRequest,
+  MaintenanceLowValueRequest,
+  MaintenanceOrphanMediaRequest,
   OptimizationApplyRequest,
   OptimizationSuggestRequest,
   PickImportFileRequest,
@@ -455,6 +462,29 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.vaultFindOrphans, request),
     collectOrphans: (request: VaultCollectOrphansRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.vaultCollectOrphans, request),
+  },
+  maintenance: {
+    // Large-collection maintenance (T099) — thin invokes. Every report is read-only;
+    // every action is op-logged + soft-delete / undoable on the main side. No raw path
+    // or asset id crosses inbound; the destructive actions are validated again main-side.
+    report: () => ipcRenderer.invoke(IPC_CHANNELS.maintenanceReport),
+    duplicates: () => ipcRenderer.invoke(IPC_CHANNELS.maintenanceDuplicates),
+    cardsWithoutSources: () => ipcRenderer.invoke(IPC_CHANNELS.maintenanceCardsWithoutSources),
+    brokenSources: () => ipcRenderer.invoke(IPC_CHANNELS.maintenanceBrokenSources),
+    lowValue: (request?: MaintenanceLowValueRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.maintenanceLowValue, request),
+    integrity: (request?: MaintenanceIntegrityRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.maintenanceIntegrity, request),
+    dedupe: (request: MaintenanceDedupeRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.maintenanceDedupe, request),
+    orphanMedia: (request: MaintenanceOrphanMediaRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.maintenanceOrphanMedia, request),
+    bulkTrash: (request: MaintenanceBulkTrashRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.maintenanceBulkTrash, request),
+    bulkArchive: (request: MaintenanceBulkArchiveRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.maintenanceBulkArchive, request),
+    bulkPostpone: (request: MaintenanceBulkPostponeRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.maintenanceBulkPostpone, request),
   },
   menu: {
     // Receive-only subscription (T048): the native Help → "Keyboard shortcuts"

@@ -74,6 +74,13 @@ export interface RetireCardInput {
    * `false` (retire is a pure flag flip; the override is untouched).
    */
   readonly lowRetention?: boolean;
+  /**
+   * Optional batch id (T099) grouping a BULK-archive's `retire` rows so the op log
+   * records which sweep they belong to. A payload enrichment within the closed op set
+   * (NOT a new op type). Retire stays reversed by the explicit un-retire (a card-flag
+   * attribute); the batch id just keeps the audit trail coherent.
+   */
+  readonly batchId?: string;
 }
 
 /**
@@ -130,7 +137,13 @@ export class CardRetirementService {
       new OperationLogRepository(tx).append(tx, {
         opType: "update_element",
         elementId: id,
-        payload: { id, retired: true, retiredAt, ...(reason != null ? { reason } : {}) },
+        payload: {
+          id,
+          retired: true,
+          retiredAt,
+          ...(reason != null ? { reason } : {}),
+          ...(input.batchId ? { batchId: input.batchId } : {}),
+        },
       });
 
       // Optional, INDEPENDENT low-retention lever (floor-clamped; NOT retirement).

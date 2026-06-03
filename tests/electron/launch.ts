@@ -101,6 +101,12 @@ export interface LaunchOptions {
   /** Seed the demo collection when the database is empty (T010 inspector E2E). */
   readonly seedOnEmpty?: boolean;
   /**
+   * Seed the T099 MAINTENANCE fixture when the database is empty (a duplicate source
+   * pair, a sourceless card, a broken source, a low-priority stale source) so the
+   * Maintenance E2E has deterministic dead weight. Sets `INTERLEAVE_SEED_MAINTENANCE=1`.
+   */
+  readonly seedMaintenance?: boolean;
+  /**
    * Show the first-run onboarding overlay (T050). DEFAULTS to suppressed: the
    * existing feature specs start from a fresh, empty data dir, where the welcome
    * overlay would otherwise cover the UI. The dedicated onboarding spec passes
@@ -198,6 +204,7 @@ export async function launchApp(
       ...process.env,
       INTERLEAVE_DATA_DIR: dataDir,
       ...(options.seedOnEmpty ? { INTERLEAVE_SEED_ON_EMPTY: "1" } : {}),
+      ...(options.seedMaintenance ? { INTERLEAVE_SEED_MAINTENANCE: "1" } : {}),
       ...(options.allowLoopbackImport ? { INTERLEAVE_ALLOW_LOOPBACK_IMPORT: "1" } : {}),
       ...(options.captureEnabled ? { INTERLEAVE_CAPTURE_ENABLED: "1" } : {}),
       ...(options.pdfImportPath ? { INTERLEAVE_PDF_IMPORT_PATH: options.pdfImportPath } : {}),

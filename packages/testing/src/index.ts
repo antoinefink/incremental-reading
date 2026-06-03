@@ -16,6 +16,9 @@ export { createInMemoryDb } from "./db";
 export {
   DEMO_FIXTURES,
   type DemoCollection,
+  type MaintenanceCollection,
   type SeededConcepts,
+  type SeedMaintenanceOptions,
   seedDemoCollection,
+  seedMaintenanceCollection,
 } from "./factories";

@@ -44,6 +44,11 @@ export {
   type PostponePreviewRow,
 } from "./auto-postpone-service";
 export {
+  type BulkActionResult,
+  BulkActionService,
+  type BulkArchiveMode,
+} from "./bulk-action-service";
+export {
   type CardBodyForKind,
   type CardEditResult,
   CardEditService,
@@ -77,6 +82,18 @@ export {
   type ConceptSummary,
   type CreateConceptInput,
 } from "./concept-repository";
+export {
+  DEFAULT_DEDUP_CLUSTER_LIMIT,
+  type DedupReportOptions,
+  DedupReportQuery,
+  type DuplicateCluster,
+  type DuplicateMatchKind,
+  type DuplicateRef,
+  type DuplicateReport,
+  normalizeContentKey,
+  pickContentKeeper,
+  pickSourceKeeper,
+} from "./dedup-report-query";
 export {
   type AddMarkInput,
   type DocumentBlockInput,
@@ -172,6 +189,17 @@ export {
   type LibraryPriorityLabel,
   LibraryQuery,
 } from "./library-query";
+export {
+  type BrokenSourceCandidate,
+  DEFAULT_LINEAGE_GAP_LIMIT,
+  DEFAULT_LOW_VALUE_STALE_DAYS,
+  type GapElementRef,
+  LineageGapQuery,
+  type LineageGapRow,
+  type LowValueOptions,
+  type LowValueRow,
+  type SourceSnapshotAsset,
+} from "./lineage-gap-query";
 export {
   type LineageData,
   type LineageNode,
@@ -352,6 +380,23 @@ export interface Repositories {
   readonly analytics: import("./analytics-query").AnalyticsService;
   /** Duplicate-detection lookups for URL import (T061) — read-only. */
   readonly sourceDedup: import("./source-dedup-query").SourceDedupQuery;
+  /**
+   * The collection-wide duplicate ROLLUP (T099) — duplicate source/card/extract
+   * CLUSTERS for the Maintenance view. Read-only, NO op-log, never auto-merges.
+   */
+  readonly dedupReport: import("./dedup-report-query").DedupReportQuery;
+  /**
+   * The lineage / value scans (T099) — cards-without-sources, broken-source
+   * candidates, and low-value-stale candidates for the Maintenance view. Read-only,
+   * NO op-log; SURFACES gaps, never auto-deletes (lineage is sacred).
+   */
+  readonly lineageGap: import("./lineage-gap-query").LineageGapQuery;
+  /**
+   * The thin BULK cleanup wrappers (T099) — `bulkSoftDelete` / `bulkArchive` /
+   * `bulkPostpone`, each minting ONE `batchId` so the whole sweep undoes as one
+   * (T044). Routes through the EXISTING per-item write paths; no new op/status.
+   */
+  readonly bulkActions: import("./bulk-action-service").BulkActionService;
   /** The persisted background-runner job queue (T058) — main-runner-only. */
   readonly jobs: import("./jobs-repository").JobsRepository;
   /** The reviewable per-page OCR layer (T066) — the recognized-text suggestion store. */
@@ -399,12 +444,15 @@ import type { InterleaveDatabase } from "@interleave/db";
 import { AiSuggestionRepository } from "./ai-suggestion-repository";
 import { AnalyticsService } from "./analytics-query";
 import { AssetRepository } from "./asset-repository";
+import { BulkActionService } from "./bulk-action-service";
 import { ConceptRepository } from "./concept-repository";
+import { DedupReportQuery } from "./dedup-report-query";
 import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
 import { EmbeddingRepository } from "./embedding-repository";
 import { ExtractStagnationQuery } from "./extract-stagnation-query";
 import { JobsRepository } from "./jobs-repository";
+import { LineageGapQuery } from "./lineage-gap-query";
 import { OcclusionMasksRepository } from "./occlusion-masks-repository";
 import { OcrPagesRepository } from "./ocr-pages-repository";
 import { OperationLogRepository } from "./operation-log-repository";
@@ -463,6 +511,9 @@ export function createRepositories(
     trash: new TrashRepository(db),
     analytics: new AnalyticsService(db),
     sourceDedup: new SourceDedupQuery(db, assets),
+    dedupReport: new DedupReportQuery(db, assets),
+    lineageGap: new LineageGapQuery(db),
+    bulkActions: new BulkActionService(db),
     jobs: new JobsRepository(db),
     ocrPages: new OcrPagesRepository(db),
     occlusionMasks: new OcclusionMasksRepository(db),

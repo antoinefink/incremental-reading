@@ -71,6 +71,17 @@ import {
   type JobsListResult,
   LibraryBrowseRequestSchema,
   LineageGetRequestSchema,
+  MaintenanceBrokenSourcesRequestSchema,
+  MaintenanceBulkArchiveRequestSchema,
+  MaintenanceBulkPostponeRequestSchema,
+  MaintenanceBulkTrashRequestSchema,
+  MaintenanceCardsWithoutSourcesRequestSchema,
+  MaintenanceDedupeRequestSchema,
+  MaintenanceDuplicatesRequestSchema,
+  MaintenanceIntegrityRequestSchema,
+  MaintenanceLowValueRequestSchema,
+  MaintenanceOrphanMediaRequestSchema,
+  MaintenanceReportRequestSchema,
   OptimizationApplyRequestSchema,
   OptimizationSuggestRequestSchema,
   PickImportFileRequestSchema,
@@ -1318,6 +1329,65 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.vaultCollectOrphans, async (_event, rawRequest: unknown) => {
     const request = VaultCollectOrphansRequestSchema.parse(rawRequest);
     return dbService.collectVaultOrphans(request);
+  });
+
+  // Large-collection maintenance (T099) — all behind the typed surface, Zod-validated.
+  // The REPORTS are read-only (no `operation_log`); the ACTIONS are transactional,
+  // op-logged, soft-delete / undoable, with the only hard deletes being the existing
+  // `trash:purge` + `vault:collectOrphans`. No `db.query`, no raw path crosses IPC.
+  ipcMain.handle(IPC_CHANNELS.maintenanceReport, async (_event, rawRequest: unknown) => {
+    MaintenanceReportRequestSchema.parse(rawRequest);
+    return dbService.getMaintenanceReport();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.maintenanceDuplicates, (_event, rawRequest: unknown) => {
+    MaintenanceDuplicatesRequestSchema.parse(rawRequest);
+    return dbService.getMaintenanceDuplicates();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.maintenanceCardsWithoutSources, (_event, rawRequest: unknown) => {
+    MaintenanceCardsWithoutSourcesRequestSchema.parse(rawRequest);
+    return dbService.getMaintenanceCardsWithoutSources();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.maintenanceBrokenSources, async (_event, rawRequest: unknown) => {
+    MaintenanceBrokenSourcesRequestSchema.parse(rawRequest);
+    return dbService.getMaintenanceBrokenSources();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.maintenanceLowValue, (_event, rawRequest: unknown) => {
+    const request = MaintenanceLowValueRequestSchema.parse(rawRequest);
+    return dbService.getMaintenanceLowValue(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.maintenanceIntegrity, async (_event, rawRequest: unknown) => {
+    const request = MaintenanceIntegrityRequestSchema.parse(rawRequest);
+    return dbService.getMaintenanceIntegrity(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.maintenanceDedupe, (_event, rawRequest: unknown) => {
+    const request = MaintenanceDedupeRequestSchema.parse(rawRequest);
+    return dbService.maintenanceDedupe(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.maintenanceOrphanMedia, async (_event, rawRequest: unknown) => {
+    const request = MaintenanceOrphanMediaRequestSchema.parse(rawRequest);
+    return dbService.maintenanceOrphanMedia(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.maintenanceBulkTrash, (_event, rawRequest: unknown) => {
+    const request = MaintenanceBulkTrashRequestSchema.parse(rawRequest);
+    return dbService.maintenanceBulkTrash(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.maintenanceBulkArchive, (_event, rawRequest: unknown) => {
+    const request = MaintenanceBulkArchiveRequestSchema.parse(rawRequest);
+    return dbService.maintenanceBulkArchive(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.maintenanceBulkPostpone, (_event, rawRequest: unknown) => {
+    const request = MaintenanceBulkPostponeRequestSchema.parse(rawRequest);
+    return dbService.maintenanceBulkPostpone(request);
   });
 
   // Jobs OBSERVE surface (T058) — read-only. `jobs.list` reads the current queue

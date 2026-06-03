@@ -1,0 +1,749 @@
+/**
+ * Maintenance hub (T099) — the janitor's dashboard for a large collection.
+ *
+ * A single view surfacing a fixed set of READ-ONLY reports — duplicate
+ * sources/cards/extracts, orphan media, broken sources, cards without sources,
+ * low-value-stale candidates, and DB + vault integrity — each as a count card that
+ * expands to its drill-down list, and each paired with a CONFIRMABLE cleanup action.
+ *
+ * Architecture (non-negotiable): UI ONLY — no SQL, no dedup/integrity logic, no
+ * scheduling. Every report is read via the typed `appApi.maintenance.*` bridge (the
+ * domain queries live in `packages/local-db` + the main `MaintenanceService`); every
+ * action is a typed command. Reports append no `operation_log`; cleanup actions are
+ * transactional, op-logged, soft-delete / undoable on the main side (the only hard
+ * deletes are the existing Trash purge + the vault orphan GC). After a reversible
+ * action the screen shows a `Snackbar` "Undo" wired to `appApi.undoLast()` and
+ * dispatches `UNDO_EVENT` so the shell + counts re-read; the deep integrity check is
+ * on-demand only (never auto-run on view open).
+ */
+
+import { Link } from "@tanstack/react-router";
+import { useCallback, useEffect, useState } from "react";
+import { Icon, type IconName } from "../components/Icon";
+import { Snackbar } from "../components/Snackbar";
+import {
+  appApi,
+  type BrokenSourceRowSummary,
+  type DuplicateReportResult,
+  isDesktop,
+  type LineageGapRowSummary,
+  type LowValueRowSummary,
+  type MaintenanceIntegrityResult,
+  type MaintenanceReportResult,
+} from "../lib/appApi";
+import { UNDO_EVENT } from "../shell/nav";
+import "../review/review.css";
+import "../maintenance/leech-cleanup.css";
+import "./maintenance.css";
+
+/** Format a byte count for the orphan-media metric. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+/** Which report card is expanded (one at a time). */
+type ExpandedReport = "duplicates" | "broken" | "sourceless" | "lowValue" | "orphan" | null;
+
+export function MaintenanceScreen() {
+  const desktop = isDesktop();
+  const [report, setReport] = useState<MaintenanceReportResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<ExpandedReport>(null);
+  const [snack, setSnack] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Drill-down payloads, loaded lazily when a card expands.
+  const [duplicates, setDuplicates] = useState<DuplicateReportResult | null>(null);
+  const [broken, setBroken] = useState<readonly BrokenSourceRowSummary[] | null>(null);
+  const [sourceless, setSourceless] = useState<readonly LineageGapRowSummary[] | null>(null);
+  const [lowValue, setLowValue] = useState<readonly LowValueRowSummary[] | null>(null);
+
+  // The on-demand deep integrity check.
+  const [integrity, setIntegrity] = useState<MaintenanceIntegrityResult | null>(null);
+  const [integrityRunning, setIntegrityRunning] = useState(false);
+
+  const loadReport = useCallback(async () => {
+    if (!isDesktop()) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const res = await appApi.maintenance.report();
+      setReport(res);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadReport();
+  }, [loadReport]);
+
+  const reloadExpanded = useCallback(async (which: ExpandedReport) => {
+    if (!isDesktop()) return;
+    try {
+      if (which === "duplicates") setDuplicates(await appApi.maintenance.duplicates());
+      else if (which === "broken") setBroken((await appApi.maintenance.brokenSources()).rows);
+      else if (which === "sourceless")
+        setSourceless((await appApi.maintenance.cardsWithoutSources()).rows);
+      else if (which === "lowValue") setLowValue((await appApi.maintenance.lowValue()).rows);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  // Re-read counts + the open drill-down after a global undo (⌘Z or our own).
+  useEffect(() => {
+    const handler = () => {
+      void loadReport();
+      if (expanded) void reloadExpanded(expanded);
+    };
+    window.addEventListener(UNDO_EVENT, handler);
+    return () => window.removeEventListener(UNDO_EVENT, handler);
+  }, [loadReport, expanded, reloadExpanded]);
+
+  const toggle = useCallback(
+    async (which: Exclude<ExpandedReport, null>) => {
+      const next = expanded === which ? null : which;
+      setExpanded(next);
+      if (next && next !== "orphan") await reloadExpanded(next);
+    },
+    [expanded, reloadExpanded],
+  );
+
+  /** Run a reversible cleanup action, then toast an Undo + refresh. */
+  const runUndoable = useCallback(
+    async (fn: () => Promise<{ affected: number; batchId: string }>, label: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        const res = await fn();
+        if (res.affected > 0) {
+          setSnack(`${label} (${res.affected})`);
+        } else {
+          setSnack("Nothing to clean up");
+        }
+        await loadReport();
+        if (expanded) await reloadExpanded(expanded);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [expanded, loadReport, reloadExpanded],
+  );
+
+  /** The Snackbar "Undo" reverses the LAST op/batch via the shared command-level undo. */
+  const onUndo = useCallback(() => {
+    setSnack(null);
+    void appApi
+      .undoLast()
+      .then(() => window.dispatchEvent(new CustomEvent(UNDO_EVENT)))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+  }, []);
+
+  const runIntegrity = useCallback(async () => {
+    setIntegrityRunning(true);
+    setError(null);
+    try {
+      setIntegrity(await appApi.maintenance.integrity());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIntegrityRunning(false);
+    }
+  }, []);
+
+  if (!desktop) {
+    return (
+      <div className="rv-shell" data-testid="route-maintenance">
+        <div className="rv-blank">
+          <div className="rv-empty">
+            <div className="rv-empty__icon">
+              <Icon name="shield" size={26} />
+            </div>
+            <h1 className="rv-empty__title">Maintenance</h1>
+            <p className="rv-empty__body">
+              Duplicates, orphan media, broken sources, lineage gaps, and integrity checks for a
+              large collection live here — open the Electron app to clean up.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rv-shell lc-shell mt-shell" data-testid="route-maintenance">
+      <div className="lc-head">
+        <div>
+          <h1 className="lc-title">
+            <Icon name="shield" size={18} />
+            Maintenance
+          </h1>
+          <p className="lc-sub">
+            Keep a large collection healthy: find and reclaim duplicates, orphan media, broken
+            sources, and lineage gaps — every cleanup is reversible from Trash + Undo.
+          </p>
+        </div>
+        <div className="mt-links" data-testid="maintenance-links">
+          <Link to="/maintenance/leeches" className="mt-link">
+            Leeches
+          </Link>
+          <Link to="/maintenance/retired" className="mt-link">
+            Retired
+          </Link>
+          <Link to="/maintenance/stagnant" className="mt-link">
+            Stagnant
+          </Link>
+          <Link to="/trash" className="mt-link">
+            Trash
+          </Link>
+        </div>
+      </div>
+
+      {error ? (
+        <p className="pq-error" data-testid="maintenance-error" style={{ padding: "8px 24px" }}>
+          {error}
+        </p>
+      ) : null}
+
+      {loading ? (
+        <p className="lc-loading" data-testid="maintenance-loading">
+          Loading…
+        </p>
+      ) : !report ? null : (
+        <div className="mt-grid" data-testid="maintenance-grid">
+          {/* Duplicates */}
+          <MetricCard
+            icon="copy"
+            title="Duplicates"
+            value={report.duplicateCount}
+            unit="removable copies"
+            testId="metric-duplicates"
+            expanded={expanded === "duplicates"}
+            onToggle={() => void toggle("duplicates")}
+          >
+            <DuplicatesPanel
+              data={duplicates}
+              busy={busy}
+              onDedupe={(ids, label) =>
+                void runUndoable(() => appApi.maintenance.dedupe({ removeIds: ids }), label)
+              }
+            />
+          </MetricCard>
+
+          {/* Orphan media */}
+          <MetricCard
+            icon="trash"
+            title="Orphan media"
+            value={report.orphanFileCount}
+            unit={`files · ${formatBytes(report.orphanBytes)}`}
+            testId="metric-orphan"
+            expanded={expanded === "orphan"}
+            onToggle={() => void toggle("orphan")}
+          >
+            <OrphanPanel
+              count={report.orphanFileCount}
+              bytes={report.orphanBytes}
+              busy={busy}
+              onCollect={async () => {
+                setBusy(true);
+                setError(null);
+                try {
+                  const res = await appApi.maintenance.orphanMedia({ confirm: true });
+                  setSnack(`Reclaimed ${res.removed} files · ${formatBytes(res.freedBytes)}`);
+                  await loadReport();
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            />
+          </MetricCard>
+
+          {/* Broken sources */}
+          <MetricCard
+            icon="warning"
+            title="Broken sources"
+            value={report ? undefined : 0}
+            unit="snapshot missing"
+            testId="metric-broken"
+            expanded={expanded === "broken"}
+            onToggle={() => void toggle("broken")}
+            countOf={broken?.length}
+          >
+            <BrokenPanel
+              rows={broken}
+              busy={busy}
+              onTrash={(ids) =>
+                void runUndoable(
+                  () => appApi.maintenance.bulkTrash({ ids }),
+                  "Moved broken sources to trash",
+                )
+              }
+            />
+          </MetricCard>
+
+          {/* Cards without sources */}
+          <MetricCard
+            icon="link"
+            title="Cards without sources"
+            value={report.cardsWithoutSourcesCount}
+            unit="lineage gaps"
+            testId="metric-sourceless"
+            expanded={expanded === "sourceless"}
+            onToggle={() => void toggle("sourceless")}
+          >
+            <SourcelessPanel
+              rows={sourceless}
+              busy={busy}
+              onTrash={(ids) =>
+                void runUndoable(
+                  () => appApi.maintenance.bulkTrash({ ids }),
+                  "Moved sourceless cards to trash",
+                )
+              }
+            />
+          </MetricCard>
+
+          {/* Low-value candidates */}
+          <MetricCard
+            icon="hourglass"
+            title="Low-value candidates"
+            value={report.lowValueCount}
+            unit="low-priority, stale"
+            testId="metric-lowvalue"
+            expanded={expanded === "lowValue"}
+            onToggle={() => void toggle("lowValue")}
+          >
+            <LowValuePanel
+              rows={lowValue}
+              busy={busy}
+              onPostpone={(ids) =>
+                void runUndoable(
+                  () => appApi.maintenance.bulkPostpone({ ids }),
+                  "Postponed low-value items",
+                )
+              }
+              onArchive={(ids, mode) =>
+                void runUndoable(
+                  () => appApi.maintenance.bulkArchive({ ids, mode }),
+                  mode === "trash"
+                    ? "Trashed low-value items"
+                    : mode === "dismiss"
+                      ? "Dismissed low-value items"
+                      : "Retired low-value cards",
+                )
+              }
+            />
+          </MetricCard>
+
+          {/* Integrity (on-demand) */}
+          <IntegrityCard
+            running={integrityRunning}
+            report={integrity}
+            onRun={() => void runIntegrity()}
+          />
+        </div>
+      )}
+
+      <Snackbar
+        message={snack}
+        onUndo={snack && snack !== "Nothing to clean up" ? onUndo : undefined}
+        onClose={() => setSnack(null)}
+        testId="maintenance-snackbar"
+      />
+    </div>
+  );
+}
+
+/** One report metric card with an expandable drill-down body. */
+function MetricCard({
+  icon,
+  title,
+  value,
+  countOf,
+  unit,
+  testId,
+  expanded,
+  onToggle,
+  children,
+}: {
+  icon: IconName;
+  title: string;
+  value?: number | undefined;
+  countOf?: number | undefined;
+  unit: string;
+  testId: string;
+  expanded: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  const display = value ?? countOf;
+  return (
+    <div className="mt-card" data-testid={testId} data-expanded={expanded}>
+      <button
+        type="button"
+        className="mt-card__head"
+        onClick={onToggle}
+        data-testid={`${testId}-toggle`}
+      >
+        <span className="mt-card__icon">
+          <Icon name={icon} size={16} />
+        </span>
+        <span className="mt-card__title">{title}</span>
+        <span className="mt-card__value" data-testid={`${testId}-value`}>
+          {display ?? "—"}
+        </span>
+        <span className="mt-card__unit">{unit}</span>
+        <Icon name={expanded ? "chevronDown" : "chevronRight"} size={14} />
+      </button>
+      {expanded ? <div className="mt-card__body">{children}</div> : null}
+    </div>
+  );
+}
+
+function DuplicatesPanel({
+  data,
+  busy,
+  onDedupe,
+}: {
+  data: DuplicateReportResult | null;
+  busy: boolean;
+  onDedupe: (ids: string[], label: string) => void;
+}) {
+  if (!data) return <p className="mt-muted">Loading…</p>;
+  const clusters = [
+    ...data.sourceClusters.map((c) => ({ kind: "source" as const, c })),
+    ...data.cardClusters.map((c) => ({ kind: "card" as const, c })),
+    ...data.extractClusters.map((c) => ({ kind: "extract" as const, c })),
+  ];
+  if (clusters.length === 0) {
+    return <EmptyRow message="No duplicates found." />;
+  }
+  const allRemovable = clusters.flatMap(({ c }) => c.duplicates.map((d) => d.id));
+  return (
+    <div data-testid="duplicates-panel">
+      <div className="mt-bulkbar">
+        <button
+          type="button"
+          className="rv-repair__btn"
+          data-testid="dedupe-all"
+          disabled={busy || allRemovable.length === 0}
+          onClick={() => onDedupe(allRemovable, "Trashed redundant copies")}
+        >
+          <Icon name="trash" size={13} />
+          Remove all {allRemovable.length} duplicates
+        </button>
+      </div>
+      {clusters.map(({ kind, c }) => (
+        <div className="mt-cluster" key={`${kind}-${c.key}`} data-testid="duplicate-cluster">
+          <div className="mt-cluster__head">
+            <span className="badge badge--soft">{kind}</span>
+            <span className="mt-cluster__match">{c.matchedBy}</span>
+            <span className="mt-keeper" data-testid="cluster-keeper">
+              keep: {c.canonical.title}
+            </span>
+          </div>
+          <ul className="mt-dup-list">
+            {c.duplicates.map((d) => (
+              <li key={d.id} data-testid="duplicate-row" data-element-id={d.id}>
+                <span className="mt-dup-title" title={d.title}>
+                  {d.title}
+                </span>
+                <button
+                  type="button"
+                  className="mt-row-btn"
+                  data-testid="dedupe-one"
+                  disabled={busy}
+                  onClick={() => onDedupe([d.id], "Trashed a redundant copy")}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function OrphanPanel({
+  count,
+  bytes,
+  busy,
+  onCollect,
+}: {
+  count: number;
+  bytes: number;
+  busy: boolean;
+  onCollect: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  if (count === 0) return <EmptyRow message="No orphan media files." />;
+  return (
+    <div data-testid="orphan-panel">
+      <p className="mt-muted">
+        {count} vault files reference no live asset (the bytes a hard-purge left behind) —{" "}
+        {formatBytes(bytes)}. Reclaiming them is the one vault-side hard delete (it cannot be
+        undone, but it never touches a referenced file).
+      </p>
+      {confirming ? (
+        <div className="mt-confirm" data-testid="orphan-confirm">
+          <span>Permanently delete {count} orphan files?</span>
+          <button
+            type="button"
+            className="rv-repair__btn rv-repair__btn--danger"
+            data-testid="orphan-confirm-yes"
+            disabled={busy}
+            onClick={() => {
+              setConfirming(false);
+              onCollect();
+            }}
+          >
+            Delete {count} files
+          </button>
+          <button type="button" className="mt-row-btn" onClick={() => setConfirming(false)}>
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="rv-repair__btn"
+          data-testid="orphan-collect"
+          disabled={busy}
+          onClick={() => setConfirming(true)}
+        >
+          <Icon name="trash" size={13} />
+          Reclaim {formatBytes(bytes)}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function BrokenPanel({
+  rows,
+  busy,
+  onTrash,
+}: {
+  rows: readonly BrokenSourceRowSummary[] | null;
+  busy: boolean;
+  onTrash: (ids: string[]) => void;
+}) {
+  if (!rows) return <p className="mt-muted">Loading…</p>;
+  if (rows.length === 0) return <EmptyRow message="No broken sources." />;
+  return (
+    <div data-testid="broken-panel">
+      <ul className="mt-dup-list">
+        {rows.map((r) => (
+          <li key={r.source.id} data-testid="broken-row" data-element-id={r.source.id}>
+            <span className="mt-dup-title" title={r.source.title}>
+              {r.source.title}
+            </span>
+            <span className="badge badge--soft" data-testid="broken-reason">
+              {r.reason === "missingFile" ? "file missing" : "no snapshot"}
+            </span>
+            <Link to="/source/$id" params={{ id: r.source.id }} className="mt-row-btn">
+              Open
+            </Link>
+            <button
+              type="button"
+              className="mt-row-btn"
+              data-testid="broken-trash"
+              disabled={busy}
+              onClick={() => onTrash([r.source.id])}
+            >
+              Trash
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function SourcelessPanel({
+  rows,
+  busy,
+  onTrash,
+}: {
+  rows: readonly LineageGapRowSummary[] | null;
+  busy: boolean;
+  onTrash: (ids: string[]) => void;
+}) {
+  if (!rows) return <p className="mt-muted">Loading…</p>;
+  if (rows.length === 0) return <EmptyRow message="No cards without sources." />;
+  return (
+    <div data-testid="sourceless-panel">
+      <p className="mt-muted">
+        These cards trace to no source. Open one to attach a source (fix the lineage), or trash it —
+        a sourceless card may be intentional, so nothing is auto-deleted.
+      </p>
+      <ul className="mt-dup-list">
+        {rows.map((r) => (
+          <li key={r.card.id} data-testid="sourceless-row" data-element-id={r.card.id}>
+            <span className="mt-dup-title" title={r.card.title}>
+              {r.card.title}
+            </span>
+            <button
+              type="button"
+              className="mt-row-btn"
+              data-testid="sourceless-trash"
+              disabled={busy}
+              onClick={() => onTrash([r.card.id])}
+            >
+              Trash
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function LowValuePanel({
+  rows,
+  busy,
+  onPostpone,
+  onArchive,
+}: {
+  rows: readonly LowValueRowSummary[] | null;
+  busy: boolean;
+  onPostpone: (ids: string[]) => void;
+  onArchive: (ids: string[], mode: "trash" | "dismiss" | "retire") => void;
+}) {
+  if (!rows) return <p className="mt-muted">Loading…</p>;
+  if (rows.length === 0) return <EmptyRow message="No low-value, stale candidates." />;
+  const ids = rows.map((r) => r.element.id);
+  return (
+    <div data-testid="lowvalue-panel">
+      <div className="mt-bulkbar">
+        <button
+          type="button"
+          className="rv-repair__btn"
+          data-testid="lowvalue-postpone"
+          disabled={busy}
+          onClick={() => onPostpone(ids)}
+        >
+          <Icon name="hourglass" size={13} />
+          Postpone all {ids.length}
+        </button>
+        <button
+          type="button"
+          className="rv-repair__btn"
+          data-testid="lowvalue-dismiss"
+          disabled={busy}
+          onClick={() => onArchive(ids, "dismiss")}
+        >
+          <Icon name="archive" size={13} />
+          Dismiss all
+        </button>
+        <button
+          type="button"
+          className="rv-repair__btn"
+          data-testid="lowvalue-trash"
+          disabled={busy}
+          onClick={() => onArchive(ids, "trash")}
+        >
+          <Icon name="trash" size={13} />
+          Trash all
+        </button>
+      </div>
+      <ul className="mt-dup-list">
+        {rows.map((r) => (
+          <li key={r.element.id} data-testid="lowvalue-row" data-element-id={r.element.id}>
+            <span className="badge badge--soft">{r.element.priorityLabel ?? r.element.type}</span>
+            <span className="mt-dup-title" title={r.element.title}>
+              {r.element.title}
+            </span>
+            <span className="mt-muted">{r.daysSinceActivity}d stale</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function IntegrityCard({
+  running,
+  report,
+  onRun,
+}: {
+  running: boolean;
+  report: MaintenanceIntegrityResult | null;
+  onRun: () => void;
+}) {
+  const ok = report ? report.db.ok && report.vault.missing.length === 0 : null;
+  return (
+    <div className="mt-card mt-card--integrity" data-testid="metric-integrity" data-ok={ok}>
+      <div className="mt-card__head mt-card__head--static">
+        <span className="mt-card__icon">
+          <Icon name="shield" size={16} />
+        </span>
+        <span className="mt-card__title">DB + vault integrity</span>
+        {report ? (
+          <span
+            className={`mt-card__value ${ok ? "mt-ok" : "mt-bad"}`}
+            data-testid="integrity-status"
+          >
+            {ok ? "OK" : "Issues"}
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="rv-repair__btn"
+            data-testid="integrity-run"
+            disabled={running}
+            onClick={onRun}
+          >
+            {running ? "Checking…" : "Run check"}
+          </button>
+        )}
+      </div>
+      {report ? (
+        <div className="mt-card__body" data-testid="integrity-body">
+          <ul className="mt-int-list">
+            <li>
+              DB: <strong>{report.db.ok ? "ok" : report.db.integrityCheck.join(", ")}</strong> ·{" "}
+              {report.db.foreignKeyViolations} FK violations · {report.db.mode}
+            </li>
+            <li>
+              Vault: {report.vault.ok} intact · {report.vault.missing.length} missing ·{" "}
+              {report.vault.mismatched.length} mismatched · {report.vault.extraFiles.length} extra
+            </li>
+          </ul>
+          <button
+            type="button"
+            className="mt-row-btn"
+            data-testid="integrity-rerun"
+            onClick={onRun}
+          >
+            Re-run
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function EmptyRow({ message }: { message: string }) {
+  return (
+    <div className="mt-empty" data-testid="maintenance-empty-row">
+      <Icon name="checkCircle" size={16} />
+      <span>{message}</span>
+    </div>
+  );
+}

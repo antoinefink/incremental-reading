@@ -26,7 +26,7 @@
 
 import type { BlockId, ElementId, IsoTimestamp, SiblingGroupId } from "@interleave/core";
 import { PRIORITY_LABEL_VALUE } from "@interleave/core";
-import type { InterleaveDatabase } from "@interleave/db";
+import { elements, type InterleaveDatabase } from "@interleave/db";
 import {
   CardEditService,
   CardRetirementService,
@@ -39,6 +39,7 @@ import {
   TaskService,
   type TaskSummary,
 } from "@interleave/local-db";
+import { eq } from "drizzle-orm";
 
 /**
  * The fixed, deterministic content of the demo collection. Exported so tests can
@@ -905,5 +906,111 @@ export function seedDemoCollection(repos: Repositories, db: InterleaveDatabase):
       clozeCard: mathCodeClozeCard,
       qaCard: mathCodeQaCard,
     },
+  };
+}
+
+/** The element ids the maintenance fixture plants, returned for the e2e to assert on. */
+export interface MaintenanceCollection {
+  /** The two live sources sharing a canonical URL — a duplicate cluster. */
+  readonly duplicateSourceKeeper: ElementId;
+  readonly duplicateSourceRedundant: ElementId;
+  /** A hand-authored card with no source_location_id, source_id, or derived_from ancestor. */
+  readonly sourcelessCard: ElementId;
+  /** A live source whose snapshot asset row points at `brokenSnapshotRelPath` (file removed by the test). */
+  readonly brokenSource: ElementId;
+  /** The canonical relative path of the broken source's snapshot asset (delete this on disk). */
+  readonly brokenSnapshotRelPath: string;
+  /** A low-priority (D), stale source — a bulk-archive / postpone candidate. */
+  readonly lowValueSource: ElementId;
+}
+
+/** Options for {@link seedMaintenanceCollection}. */
+export interface SeedMaintenanceOptions {
+  /** The `asOf` the low-value staleness is dated against (defaults to a fixed past date). */
+  readonly staleBefore?: IsoTimestamp;
+}
+
+/**
+ * Plant the deterministic maintenance fixtures (T099) the unit + e2e tests need: a
+ * duplicate source pair (same canonical URL), a hand-authored sourceless card, a
+ * broken source (a snapshot asset row whose file the test deletes on disk), and a
+ * low-priority stale source. Built THROUGH the repositories (never raw inserts) so the
+ * op-log + lineage invariants hold. Correctness-sized — a 100k performance seed is
+ * T100's concern. Returns the ids so the e2e asserts by reference.
+ */
+export function seedMaintenanceCollection(
+  repos: Repositories,
+  db: InterleaveDatabase,
+  options: SeedMaintenanceOptions = {},
+): MaintenanceCollection {
+  // 1) A duplicate source pair under one canonical URL (keeper = newest accessed_at).
+  const dupUrl = "https://example.com/maintenance-duplicate";
+  const redundant = repos.sources.create({
+    title: "Duplicate article (older copy)",
+    priority: PRIORITY_LABEL_VALUE.C,
+    status: "active",
+    url: dupUrl,
+    canonicalUrl: dupUrl,
+    accessedAt: "2026-01-01T00:00:00.000Z" as IsoTimestamp,
+  });
+  const keeper = repos.sources.create({
+    title: "Duplicate article (newer copy)",
+    priority: PRIORITY_LABEL_VALUE.C,
+    status: "active",
+    url: dupUrl,
+    canonicalUrl: dupUrl,
+    accessedAt: "2026-05-01T00:00:00.000Z" as IsoTimestamp,
+  });
+
+  // 2) A hand-authored card with NO source_location_id, NO source_id, NO ancestor.
+  const sourceless = repos.review.createCard({
+    kind: "qa",
+    title: "Hand-authored sourceless card",
+    prompt: "A fact with no source.",
+    answer: "Right.",
+    priority: PRIORITY_LABEL_VALUE.B,
+    stage: "active_card",
+  });
+
+  // 3) A broken source: a live source + a snapshot asset row whose file the test
+  //    removes on disk (the row stays → verifyIntegrity reports it as `missing`).
+  const broken = repos.sources.create({
+    title: "Broken source (snapshot file removed)",
+    priority: PRIORITY_LABEL_VALUE.B,
+    status: "active",
+    url: "https://example.com/broken",
+    canonicalUrl: "https://example.com/broken",
+    accessedAt: "2026-03-01T00:00:00.000Z" as IsoTimestamp,
+  });
+  const brokenSnapshotRelPath = `sources/${broken.element.id}/cleaned.html`;
+  repos.assets.create({
+    owningElementId: broken.element.id,
+    kind: "source_html",
+    vaultRoot: "assets",
+    relativePath: brokenSnapshotRelPath,
+    contentHash: "sha256:maintenance-broken-snapshot",
+    mime: "text/html",
+    size: 64,
+  });
+
+  // 4) A low-priority (D), stale source — a bulk-archive / postpone candidate. Its
+  //    `updated_at` is backdated (a test-only direct write) so the staleness scan
+  //    picks it up regardless of the wall clock at run time.
+  const lowValue = repos.sources.create({
+    title: "Low-value stale source",
+    priority: PRIORITY_LABEL_VALUE.D,
+    status: "active",
+    reasonAdded: "Imported and forgotten.",
+  });
+  const stale = options.staleBefore ?? ("2026-01-01T00:00:00.000Z" as IsoTimestamp);
+  db.update(elements).set({ updatedAt: stale }).where(eq(elements.id, lowValue.element.id)).run();
+
+  return {
+    duplicateSourceKeeper: keeper.element.id,
+    duplicateSourceRedundant: redundant.element.id,
+    sourcelessCard: sourceless.element.id,
+    brokenSource: broken.element.id,
+    brokenSnapshotRelPath,
+    lowValueSource: lowValue.element.id,
   };
 }

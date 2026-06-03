@@ -103,7 +103,11 @@ import {
   optimizationSuggestionFromParts,
   type WorkloadChange,
 } from "@interleave/scheduler";
-import { seedDemoCollection } from "@interleave/testing";
+import {
+  type MaintenanceCollection,
+  seedDemoCollection,
+  seedMaintenanceCollection,
+} from "@interleave/testing";
 import type {
   AiApproveRequest,
   AiApproveResult,
@@ -367,6 +371,14 @@ import { EmbeddingService } from "./embedding-service";
 import { EpubImportService } from "./epub-import-service";
 import { type HighlightImportResult, HighlightImportService } from "./highlight-import-service";
 import type { JobRunner } from "./job-runner";
+import {
+  type BrokenSourceRow,
+  type IntegrityReport,
+  type MaintenanceBatchResult,
+  type MaintenanceDuplicateReport,
+  type MaintenanceReport,
+  MaintenanceService,
+} from "./maintenance-service";
 import { MediaClipService } from "./media-clip-service";
 import { MediaImportService } from "./media-import-service";
 import { OcrService } from "./ocr-service";
@@ -489,6 +501,12 @@ export class DbService {
    * that never touches the vault can still open the DB.
    */
   private assetVault: AssetVaultService | null = null;
+  /**
+   * The Maintenance composer (T099) — the read-only reports + cleanup actions behind
+   * the Maintenance view. Built lazily on first read; it composes THIS `DbService` (so
+   * it shares the open DB, repos, vault, and integrity pragmas).
+   */
+  private maintenance: MaintenanceService | null = null;
   /**
    * The PDF-import orchestrator (T064) — read + validate + stream the original PDF
    * into the vault + parse + create an `inbox` source. Built lazily on first read
@@ -768,6 +786,7 @@ export class DbService {
     this.undoService = null;
     this.urlImport = null;
     this.assetVault = null;
+    this.maintenance = null;
     this.pdfImport = null;
     this.epubImport = null;
     this.mediaImport = null;
@@ -834,6 +853,34 @@ export class DbService {
       busyTimeoutMs,
       appliedMigrations,
     };
+  }
+
+  /**
+   * Run the SQLite DB-integrity pragmas (T099) — READ-ONLY, via the SAME
+   * `sqlite.pragma(...)` access `getStatus`/`backupDatabaseTo` use. `quick_check` (the
+   * default) is fast and skips index-consistency; `integrity_check` (deep) is thorough
+   * but can take seconds on a 100k DB. Also runs `PRAGMA foreign_key_check` (count of
+   * violated rows — 0 with `foreign_keys = ON`). `ok` = the check returned exactly
+   * `["ok"]` AND there are no FK violations. These pragmas do NOT mutate.
+   */
+  checkDbIntegrity(deep = false): {
+    ok: boolean;
+    integrityCheck: string[];
+    foreignKeyViolations: number;
+    mode: "quick_check" | "integrity_check";
+  } {
+    const { sqlite } = this.require();
+    const mode = deep ? "integrity_check" : "quick_check";
+    // `PRAGMA (quick|integrity)_check` returns one row per problem, or a single
+    // `{ <pragma>: "ok" }` row when healthy.
+    const rows = sqlite.pragma(mode) as Array<Record<string, unknown>>;
+    const integrityCheck = rows.map((r) => String(Object.values(r)[0] ?? ""));
+    // `PRAGMA foreign_key_check` returns one row per violated row (empty when clean).
+    const fkRows = sqlite.pragma("foreign_key_check") as unknown[];
+    const foreignKeyViolations = Array.isArray(fkRows) ? fkRows.length : 0;
+    const ok =
+      integrityCheck.length === 1 && integrityCheck[0] === "ok" && foreignKeyViolations === 0;
+    return { ok, integrityCheck, foreignKeyViolations, mode };
   }
 
   /**
@@ -1344,6 +1391,103 @@ export class DbService {
       assetsDir: this.assetsDir,
     });
     return this.assetVault;
+  }
+
+  /**
+   * The Maintenance composer (T099), lazily built on first read. Composes THIS
+   * `DbService` (sharing the open DB, repos, vault, and the integrity pragmas), so it
+   * needs the same `assetsDir` the vault reports do — the getter surfaces a clear error
+   * if it is absent (a contract-only test that never touches the vault).
+   */
+  get maintenanceService(): MaintenanceService {
+    if (this.maintenance) return this.maintenance;
+    this.maintenance = new MaintenanceService({ dbService: this });
+    return this.maintenance;
+  }
+
+  // --- Maintenance reports (T099 — read-only, no operation_log) -------------
+
+  /** The Maintenance hub rollup — every report's COUNT + the integrity-not-run flag. */
+  async getMaintenanceReport(): Promise<MaintenanceReport> {
+    return this.maintenanceService.report();
+  }
+
+  /** The collection-wide duplicate cluster rollup (read-only). */
+  getMaintenanceDuplicates(): MaintenanceDuplicateReport {
+    return this.maintenanceService.duplicates();
+  }
+
+  /** Live cards with no resolvable source lineage (SURFACED, never auto-deleted). */
+  getMaintenanceCardsWithoutSources(): {
+    rows: ReturnType<MaintenanceService["cardsWithoutSources"]>["rows"];
+  } {
+    return this.maintenanceService.cardsWithoutSources();
+  }
+
+  /** Broken sources — live sources whose snapshot bytes are missing / absent. */
+  async getMaintenanceBrokenSources(): Promise<{ rows: BrokenSourceRow[] }> {
+    return this.maintenanceService.brokenSources();
+  }
+
+  /** Low-priority, stale candidates for bulk postpone / archive. */
+  getMaintenanceLowValue(request?: { asOf?: string | undefined; limit?: number | undefined }): {
+    rows: ReturnType<MaintenanceService["lowValueCandidates"]>["rows"];
+  } {
+    return this.maintenanceService.lowValueCandidates(request?.asOf, request?.limit);
+  }
+
+  /** The DB + vault integrity DEEP check (on-demand). Read-only. */
+  async getMaintenanceIntegrity(request?: {
+    deep?: boolean | undefined;
+  }): Promise<IntegrityReport> {
+    return this.maintenanceService.checkIntegrity(request?.deep ?? false);
+  }
+
+  // --- Maintenance actions (T099 — transactional, op-logged, undoable) ------
+
+  /** Dedup cleanup — soft-delete validated non-keeper duplicates in one batch. */
+  maintenanceDedupe(request: { removeIds: string[] }): MaintenanceBatchResult {
+    return this.maintenanceService.dedupeCleanup({
+      removeIds: request.removeIds as ElementId[],
+    });
+  }
+
+  /** Orphan-media cleanup — the confirmed vault GC + the vector prune. */
+  async maintenanceOrphanMedia(request: {
+    confirm: true;
+    relativePaths?: string[] | undefined;
+  }): Promise<{ removed: number; freedBytes: number; vectorsPruned: number }> {
+    return this.maintenanceService.orphanMediaCleanup({
+      confirm: request.confirm,
+      ...(request.relativePaths ? { relativePaths: request.relativePaths } : {}),
+    });
+  }
+
+  /** Bulk soft-delete (broken-source / sourceless-card trash) — one undoable batch. */
+  maintenanceBulkTrash(request: { ids: string[] }): MaintenanceBatchResult {
+    return this.maintenanceService.bulkTrash({ ids: request.ids as ElementId[] });
+  }
+
+  /** Bulk archive (trash / dismiss / retire) — one undoable batch. */
+  maintenanceBulkArchive(request: {
+    ids: string[];
+    mode: "trash" | "dismiss" | "retire";
+  }): MaintenanceBatchResult {
+    return this.maintenanceService.bulkArchive({
+      ids: request.ids as ElementId[],
+      mode: request.mode,
+    });
+  }
+
+  /** Bulk postpone (low-priority recede) — one undoable batch (cards FSRS / attention split). */
+  maintenanceBulkPostpone(request: {
+    ids: string[];
+    asOf?: string | undefined;
+  }): MaintenanceBatchResult {
+    return this.maintenanceService.bulkPostpone({
+      ids: request.ids as ElementId[],
+      ...(request.asOf ? { asOf: request.asOf } : {}),
+    });
   }
 
   /**
@@ -4834,6 +4978,20 @@ export class DbService {
     if (existing.length > 0) return false;
     seedDemoCollection(repos, this.require().db);
     return true;
+  }
+
+  /**
+   * Populate an EMPTY database with the T099 MAINTENANCE fixture (a duplicate source
+   * pair, a hand-authored sourceless card, a broken source whose snapshot file the
+   * e2e deletes on disk, and a low-priority stale source), so the Maintenance E2E has
+   * deterministic dead weight to find and reclaim. A no-op when any element exists.
+   * Opt-in via `INTERLEAVE_SEED_MAINTENANCE` in `bootstrap`; production never seeds.
+   * Returns the planted ids (incl. `brokenSnapshotRelPath`) or `null` when not empty.
+   */
+  seedMaintenanceIfEmpty(): MaintenanceCollection | null {
+    const repos = this.repos;
+    if (repos.elements.listByType("source").length > 0) return null;
+    return seedMaintenanceCollection(repos, this.require().db);
   }
 
   /** Cheap connectivity check used by `app.health()`. */

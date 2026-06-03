@@ -79,6 +79,11 @@ export const SECONDARY_NAV: readonly NavItem[] = [
   // `/analytics/sources` route so it highlights exclusively (a deeper route than
   // `/analytics`, which `resolveActiveNavId`'s longest-prefix rule already favours).
   { id: "source-yield", label: "Source yield", icon: "library", to: "/analytics/sources" },
+  // The Maintenance hub (T099) — the janitor's dashboard for a large collection
+  // (duplicates, orphan media, broken sources, lineage gaps, DB+vault integrity).
+  // Canonical owner of `/maintenance`; the leech/retired/stagnant views have longer
+  // `to` paths so the longest-prefix rule keeps each highlighting exclusively.
+  { id: "maintenance", label: "Maintenance", icon: "shield", to: "/maintenance", canonical: true },
   // The leech cleanup view (T040) — maintenance for repeatedly-failing cards. Lives
   // under the "Organize" group until the full M9 analytics/maintenance screen lands.
   { id: "leeches", label: "Leeches", icon: "leech", to: "/maintenance/leeches" },

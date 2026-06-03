@@ -1,0 +1,211 @@
+/**
+ * MaintenanceScreen component tests (T099).
+ *
+ * The maintenance LOGIC lives main-side (`packages/local-db` + the main
+ * `MaintenanceService`); this asserts the RENDERER seam of the janitor hub:
+ *  - each report card renders from the mocked `maintenance.report` counts;
+ *  - expanding a report lists its rows from the drill-down read;
+ *  - a cleanup action prompts/calls the right command and shows the Undo snackbar;
+ *  - the empty case shows the calm "Nothing to clean up" row;
+ *  - the integrity card runs on demand (not auto-run on open).
+ *
+ * Collaborators are mocked so the test exercises ONLY this component's wiring; no
+ * SQLite/IPC — the renderer is a pure UI consumer here.
+ */
+
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const h = vi.hoisted(() => ({
+  report: vi.fn(),
+  duplicates: vi.fn(),
+  cardsWithoutSources: vi.fn(),
+  brokenSources: vi.fn(),
+  lowValue: vi.fn(),
+  integrity: vi.fn(),
+  dedupe: vi.fn(),
+  orphanMedia: vi.fn(),
+  bulkTrash: vi.fn(),
+  bulkArchive: vi.fn(),
+  bulkPostpone: vi.fn(),
+  undoLast: vi.fn(),
+}));
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ children }: { children: ReactNode }) => <span>{children}</span>,
+}));
+
+vi.mock("../lib/appApi", async () => {
+  const actual = await vi.importActual<typeof import("../lib/appApi")>("../lib/appApi");
+  return {
+    ...actual,
+    isDesktop: () => true,
+    appApi: {
+      maintenance: {
+        report: h.report,
+        duplicates: h.duplicates,
+        cardsWithoutSources: h.cardsWithoutSources,
+        brokenSources: h.brokenSources,
+        lowValue: h.lowValue,
+        integrity: h.integrity,
+        dedupe: h.dedupe,
+        orphanMedia: h.orphanMedia,
+        bulkTrash: h.bulkTrash,
+        bulkArchive: h.bulkArchive,
+        bulkPostpone: h.bulkPostpone,
+      },
+      undoLast: h.undoLast,
+    },
+  };
+});
+
+import { MaintenanceScreen } from "./MaintenanceScreen";
+
+const FULL_REPORT = {
+  duplicateCount: 2,
+  cardsWithoutSourcesCount: 1,
+  orphanFileCount: 3,
+  orphanBytes: 4096,
+  lowValueCount: 2,
+  integrity: null,
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  h.report.mockResolvedValue(FULL_REPORT);
+  h.duplicates.mockResolvedValue({
+    sourceClusters: [
+      {
+        key: "https://example.com/x",
+        matchedBy: "canonicalUrl",
+        canonical: { id: "keep", type: "source", title: "Keeper", priority: 0.5, createdAt: "" },
+        duplicates: [
+          { id: "dup1", type: "source", title: "Dupe one", priority: 0.5, createdAt: "" },
+        ],
+      },
+    ],
+    cardClusters: [],
+    extractClusters: [],
+    totalDuplicates: 1,
+  });
+  h.cardsWithoutSources.mockResolvedValue({
+    rows: [
+      {
+        card: { id: "card1", type: "card", title: "Orphan card", priority: 0.5, createdAt: "" },
+        hasSourceLocation: false,
+        hasSourceAncestor: false,
+        createdAt: "",
+      },
+    ],
+  });
+  h.brokenSources.mockResolvedValue({
+    rows: [
+      {
+        source: { id: "src1", type: "source", title: "Broken src", priority: 0.5, createdAt: "" },
+        reason: "missingFile",
+        missingAssetIds: ["a1"],
+      },
+    ],
+  });
+  h.lowValue.mockResolvedValue({
+    rows: [
+      {
+        element: {
+          id: "lv1",
+          type: "source",
+          title: "Stale low",
+          priority: 0.1,
+          priorityLabel: "D",
+          createdAt: "",
+        },
+        lastActivityAt: "2026-01-01T00:00:00.000Z",
+        daysSinceActivity: 90,
+      },
+    ],
+  });
+  h.integrity.mockResolvedValue({
+    db: { ok: true, integrityCheck: ["ok"], foreignKeyViolations: 0, mode: "quick_check" },
+    vault: { ok: 5, mismatched: [], missing: [], extraFiles: [] },
+  });
+  h.dedupe.mockResolvedValue({ affected: 1, batchId: "b1" });
+  h.orphanMedia.mockResolvedValue({ removed: 3, freedBytes: 4096, vectorsPruned: 0 });
+  h.bulkTrash.mockResolvedValue({ affected: 1, batchId: "b2" });
+  h.bulkArchive.mockResolvedValue({ affected: 2, batchId: "b3" });
+  h.bulkPostpone.mockResolvedValue({ affected: 2, batchId: "b4" });
+  h.undoLast.mockResolvedValue({
+    undone: true,
+    count: 1,
+    label: "Restored",
+    opType: null,
+    elementId: null,
+  });
+});
+
+describe("MaintenanceScreen", () => {
+  it("renders each report card from the report counts", async () => {
+    render(<MaintenanceScreen />);
+    await waitFor(() => expect(screen.getByTestId("maintenance-grid")).toBeInTheDocument());
+    expect(screen.getByTestId("metric-duplicates-value").textContent).toContain("2");
+    expect(screen.getByTestId("metric-orphan-value").textContent).toContain("3");
+    expect(screen.getByTestId("metric-sourceless-value").textContent).toContain("1");
+    expect(screen.getByTestId("metric-lowvalue-value").textContent).toContain("2");
+    // Integrity is NOT auto-run — the Run check button is shown, no status yet.
+    expect(screen.getByTestId("integrity-run")).toBeInTheDocument();
+    expect(h.integrity).not.toHaveBeenCalled();
+  });
+
+  it("expands a report and lists its drill-down rows", async () => {
+    render(<MaintenanceScreen />);
+    await waitFor(() => expect(screen.getByTestId("maintenance-grid")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("metric-duplicates-toggle"));
+    await waitFor(() => expect(screen.getByTestId("duplicates-panel")).toBeInTheDocument());
+    expect(screen.getByTestId("duplicate-row")).toHaveAttribute("data-element-id", "dup1");
+    expect(screen.getByTestId("cluster-keeper").textContent).toContain("Keeper");
+  });
+
+  it("runs dedup cleanup and shows the Undo snackbar", async () => {
+    render(<MaintenanceScreen />);
+    await waitFor(() => expect(screen.getByTestId("maintenance-grid")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("metric-duplicates-toggle"));
+    await waitFor(() => expect(screen.getByTestId("dedupe-all")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("dedupe-all"));
+    await waitFor(() => expect(h.dedupe).toHaveBeenCalledWith({ removeIds: ["dup1"] }));
+    await waitFor(() =>
+      expect(screen.getByTestId("maintenance-snackbar-undo")).toBeInTheDocument(),
+    );
+    // The Undo button drives the shared command-level undo.
+    fireEvent.click(screen.getByTestId("maintenance-snackbar-undo"));
+    await waitFor(() => expect(h.undoLast).toHaveBeenCalled());
+  });
+
+  it("orphan-media cleanup is confirm-gated, then composes the GC", async () => {
+    render(<MaintenanceScreen />);
+    await waitFor(() => expect(screen.getByTestId("maintenance-grid")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("metric-orphan-toggle"));
+    await waitFor(() => expect(screen.getByTestId("orphan-collect")).toBeInTheDocument());
+    // First click asks to confirm; only the confirm actually runs the GC.
+    fireEvent.click(screen.getByTestId("orphan-collect"));
+    await waitFor(() => expect(screen.getByTestId("orphan-confirm")).toBeInTheDocument());
+    expect(h.orphanMedia).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("orphan-confirm-yes"));
+    await waitFor(() => expect(h.orphanMedia).toHaveBeenCalledWith({ confirm: true }));
+  });
+
+  it("the integrity card runs on demand", async () => {
+    render(<MaintenanceScreen />);
+    await waitFor(() => expect(screen.getByTestId("integrity-run")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("integrity-run"));
+    await waitFor(() => expect(h.integrity).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId("integrity-status").textContent).toBe("OK"));
+  });
+
+  it("shows the empty drill-down row when a report has nothing", async () => {
+    h.cardsWithoutSources.mockResolvedValue({ rows: [] });
+    render(<MaintenanceScreen />);
+    await waitFor(() => expect(screen.getByTestId("maintenance-grid")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("metric-sourceless-toggle"));
+    await waitFor(() => expect(screen.getByTestId("maintenance-empty-row")).toBeInTheDocument());
+  });
+});

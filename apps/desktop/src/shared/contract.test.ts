@@ -61,6 +61,14 @@ import {
   type JobsListResult,
   LibraryBrowseRequestSchema,
   LineageGetRequestSchema,
+  MaintenanceBulkArchiveRequestSchema,
+  MaintenanceBulkPostponeRequestSchema,
+  MaintenanceBulkTrashRequestSchema,
+  MaintenanceDedupeRequestSchema,
+  MaintenanceIntegrityRequestSchema,
+  MaintenanceLowValueRequestSchema,
+  MaintenanceOrphanMediaRequestSchema,
+  MaintenanceReportRequestSchema,
   MediaRefSchema,
   PickImportFileRequestSchema,
   QueueActRequestSchema,
@@ -278,6 +286,17 @@ describe("IPC channels", () => {
         "vault:verify",
         "vault:findOrphans",
         "vault:collectOrphans",
+        "maintenance:report",
+        "maintenance:duplicates",
+        "maintenance:cardsWithoutSources",
+        "maintenance:brokenSources",
+        "maintenance:integrity",
+        "maintenance:lowValue",
+        "maintenance:dedupe",
+        "maintenance:orphanMedia",
+        "maintenance:bulkTrash",
+        "maintenance:bulkArchive",
+        "maintenance:bulkPostpone",
         "menu:showShortcuts",
         "menu:createBackup",
       ].sort(),
@@ -2686,5 +2705,52 @@ describe("Review-mode selector schemas (T096)", () => {
       false,
     );
     expect(ReviewModeCountRequestSchema.safeParse({}).success).toBe(false); // missing selector
+  });
+});
+
+describe("Maintenance schemas (T099)", () => {
+  it("the read-only report requests accept void / optional args", () => {
+    expect(() => MaintenanceReportRequestSchema.parse(undefined)).not.toThrow();
+    expect(MaintenanceLowValueRequestSchema.parse(undefined)).toBeUndefined();
+    expect(MaintenanceLowValueRequestSchema.parse({ limit: 50 })?.limit).toBe(50);
+    expect(MaintenanceIntegrityRequestSchema.parse({ deep: true })?.deep).toBe(true);
+  });
+
+  it("orphan-media requires confirm: true (the destructive guard)", () => {
+    expect(MaintenanceOrphanMediaRequestSchema.parse({ confirm: true }).confirm).toBe(true);
+    expect(MaintenanceOrphanMediaRequestSchema.safeParse({ confirm: false }).success).toBe(false);
+    expect(MaintenanceOrphanMediaRequestSchema.safeParse({}).success).toBe(false);
+    // The relative-path allow-list is optional but typed.
+    expect(
+      MaintenanceOrphanMediaRequestSchema.parse({ confirm: true, relativePaths: ["a/b.bin"] })
+        .relativePaths,
+    ).toEqual(["a/b.bin"]);
+  });
+
+  it("dedupe / bulkTrash require a non-empty id list", () => {
+    expect(MaintenanceDedupeRequestSchema.parse({ removeIds: ["e1"] }).removeIds).toEqual(["e1"]);
+    expect(MaintenanceDedupeRequestSchema.safeParse({ removeIds: [] }).success).toBe(false);
+    expect(MaintenanceBulkTrashRequestSchema.parse({ ids: ["e1"] }).ids).toEqual(["e1"]);
+    expect(MaintenanceBulkTrashRequestSchema.safeParse({ ids: [] }).success).toBe(false);
+  });
+
+  it("bulkArchive accepts only the bounded mode enum", () => {
+    for (const mode of ["trash", "dismiss", "retire"] as const) {
+      expect(MaintenanceBulkArchiveRequestSchema.parse({ ids: ["e1"], mode }).mode).toBe(mode);
+    }
+    expect(
+      MaintenanceBulkArchiveRequestSchema.safeParse({ ids: ["e1"], mode: "nuke" }).success,
+    ).toBe(false);
+    expect(MaintenanceBulkArchiveRequestSchema.safeParse({ ids: ["e1"] }).success).toBe(false);
+  });
+
+  it("bulkPostpone takes an id list + an optional asOf", () => {
+    expect(MaintenanceBulkPostponeRequestSchema.parse({ ids: ["e1"] }).ids).toEqual(["e1"]);
+    expect(
+      MaintenanceBulkPostponeRequestSchema.parse({
+        ids: ["e1"],
+        asOf: "  2026-06-01T00:00:00.000Z  ",
+      }).asOf,
+    ).toBe("2026-06-01T00:00:00.000Z");
   });
 });

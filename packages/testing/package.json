@@ -21,6 +21,7 @@
   "dependencies": {
     "@interleave/core": "workspace:*",
     "@interleave/db": "workspace:*",
-    "@interleave/local-db": "workspace:*"
+    "@interleave/local-db": "workspace:*",
+    "drizzle-orm": "^0.45.2"
   }
 }

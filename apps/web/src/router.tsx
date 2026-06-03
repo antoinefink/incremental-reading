@@ -37,6 +37,7 @@ import { ConceptsScreen } from "./concepts/ConceptsScreen";
 import { BrowseScreen } from "./library/BrowseScreen";
 import { LibraryScreen } from "./library/LibraryScreen";
 import { LeechRemediation } from "./maintenance/LeechRemediation";
+import { MaintenanceScreen } from "./maintenance/MaintenanceScreen";
 import { RetiredCards } from "./maintenance/RetiredCards";
 import { StagnantExtracts } from "./maintenance/StagnantExtracts";
 import { HomeScreen } from "./pages/home/HomeScreen";
@@ -154,6 +155,21 @@ const reviewRoute = createRoute({
  * renderer holds no leech threshold, lineage, or scheduling logic, and no SQL. The
  * `/maintenance/leeches` path + `route-leech-cleanup` testid stay stable.
  */
+/**
+ * Maintenance hub (T099) — the janitor's dashboard for a large collection. Surfaces
+ * the read-only reports (duplicates, orphan media, broken sources, cards without
+ * sources, low-value candidates, DB + vault integrity) each paired with a confirmable,
+ * soft-delete/undoable cleanup action, and links the existing leech/retired/stagnant
+ * maintenance views + Trash. Registered BEFORE `/maintenance/leeches` so the literal
+ * `/maintenance` index resolves to the hub. All over the typed `appApi.maintenance.*`
+ * surface; the renderer holds no SQL, dedup, integrity, or scheduling logic.
+ */
+const maintenanceHubRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/maintenance",
+  component: MaintenanceScreen,
+});
+
 const leechCleanupRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/maintenance/leeches",
@@ -309,6 +325,7 @@ const routeTree = rootRoute.addChildren([
   synthesisNewRoute,
   synthesisRoute,
   reviewRoute,
+  maintenanceHubRoute,
   leechCleanupRoute,
   retiredCardsRoute,
   stagnantExtractsRoute,

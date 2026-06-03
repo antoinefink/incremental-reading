@@ -2042,6 +2042,190 @@ export interface VaultCollectOrphansResult {
 }
 
 // ---------------------------------------------------------------------------
+// maintenance.*  (T099 — large-collection maintenance reports + cleanup actions)
+// ---------------------------------------------------------------------------
+
+/**
+ * The Maintenance surface (T099) — the janitor's report + cleanup commands. Every
+ * REPORT is a read-only domain query (no `operation_log`); every ACTION is a
+ * transactional, op-logged, soft-delete / undoable mutation, with the ONLY hard deletes
+ * being the existing `trash.purge` (elements) + `vault.collectOrphans` (files). The
+ * destructive actions take explicit id lists / `confirm: z.literal(true)` (orphan
+ * media) / a bounded `mode` enum (`bulkArchive`). NO asset id crosses IPC as a request
+ * input (orphan media takes canonical relative paths; `missingAssetIds` is result-only)
+ * and there is NO generic `db.query`.
+ */
+
+/** A compact element descriptor in a maintenance report (no asset ids, no raw paths). */
+export interface MaintenanceRefSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly title: string;
+  readonly priority: number;
+  readonly priorityLabel?: string;
+  readonly createdAt: string;
+}
+
+/** One duplicate cluster: the keeper + the removable copies. */
+export interface DuplicateClusterSummary {
+  readonly key: string;
+  readonly matchedBy: "canonicalUrl" | "contentHash";
+  readonly canonical: MaintenanceRefSummary;
+  readonly duplicates: readonly MaintenanceRefSummary[];
+}
+
+/** The collection-wide duplicate rollup. */
+export interface DuplicateReportResult {
+  readonly sourceClusters: readonly DuplicateClusterSummary[];
+  readonly cardClusters: readonly DuplicateClusterSummary[];
+  readonly extractClusters: readonly DuplicateClusterSummary[];
+  readonly totalDuplicates: number;
+}
+
+/** `maintenance.report()` — the hub rollup (counts + integrity-not-run flag). */
+export const MaintenanceReportRequestSchema = z.void();
+export type MaintenanceReportRequest = z.infer<typeof MaintenanceReportRequestSchema>;
+
+export interface MaintenanceReportResult {
+  readonly duplicateCount: number;
+  readonly cardsWithoutSourcesCount: number;
+  readonly orphanFileCount: number;
+  readonly orphanBytes: number;
+  readonly lowValueCount: number;
+  /** `null` — the DB+vault integrity deep check is on-demand (not auto-run). */
+  readonly integrity: null;
+}
+
+/** `maintenance.duplicates()` — the full cluster drill-down. */
+export const MaintenanceDuplicatesRequestSchema = z.void();
+export type MaintenanceDuplicatesRequest = z.infer<typeof MaintenanceDuplicatesRequestSchema>;
+export type MaintenanceDuplicatesResult = DuplicateReportResult;
+
+/** One sourceless-card row (a lineage gap the user fixes or trashes). */
+export interface LineageGapRowSummary {
+  readonly card: MaintenanceRefSummary;
+  readonly hasSourceLocation: false;
+  readonly hasSourceAncestor: false;
+  readonly createdAt: string;
+}
+
+/** `maintenance.cardsWithoutSources()`. */
+export const MaintenanceCardsWithoutSourcesRequestSchema = z.void();
+export type MaintenanceCardsWithoutSourcesRequest = z.infer<
+  typeof MaintenanceCardsWithoutSourcesRequestSchema
+>;
+export interface MaintenanceCardsWithoutSourcesResult {
+  readonly rows: readonly LineageGapRowSummary[];
+}
+
+/** One broken-source row: a source you can no longer open. */
+export interface BrokenSourceRowSummary {
+  readonly source: MaintenanceRefSummary;
+  readonly reason: "missingFile" | "noSnapshot";
+  /** Result-only — never a request input (no asset id crosses IPC inbound). */
+  readonly missingAssetIds: readonly string[];
+}
+
+/** `maintenance.brokenSources()` — composes the SQL candidates + the vault disk join. */
+export const MaintenanceBrokenSourcesRequestSchema = z.void();
+export type MaintenanceBrokenSourcesRequest = z.infer<typeof MaintenanceBrokenSourcesRequestSchema>;
+export interface MaintenanceBrokenSourcesResult {
+  readonly rows: readonly BrokenSourceRowSummary[];
+}
+
+/** One low-value, stale candidate for the bulk postpone / archive action. */
+export interface LowValueRowSummary {
+  readonly element: MaintenanceRefSummary;
+  readonly lastActivityAt: string;
+  readonly daysSinceActivity: number;
+}
+
+/** `maintenance.lowValue({ asOf?, limit? })`. */
+export const MaintenanceLowValueRequestSchema = z
+  .object({
+    asOf: IsoTimestampInputSchema.optional(),
+    limit: z.number().int().positive().optional(),
+  })
+  .optional();
+export type MaintenanceLowValueRequest = z.infer<typeof MaintenanceLowValueRequestSchema>;
+export interface MaintenanceLowValueResult {
+  readonly rows: readonly LowValueRowSummary[];
+}
+
+/** `maintenance.integrity({ deep? })` — the on-demand deep DB+vault check. */
+export const MaintenanceIntegrityRequestSchema = z
+  .object({ deep: z.boolean().optional() })
+  .optional();
+export type MaintenanceIntegrityRequest = z.infer<typeof MaintenanceIntegrityRequestSchema>;
+export interface MaintenanceIntegrityResult {
+  readonly db: {
+    readonly ok: boolean;
+    readonly integrityCheck: readonly string[];
+    readonly foreignKeyViolations: number;
+    readonly mode: "quick_check" | "integrity_check";
+  };
+  readonly vault: {
+    readonly ok: number;
+    readonly mismatched: readonly string[];
+    readonly missing: readonly string[];
+    readonly extraFiles: readonly string[];
+  };
+}
+
+/** The shared shape of every bulk cleanup action's result. */
+export interface MaintenanceBatchResultSummary {
+  readonly affected: number;
+  readonly batchId: string;
+}
+
+/** `maintenance.dedupe({ removeIds })` — soft-delete validated non-keeper duplicates. */
+export const MaintenanceDedupeRequestSchema = z.object({
+  removeIds: z.array(ElementIdSchema).min(1),
+});
+export type MaintenanceDedupeRequest = z.infer<typeof MaintenanceDedupeRequestSchema>;
+export type MaintenanceDedupeResult = MaintenanceBatchResultSummary;
+
+/**
+ * `maintenance.orphanMedia({ confirm, relativePaths? })` — the confirmed vault GC +
+ * the vector prune. `confirm: z.literal(true)` makes the destructive sweep impossible
+ * to trigger accidentally; `relativePaths` are the canonical paths `vault.findOrphans`
+ * returned (no raw absolute path crosses IPC).
+ */
+export const MaintenanceOrphanMediaRequestSchema = z.object({
+  confirm: z.literal(true),
+  relativePaths: z.array(z.string()).optional(),
+});
+export type MaintenanceOrphanMediaRequest = z.infer<typeof MaintenanceOrphanMediaRequestSchema>;
+export interface MaintenanceOrphanMediaResult {
+  readonly removed: number;
+  readonly freedBytes: number;
+  readonly vectorsPruned: number;
+}
+
+/** `maintenance.bulkTrash({ ids })` — soft-delete a chosen id list as one batch. */
+export const MaintenanceBulkTrashRequestSchema = z.object({
+  ids: z.array(ElementIdSchema).min(1),
+});
+export type MaintenanceBulkTrashRequest = z.infer<typeof MaintenanceBulkTrashRequestSchema>;
+export type MaintenanceBulkTrashResult = MaintenanceBatchResultSummary;
+
+/** `maintenance.bulkArchive({ ids, mode })` — trash / dismiss / retire as one batch. */
+export const MaintenanceBulkArchiveRequestSchema = z.object({
+  ids: z.array(ElementIdSchema).min(1),
+  mode: z.enum(["trash", "dismiss", "retire"]),
+});
+export type MaintenanceBulkArchiveRequest = z.infer<typeof MaintenanceBulkArchiveRequestSchema>;
+export type MaintenanceBulkArchiveResult = MaintenanceBatchResultSummary;
+
+/** `maintenance.bulkPostpone({ ids, asOf? })` — recede low-priority items as one batch. */
+export const MaintenanceBulkPostponeRequestSchema = z.object({
+  ids: z.array(ElementIdSchema).min(1),
+  asOf: IsoTimestampInputSchema.optional(),
+});
+export type MaintenanceBulkPostponeRequest = z.infer<typeof MaintenanceBulkPostponeRequestSchema>;
+export type MaintenanceBulkPostponeResult = MaintenanceBatchResultSummary;
+
+// ---------------------------------------------------------------------------
 // capture.getPairing() / capture.regenerateToken() / capture.setEnabled()  (T062)
 // ---------------------------------------------------------------------------
 
@@ -5772,6 +5956,34 @@ export interface AppApi {
      * Never deletes a file any live asset row references. Returns the counts freed.
      */
     collectOrphans(request: VaultCollectOrphansRequest): Promise<VaultCollectOrphansResult>;
+  };
+  readonly maintenance: {
+    /** The Maintenance hub rollup (T099) — counts + the integrity-not-run flag; read-only. */
+    report(request?: MaintenanceReportRequest): Promise<MaintenanceReportResult>;
+    /** The collection-wide duplicate cluster rollup (T099); read-only. */
+    duplicates(request?: MaintenanceDuplicatesRequest): Promise<MaintenanceDuplicatesResult>;
+    /** Live cards with no resolvable source (T099) — surfaced, never auto-deleted; read-only. */
+    cardsWithoutSources(
+      request?: MaintenanceCardsWithoutSourcesRequest,
+    ): Promise<MaintenanceCardsWithoutSourcesResult>;
+    /** Broken sources (T099) — snapshot bytes missing / absent; read-only. */
+    brokenSources(
+      request?: MaintenanceBrokenSourcesRequest,
+    ): Promise<MaintenanceBrokenSourcesResult>;
+    /** Low-priority, stale candidates (T099) for bulk postpone / archive; read-only. */
+    lowValue(request?: MaintenanceLowValueRequest): Promise<MaintenanceLowValueResult>;
+    /** The on-demand deep DB + vault integrity check (T099); read-only. */
+    integrity(request?: MaintenanceIntegrityRequest): Promise<MaintenanceIntegrityResult>;
+    /** Dedup cleanup (T099) — soft-delete validated non-keeper duplicates; undoable. */
+    dedupe(request: MaintenanceDedupeRequest): Promise<MaintenanceDedupeResult>;
+    /** Orphan-media cleanup (T099) — the confirmed vault GC + vector prune. */
+    orphanMedia(request: MaintenanceOrphanMediaRequest): Promise<MaintenanceOrphanMediaResult>;
+    /** Bulk soft-delete (T099) — broken-source / sourceless-card trash; one undoable batch. */
+    bulkTrash(request: MaintenanceBulkTrashRequest): Promise<MaintenanceBulkTrashResult>;
+    /** Bulk archive (T099) — trash / dismiss / retire; one undoable batch. */
+    bulkArchive(request: MaintenanceBulkArchiveRequest): Promise<MaintenanceBulkArchiveResult>;
+    /** Bulk postpone (T099) — recede low-priority items; one undoable batch (FSRS/attention). */
+    bulkPostpone(request: MaintenanceBulkPostponeRequest): Promise<MaintenanceBulkPostponeResult>;
   };
   readonly menu: {
     /**

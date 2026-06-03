@@ -3594,3 +3594,38 @@ describe("DbService synthesis-note wiring (T095)", () => {
     }
   });
 });
+
+describe("DbService maintenance reads (T099)", () => {
+  it("returns typed report payloads over a seeded collection (with a vault dir)", async () => {
+    const assetsDir = path.join(dir, "assets");
+    fs.mkdirSync(assetsDir, { recursive: true });
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR, assetsDir });
+    seedDemoCollection(svc.repos, svc.raw.db);
+
+    const report = await svc.getMaintenanceReport();
+    expect(typeof report.duplicateCount).toBe("number");
+    expect(typeof report.cardsWithoutSourcesCount).toBe("number");
+    expect(typeof report.orphanFileCount).toBe("number");
+    expect(report.integrity).toBeNull();
+
+    const dup = svc.getMaintenanceDuplicates();
+    expect(Array.isArray(dup.sourceClusters)).toBe(true);
+    expect(Array.isArray(dup.cardClusters)).toBe(true);
+
+    const sourceless = svc.getMaintenanceCardsWithoutSources();
+    expect(Array.isArray(sourceless.rows)).toBe(true);
+
+    const broken = await svc.getMaintenanceBrokenSources();
+    expect(Array.isArray(broken.rows)).toBe(true);
+
+    const low = svc.getMaintenanceLowValue();
+    expect(Array.isArray(low.rows)).toBe(true);
+
+    const integrity = await svc.getMaintenanceIntegrity();
+    expect(integrity.db.ok).toBe(true);
+    expect(integrity.db.foreignKeyViolations).toBe(0);
+
+    svc.close();
+  });
+});

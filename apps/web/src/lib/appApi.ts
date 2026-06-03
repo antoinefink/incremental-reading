@@ -1335,6 +1335,144 @@ export interface VaultCollectOrphansResult {
 }
 
 // ---------------------------------------------------------------------------
+// maintenance.* — large-collection maintenance (T099). Read-only REPORTS +
+// transactional, op-logged, soft-delete / undoable cleanup ACTIONS. The only hard
+// deletes are the existing `trash.purge` + `vault.collectOrphans`. No raw path or
+// asset id crosses inbound; the renderer holds no SQL, dedup, or integrity logic.
+// ---------------------------------------------------------------------------
+
+/** A compact element descriptor in a maintenance report. */
+export interface MaintenanceRef {
+  readonly id: string;
+  readonly type: string;
+  readonly title: string;
+  readonly priority: number;
+  readonly priorityLabel?: string;
+  readonly createdAt: string;
+}
+
+/** One duplicate cluster: the keeper + the removable copies. */
+export interface DuplicateClusterSummary {
+  readonly key: string;
+  readonly matchedBy: "canonicalUrl" | "contentHash";
+  readonly canonical: MaintenanceRef;
+  readonly duplicates: readonly MaintenanceRef[];
+}
+
+/** The collection-wide duplicate rollup. */
+export interface DuplicateReportResult {
+  readonly sourceClusters: readonly DuplicateClusterSummary[];
+  readonly cardClusters: readonly DuplicateClusterSummary[];
+  readonly extractClusters: readonly DuplicateClusterSummary[];
+  readonly totalDuplicates: number;
+}
+
+/** The Maintenance hub rollup — every report's COUNT + the integrity-not-run flag. */
+export interface MaintenanceReportResult {
+  readonly duplicateCount: number;
+  readonly cardsWithoutSourcesCount: number;
+  readonly orphanFileCount: number;
+  readonly orphanBytes: number;
+  readonly lowValueCount: number;
+  /** `null` — the DB+vault integrity deep check is on-demand (not auto-run). */
+  readonly integrity: null;
+}
+
+/** One sourceless-card row (a lineage gap the user fixes or trashes). */
+export interface LineageGapRowSummary {
+  readonly card: MaintenanceRef;
+  readonly hasSourceLocation: false;
+  readonly hasSourceAncestor: false;
+  readonly createdAt: string;
+}
+
+export interface MaintenanceCardsWithoutSourcesResult {
+  readonly rows: readonly LineageGapRowSummary[];
+}
+
+/** One broken-source row: a source you can no longer open. */
+export interface BrokenSourceRowSummary {
+  readonly source: MaintenanceRef;
+  readonly reason: "missingFile" | "noSnapshot";
+  /** Result-only — never a request input. */
+  readonly missingAssetIds: readonly string[];
+}
+
+export interface MaintenanceBrokenSourcesResult {
+  readonly rows: readonly BrokenSourceRowSummary[];
+}
+
+/** One low-value, stale candidate for bulk postpone / archive. */
+export interface LowValueRowSummary {
+  readonly element: MaintenanceRef;
+  readonly lastActivityAt: string;
+  readonly daysSinceActivity: number;
+}
+
+export interface MaintenanceLowValueRequest {
+  readonly asOf?: string;
+  readonly limit?: number;
+}
+
+export interface MaintenanceLowValueResult {
+  readonly rows: readonly LowValueRowSummary[];
+}
+
+export interface MaintenanceIntegrityRequest {
+  readonly deep?: boolean;
+}
+
+export interface MaintenanceIntegrityResult {
+  readonly db: {
+    readonly ok: boolean;
+    readonly integrityCheck: readonly string[];
+    readonly foreignKeyViolations: number;
+    readonly mode: "quick_check" | "integrity_check";
+  };
+  readonly vault: {
+    readonly ok: number;
+    readonly mismatched: readonly string[];
+    readonly missing: readonly string[];
+    readonly extraFiles: readonly string[];
+  };
+}
+
+/** The shared shape of every bulk cleanup action's result. */
+export interface MaintenanceBatchResult {
+  readonly affected: number;
+  readonly batchId: string;
+}
+
+export interface MaintenanceDedupeRequest {
+  readonly removeIds: readonly string[];
+}
+
+export interface MaintenanceOrphanMediaRequest {
+  readonly confirm: true;
+  readonly relativePaths?: readonly string[];
+}
+
+export interface MaintenanceOrphanMediaResult {
+  readonly removed: number;
+  readonly freedBytes: number;
+  readonly vectorsPruned: number;
+}
+
+export interface MaintenanceBulkTrashRequest {
+  readonly ids: readonly string[];
+}
+
+export interface MaintenanceBulkArchiveRequest {
+  readonly ids: readonly string[];
+  readonly mode: "trash" | "dismiss" | "retire";
+}
+
+export interface MaintenanceBulkPostponeRequest {
+  readonly ids: readonly string[];
+  readonly asOf?: string;
+}
+
+// ---------------------------------------------------------------------------
 // capture.* — browser-extension pairing (T062). The TRUSTED desktop renderer
 // reads/regenerates the pairing token + toggles the loopback capture server.
 // The token is displayed for the user to paste into the extension; it is never
@@ -3467,6 +3605,30 @@ export interface AppApi {
     /** Remove confirmed orphan files (T059) — guarded by `confirm: true`. */
     collectOrphans(request: VaultCollectOrphansRequest): Promise<VaultCollectOrphansResult>;
   };
+  readonly maintenance: {
+    /** The Maintenance hub rollup (T099) — counts + the integrity-not-run flag; read-only. */
+    report(): Promise<MaintenanceReportResult>;
+    /** The collection-wide duplicate cluster rollup (T099); read-only. */
+    duplicates(): Promise<DuplicateReportResult>;
+    /** Live cards with no resolvable source (T099) — surfaced, never auto-deleted; read-only. */
+    cardsWithoutSources(): Promise<MaintenanceCardsWithoutSourcesResult>;
+    /** Broken sources (T099) — snapshot bytes missing / absent; read-only. */
+    brokenSources(): Promise<MaintenanceBrokenSourcesResult>;
+    /** Low-priority, stale candidates (T099) for bulk postpone / archive; read-only. */
+    lowValue(request?: MaintenanceLowValueRequest): Promise<MaintenanceLowValueResult>;
+    /** The on-demand deep DB + vault integrity check (T099); read-only. */
+    integrity(request?: MaintenanceIntegrityRequest): Promise<MaintenanceIntegrityResult>;
+    /** Dedup cleanup (T099) — soft-delete validated non-keeper duplicates; undoable. */
+    dedupe(request: MaintenanceDedupeRequest): Promise<MaintenanceBatchResult>;
+    /** Orphan-media cleanup (T099) — the confirmed vault GC + vector prune. */
+    orphanMedia(request: MaintenanceOrphanMediaRequest): Promise<MaintenanceOrphanMediaResult>;
+    /** Bulk soft-delete (T099) — broken-source / sourceless-card trash; one undoable batch. */
+    bulkTrash(request: MaintenanceBulkTrashRequest): Promise<MaintenanceBatchResult>;
+    /** Bulk archive (T099) — trash / dismiss / retire; one undoable batch. */
+    bulkArchive(request: MaintenanceBulkArchiveRequest): Promise<MaintenanceBatchResult>;
+    /** Bulk postpone (T099) — recede low-priority items; one undoable batch (FSRS/attention). */
+    bulkPostpone(request: MaintenanceBulkPostponeRequest): Promise<MaintenanceBatchResult>;
+  };
   readonly menu: {
     /** Subscribe to the native Help → "Keyboard shortcuts" menu item (T048). */
     onShowShortcuts(callback: () => void): () => void;
@@ -4422,6 +4584,48 @@ export const appApi = {
       return Promise.resolve({ removed: 0, freedBytes: 0 });
     }
     return window.appApi.vault.collectOrphans(request);
+  },
+  /**
+   * The Maintenance surface (T099) — the janitor's read-only reports + cleanup
+   * actions. The reports return empty payloads outside the desktop shell (no DB to
+   * scan); the actions are no-ops there. The renderer holds no SQL, dedup, integrity,
+   * or scheduling logic — every method routes to the typed main-side command.
+   */
+  get maintenance(): AppApi["maintenance"] {
+    if (isDesktop() && window.appApi?.maintenance) return window.appApi.maintenance;
+    const emptyBatch = (): Promise<MaintenanceBatchResult> =>
+      Promise.resolve({ affected: 0, batchId: "" });
+    return {
+      report: () =>
+        Promise.resolve({
+          duplicateCount: 0,
+          cardsWithoutSourcesCount: 0,
+          orphanFileCount: 0,
+          orphanBytes: 0,
+          lowValueCount: 0,
+          integrity: null,
+        }),
+      duplicates: () =>
+        Promise.resolve({
+          sourceClusters: [],
+          cardClusters: [],
+          extractClusters: [],
+          totalDuplicates: 0,
+        }),
+      cardsWithoutSources: () => Promise.resolve({ rows: [] }),
+      brokenSources: () => Promise.resolve({ rows: [] }),
+      lowValue: () => Promise.resolve({ rows: [] }),
+      integrity: () =>
+        Promise.resolve({
+          db: { ok: true, integrityCheck: ["ok"], foreignKeyViolations: 0, mode: "quick_check" },
+          vault: { ok: 0, mismatched: [], missing: [], extraFiles: [] },
+        }),
+      dedupe: emptyBatch,
+      orphanMedia: () => Promise.resolve({ removed: 0, freedBytes: 0, vectorsPruned: 0 }),
+      bulkTrash: emptyBatch,
+      bulkArchive: emptyBatch,
+      bulkPostpone: emptyBatch,
+    };
   },
   /**
    * Subscribe to the native Help → "Keyboard shortcuts" (⌘/) menu item (T048). The

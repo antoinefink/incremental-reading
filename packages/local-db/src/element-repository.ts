@@ -326,9 +326,14 @@ export class ElementRepository {
    * Soft-delete: set `deletedAt` + status `deleted`, never DELETE the row, and
    * log `soft_delete_element`. The element moves to the trash and stays
    * recoverable; lineage references remain valid.
+   *
+   * `opContext.batchId` (when set) is threaded into the `soft_delete_element`
+   * payload so a BULK soft-delete's N rows undo as ONE batch (T044/T099) — the same
+   * payload-enrichment pattern as `updateWithin`/`rescheduleWithin`, within the
+   * closed op set (NOT a new op type, NOT a migration).
    */
-  softDelete(id: ElementId): Element {
-    return this.db.transaction((tx) => this.softDeleteWithin(tx, id));
+  softDelete(id: ElementId, opContext?: OpContext): Element {
+    return this.db.transaction((tx) => this.softDeleteWithin(tx, id, opContext));
   }
 
   /**
@@ -337,8 +342,11 @@ export class ElementRepository {
    * retire the prior batch of `image_occlusion` cards in the SAME transaction that
    * regenerates a diagram's masks + new cards — so an edit-then-regenerate REPLACES
    * the cards atomically instead of accumulating orphan, mask-less cards.
+   *
+   * `opContext.batchId` (when set) is recorded in the op payload so the general
+   * `UndoService.undoLast` reverses an entire bulk sweep in one call (T099).
    */
-  softDeleteWithin(tx: DbClient, id: ElementId): Element {
+  softDeleteWithin(tx: DbClient, id: ElementId, opContext?: OpContext): Element {
     // Capture the PRE-IMAGE status so the Trash view + undo can restore the
     // element to where it was (the op payload is the undo/origin source of truth).
     const before = tx.select().from(elements).where(eq(elements.id, id)).get();
@@ -354,7 +362,12 @@ export class ElementRepository {
     new OperationLogRepository(tx).append(tx, {
       opType: "soft_delete_element",
       elementId: id,
-      payload: { id, deletedAt: ts, prev: { status: prevStatus } },
+      payload: {
+        id,
+        deletedAt: ts,
+        prev: { status: prevStatus },
+        ...(opContext?.batchId ? { batchId: opContext.batchId } : {}),
+      },
     });
     return rowToElement(row);
   }

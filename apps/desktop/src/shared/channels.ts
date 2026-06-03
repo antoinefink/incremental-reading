@@ -203,6 +203,24 @@ export const IPC_CHANNELS = {
   vaultVerify: "vault:verify",
   vaultFindOrphans: "vault:findOrphans",
   vaultCollectOrphans: "vault:collectOrphans",
+  // Large-collection maintenance (T099) — the janitor's report + cleanup surface.
+  // The REPORTS are read-only domain queries (no `operation_log`); the ACTIONS are
+  // transactional, op-logged, soft-delete / undoable — the ONLY hard deletes stay the
+  // existing `trash:purge` + `vault:collectOrphans`. `maintenance:report` is the hub
+  // rollup (counts + integrity-not-run flag); `maintenance:integrity` is the on-demand
+  // deep DB+vault check. No `db.query`, no raw filesystem path crosses IPC (orphan
+  // media takes the canonical relative paths `vault:findOrphans` returned).
+  maintenanceReport: "maintenance:report",
+  maintenanceDuplicates: "maintenance:duplicates",
+  maintenanceCardsWithoutSources: "maintenance:cardsWithoutSources",
+  maintenanceBrokenSources: "maintenance:brokenSources",
+  maintenanceIntegrity: "maintenance:integrity",
+  maintenanceLowValue: "maintenance:lowValue",
+  maintenanceDedupe: "maintenance:dedupe",
+  maintenanceOrphanMedia: "maintenance:orphanMedia",
+  maintenanceBulkTrash: "maintenance:bulkTrash",
+  maintenanceBulkArchive: "maintenance:bulkArchive",
+  maintenanceBulkPostpone: "maintenance:bulkPostpone",
   // One-way main → renderer event (T048): the native Help → "Keyboard shortcuts"
   // menu item asks the renderer to open the in-app cheat sheet. This is a SEND
   // channel (main → renderer), not an `invoke` handler — the preload exposes a
