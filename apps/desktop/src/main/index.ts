@@ -155,14 +155,29 @@ function bootstrap(): void {
       // The embed apply (T087) UPSERTs the worker's vector into the sqlite-vec
       // store (index path) or recovers a query vector (transient query path).
       getEmbeddingService: () => dbService.embeddingService,
+      // The ai apply (T093) persists the worker's suggestion into the `ai_suggestions`
+      // draft layer (no op-log; never schedules a card).
+      getAiService: () => dbService.aiService,
     }),
     workerPath: path.join(distDir, "job-worker.cjs"),
     // The vault root the OCR worker resolves its page-image path against (T066),
     // passed via the worker's env (never a persisted job payload).
     assetsDir: paths.assetsDir,
     // The model dir the embed worker (T087) resolves a real ONNX model from, via
-    // the same fork-env seam (`INTERLEAVE_MODEL_DIR`).
+    // the same fork-env seam (`INTERLEAVE_MODEL_DIR`). The AI worker (T093) reuses this
+    // root as `INTERLEAVE_AI_MODEL_DIR` for the local instruction model.
     modelDir: paths.modelsDir,
+    // The AI fork-env seam (T093): the user's OWN AI key + provider kind are baked into
+    // the single long-lived worker AT CONSTRUCTION when AI is enabled (the worker has no
+    // per-job env channel). They are read main-side from settings here and NEVER written
+    // to a persisted `jobs` row. Changing the key/enable later calls `restartWorker()`
+    // (gated on idle) so the new env takes effect.
+    ...(() => {
+      const s = dbService.repos.settings.getAppSettings();
+      return s.aiEnabled && s.aiApiKey
+        ? { aiApiKey: s.aiApiKey, aiProviderKind: s.aiProviderKind }
+        : { aiProviderKind: s.aiProviderKind };
+    })(),
     // Out-of-band secret seam (T087): the user's embedding-API key is read LIVE
     // from settings and merged into the `embed` worker payload AT POST TIME — it is
     // NEVER written to the persisted `jobs` row (the same secret-keeping discipline

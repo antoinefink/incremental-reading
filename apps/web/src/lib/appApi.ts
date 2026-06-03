@@ -124,10 +124,42 @@ export interface AppSettings {
   readonly embeddingModelId: string;
   /** First-run state for the local model (T087). */
   readonly embeddingModelDownloaded: boolean;
+  /** On-device AI assistance master switch (T093) — OFF BY DEFAULT. */
+  readonly aiEnabled: boolean;
+  /** Which provider runs the model (T093): local / anthropic / openai / managed_proxy. */
+  readonly aiProviderKind: AiProviderKind;
+  /** The optional first-party managed-proxy route (T093) — off by default (disclosed). */
+  readonly aiManagedProxyEnabled: boolean;
+  /** First-run state for the local instruction model (T093). */
+  readonly aiModelDownloaded: boolean;
+  /** The pinned local instruction model id (T093). */
+  readonly aiLocalModelId: string;
+  /**
+   * The user's OWN AI-API key (T093). Written main-side ONLY — the typed read PROJECTS
+   * it to `aiKeyConfigured` (the key is never returned to the renderer). This field is
+   * write-only from the UI's perspective; the renderer never reads back the value.
+   * It exists on {@link AppSettings} only so the renderer can WRITE it via the patch;
+   * the read results use {@link RendererSettings}, which has no key fields.
+   */
+  readonly aiApiKey: string;
 }
 
+/**
+ * The RENDERER-facing projection of {@link AppSettings} (T087/T093) — the shape the
+ * settings READ returns. The user's OWN keys (`aiApiKey`/`embeddingApiKey`) are MAIN-SIDE
+ * secrets, so they are stripped and replaced with write-only `*Configured` booleans: the
+ * renderer reads whether a key is set, never the plaintext key. The WRITE path still
+ * accepts the raw key via {@link AppSettings} (the patch).
+ */
+export type RendererSettings = Omit<AppSettings, "aiApiKey" | "embeddingApiKey"> & {
+  /** Whether the user's OWN embedding-API key is set (T087) — never the key itself. */
+  readonly embeddingApiKeyConfigured: boolean;
+  /** Whether the user's OWN AI-API key is set (T093) — never the key itself. */
+  readonly aiKeyConfigured: boolean;
+};
+
 export interface SettingsGetAllResult {
-  readonly settings: AppSettings;
+  readonly settings: RendererSettings;
 }
 
 export interface SettingsUpdateManyRequest {
@@ -135,7 +167,7 @@ export interface SettingsUpdateManyRequest {
 }
 
 export interface SettingsUpdateManyResult {
-  readonly settings: AppSettings;
+  readonly settings: RendererSettings;
 }
 
 // ---------------------------------------------------------------------------
@@ -1109,6 +1141,108 @@ export interface SourcesAcceptOcrRequest {
 
 export interface SourcesAcceptOcrResult {
   readonly accepted: boolean;
+}
+
+// --- AI-assisted distillation (T093/T094) ---
+
+/** The seven AI formulation actions (mirrors the core `AiActionType` union). */
+export type AiActionType =
+  | "explain"
+  | "simplify"
+  | "suggest_qa"
+  | "suggest_cloze"
+  | "detect_ambiguity"
+  | "propose_prerequisites"
+  | "summarize";
+
+/** The provider kind (mirrors the core `AiProviderKind` union). */
+export type AiProviderKind = "local" | "anthropic" | "openai" | "managed_proxy";
+
+/** A suggestion shape (mirrors the core `AiSuggestionKind` union). */
+export type AiSuggestionKind = "text" | "card_qa" | "card_cloze" | "prerequisite_list";
+
+/** Run an AI formulation action over a selected span (T093). */
+export interface AiRunRequest {
+  readonly owningElementId: string;
+  readonly action: AiActionType;
+  readonly sourceRef: {
+    readonly sourceElementId: string;
+    readonly blockIds: readonly string[];
+    readonly startOffset?: number | null;
+    readonly endOffset?: number | null;
+    readonly selectedText: string;
+    readonly context?: string;
+  };
+}
+
+export interface AiRunResult {
+  readonly jobId: string;
+}
+
+/** One card-quality check row (the same T035/T086 shape). */
+export interface AiQualityCheck {
+  readonly id: string;
+  readonly severity: "ok" | "warn" | "block";
+  readonly message: string;
+}
+
+/** A draft card carried in a card-shaped suggestion. */
+export interface AiDraftCard {
+  readonly kind: "qa" | "cloze";
+  readonly prompt?: string;
+  readonly answer?: string;
+  readonly cloze?: string;
+}
+
+/** A renderer-safe AI suggestion + its resolved grounding (T093/T094). NO key. */
+export interface AiSuggestionView {
+  readonly id: string;
+  readonly action: AiActionType;
+  readonly kind: AiSuggestionKind;
+  readonly text: string;
+  readonly cards: readonly AiDraftCard[];
+  readonly status: string;
+  readonly qualityChecks: readonly AiQualityCheck[];
+  readonly grounding: SourceRef;
+}
+
+export interface AiListRequest {
+  readonly elementId: string;
+}
+
+export interface AiListResult {
+  readonly suggestions: readonly AiSuggestionView[];
+}
+
+export interface AiApproveRequest {
+  readonly suggestionId: string;
+}
+
+export interface AiApproveResult {
+  readonly approved: boolean;
+  readonly cardId?: string;
+  readonly reason?: string;
+}
+
+export interface AiDismissRequest {
+  readonly suggestionId: string;
+}
+
+export interface AiDismissResult {
+  readonly dismissed: boolean;
+}
+
+/** The AI disabled-state + disclosure data (T093) — NO key (only `keyConfigured`). */
+export interface AiStatusResult {
+  readonly enabled: boolean;
+  readonly providerKind: AiProviderKind;
+  readonly keyConfigured: boolean;
+  readonly modelDownloaded: boolean;
+  readonly managedProxyEnabled: boolean;
+}
+
+export interface AiDownloadModelResult {
+  readonly downloaded: boolean;
 }
 
 /**
@@ -3011,6 +3145,14 @@ export interface AppApi {
     acceptOcr(request: SourcesAcceptOcrRequest): Promise<SourcesAcceptOcrResult>;
     dismissOcr(request: SourcesAcceptOcrRequest): Promise<{ dismissed: boolean }>;
   };
+  readonly ai: {
+    run(request: AiRunRequest): Promise<AiRunResult>;
+    list(request: AiListRequest): Promise<AiListResult>;
+    approveCard(request: AiApproveRequest): Promise<AiApproveResult>;
+    dismiss(request: AiDismissRequest): Promise<AiDismissResult>;
+    status(): Promise<AiStatusResult>;
+    downloadModel(): Promise<AiDownloadModelResult>;
+  };
   readonly capture: {
     getPairing(): Promise<CapturePairingResult>;
     regenerateToken(): Promise<CaptureRegenerateTokenResult>;
@@ -3456,6 +3598,34 @@ export const appApi = {
   /** Dismiss a page's OCR suggestion (T066) — sets `dismissed`. */
   dismissOcr(request: SourcesAcceptOcrRequest): Promise<{ dismissed: boolean }> {
     return requireAppApi().sources.dismissOcr(request);
+  },
+  /**
+   * Run an AI formulation action over a selected span (T093) — enqueues an `ai` job on
+   * the T058 runner (a local model OR the user's own-key call). DRAFTS ONLY: the result
+   * is an inert suggestion, never a scheduled card. Observe progress via `subscribeJobs`.
+   */
+  runAi(request: AiRunRequest): Promise<AiRunResult> {
+    return requireAppApi().ai.run(request);
+  },
+  /** The draft AI suggestions for an element + each one's resolved grounding (T093/T094). */
+  listAiSuggestions(request: AiListRequest): Promise<AiListResult> {
+    return requireAppApi().ai.list(request);
+  },
+  /** Approve a card-shaped suggestion → mint a PARKED, un-due `card_draft` (T093). */
+  approveAiCard(request: AiApproveRequest): Promise<AiApproveResult> {
+    return requireAppApi().ai.approveCard(request);
+  },
+  /** Dismiss a draft AI suggestion (T093) — soft. */
+  dismissAiSuggestion(request: AiDismissRequest): Promise<AiDismissResult> {
+    return requireAppApi().ai.dismiss(request);
+  },
+  /** The AI disabled-state + disclosure data (T093) — NO key (only `keyConfigured`). */
+  aiStatus(): Promise<AiStatusResult> {
+    return requireAppApi().ai.status();
+  },
+  /** Download / warm the local AI model (T093) — flips `aiModelDownloaded`. */
+  downloadAiModel(): Promise<AiDownloadModelResult> {
+    return requireAppApi().ai.downloadModel();
   },
   /** Read the browser-capture pairing state (token + enabled/running/port) (T062). */
   getCapturePairing(): Promise<CapturePairingResult> {

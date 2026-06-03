@@ -9,15 +9,18 @@
 import { describe, expect, it } from "vitest";
 import {
   appSettingsFromStored,
+  coerceAiProviderKind,
   coerceSettingsPatch,
   coerceSettingValue,
   DAILY_REVIEW_BUDGET_MAX,
   DAILY_REVIEW_BUDGET_MIN,
+  DEFAULT_AI_LOCAL_MODEL_ID,
   DEFAULT_APP_SETTINGS,
   DESIRED_RETENTION_MAX,
   DESIRED_RETENTION_MIN,
   isKeyboardLayout,
   isThemePreference,
+  projectToRendererSettings,
   SETTINGS_KEYS,
   settingsPatchToStored,
   sourcePriorityFromLabel,
@@ -49,6 +52,12 @@ describe("AppSettings defaults", () => {
       embeddingApiKey: "semantic.apiKey",
       embeddingModelId: "semantic.modelId",
       embeddingModelDownloaded: "semantic.modelDownloaded",
+      aiEnabled: "ai.enabled",
+      aiProviderKind: "ai.providerKind",
+      aiManagedProxyEnabled: "ai.managedProxyEnabled",
+      aiModelDownloaded: "ai.modelDownloaded",
+      aiLocalModelId: "ai.localModelId",
+      aiApiKey: "ai.apiKey",
     });
   });
 
@@ -204,6 +213,13 @@ describe("stored ↔ model round-trip", () => {
       embeddingApiKey: "",
       embeddingModelId: "local:all-MiniLM-L6-v2",
       embeddingModelDownloaded: false,
+      // Unset AI keys fall back to the OFF-by-default local-provider defaults (T093).
+      aiEnabled: false,
+      aiProviderKind: "local",
+      aiManagedProxyEnabled: false,
+      aiModelDownloaded: false,
+      aiLocalModelId: "local:Llama-3.2-3B-Instruct-Q4_K_M",
+      aiApiKey: "",
     });
   });
 
@@ -238,6 +254,13 @@ describe("stored ↔ model round-trip", () => {
       embeddingApiKey: "sk-user-own-key",
       embeddingModelId: "openai:text-embedding-3-small",
       embeddingModelDownloaded: true,
+      // AI settings (T093) round-trip through the JSON store too.
+      aiEnabled: true,
+      aiProviderKind: "anthropic" as const,
+      aiManagedProxyEnabled: true,
+      aiModelDownloaded: true,
+      aiLocalModelId: "local:Llama-3.2-3B-Instruct-Q4_K_M",
+      aiApiKey: "sk-user-own-ai-key",
     };
     const reloaded = appSettingsFromStored(settingsPatchToStored(original));
     expect(reloaded).toEqual(original);
@@ -268,5 +291,85 @@ describe("sourcePriorityFromLabel", () => {
   it("maps A/B/C/D to numeric priority bands", () => {
     expect(sourcePriorityFromLabel("A")).toBe(0.875);
     expect(sourcePriorityFromLabel("D")).toBe(0.125);
+  });
+});
+
+describe("AI settings (T093)", () => {
+  it("defaults AI off with the local provider + the pinned model id, no key", () => {
+    expect(DEFAULT_APP_SETTINGS.aiEnabled).toBe(false);
+    expect(DEFAULT_APP_SETTINGS.aiProviderKind).toBe("local");
+    expect(DEFAULT_APP_SETTINGS.aiManagedProxyEnabled).toBe(false);
+    expect(DEFAULT_APP_SETTINGS.aiModelDownloaded).toBe(false);
+    expect(DEFAULT_APP_SETTINGS.aiLocalModelId).toBe(DEFAULT_AI_LOCAL_MODEL_ID);
+    expect(DEFAULT_APP_SETTINGS.aiApiKey).toBe("");
+  });
+
+  it("coerces the provider kind, degrading an unknown value to local", () => {
+    expect(coerceAiProviderKind("anthropic")).toBe("anthropic");
+    expect(coerceAiProviderKind("openai")).toBe("openai");
+    expect(coerceAiProviderKind("managed_proxy")).toBe("managed_proxy");
+    expect(coerceAiProviderKind("gemini")).toBe("local");
+    expect(coerceAiProviderKind(42)).toBe("local");
+    expect(coerceSettingValue("aiProviderKind", "bogus")).toBe("local");
+  });
+
+  it("coerces aiEnabled / aiApiKey from a stored record (key is a bounded string)", () => {
+    expect(coerceSettingValue("aiEnabled", true)).toBe(true);
+    expect(coerceSettingValue("aiEnabled", "yes")).toBe(false);
+    expect(coerceSettingValue("aiApiKey", "sk-abc")).toBe("sk-abc");
+    expect(coerceSettingValue("aiApiKey", 123)).toBe("");
+  });
+
+  it("round-trips the AI settings through stored ↔ model", () => {
+    const stored = settingsPatchToStored({
+      aiEnabled: true,
+      aiProviderKind: "anthropic",
+      aiApiKey: "sk-secret",
+      aiManagedProxyEnabled: true,
+    });
+    expect(stored[SETTINGS_KEYS.aiEnabled]).toBe(true);
+    expect(stored[SETTINGS_KEYS.aiApiKey]).toBe("sk-secret");
+    const model = appSettingsFromStored({
+      [SETTINGS_KEYS.aiEnabled]: true,
+      [SETTINGS_KEYS.aiProviderKind]: "openai",
+      [SETTINGS_KEYS.aiApiKey]: "sk-xyz",
+    });
+    expect(model.aiEnabled).toBe(true);
+    expect(model.aiProviderKind).toBe("openai");
+    expect(model.aiApiKey).toBe("sk-xyz");
+  });
+});
+
+describe("projectToRendererSettings (T087/T093 own-key projection)", () => {
+  it("strips the plaintext own-keys and replaces them with *Configured booleans", () => {
+    const full = {
+      ...DEFAULT_APP_SETTINGS,
+      embeddingApiKey: "sk-embed-secret",
+      aiApiKey: "sk-ai-secret",
+    };
+    const projected = projectToRendererSettings(full);
+
+    // The plaintext keys are GONE — never returned across the IPC boundary.
+    expect(projected).not.toHaveProperty("aiApiKey");
+    expect(projected).not.toHaveProperty("embeddingApiKey");
+    // …replaced with write-only configured flags derived from whether a key is set.
+    expect(projected.aiKeyConfigured).toBe(true);
+    expect(projected.embeddingApiKeyConfigured).toBe(true);
+    // Every non-key field is carried through untouched.
+    expect(projected.dailyReviewBudget).toBe(DEFAULT_APP_SETTINGS.dailyReviewBudget);
+    expect(projected.aiEnabled).toBe(DEFAULT_APP_SETTINGS.aiEnabled);
+  });
+
+  it("reports configured=false for an empty / whitespace-only key", () => {
+    expect(
+      projectToRendererSettings({ ...DEFAULT_APP_SETTINGS, aiApiKey: "", embeddingApiKey: "" }),
+    ).toMatchObject({ aiKeyConfigured: false, embeddingApiKeyConfigured: false });
+    expect(
+      projectToRendererSettings({
+        ...DEFAULT_APP_SETTINGS,
+        aiApiKey: "   ",
+        embeddingApiKey: "\t\n",
+      }),
+    ).toMatchObject({ aiKeyConfigured: false, embeddingApiKeyConfigured: false });
   });
 });

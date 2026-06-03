@@ -12,6 +12,10 @@ import type { Job, JobJsonValue } from "@interleave/core";
 import { isYouTubeUrl } from "@interleave/importers";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import {
+  AiApproveRequestSchema,
+  AiDismissRequestSchema,
+  AiListRequestSchema,
+  AiRunRequestSchema,
   AnalyticsGetRequestSchema,
   BackupsCreateRequestSchema,
   BalanceGetRequestSchema,
@@ -629,6 +633,38 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.sourcesDismissOcr, (_event, rawRequest: unknown) => {
     const request = SourcesAcceptOcrRequestSchema.parse(rawRequest);
     return dbService.dismissOcr(request);
+  });
+
+  // AI-assisted distillation (T093). `ai.run` enqueues an `ai` job on the T058 runner
+  // (a local model OR the user's own-key call); the result is an inert DRAFT suggestion,
+  // never a scheduled card. The enqueue needs the runner present (mirrors `runOcr`).
+  ipcMain.handle(IPC_CHANNELS.aiRun, (_event, rawRequest: unknown) => {
+    requireRunner();
+    const request = AiRunRequestSchema.parse(rawRequest);
+    return dbService.runAi(request);
+  });
+  // The draft suggestions for an element + each one's resolved grounding (T094). Read-only.
+  ipcMain.handle(IPC_CHANNELS.aiList, (_event, rawRequest: unknown) => {
+    const request = AiListRequestSchema.parse(rawRequest);
+    return dbService.listAiSuggestions(request);
+  });
+  // Approve a card-shaped suggestion → mint a PARKED, un-due `card_draft` (drafts-only).
+  ipcMain.handle(IPC_CHANNELS.aiApproveCard, (_event, rawRequest: unknown) => {
+    const request = AiApproveRequestSchema.parse(rawRequest);
+    return dbService.approveAiCard(request);
+  });
+  // Dismiss a draft suggestion (soft).
+  ipcMain.handle(IPC_CHANNELS.aiDismiss, (_event, rawRequest: unknown) => {
+    const request = AiDismissRequestSchema.parse(rawRequest);
+    return dbService.dismissAiSuggestion(request);
+  });
+  // The AI disabled-state + disclosure data — NO key (only `keyConfigured`).
+  ipcMain.handle(IPC_CHANNELS.aiStatus, () => {
+    return dbService.aiStatus();
+  });
+  // Download / warm the local AI model — flips `aiModelDownloaded`.
+  ipcMain.handle(IPC_CHANNELS.aiDownloadModel, () => {
+    return dbService.downloadAiModel();
   });
 
   // Browser-capture pairing (T062). The TRUSTED desktop renderer reads the

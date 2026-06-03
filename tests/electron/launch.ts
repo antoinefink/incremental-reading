@@ -170,6 +170,12 @@ export interface LaunchOptions {
    * (the second picker is cancelled → a transcript-less import).
    */
   readonly subtitlesPath?: string;
+  /**
+   * Inject the DETERMINISTIC FAKE AI provider (T093) so the AI-distillation E2E runs
+   * the full flow with NO live model / network. Sets `INTERLEAVE_AI_FAKE=1` (honored
+   * only in the unpackaged build by the worker's provider factory). Defaults off.
+   */
+  readonly aiFake?: boolean;
 }
 
 /**
@@ -205,6 +211,10 @@ export async function launchApp(
       ...(options.ankiImportPath ? { INTERLEAVE_ANKI_IMPORT_PATH: options.ankiImportPath } : {}),
       ...(options.mediaImportPath ? { INTERLEAVE_MEDIA_IMPORT_PATH: options.mediaImportPath } : {}),
       ...(options.subtitlesPath ? { INTERLEAVE_SUBTITLES_PATH: options.subtitlesPath } : {}),
+      // Inject the DETERMINISTIC FAKE AI provider (T093) so the AI-distillation E2E
+      // exercises the full flow with NO live model / network. Honored only in the
+      // unpackaged build by the worker's provider factory.
+      ...(options.aiFake ? { INTERLEAVE_AI_FAKE: "1" } : {}),
       // Suppress the first-run onboarding overlay unless a spec opts in, so it
       // never covers the UI in the feature specs (all start empty). See main/index.ts.
       ...(options.showOnboarding ? {} : { INTERLEAVE_SUPPRESS_ONBOARDING: "1" }),

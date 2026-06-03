@@ -19,6 +19,12 @@
  */
 
 export {
+  type AiSuggestion,
+  type AiSuggestionGrounding,
+  AiSuggestionRepository,
+  type CreateAiSuggestionInput,
+} from "./ai-suggestion-repository";
+export {
   type AnalyticsOptions,
   AnalyticsService,
   type AnalyticsSummary,
@@ -355,9 +361,16 @@ export interface Repositories {
    * `add_relation`); generation is idempotent + priority-inherited.
    */
   readonly tasks: import("./task-service").TaskService;
+  /**
+   * The AI-suggestion DRAFT layer (T093/T094) — inert `ai_suggestions` rows the
+   * on-device AI runner produces. NO op-log (a transient draft/infra artifact, like a
+   * `jobs`/`ocr_pages` row); grounding stored separately from the model output.
+   */
+  readonly aiSuggestions: import("./ai-suggestion-repository").AiSuggestionRepository;
 }
 
 import type { InterleaveDatabase } from "@interleave/db";
+import { AiSuggestionRepository } from "./ai-suggestion-repository";
 import { AnalyticsService } from "./analytics-query";
 import { AssetRepository } from "./asset-repository";
 import { ConceptRepository } from "./concept-repository";
@@ -431,6 +444,7 @@ export function createRepositories(
     embeddings,
     semanticSearch: new SemanticSearchRepository(search, embeddings),
     tasks: new TaskService(db),
+    aiSuggestions: new AiSuggestionRepository(db),
     // Built last: it resolves an item's refblock through the SAME `resolveSourceRef`
     // the inspector/review/library use (needs the assembled repos), so it captures
     // `repos` for the lazy ref resolution. It is a DERIVED read — no op-log.

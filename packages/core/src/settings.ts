@@ -19,6 +19,7 @@
  * surfaced as A/B/C/D via `@interleave/core`'s priority helpers.
  */
 
+import { type AiProviderKind, isAiProviderKind } from "./ai";
 import { clampFactor, DEFAULT_IMPORT_BALANCE_FACTOR } from "./balance";
 import { clamp01 } from "./numeric";
 import { DEFAULT_PRIORITY, type Priority, type PriorityLabel, priorityFromLabel } from "./priority";
@@ -154,6 +155,88 @@ export interface AppSettings {
    * hanging).
    */
   readonly embeddingModelDownloaded: boolean;
+  /**
+   * On-device AI assistance master switch (T093). `false` by default — when off, the
+   * seven AI formulation actions are disabled, no model/API is called, and the
+   * distillation surface shows a calm "Turn on AI assistance in Settings" state. AI
+   * runs on the T058 background runner (a local model OR the user's own API key);
+   * off-by-default + drafts-only are load-bearing invariants.
+   */
+  readonly aiEnabled: boolean;
+  /**
+   * Which provider runs the model (T093): `"local"` (the bundled/downloaded on-device
+   * instruction model, run in the DB-free worker — the default, but its model needs a
+   * one-time download), `"anthropic"`/`"openai"` (the user's OWN-key HTTP call from the
+   * worker — works immediately once a key is set), or `"managed_proxy"` (the
+   * OFF-by-default first-party route, which discloses content is sent off-device). The
+   * recommended WORKING generation path is an own-key provider — see
+   * {@link aiLocalModelId}.
+   */
+  readonly aiProviderKind: AiProviderKind;
+  /**
+   * The optional first-party managed-proxy route (T093), `false` by default. Enabling
+   * it routes AI calls through the future T051 backup server and is gated by a confirm
+   * dialog DISCLOSING that content is sent off-device. The proxy provider throws
+   * `AiProxyUnavailableError` until the server `/ai/complete` route lands.
+   */
+  readonly aiManagedProxyEnabled: boolean;
+  /**
+   * First-run state for the local instruction model (T093): `false` until the one-time
+   * download-on-first-enable completes (the model is NOT bundled — it streams into
+   * `<dataDir>/models/<modelId>/`). Until then every action stays disabled with a
+   * "downloading model…" affordance. A user with only an own-key configured skips the
+   * download entirely.
+   */
+  readonly aiModelDownloaded: boolean;
+  /**
+   * The pinned local instruction model id (T093), default
+   * `"local:Llama-3.2-3B-Instruct-Q4_K_M"` — identifies the model dir + the download.
+   * The on-device instruction model is the EXPLICITLY-EXPERIMENTAL option (CPU-only
+   * generation is weaker/slower than an own-key call); the own-key providers are the
+   * recommended default generation path and need no download.
+   */
+  readonly aiLocalModelId: string;
+  /**
+   * The user's OWN AI-API key (T093), used only for `aiProviderKind` `"anthropic"` /
+   * `"openai"`. Stored in SQLite settings on the user's own device, written MAIN-SIDE
+   * ONLY. The load-bearing invariant: it is NEVER returned to the renderer (the typed
+   * settings read PROJECTS it to a `aiKeyConfigured: boolean`) and NEVER written to a
+   * persisted `jobs` row — it is baked into the worker's fork env when AI is enabled.
+   * Empty by default.
+   */
+  readonly aiApiKey: string;
+}
+
+/**
+ * The RENDERER-facing projection of {@link AppSettings} (T087/T093). The user's OWN
+ * keys (`aiApiKey`, `embeddingApiKey`) are MAIN-SIDE secrets — they must NEVER cross
+ * the trusted/untrusted boundary in plaintext. So the typed settings read/write the
+ * renderer sees swaps each raw key for a write-only `*Configured: boolean` derived
+ * from whether a non-empty key is set. The renderer reads the boolean (to show
+ * "key configured") and WRITES the key via the patch, but never reads the value back.
+ * `projectToRendererSettings` is the single choke point that performs this projection.
+ */
+export type RendererSettings = Omit<AppSettings, "aiApiKey" | "embeddingApiKey"> & {
+  /** Whether the user's OWN embedding-API key is set (T087) — never the key itself. */
+  readonly embeddingApiKeyConfigured: boolean;
+  /** Whether the user's OWN AI-API key is set (T093) — never the key itself. */
+  readonly aiKeyConfigured: boolean;
+};
+
+/**
+ * Project the full main-side {@link AppSettings} to the renderer-safe
+ * {@link RendererSettings}: strip the plaintext `aiApiKey`/`embeddingApiKey` and
+ * replace them with `aiKeyConfigured`/`embeddingApiKeyConfigured` booleans. This is the
+ * load-bearing T087/T093 invariant — the own-keys are write-only from the renderer's
+ * perspective and are never returned in plaintext.
+ */
+export function projectToRendererSettings(settings: AppSettings): RendererSettings {
+  const { aiApiKey, embeddingApiKey, ...rest } = settings;
+  return {
+    ...rest,
+    embeddingApiKeyConfigured: embeddingApiKey.trim().length > 0,
+    aiKeyConfigured: aiApiKey.trim().length > 0,
+  };
 }
 
 /**
@@ -180,6 +263,12 @@ export const SETTINGS_KEYS = {
   embeddingApiKey: "semantic.apiKey",
   embeddingModelId: "semantic.modelId",
   embeddingModelDownloaded: "semantic.modelDownloaded",
+  aiEnabled: "ai.enabled",
+  aiProviderKind: "ai.providerKind",
+  aiManagedProxyEnabled: "ai.managedProxyEnabled",
+  aiModelDownloaded: "ai.modelDownloaded",
+  aiLocalModelId: "ai.localModelId",
+  aiApiKey: "ai.apiKey",
 } as const satisfies Record<keyof AppSettings, string>;
 
 /**
@@ -193,6 +282,32 @@ export const SETTINGS_KEYS = {
  * (`local:minilm-hash-384`, `FALLBACK_MODEL_ID`) so the two spaces are never KNN-mixed.
  */
 export const DEFAULT_EMBEDDING_MODEL_ID = "local:all-MiniLM-L6-v2";
+
+/**
+ * The pinned local instruction-model id (T093). `node-llama-cpp` running
+ * `Llama-3.2-3B-Instruct` Q4_K_M GGUF (~2 GB int4) is the named on-device generation
+ * model — the explicitly-experimental option (CPU-only output is best-effort). The id
+ * identifies the model dir (`<dataDir>/models/<modelId>/`) + the one-time download. The
+ * own-key providers (Anthropic/OpenAI) are the recommended default generation path and
+ * need no download. The local provider MAY ship as a reserved stub until the
+ * `node-llama-cpp` integration lands.
+ */
+export const DEFAULT_AI_LOCAL_MODEL_ID = "local:Llama-3.2-3B-Instruct-Q4_K_M";
+
+/** Maximum length of the user's AI-API key (chars). */
+export const AI_API_KEY_MAX = 512;
+
+/** Maximum length of the local AI model id (chars). */
+export const AI_LOCAL_MODEL_ID_MAX = 128;
+
+/**
+ * Coerce an arbitrary stored value into a valid {@link AiProviderKind} (T093) — the
+ * single choke point that keeps a corrupt/legacy provider value from reaching the
+ * provider factory. An unknown kind degrades to `"local"` (the default).
+ */
+export function coerceAiProviderKind(raw: unknown): AiProviderKind {
+  return isAiProviderKind(raw) ? raw : "local";
+}
 
 /**
  * The defaults used when a setting has never been written. A brand-new database
@@ -227,6 +342,16 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   embeddingApiKey: "",
   embeddingModelId: DEFAULT_EMBEDDING_MODEL_ID,
   embeddingModelDownloaded: false,
+  // AI assistance (T093) — OFF BY DEFAULT. Nothing runs until the user opts in AND
+  // configures a provider. The default provider kind is `"local"` (its model needs a
+  // one-time download), but the recommended working path is an own-key provider. The
+  // managed proxy is off until explicitly enabled (with a content-is-sent disclosure).
+  aiEnabled: false,
+  aiProviderKind: "local",
+  aiManagedProxyEnabled: false,
+  aiModelDownloaded: false,
+  aiLocalModelId: DEFAULT_AI_LOCAL_MODEL_ID,
+  aiApiKey: "",
 };
 
 /** The valid embedding-provider values (the `semantic.provider` setting). */
@@ -411,6 +536,27 @@ export function coerceSettingValue<K extends keyof AppSettings>(
       ) as AppSettings[K];
     case "embeddingModelDownloaded":
       return (typeof raw === "boolean" ? raw : fallback) as AppSettings[K];
+    case "aiEnabled":
+      return (typeof raw === "boolean" ? raw : fallback) as AppSettings[K];
+    case "aiProviderKind":
+      // An unknown/legacy provider kind degrades to `"local"` (the default) so a
+      // corrupt value never reaches the provider factory.
+      return coerceAiProviderKind(raw) as AppSettings[K];
+    case "aiManagedProxyEnabled":
+      return (typeof raw === "boolean" ? raw : fallback) as AppSettings[K];
+    case "aiModelDownloaded":
+      return (typeof raw === "boolean" ? raw : fallback) as AppSettings[K];
+    case "aiLocalModelId":
+      // A non-empty bounded string, else the canonical default model id.
+      return (
+        typeof raw === "string" && raw.trim().length > 0
+          ? raw.trim().slice(0, AI_LOCAL_MODEL_ID_MAX)
+          : fallback
+      ) as AppSettings[K];
+    case "aiApiKey":
+      // A bounded string; a non-string degrades to the empty default so a corrupt
+      // value never reaches the worker's provider call. Written main-side only.
+      return (typeof raw === "string" ? raw.slice(0, AI_API_KEY_MAX) : fallback) as AppSettings[K];
     default:
       return fallback;
   }
@@ -478,6 +624,18 @@ export function appSettingsFromStored(stored: Readonly<Record<string, unknown>>)
       "embeddingModelDownloaded",
       stored[SETTINGS_KEYS.embeddingModelDownloaded],
     ),
+    aiEnabled: coerceSettingValue("aiEnabled", stored[SETTINGS_KEYS.aiEnabled]),
+    aiProviderKind: coerceSettingValue("aiProviderKind", stored[SETTINGS_KEYS.aiProviderKind]),
+    aiManagedProxyEnabled: coerceSettingValue(
+      "aiManagedProxyEnabled",
+      stored[SETTINGS_KEYS.aiManagedProxyEnabled],
+    ),
+    aiModelDownloaded: coerceSettingValue(
+      "aiModelDownloaded",
+      stored[SETTINGS_KEYS.aiModelDownloaded],
+    ),
+    aiLocalModelId: coerceSettingValue("aiLocalModelId", stored[SETTINGS_KEYS.aiLocalModelId]),
+    aiApiKey: coerceSettingValue("aiApiKey", stored[SETTINGS_KEYS.aiApiKey]),
   };
 }
 

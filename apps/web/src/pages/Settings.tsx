@@ -25,6 +25,7 @@ import {
   type BackupsCreateResult,
   type CapturePairingResult,
   isDesktop,
+  type RendererSettings,
   type ThemePreference,
 } from "../lib/appApi";
 import { SETTINGS_CHANGED_EVENT } from "../shell/nav";
@@ -43,8 +44,13 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(1)} ${units[unit]}`;
 }
 
-/** Local fallback defaults mirroring `@interleave/core`'s DEFAULT_APP_SETTINGS. */
-const FALLBACK_SETTINGS: AppSettings = {
+/**
+ * Local fallback defaults mirroring `@interleave/core`'s DEFAULT_APP_SETTINGS. Typed as
+ * the RENDERER projection ({@link RendererSettings}) — the user's OWN keys are MAIN-SIDE
+ * secrets, so the renderer state holds the write-only `*Configured` booleans, never the
+ * plaintext keys.
+ */
+const FALLBACK_SETTINGS: RendererSettings = {
   dailyReviewBudget: 60,
   defaultDesiredRetention: 0.9,
   defaultTopicIntervalDays: 7,
@@ -61,9 +67,15 @@ const FALLBACK_SETTINGS: AppSettings = {
   fsrsParamsGlobal: null,
   semanticSearchEnabled: false,
   embeddingProvider: "local",
-  embeddingApiKey: "",
+  embeddingApiKeyConfigured: false,
   embeddingModelId: "local:minilm-hash-384",
   embeddingModelDownloaded: false,
+  aiEnabled: false,
+  aiProviderKind: "local",
+  aiManagedProxyEnabled: false,
+  aiModelDownloaded: false,
+  aiLocalModelId: "local:Llama-3.2-3B-Instruct-Q4_K_M",
+  aiKeyConfigured: false,
 };
 
 /** Max length of the display name (mirrors `@interleave/core` `DISPLAY_NAME_MAX`). */
@@ -270,9 +282,12 @@ function SemanticSearchPanel({
   settings,
   patch,
 }: {
-  settings: AppSettings;
+  settings: RendererSettings;
   patch: (next: Partial<AppSettings>) => Promise<void>;
 }) {
+  // The user's OWN embedding key is write-only (T087) — the renderer never reads it back.
+  // It tracks the input locally + persists on save, mirroring the AI key field.
+  const [embeddingKeyInput, setEmbeddingKeyInput] = useState("");
   const [status, setStatus] = useState<{
     vecAvailable: boolean;
     embedded: number;
@@ -384,16 +399,35 @@ function SemanticSearchPanel({
       {settings.embeddingProvider === "api" ? (
         <SettingRow
           label="Embedding API key"
-          hint="Your own provider key. Stored in this vault's settings only."
+          hint={
+            settings.embeddingApiKeyConfigured
+              ? "A key is configured (stored in this vault only; never shown). Enter a new value to replace it."
+              : "Your own provider key. Stored in this vault's settings only — never returned to the UI."
+          }
         >
-          <input
-            type="password"
-            data-testid="setting-embedding-api-key"
-            value={settings.embeddingApiKey}
-            placeholder="sk-…"
-            onChange={(e) => void patch({ embeddingApiKey: e.target.value })}
-            className="w-48 rounded-md border border-border bg-surface px-2.5 py-1 text-sm text-text placeholder:text-text-3 focus:outline-none focus:ring-2 focus:ring-accent"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="password"
+              data-testid="setting-embedding-api-key"
+              value={embeddingKeyInput}
+              placeholder={settings.embeddingApiKeyConfigured ? "•••• configured" : "sk-…"}
+              onChange={(e) => setEmbeddingKeyInput(e.target.value)}
+              className="w-40 rounded-md border border-border bg-surface px-2.5 py-1 text-sm text-text placeholder:text-text-3 focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+            <button
+              type="button"
+              data-testid="setting-embedding-save-key"
+              onClick={() => {
+                const trimmed = embeddingKeyInput.trim();
+                if (trimmed.length === 0) return;
+                void patch({ embeddingApiKey: trimmed });
+                setEmbeddingKeyInput("");
+              }}
+              className="rounded-md border border-border bg-surface px-3 py-1 text-sm text-text hover:bg-surface-2"
+            >
+              Save
+            </button>
+          </div>
         </SettingRow>
       ) : null}
 
@@ -421,9 +455,187 @@ function SemanticSearchPanel({
   );
 }
 
+/**
+ * The "AI assistance" settings section (T093). On-device + OFF BY DEFAULT: the switch
+ * turns on the seven AI formulation actions; the provider picker + the WRITE-ONLY key
+ * field let a user bring their OWN key (stored in SQLite only, read back as
+ * `keyConfigured`, never echoed). The local model is the explicitly-experimental option
+ * (a one-time download); the managed proxy is behind a content-is-sent disclosure
+ * confirm. Pure UI — one command per action; no model/SQL/key in React.
+ */
+function AiAssistancePanel({
+  settings,
+  patch,
+}: {
+  settings: RendererSettings;
+  patch: (next: Partial<AppSettings>) => Promise<void>;
+}) {
+  const [status, setStatus] = useState<{
+    enabled: boolean;
+    providerKind: string;
+    keyConfigured: boolean;
+    modelDownloaded: boolean;
+    managedProxyEnabled: boolean;
+  } | null>(null);
+  const [keyInput, setKeyInput] = useState("");
+  const [downloading, setDownloading] = useState(false);
+
+  const refreshStatus = useCallback(async () => {
+    if (!isDesktop()) return;
+    try {
+      setStatus(await appApi.aiStatus());
+    } catch {
+      setStatus(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshStatus();
+  }, [refreshStatus]);
+
+  const onToggle = useCallback(
+    async (enabled: boolean) => {
+      await patch({ aiEnabled: enabled });
+      await refreshStatus();
+    },
+    [patch, refreshStatus],
+  );
+
+  const onSaveKey = useCallback(async () => {
+    if (keyInput.trim().length === 0) return;
+    await patch({ aiApiKey: keyInput.trim() });
+    setKeyInput("");
+    await refreshStatus();
+  }, [keyInput, patch, refreshStatus]);
+
+  const onDownloadModel = useCallback(async () => {
+    setDownloading(true);
+    try {
+      await appApi.downloadAiModel();
+      await refreshStatus();
+    } finally {
+      setDownloading(false);
+    }
+  }, [refreshStatus]);
+
+  const onToggleProxy = useCallback(
+    async (enabled: boolean) => {
+      // Enabling the managed proxy DISCLOSES that content is sent off-device.
+      if (enabled) {
+        const ok = window.confirm(
+          "Enabling the managed proxy routes your selected text to the first-party server " +
+            "to generate suggestions. Content is sent off-device. Continue?",
+        );
+        if (!ok) return;
+      }
+      await patch({ aiManagedProxyEnabled: enabled });
+      await refreshStatus();
+    },
+    [patch, refreshStatus],
+  );
+
+  const isLocal = settings.aiProviderKind === "local";
+  const isOwnKey = settings.aiProviderKind === "anthropic" || settings.aiProviderKind === "openai";
+
+  return (
+    <SectionPanel title="AI assistance">
+      <SettingRow
+        label="On-device AI assistance"
+        hint="Help formulate cards (explain / simplify / suggest Q&A / cloze / detect ambiguity / prerequisites / summarize) over a selected span. Every suggestion is a DRAFT — it never schedules a card. Runs with a local model or your OWN API key. Off by default."
+      >
+        <Toggle
+          name="setting-ai-enabled"
+          checked={settings.aiEnabled}
+          onChange={(value) => void onToggle(value)}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label="AI provider"
+        hint="Local runs an experimental on-device model (a one-time download). Anthropic / OpenAI use your OWN key — stored on this device only, never sent to us."
+      >
+        <Segmented
+          name="setting-ai-provider"
+          value={settings.aiProviderKind}
+          onChange={(value) =>
+            void patch({ aiProviderKind: value as AppSettings["aiProviderKind"] })
+          }
+          options={[
+            { value: "local", label: "Local" },
+            { value: "anthropic", label: "Anthropic" },
+            { value: "openai", label: "OpenAI" },
+          ]}
+        />
+      </SettingRow>
+
+      {isOwnKey ? (
+        <SettingRow
+          label="AI API key"
+          hint={
+            status?.keyConfigured
+              ? "A key is configured (stored in this vault only; never shown). Enter a new value to replace it."
+              : "Your own provider key. Stored in this vault's settings only — never returned to the UI."
+          }
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="password"
+              data-testid="setting-ai-api-key"
+              value={keyInput}
+              placeholder={status?.keyConfigured ? "•••• configured" : "sk-…"}
+              onChange={(e) => setKeyInput(e.target.value)}
+              className="w-40 rounded-md border border-border bg-surface px-2.5 py-1 text-sm text-text placeholder:text-text-3 focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+            <button
+              type="button"
+              data-testid="setting-ai-save-key"
+              onClick={() => void onSaveKey()}
+              className="rounded-md border border-border bg-surface px-3 py-1 text-sm text-text hover:bg-surface-2"
+            >
+              Save
+            </button>
+          </div>
+        </SettingRow>
+      ) : null}
+
+      {isLocal ? (
+        <SettingRow
+          label="Local model"
+          hint={
+            status?.modelDownloaded
+              ? "The experimental on-device model is ready."
+              : "Download the experimental on-device instruction model (~2 GB). CPU-only quality is best-effort — an own-key provider is recommended."
+          }
+        >
+          <button
+            type="button"
+            data-testid="setting-ai-download-model"
+            disabled={downloading || status?.modelDownloaded}
+            onClick={() => void onDownloadModel()}
+            className="rounded-md border border-border bg-surface px-3 py-1 text-sm text-text hover:bg-surface-2 disabled:opacity-40"
+          >
+            {status?.modelDownloaded ? "Ready" : downloading ? "Downloading…" : "Download model"}
+          </button>
+        </SettingRow>
+      ) : null}
+
+      <SettingRow
+        label="Managed proxy"
+        hint="Off by default. When on, AI calls route through the first-party server — content is sent off-device (you'll be asked to confirm)."
+      >
+        <Toggle
+          name="setting-ai-managed-proxy"
+          checked={settings.aiManagedProxyEnabled}
+          onChange={(value) => void onToggleProxy(value)}
+        />
+      </SettingRow>
+    </SectionPanel>
+  );
+}
+
 export function Settings() {
   const desktop = isDesktop();
-  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [settings, setSettings] = useState<RendererSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [backingUp, setBackingUp] = useState(false);
@@ -542,7 +754,24 @@ export function Settings() {
    * applied to <html> immediately so the change is visible.
    */
   const patch = useCallback(async (next: Partial<AppSettings>) => {
-    setSettings((prev) => (prev ? { ...prev, ...next } : prev));
+    // The own-keys (`aiApiKey`/`embeddingApiKey`) are WRITE-ONLY: they go to the main
+    // side via the patch but never live in the renderer's projected state. Strip them
+    // from the optimistic merge and instead flip the `*Configured` flag locally so the
+    // "configured" hint updates immediately; the authoritative state is the projected
+    // `RendererSettings` the main side returns below.
+    const { aiApiKey, embeddingApiKey, ...rendererNext } = next;
+    setSettings((prev) =>
+      prev
+        ? {
+            ...prev,
+            ...rendererNext,
+            ...(aiApiKey !== undefined ? { aiKeyConfigured: aiApiKey.trim().length > 0 } : {}),
+            ...(embeddingApiKey !== undefined
+              ? { embeddingApiKeyConfigured: embeddingApiKey.trim().length > 0 }
+              : {}),
+          }
+        : prev,
+    );
     if (next.theme) applyTheme(next.theme);
     try {
       const { settings: confirmed } = await appApi.updateAppSettings({ patch: next });
@@ -803,6 +1032,8 @@ export function Settings() {
       <OptimizationPanel />
 
       <SemanticSearchPanel settings={s} patch={patch} />
+
+      <AiAssistancePanel settings={s} patch={patch} />
 
       <SectionPanel title="Interface">
         <SettingRow

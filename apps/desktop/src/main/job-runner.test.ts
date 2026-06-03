@@ -275,4 +275,71 @@ describe("JobRunner", () => {
     expect((fake.last?.payload as { apiKey?: string }).apiKey).toBeUndefined();
     runner.stop();
   });
+
+  // --- restartWorker (T093): the AI-key re-fork, gated on idle -------------
+
+  it("restartWorker re-forks immediately when the worker is idle", async () => {
+    const workers: FakeWorker[] = [];
+    const runner = new JobRunner({
+      jobsRepo,
+      applyHandlers: {},
+      workerPath: "(unused)",
+      fork: () => {
+        const w = new FakeWorker();
+        workers.push(w);
+        return w;
+      },
+    });
+    runner.start();
+    expect(workers).toHaveLength(1);
+    // Idle (nothing in flight) → an immediate re-fork: the old worker is killed + a new one forked.
+    runner.restartWorker({ aiApiKey: "sk-new", aiProviderKind: "anthropic" });
+    expect(workers[0]?.killed).toBe(true);
+    expect(workers).toHaveLength(2);
+    runner.stop();
+  });
+
+  it("DEFERS the restart while TWO non-AI jobs are in flight; re-forks only when inFlight reaches 0", async () => {
+    const workers: FakeWorker[] = [];
+    const runner = new JobRunner({
+      jobsRepo,
+      applyHandlers: { url_import: () => ({ status: "imported", id: "s" }) },
+      workerPath: "(unused)",
+      fork: () => {
+        const w = new FakeWorker();
+        workers.push(w);
+        return w;
+      },
+      concurrency: 2,
+    });
+    runner.start();
+    const w0 = workers[0];
+    if (!w0) throw new Error("expected an initial worker");
+
+    // Two unrelated non-AI jobs in flight (the runner posts up to 2 to the single worker).
+    const j1 = runner.enqueue("url_import", { url: "https://a.test" });
+    const j2 = runner.enqueue("url_import", { url: "https://b.test" });
+    await until(() => w0.posted.length === 2);
+
+    // A restart requested NOW must NOT kill the worker (both jobs would be lost).
+    runner.restartWorker({ aiApiKey: "sk-new", aiProviderKind: "openai" });
+    expect(w0.killed).toBe(false);
+    expect(workers).toHaveLength(1);
+
+    // The FIRST of the two finishes — still NOT a re-fork (inFlight is not yet empty).
+    w0.reply({ kind: "result", jobId: j1.id, data: { status: "imported", id: "s" } });
+    await flush();
+    expect(w0.killed).toBe(false);
+    expect(workers).toHaveLength(1);
+
+    // The SECOND finishes — NOW inFlight reaches 0 → the deferred re-fork runs.
+    w0.reply({ kind: "result", jobId: j2.id, data: { status: "imported", id: "s" } });
+    await until(() => w0.killed === true);
+    expect(workers).toHaveLength(2);
+
+    // The persisted queue survived (both jobs succeeded, not requeued by the restart).
+    expect(jobsRepo.findById(j1.id)?.status).toBe("succeeded");
+    expect(jobsRepo.findById(j2.id)?.status).toBe("succeeded");
+    runner.stop();
+  });
 });

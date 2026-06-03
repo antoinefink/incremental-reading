@@ -57,6 +57,7 @@ import {
   type LineageData,
 } from "../lib/appApi";
 import { useDocument } from "../pages/source/useDocument";
+import { AiAssist } from "./AiAssist";
 import { CardBuilder } from "./CardBuilder";
 import { ClipMiniPlayer } from "./ClipMiniPlayer";
 import { useNavigateToLocation } from "./navigateToLocation";
@@ -815,6 +816,25 @@ export function ExtractView() {
               <Icon name="trash" size={14} />
             </button>
           </div>
+
+          {/* AI-assisted distillation (T093/T094) — DRAFTS ONLY. The extract's own
+              source-location anchor is the grounding the actions run over. */}
+          {id ? (
+            <AiAssist
+              owningElementId={id}
+              grounding={
+                inspector?.location
+                  ? {
+                      sourceElementId: inspector.location.sourceElementId,
+                      blockIds: inspector.location.blockIds,
+                      startOffset: inspector.location.startOffset,
+                      endOffset: inspector.location.endOffset,
+                      selectedText: inspector.location.selectedText,
+                    }
+                  : null
+              }
+            />
+          ) : null}
         </section>
 
         {/* RIGHT — card builder (T033/T034), mounted as the third split3 column. */}

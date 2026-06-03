@@ -14,6 +14,7 @@
  */
 
 import type { JobJsonValue } from "@interleave/core";
+import type { AiJobPayload, AiResultData, AiService } from "./ai-service";
 import type { AssetVaultService } from "./asset-vault-service";
 import type { EmbeddingService, EmbedJobPayload, EmbedResultData } from "./embedding-service";
 import type { JobApplyHandlers } from "./job-runner";
@@ -47,6 +48,8 @@ export interface JobApplyHandlerDeps {
   readonly getOcrService: () => OcrService;
   /** The embedding service (T087) — UPSERTs the worker's vector OR recovers a query vector. */
   readonly getEmbeddingService: () => EmbeddingService;
+  /** The AI service (T093) — persists the worker's suggestion into the `ai_suggestions` draft layer. */
+  readonly getAiService: () => AiService;
 }
 
 /**
@@ -76,8 +79,28 @@ export interface JobApplyHandlerDeps {
  * a cross-process redesign that no current invariant requires.
  */
 export function createJobApplyHandlers(deps: JobApplyHandlerDeps): JobApplyHandlers {
-  const { getUrlImportService, getAssetVaultService, getOcrService, getEmbeddingService } = deps;
+  const {
+    getUrlImportService,
+    getAssetVaultService,
+    getOcrService,
+    getEmbeddingService,
+    getAiService,
+  } = deps;
   return {
+    /**
+     * Persist a worker `ai` result (T093): write ONE inert `ai_suggestions` DRAFT row
+     * with the grounding (T094) + return a renderer-safe summary with the card-quality
+     * warnings. NO `operation_log` op — a suggestion row is transient draft/infra. The
+     * suggestion NEVER schedules a card / touches FSRS; minting a parked `card_draft`
+     * is the user's explicit approve (a different path). The worker did the model/network
+     * call off-main; this main-owned handler does the DB write.
+     */
+    ai: (job, resultData) => {
+      const payload = job.payload as unknown as AiJobPayload;
+      const result = resultData as unknown as AiResultData;
+      const summary = getAiService().applyResult(payload, result);
+      return summary as unknown as JobJsonValue;
+    },
     /**
      * Apply an `embed` worker result (T087) — the SINGLE `embed` handler. It
      * delegates to `EmbeddingService.applyResult`, which branches on

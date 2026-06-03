@@ -50,6 +50,7 @@
  */
 
 import type {
+  BlockId,
   CardKind,
   ElementId,
   IsoTimestamp,
@@ -66,6 +67,7 @@ import { newBlockId, newSiblingGroupId, nowIso } from "./ids";
 import type { CardWithElement } from "./review-repository";
 import { ReviewRepository } from "./review-repository";
 import { SourceRepository } from "./source-repository";
+import type { TransactionClient } from "./types";
 
 /** Arguments to author a card from an extract. */
 export interface CreateCardFromExtractInput {
@@ -274,6 +276,150 @@ export class CardService {
     });
 
     return { element, card, siblingGroupId, sourceLocationId, mediaRef };
+  }
+
+  /**
+   * Author a PARKED, UN-DUE `card_draft` from an AI suggestion (T093) — the
+   * DRAFT-ONLY seam the `approveCard` path routes through. It is deliberately NOT
+   * `createFromExtract`: that path hardcodes `firstScheduledAt = now`, which makes
+   * `ReviewRepository.createCardWithin` write a DUE `review_states` row AND activate the
+   * element (`card_draft → active_card`) — i.e. it would put the card in the deck +
+   * engage FSRS. This seam OMITS `firstScheduledAt`, so the same `createCardWithin`
+   * leaves the card PARKED: `review_states.dueAt = null`, element stays `card_draft`
+   * (NOT `active_card`), `fsrsState: "new"`, NOT in the due deck. Activation /
+   * first-schedule stays the user's existing explicit card action.
+   *
+   * It reuses the EXACT extract→card lineage/op path: `parentId = extractId`,
+   * `sourceId = extract.sourceId ?? extractId`, the `create_element`/`create_card` ops,
+   * tag inheritance, and the cloze body seed — minus the due-now first-schedule. The
+   * AI GROUNDING (T094) is written as a REAL `source_locations` row anchored to the
+   * card (via {@link SourceRepository.createElementLocationWithin}) so the minted card's
+   * refblock + jump-to-source work identically to an extract-derived card; a
+   * `derived_from` edge points the card at its owning extract/source.
+   */
+  createDraftFromSuggestion(input: {
+    /** The owning extract/source the AI action ran on (the lineage parent). */
+    readonly owningElementId: ElementId;
+    readonly kind: CardKind;
+    readonly title?: string;
+    readonly prompt?: string | null;
+    readonly answer?: string | null;
+    readonly cloze?: string | null;
+    readonly priority?: Priority;
+    /** The AI grounding (T094) written as a `source_locations` anchor for the card. */
+    readonly grounding?: {
+      readonly sourceElementId: ElementId;
+      readonly blockIds: readonly BlockId[];
+      readonly startOffset?: number | null;
+      readonly endOffset?: number | null;
+      readonly selectedText: string;
+      readonly label?: string | null;
+    };
+    /**
+     * Optional hook run INSIDE the same card-creation transaction (T093). The
+     * `approveCard` path threads the suggestion's `draft → approved` status flip
+     * through here so the card mint + the suggestion flip commit atomically — a
+     * throw rolls BOTH back, so the suggestion can never end up `draft` with a
+     * committed card (no re-approve → no duplicate card).
+     */
+    readonly onWithin?: (
+      tx: TransactionClient,
+      minted: { readonly cardElementId: ElementId },
+    ) => void;
+  }): CreateCardResult {
+    if (input.kind === "image_occlusion") {
+      throw new Error(
+        "CardService.createDraftFromSuggestion: image_occlusion cards must be created via the occlusion generator",
+      );
+    }
+    const owner = this.elements.findById(input.owningElementId);
+    if (!owner || owner.deletedAt) {
+      throw new Error(
+        `CardService.createDraftFromSuggestion: owning element ${input.owningElementId} not found`,
+      );
+    }
+
+    const parentId = input.owningElementId;
+    const sourceId = owner.sourceId ?? input.owningElementId;
+    const priority: Priority = input.priority ?? owner.priority;
+    const siblingGroupId: SiblingGroupId = newSiblingGroupId();
+    const inheritedTags = this.elements.listTags(input.owningElementId);
+
+    const cloze =
+      input.kind === "cloze" && input.cloze != null ? canonicalizeCloze(input.cloze) : input.cloze;
+    const title =
+      (input.title ?? "").trim() ||
+      titleFromBody({
+        kind: input.kind,
+        ...(input.prompt !== undefined ? { prompt: input.prompt } : {}),
+        ...(input.answer !== undefined ? { answer: input.answer } : {}),
+        ...(cloze !== undefined ? { cloze } : {}),
+      } as CreateCardFromExtractInput);
+
+    const { element, card, sourceLocationId } = this.db.transaction((tx) => {
+      // The AI grounding (T094) → a REAL source_locations row anchored to the card, so
+      // the minted card resolves the SAME SourceRef an extract-derived card does. We
+      // create the card element FIRST (so the location can reference its id), but since
+      // createCardWithin needs the sourceLocationId up front we mint the location id and
+      // write the row after the card. To keep the card→location link, we write the
+      // location, then patch the card's source_location_id is unnecessary — instead we
+      // pre-create the location id and pass it to createCardWithin.
+      // 1) create the card (parked, NO firstScheduledAt → dueAt = null, stays card_draft).
+      const created = this.review.createCardWithin(tx, {
+        kind: input.kind,
+        title,
+        priority,
+        stage: "card_draft",
+        prompt: input.prompt ?? null,
+        answer: input.answer ?? null,
+        cloze: cloze ?? null,
+        parentId,
+        sourceId,
+        sourceLocationId: null,
+        // NO firstScheduledAt — the load-bearing draft-only difference.
+      });
+
+      // 2) the grounding as a real source_locations row anchored to the card, then link
+      //    the card's source_location_id to it (so refblock + jump-to-source work).
+      let locationId: SourceLocationId | null = null;
+      if (input.grounding) {
+        const location = this.sources.createElementLocationWithin(tx, {
+          elementId: created.element.id,
+          sourceElementId: input.grounding.sourceElementId,
+          blockIds: input.grounding.blockIds,
+          startOffset: input.grounding.startOffset ?? null,
+          endOffset: input.grounding.endOffset ?? null,
+          selectedText: input.grounding.selectedText,
+          label: input.grounding.label ?? null,
+        });
+        locationId = location.id;
+        this.review.setCardSourceLocationWithin(tx, created.element.id, location.id);
+      }
+
+      // 3) inherit the owner's tags (add_tag).
+      for (const tagName of inheritedTags) {
+        this.elements.addTagWithin(tx, created.element.id, tagName);
+      }
+
+      // 4) the derived_from edge card → owning extract/source (lineage; add_relation).
+      this.elements.addRelationWithin(tx, {
+        fromElementId: created.element.id,
+        toElementId: parentId,
+        relationType: "derived_from",
+      });
+
+      // 5) cloze structured metadata (same as createFromExtract).
+      if (input.kind === "cloze" && cloze != null) {
+        this.seedClozeBodyWithin(tx, created.element.id, cloze);
+      }
+
+      // 6) caller hook in the SAME transaction (the approve-path suggestion status flip).
+      input.onWithin?.(tx, { cardElementId: created.element.id });
+
+      return { element: created.element, card: created.card, sourceLocationId: locationId };
+    });
+
+    return { element, card, siblingGroupId, sourceLocationId, mediaRef: null };
   }
 
   /**

@@ -23,9 +23,11 @@
  * over `process.parentPort`.
  */
 
+import { AiProviderError } from "@interleave/core";
 import { type OptimizerHistory, suggestParameters } from "@interleave/scheduler";
 import type { ParentPort } from "electron";
 import { fetchImportablePage, UrlFetchError } from "../main/url-fetch";
+import { type AiJobPayload, resolveProviderFromEnv } from "./ai-providers";
 import { computeEmbedding, EmbedError, type EmbedJobPayload } from "./embedding-model";
 import { type WorkerMessage, WorkerRequestSchema } from "./messages";
 import { recognizePageImage, resolveVaultImagePath } from "./ocr";
@@ -177,6 +179,32 @@ async function runEmbed(jobId: string, payload: EmbedJobPayload): Promise<void> 
   });
 }
 
+/**
+ * Execute one `ai` job (T093): resolve the AI provider from the worker's FORK-ENV
+ * (the user's own key / the local model dir — both baked into the worker at
+ * construction, NEVER in the payload), run `provider.complete(request)` OFF the main
+ * thread, and post the {@link AiSuggestion} JSON back. MAIN persists the inert DRAFT
+ * `ai_suggestions` row. The worker stays DB-FREE — it imports the pure
+ * `@interleave/core` AI types + the provider impls only, NEVER `@interleave/db`.
+ */
+async function runAi(jobId: string, payload: AiJobPayload): Promise<void> {
+  post({ kind: "progress", jobId, progress: { ratio: 0.15, note: "thinking" } });
+  const provider = resolveProviderFromEnv(payload);
+  const suggestion = await provider.complete(payload.request);
+  post({ kind: "progress", jobId, progress: { ratio: 0.95, note: "done" } });
+  // The suggestion is plain JSON (`kind`/`text`/optional `cards: DraftCard[]`); post it
+  // verbatim. MAIN re-validates it at the apply boundary before persisting the draft.
+  post({
+    kind: "result",
+    jobId,
+    data: {
+      kind: suggestion.kind,
+      text: suggestion.text,
+      ...(suggestion.cards ? { cards: suggestion.cards.map((c) => ({ ...c })) } : {}),
+    },
+  });
+}
+
 /** Dispatch one validated request to its job-execution function. */
 async function dispatch(jobId: string, type: string, payload: unknown): Promise<void> {
   try {
@@ -192,6 +220,9 @@ async function dispatch(jobId: string, type: string, payload: unknown): Promise<
         return;
       case "fsrs_optimize":
         runFsrsOptimize(jobId, payload as FsrsOptimizePayload);
+        return;
+      case "ai":
+        await runAi(jobId, payload as AiJobPayload);
         return;
       case "vault_verify":
       case "vault_gc":
@@ -216,7 +247,11 @@ async function dispatch(jobId: string, type: string, payload: unknown): Promise<
         return;
     }
   } catch (err) {
-    if (err instanceof UrlFetchError || err instanceof EmbedError) {
+    if (
+      err instanceof UrlFetchError ||
+      err instanceof EmbedError ||
+      err instanceof AiProviderError
+    ) {
       post({ kind: "error", jobId, code: err.code, message: err.message });
       return;
     }

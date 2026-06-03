@@ -16,6 +16,10 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { IPC_CHANNELS } from "../shared/channels";
 import type {
+  AiApproveRequest,
+  AiDismissRequest,
+  AiListRequest,
+  AiRunRequest,
   AnalyticsGetRequest,
   AppApi,
   BalanceGetRequest,
@@ -211,6 +215,15 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.sourcesAcceptOcr, request),
     dismissOcr: (request: SourcesAcceptOcrRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.sourcesDismissOcr, request),
+  },
+  ai: {
+    run: (request: AiRunRequest) => ipcRenderer.invoke(IPC_CHANNELS.aiRun, request),
+    list: (request: AiListRequest) => ipcRenderer.invoke(IPC_CHANNELS.aiList, request),
+    approveCard: (request: AiApproveRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.aiApproveCard, request),
+    dismiss: (request: AiDismissRequest) => ipcRenderer.invoke(IPC_CHANNELS.aiDismiss, request),
+    status: () => ipcRenderer.invoke(IPC_CHANNELS.aiStatus),
+    downloadModel: () => ipcRenderer.invoke(IPC_CHANNELS.aiDownloadModel),
   },
   capture: {
     getPairing: () => ipcRenderer.invoke(IPC_CHANNELS.captureGetPairing),

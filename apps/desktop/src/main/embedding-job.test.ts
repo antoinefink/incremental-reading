@@ -93,6 +93,7 @@ function makeRunner(svc: DbService, worker: WorkerHandle): JobRunner {
       getAssetVaultService: () => svc.assetVaultService,
       getOcrService: () => svc.ocrService,
       getEmbeddingService: () => svc.embeddingService,
+      getAiService: () => svc.aiService,
     }),
     workerPath: "(unused)",
     fork: () => worker,

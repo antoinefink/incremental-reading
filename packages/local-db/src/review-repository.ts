@@ -306,6 +306,22 @@ export class ReviewRepository {
     return { element, card };
   }
 
+  /**
+   * Link a card's `cards.source_location_id` to an existing `source_locations` row,
+   * within an existing transaction (T093 — the AI approve seam). Used when a draft
+   * card's grounding anchor is created AFTER the card row (the card id is needed for
+   * the location's `element_id`), so the card→location link is patched in the same
+   * transaction. No `operation_log` op — the lineage anchor is recorded by the
+   * location's own creation; this only wires the back-reference. Pure column update.
+   */
+  setCardSourceLocationWithin(
+    tx: DbClient,
+    cardElementId: ElementId,
+    sourceLocationId: SourceLocationId,
+  ): void {
+    tx.update(cards).set({ sourceLocationId }).where(eq(cards.elementId, cardElementId)).run();
+  }
+
   /** Read a card (element + card row) by element id, or `null`. */
   findCardById(elementId: ElementId): CardWithElement | null {
     const elementRow = this.db.select().from(elements).where(eq(elements.id, elementId)).get();

@@ -60,6 +60,7 @@ describe("schema migration", () => {
       .all() as { name: string }[];
     const names = rows.map((r) => r.name);
     expect(names).toEqual([
+      "ai_suggestions",
       "assets",
       "cards",
       "concepts",

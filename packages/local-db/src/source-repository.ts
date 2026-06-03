@@ -766,6 +766,9 @@ export class SourceRepository {
       readonly label?: string | null;
       readonly blockIds?: readonly BlockId[];
       readonly selectedText?: string;
+      /** Optional char offsets within the span (T094 — AI grounding inheritance). */
+      readonly startOffset?: number | null;
+      readonly endOffset?: number | null;
     },
   ): ElementLocation {
     const locationId: SourceLocationId = newSourceLocationId();
@@ -774,8 +777,8 @@ export class SourceRepository {
       elementId: input.elementId,
       sourceElementId: input.sourceElementId,
       blockIds: input.blockIds ?? [],
-      startOffset: null,
-      endOffset: null,
+      startOffset: input.startOffset ?? null,
+      endOffset: input.endOffset ?? null,
       page: input.page ?? null,
       timestampMs: null,
       region: null,

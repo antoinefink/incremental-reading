@@ -121,6 +121,17 @@ export interface JobRunnerDeps {
    */
   readonly modelDir?: string;
   /**
+   * The user's OWN AI-API key (T093), baked into the worker fork env as
+   * `INTERLEAVE_AI_API_KEY` when AI is enabled. Unlike the embedding key (which rides
+   * the per-job `getJobSecrets` out-of-band channel), the AI key uses the FORK-ENV seam
+   * because the single long-lived worker has no per-job env channel — so enabling AI /
+   * changing the key requires {@link restartWorker} to re-fork with the new env. NEVER
+   * written to a persisted `jobs` row. Optional: a runner built without it has no AI key.
+   */
+  readonly aiApiKey?: string;
+  /** The AI provider kind (T093), baked into the worker fork env as `INTERLEAVE_AI_PROVIDER`. */
+  readonly aiProviderKind?: string;
+  /**
    * Out-of-band per-job secret provider (T087). When set, the runner calls it at
    * POST time and merges the returned fields into the worker request payload — the
    * persisted `jobs` row never holds them. Used to thread the user's embedding-API
@@ -156,25 +167,44 @@ function backoffMs(attempts: number, baseMs: number): number {
   return Math.min(exp, RETRY_BACKOFF_MAX_MS);
 }
 
+/** The fork-env values baked into the worker at construction (the secret/path seam). */
+interface ForkEnv {
+  readonly assetsDir?: string | undefined;
+  readonly modelDir?: string | undefined;
+  /** The AI model dir (T093) — `INTERLEAVE_AI_MODEL_DIR` (the local instruction model). */
+  readonly aiModelDir?: string | undefined;
+  /** The user's OWN AI key (T093) — `INTERLEAVE_AI_API_KEY`; NEVER in a persisted row. */
+  readonly aiApiKey?: string | undefined;
+  /** The AI provider kind (T093) — `INTERLEAVE_AI_PROVIDER`. */
+  readonly aiProviderKind?: string | undefined;
+}
+
 /**
  * Build the default real-`utilityProcess` fork factory. When `assetsDir` is set,
  * the worker is forked with `INTERLEAVE_ASSETS_DIR` in its env (the fork-env seam,
  * T066) so a DB-free OCR job can resolve the vault-relative page-image path. Env
- * is chosen over the job `payload` deliberately — the absolute vault root must
- * NEVER be written to a persisted, restart-safe `jobs` row.
+ * is chosen over the job `payload` deliberately — the absolute vault root + the
+ * AI key (T093) must NEVER be written to a persisted, restart-safe `jobs` row. The
+ * factory READS the current `forkEnv` on every call, so a `restartWorker()` re-fork
+ * picks up a changed AI key/provider.
  */
-function defaultFork(workerPath: string, assetsDir?: string, modelDir?: string): WorkerForkFactory {
+function defaultFork(workerPath: string, getForkEnv: () => ForkEnv): WorkerForkFactory {
   return () => {
-    // Thread the fork-env seam: the vault root (OCR, T066) + the model dir (embed,
-    // T087). The absolute roots NEVER land in a persisted `jobs` row.
-    const env =
-      assetsDir || modelDir
-        ? {
-            ...process.env,
-            ...(assetsDir ? { INTERLEAVE_ASSETS_DIR: assetsDir } : {}),
-            ...(modelDir ? { INTERLEAVE_MODEL_DIR: modelDir } : {}),
-          }
-        : undefined;
+    // Thread the fork-env seam: the vault root (OCR, T066) + the embed model dir (T087)
+    // + the AI key/provider/model dir (T093). The absolute roots + the secret key NEVER
+    // land in a persisted `jobs` row. Read live so a re-fork picks up a changed AI key.
+    const fe = getForkEnv();
+    const hasEnv = fe.assetsDir || fe.modelDir || fe.aiModelDir || fe.aiApiKey || fe.aiProviderKind;
+    const env = hasEnv
+      ? {
+          ...process.env,
+          ...(fe.assetsDir ? { INTERLEAVE_ASSETS_DIR: fe.assetsDir } : {}),
+          ...(fe.modelDir ? { INTERLEAVE_MODEL_DIR: fe.modelDir } : {}),
+          ...(fe.aiModelDir ? { INTERLEAVE_AI_MODEL_DIR: fe.aiModelDir } : {}),
+          ...(fe.aiApiKey ? { INTERLEAVE_AI_API_KEY: fe.aiApiKey } : {}),
+          ...(fe.aiProviderKind ? { INTERLEAVE_AI_PROVIDER: fe.aiProviderKind } : {}),
+        }
+      : undefined;
     const child = env
       ? utilityProcess.fork(workerPath, [], { env })
       : utilityProcess.fork(workerPath);
@@ -212,11 +242,33 @@ export class JobRunner {
   private readonly inFlight = new Set<string>();
   /** A pending tick scheduled via `setImmediate`, so we coalesce kicks. */
   private tickScheduled = false;
+  /**
+   * The mutable fork-env (T093) the default fork factory reads on every fork — so a
+   * {@link restartWorker} re-fork picks up a changed AI key/provider. Only the AI
+   * fields change at runtime (the vault/model dirs are static); they are read live by
+   * the factory closure.
+   */
+  private forkEnv: ForkEnv;
+  /**
+   * A deferred restart (T093): set when {@link restartWorker} is requested while jobs
+   * are in flight, so the re-fork happens on the transition to an EMPTY `inFlight` set
+   * (NOT after just the first of two concurrent jobs finishes) — toggling an AI setting
+   * never kills + re-runs an unrelated in-flight OCR/url_import/embed job.
+   */
+  private pendingRestart = false;
 
   constructor(deps: JobRunnerDeps) {
     this.jobsRepo = deps.jobsRepo;
     this.applyHandlers = deps.applyHandlers;
-    this.forkFactory = deps.fork ?? defaultFork(deps.workerPath, deps.assetsDir, deps.modelDir);
+    this.forkEnv = {
+      ...(deps.assetsDir ? { assetsDir: deps.assetsDir } : {}),
+      ...(deps.modelDir ? { modelDir: deps.modelDir } : {}),
+      // The AI model dir reuses the embed model dir root (`<dataDir>/models`).
+      ...(deps.modelDir ? { aiModelDir: deps.modelDir } : {}),
+      ...(deps.aiApiKey ? { aiApiKey: deps.aiApiKey } : {}),
+      ...(deps.aiProviderKind ? { aiProviderKind: deps.aiProviderKind } : {}),
+    };
+    this.forkFactory = deps.fork ?? defaultFork(deps.workerPath, () => this.forkEnv);
     this.getJobSecrets = deps.getJobSecrets;
     this.concurrency = deps.concurrency ?? DEFAULT_CONCURRENCY;
     this.retryBackoffBaseMs = deps.retryBackoffBaseMs ?? RETRY_BACKOFF_BASE_MS;
@@ -256,6 +308,7 @@ export class JobRunner {
     const job = this.jobsRepo.findById(id);
     if (job) this.emit(job);
     this.kick();
+    this.maybeRunPendingRestart();
   }
 
   /** Subscribe to `job:update` snapshots; returns an unsubscribe fn. */
@@ -296,10 +349,79 @@ export class JobRunner {
     this.worker?.kill();
     this.worker = null;
     this.inFlight.clear();
+    this.pendingRestart = false;
     this.emitter.removeAllListeners();
   }
 
+  /**
+   * Re-fork the single worker with the current fork env (T093) — used when the AI
+   * enable/key/provider settings change, so the new `INTERLEAVE_AI_API_KEY` /
+   * `INTERLEAVE_AI_PROVIDER` takes effect (the worker bakes env at construction; there
+   * is no per-job env channel today). The persisted queue is UNTOUCHED — only the
+   * worker process is replaced.
+   *
+   * **Gated on IDLE — `inFlight.size === 0` (ALL in-flight jobs drained).** The runner
+   * forks ONE worker but posts up to {@link DEFAULT_CONCURRENCY} jobs to it concurrently,
+   * so there can be TWO unrelated in-flight jobs at restart time; killing the worker
+   * mid-flight would kill BOTH (e.g. an OCR page AND a `url_import`), which would then
+   * requeue + re-run purely because the user toggled an AI setting. So if `inFlight` is
+   * non-empty we DEFER (set `pendingRestart`) and re-fork on the transition to an EMPTY
+   * `inFlight` set ({@link maybeRunPendingRestart}, called when `inFlight` reaches 0) —
+   * NOT after just the first of two concurrent jobs finishes.
+   *
+   * Because the re-fork is gated on idle, NOTHING is in flight at re-fork time — so the
+   * idle path does NOT depend on `recoverRunning()` (it runs only in `start()`); a bare
+   * re-fork has no kill-mid-job to recover from.
+   *
+   * @param aiEnv the new AI fork-env fields (key/provider) to bake into the next fork.
+   */
+  restartWorker(aiEnv?: {
+    aiApiKey?: string | undefined;
+    aiProviderKind?: string | undefined;
+  }): void {
+    if (!this.running) return;
+    // Update the live fork env the factory reads on the next fork. An empty key clears
+    // the env var (a key removal must not leave a stale key baked in the worker).
+    if (aiEnv) {
+      this.forkEnv = {
+        ...this.forkEnv,
+        ...(aiEnv.aiApiKey !== undefined
+          ? aiEnv.aiApiKey
+            ? { aiApiKey: aiEnv.aiApiKey }
+            : { aiApiKey: undefined }
+          : {}),
+        ...(aiEnv.aiProviderKind !== undefined ? { aiProviderKind: aiEnv.aiProviderKind } : {}),
+      };
+    }
+    if (this.inFlight.size > 0) {
+      // Defer until the worker is fully idle (the transition to an empty inFlight set).
+      this.pendingRestart = true;
+      return;
+    }
+    this.reforkNow();
+  }
+
   // --- internals -----------------------------------------------------------
+
+  /** Kill + re-fork the single worker, re-subscribing the message handler. */
+  private reforkNow(): void {
+    this.pendingRestart = false;
+    this.worker?.kill();
+    this.worker = this.forkFactory();
+    this.worker.onMessage((message) => this.handleWorkerMessage(message));
+    this.kick();
+  }
+
+  /**
+   * Run a deferred {@link restartWorker} once the worker is fully idle. Called whenever
+   * `inFlight` may have just reached 0 (an apply/failure drained the last in-flight job).
+   * Re-forks ONLY on the transition to an empty set — not after a single job of two.
+   */
+  private maybeRunPendingRestart(): void {
+    if (this.pendingRestart && this.inFlight.size === 0) {
+      this.reforkNow();
+    }
+  }
 
   private emit(job: Job): void {
     this.emitter.emit("job:update", job);
@@ -384,6 +506,7 @@ export class JobRunner {
     const job = this.jobsRepo.findById(jobId);
     if (!job) {
       this.inFlight.delete(jobId);
+      this.maybeRunPendingRestart();
       return;
     }
     const handler = this.applyHandlers[job.type];
@@ -394,6 +517,7 @@ export class JobRunner {
       if (current && current.status === "cancelled") {
         this.inFlight.delete(jobId);
         this.kick();
+        this.maybeRunPendingRestart();
         return;
       }
       this.jobsRepo.succeed(jobId, result ?? null);
@@ -408,6 +532,8 @@ export class JobRunner {
     const done = this.jobsRepo.findById(jobId);
     if (done) this.emit(done);
     this.kick();
+    // A deferred AI-key restart re-forks ONLY now that the worker is fully idle.
+    this.maybeRunPendingRestart();
   }
 
   /**
@@ -436,6 +562,8 @@ export class JobRunner {
     const after = this.jobsRepo.findById(jobId);
     if (after) this.emit(after);
     this.kick();
+    // A deferred AI-key restart re-forks ONLY now that the worker is fully idle.
+    this.maybeRunPendingRestart();
   }
 }
 

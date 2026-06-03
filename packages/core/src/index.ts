@@ -22,6 +22,32 @@ export const CORE_PACKAGE = "@interleave/core" as const;
 // before value exports and alphabetizes by module, so per-block comments are
 // kept minimal; the authoritative docs live on each declaration in its module.
 
+// AI-assisted distillation contract — the provider seam + action/suggestion shapes (./ai, T093).
+export type {
+  AiProvider,
+  AiRequest,
+  AiSuggestion,
+  DraftCard,
+} from "./ai";
+export {
+  AI_ACTION_TYPES,
+  AI_CONTEXT_MAX,
+  AI_PROVIDER_KINDS,
+  AI_SOURCE_TEXT_MAX,
+  AI_SUGGESTION_KINDS,
+  AI_SUGGESTION_STATUSES,
+  type AiActionType,
+  AiDisabledError,
+  AiProviderError,
+  type AiProviderKind,
+  AiProxyUnavailableError,
+  type AiSuggestionKind,
+  type AiSuggestionStatus,
+  actionProducesCard,
+  isAiActionType,
+  isAiProviderKind,
+  suggestionKindForAction,
+} from "./ai";
 // Import/process balance rule — the pure imbalance judgment (./balance).
 export type { BalanceCounts, BalanceJudgment, BalanceSeverity } from "./balance";
 export {
@@ -213,15 +239,25 @@ export { plainTextToProseMirrorDoc } from "./prosemirror";
 // FSRS card review state + durable logs — cards only (./review).
 export type { ReviewLog, ReviewState } from "./review";
 // User/domain settings — the typed model scheduling + UI read (./settings).
-export type { AppSettings, EmbeddingProvider, KeyboardLayout, ThemePreference } from "./settings";
+export type {
+  AppSettings,
+  EmbeddingProvider,
+  KeyboardLayout,
+  RendererSettings,
+  ThemePreference,
+} from "./settings";
 export {
+  AI_API_KEY_MAX,
+  AI_LOCAL_MODEL_ID_MAX,
   appSettingsFromStored,
+  coerceAiProviderKind,
   coerceFsrsParams,
   coerceRetentionByBand,
   coerceSettingsPatch,
   coerceSettingValue,
   DAILY_REVIEW_BUDGET_MAX,
   DAILY_REVIEW_BUDGET_MIN,
+  DEFAULT_AI_LOCAL_MODEL_ID,
   DEFAULT_APP_SETTINGS,
   DEFAULT_EMBEDDING_MODEL_ID,
   DESIRED_RETENTION_MAX,
@@ -235,6 +271,7 @@ export {
   isKeyboardLayout,
   isThemePreference,
   KEYBOARD_LAYOUTS,
+  projectToRendererSettings,
   SETTINGS_KEYS,
   settingsPatchToStored,
   sourcePriorityFromLabel,

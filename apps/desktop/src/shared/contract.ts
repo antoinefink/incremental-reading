@@ -16,6 +16,14 @@
  */
 
 import {
+  AI_ACTION_TYPES,
+  AI_API_KEY_MAX,
+  AI_LOCAL_MODEL_ID_MAX,
+  AI_PROVIDER_KINDS,
+  AI_SOURCE_TEXT_MAX,
+  type AiActionType,
+  type AiProviderKind,
+  type AiSuggestionKind,
   type AppSettings,
   CARD_KINDS,
   CONFIDENCE_LEVELS,
@@ -44,6 +52,7 @@ import {
   RELIABILITY_TIERS,
   REVIEW_RATINGS,
   type ReliabilityTier,
+  type RendererSettings,
   SOURCE_TYPES,
   type SourceRef,
   type SourceType,
@@ -68,6 +77,7 @@ export type {
   FactStability,
   ReliabilitySummary,
   ReliabilityTier,
+  RendererSettings,
   SourceRef,
   SourceType,
 } from "@interleave/core";
@@ -180,8 +190,13 @@ export interface SettingsUpdateResult {
 export const SettingsGetAllRequestSchema = z.void();
 
 export interface SettingsGetAllResult {
-  /** The complete, validated settings (unset keys resolved to defaults). */
-  readonly settings: AppSettings;
+  /**
+   * The complete, validated settings (unset keys resolved to defaults), PROJECTED for
+   * the renderer: the user's OWN keys (`aiApiKey`/`embeddingApiKey`) are stripped and
+   * replaced with `aiKeyConfigured`/`embeddingApiKeyConfigured` booleans. The plaintext
+   * keys are MAIN-SIDE secrets and are NEVER returned across the IPC boundary (T087/T093).
+   */
+  readonly settings: RendererSettings;
 }
 
 /**
@@ -212,6 +227,15 @@ export const SettingsPatchSchema = z
     embeddingApiKey: z.string().max(EMBEDDING_API_KEY_MAX),
     embeddingModelId: z.string().max(EMBEDDING_MODEL_ID_MAX),
     embeddingModelDownloaded: z.boolean(),
+    // AI assistance (T093): the on/off switch, provider kind, the managed-proxy switch,
+    // the model-downloaded flag, the local model id, and the user's OWN key (validated/
+    // coerced main-side, projected to `keyConfigured` on read — never returned).
+    aiEnabled: z.boolean(),
+    aiProviderKind: z.enum(AI_PROVIDER_KINDS),
+    aiManagedProxyEnabled: z.boolean(),
+    aiModelDownloaded: z.boolean(),
+    aiLocalModelId: z.string().max(AI_LOCAL_MODEL_ID_MAX),
+    aiApiKey: z.string().max(AI_API_KEY_MAX),
   })
   .partial()
   .strict();
@@ -223,8 +247,12 @@ export const SettingsUpdateManyRequestSchema = z.object({
 export type SettingsUpdateManyRequest = z.infer<typeof SettingsUpdateManyRequestSchema>;
 
 export interface SettingsUpdateManyResult {
-  /** The full settings after the patch is applied. */
-  readonly settings: AppSettings;
+  /**
+   * The full settings after the patch is applied, PROJECTED for the renderer — the
+   * own-keys are replaced with `*Configured` booleans, never returned in plaintext
+   * (T087/T093). The write path still accepts the raw key via {@link SettingsPatchSchema}.
+   */
+  readonly settings: RendererSettings;
 }
 
 // ---------------------------------------------------------------------------
@@ -1786,6 +1814,129 @@ export type SourcesAcceptOcrRequest = z.infer<typeof SourcesAcceptOcrRequestSche
 export interface SourcesAcceptOcrResult {
   /** Whether the OCR text was merged into the body (false when no suggestion). */
   readonly accepted: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// ai.run() / ai.list() / ai.approveCard() / ai.dismiss() / ai.status()  (T093)
+// ---------------------------------------------------------------------------
+
+/** Zod mirror of the closed `AiActionType` union (built from the core tuple). */
+export const AiActionTypeSchema = z.enum(AI_ACTION_TYPES);
+/** Zod mirror of the closed `AiProviderKind` union (built from the core tuple). */
+export const AiProviderKindSchema = z.enum(AI_PROVIDER_KINDS);
+
+/**
+ * Run an AI formulation action over a selected span (T093). The renderer ships the
+ * SAME selection payload the T021 extraction path uses (the source element id + the
+ * ordered stable block ids + offsets + the verbatim selected text); MAIN reads
+ * settings (throwing when AI is off), builds the request, and enqueues an `ai` job on
+ * the T058 runner — the renderer observes via the existing `jobs.subscribe`. The API
+ * key is NEVER in this request (it lives main-side, baked into the worker fork env).
+ */
+export const AiRunRequestSchema = z.object({
+  /** The extract/source the action runs ON (the suggestion's owner; lineage parent). */
+  owningElementId: ElementIdSchema,
+  action: AiActionTypeSchema,
+  sourceRef: z.object({
+    /** The source element the span lives in (the jump-to-source target, T094). */
+    sourceElementId: ElementIdSchema,
+    /** Ordered STABLE block ids the span covers (document order). */
+    blockIds: z.array(z.string().min(1).max(128)).min(1).max(10_000),
+    /** Char offset within the FIRST spanned block where the span starts. */
+    startOffset: z.number().int().min(0).nullable().optional(),
+    /** Char offset within the LAST spanned block where the span ends. */
+    endOffset: z.number().int().min(0).nullable().optional(),
+    /** The verbatim selected source quote (the grounding) — bounded for the prompt. */
+    selectedText: z.string().min(1).max(AI_SOURCE_TEXT_MAX),
+    /** Optional surrounding context to improve the formulation. */
+    context: z.string().max(AI_SOURCE_TEXT_MAX).optional(),
+  }),
+});
+export type AiRunRequest = z.infer<typeof AiRunRequestSchema>;
+
+export interface AiRunResult {
+  /** The enqueued job id (the renderer observes its progress via `jobs.subscribe`). */
+  readonly jobId: string;
+}
+
+/** One card-quality check row crossing IPC (the same T035/T086 shape, inlined). */
+export interface AiQualityCheck {
+  readonly id: string;
+  readonly severity: "ok" | "warn" | "block";
+  readonly message: string;
+}
+
+/** A draft card carried in a card-shaped suggestion. */
+export interface AiDraftCard {
+  readonly kind: "qa" | "cloze";
+  readonly prompt?: string;
+  readonly answer?: string;
+  readonly cloze?: string;
+}
+
+/** A renderer-safe AI suggestion + its resolved grounding (T093/T094). NO key. */
+export interface AiSuggestionView {
+  readonly id: string;
+  readonly action: AiActionType;
+  readonly kind: AiSuggestionKind;
+  /** The MODEL's generated text (stored separately from the source quote). */
+  readonly text: string;
+  readonly cards: readonly AiDraftCard[];
+  readonly status: string;
+  /** The card-quality warnings on any card draft (shown before approval). */
+  readonly qualityChecks: readonly AiQualityCheck[];
+  /** The resolved grounding refblock (the source span this was made about, T094). */
+  readonly grounding: SourceRef;
+}
+
+/** List the draft suggestions for an element (T093). */
+export const AiListRequestSchema = z.object({
+  elementId: ElementIdSchema,
+});
+export type AiListRequest = z.infer<typeof AiListRequestSchema>;
+
+export interface AiListResult {
+  readonly suggestions: readonly AiSuggestionView[];
+}
+
+/** Approve a card-shaped suggestion → mint a PARKED, un-due `card_draft` (T093). */
+export const AiApproveRequestSchema = z.object({
+  suggestionId: z.string().min(1).max(128),
+});
+export type AiApproveRequest = z.infer<typeof AiApproveRequestSchema>;
+
+export interface AiApproveResult {
+  readonly approved: boolean;
+  /** The minted parked `card_draft` element id (when approved). */
+  readonly cardId?: string;
+  /** Why approval was refused (`not_found` / `not_draft` / `not_a_card` / `empty_card`). */
+  readonly reason?: string;
+}
+
+/** Dismiss a draft suggestion (soft) (T093). */
+export const AiDismissRequestSchema = z.object({
+  suggestionId: z.string().min(1).max(128),
+});
+export type AiDismissRequest = z.infer<typeof AiDismissRequestSchema>;
+
+export interface AiDismissResult {
+  readonly dismissed: boolean;
+}
+
+/** The AI disabled-state + disclosure data (T093) — NO key (only `keyConfigured`). */
+export interface AiStatusResult {
+  readonly enabled: boolean;
+  readonly providerKind: AiProviderKind;
+  /** Whether an own-key is configured (the key itself is NEVER returned). */
+  readonly keyConfigured: boolean;
+  readonly modelDownloaded: boolean;
+  readonly managedProxyEnabled: boolean;
+}
+
+/** Download / warm the local AI model (T093) — flips `aiModelDownloaded`. */
+export const AiDownloadModelRequestSchema = z.void();
+export interface AiDownloadModelResult {
+  readonly downloaded: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -4902,6 +5053,29 @@ export interface AppApi {
     acceptOcr(request: SourcesAcceptOcrRequest): Promise<SourcesAcceptOcrResult>;
     /** Dismiss a page's OCR suggestion (T066) — sets `dismissed`. */
     dismissOcr(request: SourcesAcceptOcrRequest): Promise<{ dismissed: boolean }>;
+  };
+  readonly ai: {
+    /**
+     * Run an AI formulation action over a selected span (T093) — enqueues an `ai` job
+     * on the T058 runner (a local model OR the user's own-key call). DRAFTS ONLY: the
+     * result is an inert `ai_suggestions` row, never a scheduled card. Throws
+     * `AiDisabledError` when AI is off. Observe progress via `jobs.subscribe`.
+     */
+    run(request: AiRunRequest): Promise<AiRunResult>;
+    /** The draft suggestions for an element + each one's resolved grounding (T093/T094). */
+    list(request: AiListRequest): Promise<AiListResult>;
+    /**
+     * Approve a card-shaped suggestion (T093) → mint a PARKED, un-due `card_draft` via
+     * the draft-only `CardService` seam (NOT activated, NOT first-scheduled, NOT in the
+     * FSRS deck). The grounding is inherited as a real `source_locations` row.
+     */
+    approveCard(request: AiApproveRequest): Promise<AiApproveResult>;
+    /** Dismiss a draft suggestion (T093) — soft (status → `dismissed`). */
+    dismiss(request: AiDismissRequest): Promise<AiDismissResult>;
+    /** The disabled-state + disclosure data (T093) — NO key (only `keyConfigured`). */
+    status(): Promise<AiStatusResult>;
+    /** Download / warm the local AI model (T093) — flips `aiModelDownloaded`. */
+    downloadModel(): Promise<AiDownloadModelResult>;
   };
   readonly capture: {
     /** Read the browser-capture pairing state (token + enabled/running/port) (T062). */

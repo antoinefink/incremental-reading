@@ -43,6 +43,7 @@ import {
   parseMediaRef,
   priorityFromLabel,
   priorityToLabel,
+  projectToRendererSettings,
   raisePriority,
 } from "@interleave/core";
 import {
@@ -100,6 +101,15 @@ import {
 } from "@interleave/scheduler";
 import { seedDemoCollection } from "@interleave/testing";
 import type {
+  AiApproveRequest,
+  AiApproveResult,
+  AiDismissRequest,
+  AiDismissResult,
+  AiListRequest,
+  AiListResult,
+  AiRunRequest,
+  AiRunResult,
+  AiStatusResult,
   AnalyticsGetRequest,
   AnalyticsGetResult,
   AutoPostponeApplyResult,
@@ -306,6 +316,7 @@ import type {
   WorkloadSimulateRequest,
   WorkloadSimulateResult,
 } from "../shared/contract";
+import { AiService } from "./ai-service";
 import {
   type AnkiExportFileResult,
   type AnkiExportSelection,
@@ -521,6 +532,12 @@ export class DbService {
    */
   private embedding: EmbeddingService | null = null;
   /**
+   * The AI-assisted-distillation service (T093), built lazily against the open DB + the
+   * runner + the settings repo. Persists the worker's suggestion into the
+   * `ai_suggestions` draft layer + mints parked card drafts on approve. `null` until first use.
+   */
+  private ai: AiService | null = null;
+  /**
    * The contradiction-detection service (T089), built lazily against the open DB.
    * A DERIVED, HEURISTIC, SUGGESTIVE read over the `vec0` neighbors + the `sources`
    * provenance dates (via lineage) — it writes nothing. Left `null` until first use.
@@ -726,6 +743,8 @@ export class DbService {
     this.pdfRegion = null;
     this.mediaClip = null;
     this.ocr = null;
+    this.embedding = null;
+    this.ai = null;
     this.runner = null;
     this.assetsDir = null;
     this.exportsDir = null;
@@ -825,7 +844,10 @@ export class DbService {
    * scheduler/UI always see a complete object.
    */
   getAppSettings(): SettingsGetAllResult {
-    return { settings: this.repos.settings.getAppSettings() };
+    // Project out the user's OWN plaintext keys (`aiApiKey`/`embeddingApiKey`) before the
+    // result crosses the IPC boundary — the renderer sees `*Configured` booleans only
+    // (T087/T093). The raw keys stay main-side (worker fork env), never returned.
+    return { settings: projectToRendererSettings(this.repos.settings.getAppSettings()) };
   }
 
   /**
@@ -834,7 +856,22 @@ export class DbService {
    * resulting settings — so it survives an app restart.
    */
   updateAppSettings(patch: Readonly<Record<string, unknown>>): SettingsUpdateManyResult {
-    return { settings: this.repos.settings.updateAppSettings(patch) };
+    const result = this.repos.settings.updateAppSettings(patch);
+    // T093: when an AI enable/key/provider setting changes, re-fork the worker so the
+    // new `INTERLEAVE_AI_API_KEY`/`INTERLEAVE_AI_PROVIDER` env takes effect (the worker
+    // bakes env at construction; there is no per-job env channel). The re-fork is gated
+    // on the worker being fully idle, so an unrelated in-flight job is never killed. Only
+    // when the runner is present (the IPC path) — a contract-only test never re-forks.
+    const touchesAi =
+      Object.hasOwn(patch, "aiEnabled") ||
+      Object.hasOwn(patch, "aiApiKey") ||
+      Object.hasOwn(patch, "aiProviderKind");
+    if (touchesAi && this.runner) {
+      this.aiService.onSettingsChanged();
+    }
+    // Project out the plaintext own-keys before returning to the renderer (T087/T093) —
+    // the write path accepted the key, but the read-back is `*Configured` booleans only.
+    return { settings: projectToRendererSettings(result) };
   }
 
   /** Read-only inspector query layer (T010), bound to the open database. */
@@ -1816,6 +1853,80 @@ export class DbService {
       getSettings: () => this.repos.settings.getAppSettings(),
     });
     return this.embedding;
+  }
+
+  /**
+   * The AI-assisted-distillation service (T093), lazily built against the open DB + the
+   * runner + the settings repo. Returns the SAME instance every call. The apply handler
+   * reaches it via `getAiService` (its `applyResult` needs no runner); the IPC `runAi`
+   * path uses the runner to enqueue.
+   */
+  get aiService(): AiService {
+    if (this.ai) return this.ai;
+    this.ai = new AiService({
+      repositories: this.repos,
+      getRunner: () => {
+        if (!this.runner) {
+          throw new Error("DbService: AI enqueue requires a background runner — setRunner() first");
+        }
+        return this.runner;
+      },
+      getSettings: () => this.repos.settings.getAppSettings(),
+      getCardService: () => this.cards,
+    });
+    return this.ai;
+  }
+
+  // -------------------------------------------------------------------------
+  // ai.*  (T093 — AI-assisted distillation)
+  // -------------------------------------------------------------------------
+
+  /** Enqueue an AI formulation action over a selected span (T093). Off → throws. */
+  runAi(request: AiRunRequest): AiRunResult {
+    return this.aiService.enqueue({
+      owningElementId: request.owningElementId as ElementId,
+      action: request.action,
+      sourceRef: {
+        sourceElementId: request.sourceRef.sourceElementId as ElementId,
+        blockIds: request.sourceRef.blockIds as BlockId[],
+        startOffset: request.sourceRef.startOffset ?? null,
+        endOffset: request.sourceRef.endOffset ?? null,
+        selectedText: request.sourceRef.selectedText,
+        ...(request.sourceRef.context ? { context: request.sourceRef.context } : {}),
+      },
+    });
+  }
+
+  /** The draft suggestions for an element + each one's resolved grounding (T093/T094). */
+  listAiSuggestions(request: AiListRequest): AiListResult {
+    const owningElementId = request.elementId as ElementId;
+    const suggestions = this.aiService.listForElement(owningElementId);
+    return {
+      suggestions: suggestions.map((s) => ({
+        ...s,
+        grounding: this.repos.aiSuggestions.groundingFor(this.repos, s.id),
+      })),
+    };
+  }
+
+  /** Approve a card-shaped suggestion → mint a PARKED, un-due `card_draft` (T093). */
+  approveAiCard(request: AiApproveRequest): AiApproveResult {
+    return this.aiService.approveCard(request.suggestionId);
+  }
+
+  /** Dismiss a draft suggestion (soft) (T093). */
+  dismissAiSuggestion(request: AiDismissRequest): AiDismissResult {
+    return this.aiService.dismiss(request.suggestionId);
+  }
+
+  /** The AI disabled-state + disclosure data (T093) — NO key, only `keyConfigured`. */
+  aiStatus(): AiStatusResult {
+    return this.aiService.status();
+  }
+
+  /** Download / warm the local AI model (T093) — flips `aiModelDownloaded`. */
+  downloadAiModel(): { downloaded: boolean } {
+    return this.aiService.downloadModel();
   }
 
   // -------------------------------------------------------------------------

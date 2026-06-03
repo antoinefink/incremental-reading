@@ -449,6 +449,8 @@ describe("DbService", () => {
     const second = new DbService();
     second.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
     const { settings } = second.getAppSettings();
+    // The IPC-facing read PROJECTS the own-keys to `*Configured` booleans (T087/T093) —
+    // the plaintext `aiApiKey`/`embeddingApiKey` are NEVER returned to the renderer.
     expect(settings).toEqual({
       dailyReviewBudget: 90,
       defaultDesiredRetention: 0.95,
@@ -466,10 +468,18 @@ describe("DbService", () => {
       fsrsParamsGlobal: null,
       semanticSearchEnabled: false,
       embeddingProvider: "local",
-      embeddingApiKey: "",
+      embeddingApiKeyConfigured: false,
       embeddingModelId: "local:all-MiniLM-L6-v2",
       embeddingModelDownloaded: false,
+      aiEnabled: false,
+      aiProviderKind: "local",
+      aiManagedProxyEnabled: false,
+      aiModelDownloaded: false,
+      aiLocalModelId: "local:Llama-3.2-3B-Instruct-Q4_K_M",
+      aiKeyConfigured: false,
     });
+    expect(settings).not.toHaveProperty("aiApiKey");
+    expect(settings).not.toHaveProperty("embeddingApiKey");
     second.close();
   });
 
@@ -2752,7 +2762,7 @@ describe("DbService — backup support (T047)", () => {
   it("getSchemaVersion returns the latest applied Drizzle migration tag", () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
-    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe("0025_noisy_korath");
+    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe("0026_reflective_magma");
     svc.close();
   });
 
