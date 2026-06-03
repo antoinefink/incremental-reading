@@ -343,10 +343,11 @@ Detailed specs: [`tasks/M19-review-modes.md`](./tasks/M19-review-modes.md) (T096
   Done when: the end-to-end backup encryption (introduced in T055/T057) is hardened and audited — per-user keys, device recovery, key rotation, and a threat-model review — so a server compromise reveals only ciphertext. (Re-scope: encryption protects *backups*; there is no live sync to encrypt.)
 
 ## M20 — Scale & hardening (T099–T100)
+Detailed specs: [`tasks/M20-maintenance.md`](./tasks/M20-maintenance.md) (T099) · [`tasks/M20-hardening.md`](./tasks/M20-hardening.md) (T100)
 
 - [ ] **T099 — Large-collection maintenance tools** · _deps: T044, T083_
   Done when: dedup, orphan-media cleanup, broken-source reports, cards-without-sources, bulk low-priority postpone/archive, and DB integrity checks keep a 100k-element collection maintainable.
-- [ ] **T100 — Gold-standard QA & performance hardening** · _deps: T099, T096, T097, T098_
+- [ ] **T100 — Gold-standard QA & performance hardening** · _deps: T099, T096_ (T097 Tauri + T098 E2E-encryption are out of scope for the local-first program)
   Done when: load-tested at 100k cards / 100k extracts / thousands of sources / large PDFs / long histories, with indexes, rendering, search, queue calc, and backup/restore optimized so the app stays fast, safe, backed up, and searchable after years of use.
 
 ---
