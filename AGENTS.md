@@ -542,6 +542,9 @@ A bad task is:
 
 Do not rewrite unrelated files. Do not rename concepts casually. Do not change public data shapes without updating migrations, tests, fixtures, and affected services.
 
+When committing agent-authored work, add the coding agent that performed the work
+as a co-author using a standard `Co-authored-by: Name <email>` trailer.
+
 When uncertain, preserve data integrity and source lineage over UI convenience.
 
 Use multi-agent **Workflows** where they help structure the work and raise quality — fan out
