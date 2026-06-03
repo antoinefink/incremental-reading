@@ -29,6 +29,7 @@ import { ConflictSection } from "../components/ConflictSection";
 import { Icon } from "../components/Icon";
 import { FsrsStats, Prio, SchedulerChip, Stage } from "../components/inspector/primitives";
 import { RefBlock } from "../components/RefBlock";
+import { HelpLink, InlineHint } from "../help/Contextual";
 import "../components/inspector/inspector.css";
 import {
   appApi,
@@ -647,6 +648,7 @@ export function ReviewScreen() {
             className="rv-stage rv-fade"
             key={card.id}
             data-testid="review-card"
+            data-coach="review-card"
             data-card-id={card.id}
           >
             {/* metadata row */}
@@ -673,7 +675,10 @@ export function ReviewScreen() {
                   <span className="badge badge--leech">Leech · {card.lapses} lapses</span>
                 ) : null}
               </div>
-              <SchedulerChip scheduler={chipSignals(card)} />
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <SchedulerChip scheduler={chipSignals(card)} />
+                <HelpLink slug="two-schedulers" />
+              </span>
             </div>
 
             {card.leech ? (
@@ -686,6 +691,9 @@ export function ReviewScreen() {
                   </div>
                 </div>
                 <div className="banner__actions">
+                  <HelpLink slug="leeches" variant="inline">
+                    What’s a leech?
+                  </HelpLink>
                   <button
                     type="button"
                     className="banner__action"
@@ -843,6 +851,12 @@ export function ReviewScreen() {
                         </button>
                       ))}
                     </div>
+                    <div style={{ marginTop: 10 }}>
+                      <InlineHint slug="grading-honestly" slugLabel="How to grade">
+                        Grade honestly — the text under each button is when the card returns.{" "}
+                        <b>Again</b> isn’t failure; it just brings the card back sooner.
+                      </InlineHint>
+                    </div>
                     <div style={{ marginTop: 14 }}>
                       <FsrsStats scheduler={chipSignals(card)} />
                     </div>
@@ -879,6 +893,13 @@ export function ReviewScreen() {
                   ? `The ${modeLabel} subset has no cards to review right now.`
                   : "Nothing is due for review right now. New cards arrive as you distill extracts into atomic statements."}
               </p>
+              {!mode && (
+                <div style={{ marginBottom: 14 }}>
+                  <HelpLink slug="no-cards-due" variant="inline">
+                    Why some cards aren’t due
+                  </HelpLink>
+                </div>
+              )}
               <div className="rv-empty__actions">
                 {mode ? (
                   <button

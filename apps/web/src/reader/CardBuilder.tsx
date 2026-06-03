@@ -51,6 +51,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "../components/Icon";
 import { priorityLabel } from "../components/inspector/primitives";
+import { HelpLink } from "../help/Contextual";
 import { appApi, type CardKind, type MediaRefFace, type PriorityLabel } from "../lib/appApi";
 import { ClipMiniPlayer } from "./ClipMiniPlayer";
 import { OcclusionEditor } from "./OcclusionEditor";
@@ -602,7 +603,9 @@ export function CardBuilder({
             `ok` / `warn` / `block` from the pure core heuristic. `block` rows disable
             Create; `warn` rows are advisory. */}
         <div className="insp-sec cb-quality" data-testid="cb-quality">
-          <div className="insp-sec__title">Quality checks</div>
+          <div className="insp-sec__title">
+            Quality checks <HelpLink slug="quality-checks" />
+          </div>
           <div className="cb-quality__rows">
             {quality.checks.map((c) => (
               <div

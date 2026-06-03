@@ -1,0 +1,300 @@
+/* ============================================================
+   Interleave — First-run onboarding (welcome modal + guided tour)
+   Design handoff. Token-driven; light + dark inherit free. The
+   shared coachmark styling lives in help/help.css (the tour reuses
+   the Coachmark primitive).
+   ============================================================ */
+
+/* ---------- Welcome modal ---------- */
+.welcome-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 330;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: oklch(0.2 0.03 262 / 0.5);
+  backdrop-filter: blur(5px);
+}
+[data-theme="dark"] .welcome-overlay {
+  background: oklch(0.1 0.01 264 / 0.66);
+}
+.welcome {
+  width: 580px;
+  max-width: 100%;
+  max-height: 92vh;
+  overflow-y: auto;
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-pop);
+  padding: 30px 34px 26px;
+  animation: coachIn 240ms var(--ease) both;
+}
+.welcome__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--ok);
+  padding: 4px 10px 4px 8px;
+  border-radius: var(--r-full);
+  background: var(--ok-soft);
+  border: 1px solid color-mix(in oklch, var(--ok) 24%, transparent);
+  margin-bottom: 16px;
+  white-space: nowrap;
+}
+.welcome__eyebrow svg {
+  width: 13px;
+  height: 13px;
+}
+.welcome__title {
+  font-size: var(--t-2xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+  line-height: var(--lh-tight);
+}
+.welcome__lede {
+  font-size: var(--t-md);
+  color: var(--text-2);
+  line-height: var(--lh-normal);
+  margin: 0 0 20px;
+  max-width: 46ch;
+}
+.welcome__lede b {
+  color: var(--text);
+  font-weight: 600;
+}
+.welcome__pipeline {
+  padding: 16px 14px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+  margin-bottom: 18px;
+}
+.welcome__pipeline-cap {
+  font-size: var(--t-xs);
+  color: var(--text-3);
+  text-align: center;
+  margin-top: 12px;
+}
+.welcome__myths {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 22px;
+}
+.myth {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: var(--t-sm);
+  line-height: var(--lh-snug);
+}
+.myth__x {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-full);
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: var(--danger-soft);
+  color: var(--danger);
+  margin-top: 1px;
+}
+.myth__x svg {
+  width: 11px;
+  height: 11px;
+}
+.myth b {
+  font-weight: 600;
+}
+.myth span {
+  color: var(--text-2);
+}
+.welcome__theme {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.welcome__theme-label {
+  font-size: var(--t-sm);
+  color: var(--text-2);
+  flex: 1 1 auto;
+}
+.welcome__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.welcome__row2 {
+  display: flex;
+  gap: 8px;
+}
+.welcome__row2 .btn {
+  flex: 1;
+  justify-content: center;
+}
+.welcome__skip {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+.welcome__skip button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  color: var(--text-3);
+}
+.welcome__skip button:hover {
+  color: var(--text-2);
+  text-decoration: underline;
+}
+
+/* segmented (theme picker) */
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  gap: 2px;
+}
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 var(--s-4);
+  border: none;
+  background: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  font-weight: 500;
+  color: var(--text-2);
+  transition: all var(--fast) var(--ease);
+}
+.seg:hover {
+  color: var(--text);
+}
+.seg--on {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+.seg svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* two-scheduler primer card (tour step) */
+.primer {
+  display: flex;
+  gap: 12px;
+  margin: 14px 0 2px;
+}
+.primer__col {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.primer__q {
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+.primer__who {
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+}
+.primer .sched {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-xs);
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: var(--r-full);
+  width: fit-content;
+}
+.primer .sched svg {
+  width: 14px;
+  height: 14px;
+}
+.primer .sched--fsrs {
+  background: color-mix(in oklch, var(--sched-fsrs) 14%, transparent);
+  color: var(--sched-fsrs);
+}
+.primer .sched--attn {
+  background: color-mix(in oklch, var(--sched-attn) 14%, transparent);
+  color: var(--sched-attn);
+}
+
+/* ---------- Tour progress rail ---------- */
+.tour-rail {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 318;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 8px 7px 16px;
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--t-sm);
+  animation: coachIn 200ms var(--ease) both;
+}
+.tour-rail__label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.tour-rail__step {
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.tour-rail__name {
+  font-weight: 600;
+}
+.tour-rail__track {
+  display: flex;
+  gap: 4px;
+}
+.tour-rail__seg {
+  width: 22px;
+  height: 4px;
+  border-radius: var(--r-full);
+  background: var(--border-strong);
+  transition: background var(--med) var(--ease);
+}
+.tour-rail__seg--done,
+.tour-rail__seg--on {
+  background: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome,
+  .tour-rail {
+    animation: none;
+  }
+}

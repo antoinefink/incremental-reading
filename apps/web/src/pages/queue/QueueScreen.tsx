@@ -44,6 +44,7 @@ import {
 } from "../../lib/appApi";
 import { useSelection } from "../../shell/selection";
 import "./queue.css";
+import { HelpLink } from "../../help/Contextual";
 import { jitterOrder } from "./jitter";
 import { OverloadBanner } from "./OverloadBanner";
 import { actionFor, DueBadge, metaFor, titleFor } from "./queueRow";
@@ -500,7 +501,9 @@ export function QueueScreen() {
       <div className="q-pad">
         <div className="q-head">
           <div>
-            <h1 className="q-title">Daily Queue</h1>
+            <h1 className="q-title">
+              Daily Queue <HelpLink slug="daily-loop" />
+            </h1>
             <p className="q-sub" data-testid="queue-subtitle">
               {today} · {dueCount} item{dueCount === 1 ? "" : "s"} due · est. {estMin} min
             </p>
@@ -564,6 +567,7 @@ export function QueueScreen() {
             type="button"
             className="sessionbar__start"
             data-testid="queue-start-session"
+            data-coach="start-session"
             onClick={startSession}
           >
             <Icon name="play" size={14} />

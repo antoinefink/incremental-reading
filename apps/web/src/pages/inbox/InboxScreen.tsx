@@ -24,6 +24,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BalanceBanner } from "../../components/BalanceBanner";
 import { Icon, type IconName } from "../../components/Icon";
 import { Prio, Status, TypeIcon } from "../../components/inspector/primitives";
+import { HelpLink, InlineHint } from "../../help/Contextual";
 import {
   appApi,
   type InboxItemDetail,
@@ -298,8 +299,8 @@ function PreviewPane({
         </section>
 
         <section data-testid="inbox-priority">
-          <div className="mb-2 font-medium text-text-2 text-xs uppercase tracking-wide">
-            Priority
+          <div className="mb-2 flex items-center gap-1.5 font-medium text-text-2 text-xs uppercase tracking-wide">
+            Priority <HelpLink slug="priority-abcd" />
           </div>
           <div className="flex gap-1.5">
             {PRIORITY_LABELS.map((p) => {
@@ -579,7 +580,7 @@ export function InboxScreen() {
             {items.length} item{items.length !== 1 ? "s" : ""} awaiting triage
           </span>
         </div>
-        <div className="flex flex-wrap gap-2.5">
+        <div className="flex flex-wrap gap-2.5" data-coach="import">
           {IMPORT_OPTS.map((o) => {
             const enabled =
               o.action === "manual" ||
@@ -627,6 +628,12 @@ export function InboxScreen() {
               </button>
             );
           })}
+        </div>
+        <div className="mt-2.5">
+          <InlineHint slug="what-to-import" slugLabel="What to import">
+            Good candidates: textbooks, overviews, technical explainers, your own notes — not
+            fiction, breaking news, or do-it-to-learn tutorials.
+          </InlineHint>
         </div>
       </div>
 

@@ -48,6 +48,7 @@ import { requestInspectorRefresh } from "../components/inspector/Inspector";
 import { LineageTree } from "../components/inspector/LineageTree";
 import { Prio, SchedulerChip, Stage, Status, stageLabel } from "../components/inspector/primitives";
 import { RefBlock } from "../components/RefBlock";
+import { HelpLink } from "../help/Contextual";
 import type { CardKind } from "../lib/appApi";
 import {
   appApi,
@@ -662,7 +663,9 @@ export function ExtractView() {
         {/* CENTER — distill */}
         <section className="extract-distill" data-testid="extract-distill">
           <div className="extract-distill__head">
-            <span className="extract-distill__title">Distill extract</span>
+            <span className="extract-distill__title">
+              Distill extract <HelpLink slug="distilling-extracts" />
+            </span>
             {stageIdx < EXTRACT_STAGES.length - 1 ? (
               <button
                 type="button"
@@ -677,7 +680,7 @@ export function ExtractView() {
           </div>
 
           {/* stage stepper — click any step to set that stage */}
-          <div className="stage-stepper" data-testid="extract-stage-stepper">
+          <div className="stage-stepper" data-testid="extract-stage-stepper" data-coach="stages">
             {EXTRACT_STAGES.map((s, i) => (
               <div className="stage-step" key={s}>
                 <button

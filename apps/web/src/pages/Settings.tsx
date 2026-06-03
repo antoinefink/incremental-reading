@@ -19,6 +19,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../components/Icon";
 import { OptimizationPanel } from "../components/OptimizationPanel";
 import { WorkloadSimulator } from "../components/WorkloadSimulator";
+import { InlineHint } from "../help/Contextual";
 import {
   type AppSettings,
   appApi,
@@ -1074,6 +1075,12 @@ export function Settings() {
       </SectionPanel>
 
       <SectionPanel title="Data & backup">
+        <div className="mb-2">
+          <InlineHint slug="backup-vs-export" slugLabel="Backup vs Export">
+            A backup is a full, recoverable copy of everything (DB + assets). An export pulls
+            specific content out to Markdown or Anki — it is not a backup.
+          </InlineHint>
+        </div>
         <SettingRow
           label="Back up now"
           hint="Export the database + asset vault to a portable, hashed ZIP under backups/."

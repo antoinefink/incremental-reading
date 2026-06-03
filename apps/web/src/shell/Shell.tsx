@@ -24,18 +24,30 @@
  */
 import type { LocalVaultPath, VaultRoot } from "@interleave/core";
 import { Link, Outlet, useLinkProps, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BackupPrompt, runBackup } from "../components/BackupPrompt";
 import { Icon } from "../components/Icon";
 import { Inspector } from "../components/inspector/Inspector";
-import { Onboarding } from "../components/Onboarding";
 import { Snackbar } from "../components/Snackbar";
+import { HelpCenter } from "../help/HelpCenter";
+import { type HelpContextValue, HelpProvider } from "../help/HelpContext";
 import { appApi, isDesktop } from "../lib/appApi";
-import { toggleTheme as applyToggleTheme, getStoredTheme, type Theme } from "../theme";
+import { getTourSteps, TourLayer } from "../onboarding/Tour";
+import { WelcomeModal } from "../onboarding/WelcomeModal";
+import { applyTheme, toggleTheme as applyToggleTheme, getStoredTheme, type Theme } from "../theme";
 import { CheatSheet } from "./CheatSheet";
 import { CommandPalette } from "./CommandPalette";
 import { Kbd } from "./Kbd";
-import { type NavItem, PRIMARY_NAV, resolveActiveNavId, SECONDARY_NAV, UNDO_EVENT } from "./nav";
+import {
+  type NavItem,
+  NEW_SOURCE_EVENT,
+  OPEN_HELP_EVENT,
+  PRIMARY_NAV,
+  resolveActiveNavId,
+  SECONDARY_NAV,
+  START_TOUR_EVENT,
+  UNDO_EVENT,
+} from "./nav";
 import { SelectionProvider, useSelection } from "./selection";
 import "./shell.css";
 import type { PaletteActionId } from "./shortcuts";
@@ -43,6 +55,12 @@ import { useGlobalActions } from "./useGlobalActions";
 import { type NavBadgeCounts, useNavBadges } from "./useNavBadges";
 import { useShellIdentity } from "./useShellIdentity";
 import { useShellShortcuts } from "./useShellShortcuts";
+
+/** Generic settings keys for the onboarding + contextual-help flags (persisted in
+ *  the SQLite `settings` table via the bridge, like the original `ui.seenOnboarding`). */
+const SEEN_ONBOARDING_KEY = "ui.seenOnboarding";
+const TIPS_ENABLED_KEY = "ui.tipsEnabled";
+const COACH_SEEN_KEY = "ui.coachSeen";
 
 function NavButton({
   item,
@@ -104,11 +122,13 @@ function Sidebar({
   theme,
   onToggleTheme,
   onOpenCheat,
+  onOpenHelp,
 }: {
   pathname: string;
   theme: Theme;
   onToggleTheme: () => void;
   onOpenCheat: () => void;
+  onOpenHelp: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuWrapRef = useRef<HTMLDivElement>(null);
@@ -228,6 +248,19 @@ function Sidebar({
                 <span className="shell-grow">Keyboard shortcuts</span>
                 <Kbd keys="?" />
               </button>
+              <button
+                type="button"
+                className="shell-usermenu__item"
+                role="menuitem"
+                data-testid="usermenu-help"
+                onClick={() => {
+                  onOpenHelp();
+                  setMenuOpen(false);
+                }}
+              >
+                <Icon name="info" size={14} />
+                <span className="shell-grow">Help &amp; docs</span>
+              </button>
               <hr className="shell-usermenu__sep" />
               {/* Non-interactive status (not a menu action): the MVP is local-only,
                   so this is honest "offline-first" copy, not a misleading "synced"
@@ -313,6 +346,15 @@ function ShellInner() {
   const [theme, setTheme] = useState<Theme>(() => getStoredTheme());
   const [undoToast, setUndoToast] = useState<string | null>(null);
   const [backupToast, setBackupToast] = useState<string | null>(null);
+
+  // ---- Onboarding + contextual-help state (design handoff) ----
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpSlug, setHelpSlug] = useState<string | null>(null);
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  const [tourIndex, setTourIndex] = useState<number | null>(null);
+  const [tipsEnabled, setTipsState] = useState(true);
+  const [seen, setSeen] = useState<Set<string>>(() => new Set());
+  const tourSteps = useMemo(() => getTourSteps(), []);
 
   const onNavigate = (to: string) => {
     void navigate({ to });
@@ -428,6 +470,140 @@ function ShellInner() {
     }
   };
 
+  // ---- Onboarding + contextual-help wiring (design handoff) ----
+
+  // Load the persisted flags once: tips toggle, the once-only "seen" coachmark set,
+  // and whether the first-run welcome still needs to show. All via the generic
+  // key/value settings surface (SQLite-backed) — never localStorage.
+  useEffect(() => {
+    if (!isDesktop()) return;
+    let cancelled = false;
+    void appApi
+      .getSettings()
+      .then(({ settings }) => {
+        if (cancelled) return;
+        if (settings[TIPS_ENABLED_KEY] === false) setTipsState(false);
+        const arr = settings[COACH_SEEN_KEY];
+        if (Array.isArray(arr)) setSeen(new Set(arr as string[]));
+        if (settings[SEEN_ONBOARDING_KEY] !== true) setWelcomeOpen(true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const persistOnboardingSeen = useCallback(() => {
+    if (isDesktop())
+      void appApi.updateSetting({ key: SEEN_ONBOARDING_KEY, value: true }).catch(() => {});
+  }, []);
+
+  const setTipsEnabled = useCallback((value: boolean) => {
+    setTipsState(value);
+    if (isDesktop()) void appApi.updateSetting({ key: TIPS_ENABLED_KEY, value }).catch(() => {});
+  }, []);
+
+  const markSeen = useCallback((id: string) => {
+    setSeen((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      if (isDesktop())
+        void appApi.updateSetting({ key: COACH_SEEN_KEY, value: [...next] }).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const resetTips = useCallback(() => {
+    setSeen(new Set());
+    if (isDesktop()) void appApi.updateSetting({ key: COACH_SEEN_KEY, value: [] }).catch(() => {});
+  }, []);
+
+  const openHelp = useCallback((slug?: string) => {
+    setHelpSlug(slug ?? null);
+    setHelpOpen(true);
+  }, []);
+
+  const finishTour = useCallback(() => {
+    setTourIndex(null);
+    persistOnboardingSeen();
+    void navigate({ to: "/queue" });
+  }, [navigate, persistOnboardingSeen]);
+
+  const startTour = useCallback(() => {
+    setWelcomeOpen(false);
+    setHelpOpen(false);
+    persistOnboardingSeen();
+    setTourIndex(0);
+  }, [persistOnboardingSeen]);
+
+  const tourNext = useCallback(() => {
+    const next = (tourIndex ?? 0) + 1;
+    if (next >= tourSteps.length) finishTour();
+    else setTourIndex(next);
+  }, [tourIndex, tourSteps.length, finishTour]);
+
+  const tourPrev = useCallback(() => setTourIndex((i) => Math.max(0, (i ?? 0) - 1)), []);
+
+  // Drive the route as the tour advances so each coachmark anchors on its screen.
+  useEffect(() => {
+    if (tourIndex != null && tourSteps[tourIndex]) {
+      void navigate({ to: tourSteps[tourIndex].route });
+    }
+  }, [tourIndex, tourSteps, navigate]);
+
+  // Welcome-modal exits.
+  const onWelcomeImport = useCallback(() => {
+    setWelcomeOpen(false);
+    persistOnboardingSeen();
+    void navigate({ to: "/inbox" }).then(() =>
+      window.dispatchEvent(new CustomEvent(NEW_SOURCE_EVENT)),
+    );
+  }, [navigate, persistOnboardingSeen]);
+
+  const onWelcomeExplore = useCallback(() => {
+    setWelcomeOpen(false);
+    persistOnboardingSeen();
+  }, [persistOnboardingSeen]);
+
+  const onWelcomeDisableTips = useCallback(() => {
+    setWelcomeOpen(false);
+    persistOnboardingSeen();
+    setTipsEnabled(false);
+  }, [persistOnboardingSeen, setTipsEnabled]);
+
+  // Set a specific theme (welcome picker) — applies + persists like onToggleTheme.
+  const onPickTheme = useCallback((next: Theme) => {
+    applyTheme(next);
+    setTheme(next);
+    if (isDesktop()) void appApi.updateAppSettings({ patch: { theme: next } }).catch(() => {});
+  }, []);
+
+  // ⌘K "Help" commands dispatch window events the palette can't handle itself.
+  useEffect(() => {
+    const onOpen = () => openHelp();
+    const onTour = () => startTour();
+    window.addEventListener(OPEN_HELP_EVENT, onOpen);
+    window.addEventListener(START_TOUR_EVENT, onTour);
+    return () => {
+      window.removeEventListener(OPEN_HELP_EVENT, onOpen);
+      window.removeEventListener(START_TOUR_EVENT, onTour);
+    };
+  }, [openHelp, startTour]);
+
+  const helpValue = useMemo<HelpContextValue>(
+    () => ({
+      tipsEnabled,
+      setTipsEnabled,
+      isSeen: (id: string) => seen.has(id),
+      markSeen,
+      resetTips,
+      openHelp,
+      startTour,
+    }),
+    [tipsEnabled, setTipsEnabled, seen, markSeen, resetTips, openHelp, startTour],
+  );
+
   useShellShortcuts({
     toggleCommandPalette: () => setCommandOpen((o) => !o),
     toggleCheatSheet: () => setCheatOpen((o) => !o),
@@ -442,52 +618,73 @@ function ShellInner() {
   });
 
   return (
-    <div className="app-shell">
-      <Sidebar
-        pathname={pathname}
-        theme={theme}
-        onToggleTheme={onToggleTheme}
-        onOpenCheat={() => setCheatOpen(true)}
-      />
+    <HelpProvider value={helpValue}>
+      <div className="app-shell">
+        <Sidebar
+          pathname={pathname}
+          theme={theme}
+          onToggleTheme={onToggleTheme}
+          onOpenCheat={() => setCheatOpen(true)}
+          onOpenHelp={() => openHelp()}
+        />
 
-      <div className="shell-main">
-        <Topbar onOpenCommand={() => setCommandOpen(true)} />
-        <main className="shell-page">
-          {/* Gentle, app-wide "no backup in N days" reminder + "create a backup
+        <div className="shell-main">
+          <Topbar onOpenCommand={() => setCommandOpen(true)} />
+          <main className="shell-page">
+            {/* Gentle, app-wide "no backup in N days" reminder + "create a backup
               now" affordance (T050). Renders null until due / outside desktop. */}
-          <BackupPrompt />
-          <Outlet />
-        </main>
-        <StatusBar />
+            <BackupPrompt />
+            <Outlet />
+          </main>
+          <StatusBar />
+        </div>
+
+        <Inspector />
+
+        {/* First-run welcome (design handoff) — shown once, then a `ui.seenOnboarding`
+          flag persists in settings (survives restart). Replaces the minimal T050
+          welcome with the method primer + myth-busters + theme + the guided tour. */}
+        <WelcomeModal
+          open={welcomeOpen}
+          theme={theme}
+          onPickTheme={onPickTheme}
+          onStartTour={startTour}
+          onImport={onWelcomeImport}
+          onExplore={onWelcomeExplore}
+          onDisableTips={onWelcomeDisableTips}
+        />
+        {/* The scripted guided tour: rail + anchored coachmarks over the real screens. */}
+        <TourLayer index={tourIndex} onNext={tourNext} onPrev={tourPrev} onSkip={finishTour} />
+
+        <CommandPalette
+          open={commandOpen}
+          onClose={() => setCommandOpen(false)}
+          onNavigate={onNavigate}
+          onAction={runAction}
+          hasSelection={selectedId !== null}
+        />
+        <CheatSheet open={cheatOpen} onClose={() => setCheatOpen(false)} />
+        {/* The in-app help center (deep-linked from every contextual hook + ⌘K). */}
+        <HelpCenter
+          open={helpOpen}
+          openSlug={helpSlug}
+          onClose={() => setHelpOpen(false)}
+          onNavScreen={onNavigate}
+        />
+        {/* Global undo toast (T044) — confirms the ⌘Z command-level undo. */}
+        <Snackbar
+          message={undoToast}
+          onClose={() => setUndoToast(null)}
+          testId="shell-undo-snackbar"
+        />
+        {/* Backup toast (T050) — confirms the ⌘B / palette / menu backup command. */}
+        <Snackbar
+          message={backupToast}
+          onClose={() => setBackupToast(null)}
+          testId="shell-backup-snackbar"
+        />
       </div>
-
-      <Inspector />
-
-      {/* First-run welcome / empty-state onboarding (T050) — shown once, then a
-          `ui.seenOnboarding` flag persists in settings (survives restart). */}
-      <Onboarding />
-
-      <CommandPalette
-        open={commandOpen}
-        onClose={() => setCommandOpen(false)}
-        onNavigate={onNavigate}
-        onAction={runAction}
-        hasSelection={selectedId !== null}
-      />
-      <CheatSheet open={cheatOpen} onClose={() => setCheatOpen(false)} />
-      {/* Global undo toast (T044) — confirms the ⌘Z command-level undo. */}
-      <Snackbar
-        message={undoToast}
-        onClose={() => setUndoToast(null)}
-        testId="shell-undo-snackbar"
-      />
-      {/* Backup toast (T050) — confirms the ⌘B / palette / menu backup command. */}
-      <Snackbar
-        message={backupToast}
-        onClose={() => setBackupToast(null)}
-        testId="shell-backup-snackbar"
-      />
-    </div>
+    </HelpProvider>
   );
 }
 

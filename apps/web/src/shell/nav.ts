@@ -216,6 +216,15 @@ export const UNDO_EVENT = "interleave:undo";
 export const SETTINGS_CHANGED_EVENT = "interleave:settings-changed";
 
 /**
+ * CustomEvent names the ⌘K "Help" commands dispatch (the palette runs an item's
+ * `event` after navigating). The Shell listens for these to open the in-app help
+ * center and to (re)start the first-run guided tour — keeping the palette free of
+ * any help/onboarding state. The detail is `undefined`.
+ */
+export const OPEN_HELP_EVENT = "interleave:open-help";
+export const START_TOUR_EVENT = "interleave:start-tour";
+
+/**
  * Action entries DERIVED from the single shortcut registry (T048) — the palette's
  * "do something" commands (Open source, Open parent, Raise/Lower priority, Start
  * review, Search). Each carries the registry's `actionId` so `CommandPalette`'s
@@ -282,6 +291,12 @@ export const COMMAND_ITEMS: readonly CommandItem[] = [
     label: "New synthesis note…",
     to: "/synthesis/new",
   },
+  // Help (design handoff) — the palette's discoverable entry into the in-app help
+  // center + the guided tour. Prefixed "Help:" so typing "help" surfaces them; each
+  // dispatches a window event the Shell handles (no `to`, so the palette just fires
+  // the event). Trimmed to two commands so the dense palette stays scannable.
+  { group: "Help", icon: "info", label: "Help: Open help center", event: OPEN_HELP_EVENT },
+  { group: "Help", icon: "sparkle", label: "Help: Take the tour", event: START_TOUR_EVENT },
   ...ACTION_COMMAND_ITEMS,
 ];
 

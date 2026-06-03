@@ -211,6 +211,18 @@
   border-color: var(--text);
   color: var(--canvas);
 }
+/* An active chip stays readable on hover: `.chip:hover` (specificity 0,2,0) would
+   otherwise override `.chip--active`'s light text with `var(--text)` (dark-on-dark
+   = invisible). This same-specificity, later rule keeps the inverted colors. */
+.chip--active:hover {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--canvas);
+}
+.chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
 .chip__count {
   font-family: var(--font-mono);
   font-size: var(--t-2xs);

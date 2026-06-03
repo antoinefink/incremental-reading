@@ -38,10 +38,6 @@ vi.mock("../components/Icon", () => ({
   Icon: ({ name }: { name: string }) => <span data-testid={`icon-${name}`} />,
 }));
 
-vi.mock("../components/Onboarding", () => ({
-  Onboarding: () => <div data-testid="onboarding" />,
-}));
-
 vi.mock("../components/Snackbar", () => ({
   Snackbar: ({ message, testId }: { message: string | null; testId: string }) => (
     <div data-testid={testId}>{message}</div>
@@ -61,6 +57,10 @@ vi.mock("../lib/appApi", async () => {
       onMenuShowShortcuts: vi.fn(() => vi.fn()),
       onMenuCreateBackup: vi.fn(() => vi.fn()),
       updateAppSettings: h.updateAppSettings,
+      // The onboarding-flag load: report the welcome as already seen so the
+      // first-run modal stays closed in these chrome tests.
+      getSettings: vi.fn(() => Promise.resolve({ settings: { "ui.seenOnboarding": true } })),
+      updateSetting: vi.fn(() => Promise.resolve({})),
       undoLast: vi.fn(),
     },
   };
@@ -69,6 +69,7 @@ vi.mock("../lib/appApi", async () => {
 vi.mock("../theme", () => ({
   getStoredTheme: () => "light",
   toggleTheme: () => h.toggleTheme(),
+  applyTheme: vi.fn(),
 }));
 
 vi.mock("./CheatSheet", () => ({
