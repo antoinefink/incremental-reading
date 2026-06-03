@@ -1,0 +1,113 @@
+import { fireEvent, render, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const h = vi.hoisted(() => ({
+  desktop: true,
+  importUrlSource: vi.fn(),
+}));
+
+vi.mock("../../lib/appApi", async () => {
+  const actual = await vi.importActual<typeof import("../../lib/appApi")>("../../lib/appApi");
+  return {
+    ...actual,
+    isDesktop: () => h.desktop,
+    appApi: {
+      importUrlSource: h.importUrlSource,
+    },
+  };
+});
+
+import { ImportUrlModal } from "./ImportUrlModal";
+
+beforeEach(() => {
+  h.desktop = true;
+  h.importUrlSource.mockReset();
+  h.importUrlSource.mockResolvedValue({ status: "imported", id: "source-1" });
+});
+
+describe("ImportUrlModal", () => {
+  it("imports a URL with optional reason and priority", async () => {
+    const onImported = vi.fn();
+    const { getByTestId } = render(
+      <ImportUrlModal open onClose={vi.fn()} onImported={onImported} />,
+    );
+
+    fireEvent.change(getByTestId("import-url-input"), {
+      target: { value: " https://example.com/a " },
+    });
+    fireEvent.change(getByTestId("import-url-reason"), { target: { value: " For research " } });
+    fireEvent.click(getByTestId("import-url-priority-A"));
+    fireEvent.click(getByTestId("import-url-submit"));
+
+    await waitFor(() =>
+      expect(h.importUrlSource).toHaveBeenCalledWith({
+        url: "https://example.com/a",
+        priority: "A",
+        reasonAdded: "For research",
+      }),
+    );
+    expect(onImported).toHaveBeenCalledWith("source-1");
+  });
+
+  it("shows duplicate choices, opens existing, and can force a new version", async () => {
+    h.importUrlSource.mockResolvedValueOnce({
+      status: "duplicate",
+      matches: [
+        {
+          elementId: "existing-1",
+          title: "Existing article",
+          accessedAt: "2026-06-01T00:00:00.000Z",
+          matchedBy: "canonicalUrl",
+        },
+      ],
+    });
+    h.importUrlSource.mockResolvedValueOnce({ status: "imported", id: "source-new" });
+    const onImported = vi.fn();
+    const onOpenExisting = vi.fn();
+    const { getByTestId, findByTestId } = render(
+      <ImportUrlModal
+        open
+        onClose={vi.fn()}
+        onImported={onImported}
+        onOpenExisting={onOpenExisting}
+      />,
+    );
+
+    fireEvent.change(getByTestId("import-url-input"), { target: { value: "https://example.com" } });
+    fireEvent.click(getByTestId("import-url-submit"));
+    expect(await findByTestId("import-url-duplicate")).toHaveTextContent("Existing article");
+
+    fireEvent.click(getByTestId("import-url-open-existing"));
+    expect(onOpenExisting).toHaveBeenCalledWith("existing-1");
+
+    fireEvent.click(getByTestId("import-url-new-version"));
+    await waitFor(() =>
+      expect(h.importUrlSource).toHaveBeenLastCalledWith({
+        url: "https://example.com",
+        priority: "C",
+        forceNewVersion: true,
+      }),
+    );
+    expect(onImported).toHaveBeenCalledWith("source-new");
+  });
+
+  it("maps typed import errors to friendly copy and is inert outside desktop", async () => {
+    h.importUrlSource.mockRejectedValueOnce(new Error("timeout: fetch exceeded"));
+    const { getByTestId, findByTestId, rerender } = render(
+      <ImportUrlModal open onClose={vi.fn()} onImported={vi.fn()} />,
+    );
+
+    fireEvent.change(getByTestId("import-url-input"), { target: { value: "https://slow.test" } });
+    fireEvent.click(getByTestId("import-url-submit"));
+    expect(await findByTestId("import-url-error")).toHaveTextContent(
+      "Timed out reaching that page.",
+    );
+
+    h.desktop = false;
+    h.importUrlSource.mockClear();
+    rerender(<ImportUrlModal open onClose={vi.fn()} onImported={vi.fn()} />);
+    fireEvent.change(getByTestId("import-url-input"), { target: { value: "https://x.test" } });
+    fireEvent.click(getByTestId("import-url-submit"));
+    expect(h.importUrlSource).not.toHaveBeenCalled();
+  });
+});
