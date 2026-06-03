@@ -286,6 +286,21 @@ export function ReviewScreen() {
     })();
   }, [card, navigateToLocation]);
 
+  /**
+   * Create a "verify this claim" verification task (T092) for the current card,
+   * straight from the post-reveal expiry banner — a scheduled `task`-type element
+   * linked to the card (`tasks.create`, one transaction + `create_element` +
+   * `add_relation`). The fact stays in review; this just queues the maintenance work.
+   */
+  const createVerifyTask = useCallback(async () => {
+    if (!card) return;
+    await appApi.createTask({
+      taskType: "verify_claim",
+      title: card.sourceTitle ? `Verify claim from ${card.sourceTitle}` : "Verify this claim",
+      linkedElementId: card.id,
+    });
+  }, [card]);
+
   /** Restart the session from the top (re-reads the due deck). */
   const restart = useCallback(() => {
     excludeRef.current = [];
@@ -519,7 +534,9 @@ export function ReviewScreen() {
                         {/* Expiry banner (T090) — a calm "may be out of date" line, shown
                             ONLY post-reveal (it rides the reveal gate so it can't leak the
                             answer). Absent for a fresh / lifetime-less card (`expiry: null`). */}
-                        {card.expiry ? <ExpiryBanner expiry={card.expiry} /> : null}
+                        {card.expiry ? (
+                          <ExpiryBanner expiry={card.expiry} onCreateTask={createVerifyTask} />
+                        ) : null}
                         {/* Possible-conflict flags (T089) — shown ONLY post-reveal so
                             they can't leak the answer; suggestive, never authoritative. */}
                         <ConflictSection
@@ -590,7 +607,9 @@ export function ReviewScreen() {
                         {/* Expiry banner (T090) — a calm "may be out of date" line, shown
                             ONLY post-reveal (it rides the reveal gate so it can't leak the
                             answer). Absent for a fresh / lifetime-less card (`expiry: null`). */}
-                        {card.expiry ? <ExpiryBanner expiry={card.expiry} /> : null}
+                        {card.expiry ? (
+                          <ExpiryBanner expiry={card.expiry} onCreateTask={createVerifyTask} />
+                        ) : null}
                         {/* Possible-conflict flags (T089) — shown ONLY post-reveal so
                             they can't leak the answer; suggestive, never authoritative. */}
                         <ConflictSection

@@ -43,6 +43,8 @@ const h = vi.hoisted(() => {
     siblingGroupId: null,
     sourceId: null,
     cardType: "qa",
+    linkedElementId: null,
+    linkedElementType: null,
     protected: true,
     due: "overdue",
     dueLabel: "Overdue",
@@ -71,6 +73,8 @@ const h = vi.hoisted(() => {
     siblingGroupId: null,
     sourceId: null,
     cardType: null,
+    linkedElementId: null,
+    linkedElementType: null,
     protected: false,
     due: "today",
     dueLabel: "Due today",
@@ -99,6 +103,8 @@ const h = vi.hoisted(() => {
     siblingGroupId: null,
     sourceId: null,
     cardType: null,
+    linkedElementId: null,
+    linkedElementType: null,
     protected: true,
     due: "overdue",
     dueLabel: "Overdue",
@@ -127,9 +133,43 @@ const h = vi.hoisted(() => {
     siblingGroupId: null,
     sourceId: null,
     cardType: null,
+    linkedElementId: null,
+    linkedElementType: null,
     protected: false,
     due: "today",
     dueLabel: "Due today",
+  };
+  // A verification TASK (T092) linked to the source above — opening it must JUMP TO
+  // the protected source's reader, not open the task in /process.
+  const taskRow: QueueItemSummary = {
+    id: "task-1",
+    type: "task",
+    status: "scheduled",
+    stage: "rough_topic",
+    priority: 0.875,
+    title: "Verify claim: The Bitter Lesson",
+    dueAt: "2026-05-29T08:00:00.000Z",
+    scheduler: "attention",
+    schedulerSignals: {
+      kind: "attention",
+      retrievability: null,
+      stability: null,
+      fsrsState: null,
+      lapses: null,
+      stage: "rough_topic",
+      postponed: 0,
+    },
+    sourceTitle: null,
+    author: null,
+    concept: null,
+    siblingGroupId: null,
+    sourceId: null,
+    cardType: null,
+    linkedElementId: "source-1",
+    linkedElementType: "source",
+    protected: true,
+    due: "overdue",
+    dueLabel: "Overdue",
   };
   const result: QueueListResult = {
     items: [cardRow, sourceRow, extractRow, topicRow],
@@ -158,6 +198,7 @@ const h = vi.hoisted(() => {
     undoQueueAction: vi.fn().mockResolvedValue({ item: extractRow }),
     extractRow,
     topicRow,
+    taskRow,
   };
 });
 
@@ -276,6 +317,42 @@ describe("QueueScreen", () => {
       to: "/source/$id",
       params: { id: "source-1" },
     });
+  });
+
+  it("opens a verification task by JUMPING TO the protected element's reader, not /process", async () => {
+    // The task row protects `source-1`; its "Verify" affordance must select the
+    // protected element + open ITS reader (T092), never open the task in /process.
+    h.listQueue.mockResolvedValueOnce({
+      items: [h.taskRow],
+      counts: {
+        all: 1,
+        card: 0,
+        source: 0,
+        extract: 0,
+        topic: 0,
+        task: 1,
+        highPriority: 1,
+        overdue: 1,
+        protected: 1,
+      },
+      budget: { used: 1, target: 30 },
+    });
+    render(<QueueScreen />);
+    await screen.findAllByTestId("queue-item");
+    const task = screen
+      .getAllByTestId("queue-item")
+      .find((el) => el.getAttribute("data-element-id") === "task-1");
+    // The affordance reads "Verify" (jump), not the generic "Open".
+    expect(task?.querySelector('[data-testid="queue-open"]')).toHaveTextContent("Verify");
+    const open = task?.querySelector('[data-testid="queue-open"]') as HTMLElement;
+    fireEvent.click(open);
+    // Selects the PROTECTED element (not the task) + routes to the source reader.
+    expect(h.selectSpy).toHaveBeenCalledWith("source-1");
+    expect(h.navigateSpy).toHaveBeenCalledWith({
+      to: "/source/$id",
+      params: { id: "source-1" },
+    });
+    expect(h.navigateSpy).not.toHaveBeenCalledWith({ to: "/process", search: {} });
   });
 
   it("renders the BudgetMeter with the items-due / target gauge", async () => {

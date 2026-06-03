@@ -847,3 +847,68 @@
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/* ---------- Maintenance / verification tasks (T092) ---------- */
+.insp-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.insp-task {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.insp-task__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.insp-task__kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  font-weight: 500;
+  color: var(--text-2);
+}
+.insp-task__note {
+  font-size: var(--t-xs);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.insp-task__acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.insp-task__act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.insp-task__act:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.insp-task__act:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

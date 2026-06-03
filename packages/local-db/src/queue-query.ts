@@ -107,6 +107,19 @@ export interface QueueItemSummary {
   readonly sourceId: string | null;
   /** Card kind (`qa`/`cloze`), for the card meta line; null for non-cards. */
   readonly cardType: string | null;
+  /**
+   * The element a `task`-type row protects (its `tasks.linked_element_id`), or `null` —
+   * lets the queue/process "Open" affordance JUMP TO the protected card/source/extract's
+   * reader (the T092 verification deliverable) rather than opening the maintenance task
+   * itself. Populated for task rows only; always `null` for every other type.
+   */
+  readonly linkedElementId: string | null;
+  /**
+   * The protected element's TYPE (`card`/`source`/`extract`/…), or `null` — paired with
+   * {@link linkedElementId} so the "Open" affordance can route to the right surface
+   * (source → reader, extract → extract view, card → review) WITHOUT a second read.
+   */
+  readonly linkedElementType: string | null;
   /** True for A-priority items (the `--protected` accent bar). */
   readonly protected: boolean;
   /** Overdue / today / soon, relative to `asOf`. */
@@ -421,6 +434,9 @@ export class QueueQuery {
       siblingGroupId,
       sourceId,
       cardType: card?.card.kind ?? null,
+      // A card is the FSRS leaf — it protects nothing else, never a verification task.
+      linkedElementId: null,
+      linkedElementType: null,
       protected: priorityToLabel(element.priority) === "A",
       due,
       dueLabel: dueLabelFor(dueAt, due, asOfMs),
@@ -431,6 +447,13 @@ export class QueueQuery {
   private toAttentionSummary(element: Element, asOfMs: number): QueueItemSummary {
     const due = dueStateFor(element.dueAt, asOfMs);
     const { sourceTitle, author, sourceId } = this.sourceContext(element);
+    // ONLY a verification `task` protects another element — resolve its
+    // `tasks.linked_element_id` (+ type) ONCE so the "Open" affordance jumps to that
+    // card/source's reader. Every other attention type resolves to `null`.
+    const linked =
+      element.type === "task"
+        ? (this.repos.tasks.findTask(element.id)?.linkedElement ?? null)
+        : null;
     return {
       id: element.id,
       type: element.type,
@@ -457,6 +480,8 @@ export class QueueQuery {
       siblingGroupId: null,
       sourceId,
       cardType: null,
+      linkedElementId: linked?.id ?? null,
+      linkedElementType: linked?.type ?? null,
       protected: priorityToLabel(element.priority) === "A",
       due,
       dueLabel: dueLabelFor(element.dueAt, due, asOfMs),

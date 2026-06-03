@@ -123,6 +123,11 @@ import {
   TagsAddRequestSchema,
   TagsListRequestSchema,
   TagsRemoveRequestSchema,
+  TasksCompleteRequestSchema,
+  TasksCreateRequestSchema,
+  TasksGenerateFromExpiryRequestSchema,
+  TasksListRequestSchema,
+  TasksPostponeRequestSchema,
   TrashEmptyRequestSchema,
   TrashListRequestSchema,
   TrashPurgeRequestSchema,
@@ -999,6 +1004,32 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.conceptsMembers, (_event, rawRequest: unknown) => {
     const request = ConceptsMembersRequestSchema.parse(rawRequest);
     return dbService.conceptMembers(request);
+  });
+
+  // Verification tasks (T092) — create / list / complete / postpone / generate.
+  ipcMain.handle(IPC_CHANNELS.tasksCreate, (_event, rawRequest: unknown) => {
+    const request = TasksCreateRequestSchema.parse(rawRequest);
+    return dbService.createTask(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.tasksList, (_event, rawRequest: unknown) => {
+    const request = TasksListRequestSchema.parse(rawRequest);
+    return dbService.listTasks(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.tasksComplete, (_event, rawRequest: unknown) => {
+    const request = TasksCompleteRequestSchema.parse(rawRequest);
+    return dbService.completeTask(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.tasksPostpone, (_event, rawRequest: unknown) => {
+    const request = TasksPostponeRequestSchema.parse(rawRequest);
+    return dbService.postponeTask(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.tasksGenerateFromExpiry, (_event, rawRequest: unknown) => {
+    const request = TasksGenerateFromExpiryRequestSchema.parse(rawRequest);
+    return dbService.generateVerificationTasks(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.retentionGet, () => {

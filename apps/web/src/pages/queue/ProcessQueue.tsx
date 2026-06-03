@@ -430,6 +430,21 @@ export function ProcessQueue() {
   /** Open the current item in its full surface — the ONLY navigation in the loop. */
   const open = useCallback(() => {
     if (!current) return;
+    // A verification TASK (T092) protecting another element JUMPS TO that protected
+    // card/source/extract's reader (the verification deliverable), not the task itself.
+    // An unlinked task falls through to the normal per-type routing below.
+    if (current.type === "task" && current.linkedElementId) {
+      select(current.linkedElementId);
+      const linkedId = current.linkedElementId;
+      const linkedType = current.linkedElementType;
+      if (linkedType === "source" || linkedType === "topic") {
+        void navigate({ to: "/source/$id", params: { id: linkedId } });
+      } else if (linkedType === "extract") {
+        void navigate({ to: "/extract/$id", params: { id: linkedId } });
+      }
+      // card / synthesis_note / no dedicated page: the select above drives the inspector.
+      return;
+    }
     select(current.id);
     if (current.type === "source") {
       void navigate({ to: "/source/$id", params: { id: current.id } });

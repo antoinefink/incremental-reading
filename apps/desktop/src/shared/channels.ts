@@ -108,6 +108,15 @@ export const IPC_CHANNELS = {
   conceptsAssign: "concepts:assign",
   conceptsUnassign: "concepts:unassign",
   conceptsMembers: "concepts:members",
+  // Verification tasks (T092) — scheduled `task`-type elements that protect
+  // time-sensitive knowledge. Created by hand or generated from T090 expiry;
+  // attention-scheduled (never FSRS); each mutation is one transaction + the correct
+  // existing op (create_element / add_relation / reschedule_element).
+  tasksCreate: "tasks:create",
+  tasksList: "tasks:list",
+  tasksComplete: "tasks:complete",
+  tasksPostpone: "tasks:postpone",
+  tasksGenerateFromExpiry: "tasks:generateFromExpiry",
   // Desired retention by priority band / concept / card (T079).
   retentionGet: "retention:get",
   retentionSetBand: "retention:setBand",

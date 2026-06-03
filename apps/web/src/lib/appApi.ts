@@ -438,6 +438,14 @@ export interface QueueItemSummary {
   readonly sourceId: string | null;
   /** Card kind (`qa`/`cloze`); null for non-cards. */
   readonly cardType: string | null;
+  /**
+   * The element a `task`-type row protects (its `tasks.linked_element_id`), or `null` —
+   * lets the queue/process "Open" affordance JUMP TO the protected card/source/extract's
+   * reader (T092) rather than opening the maintenance task itself. Task rows only.
+   */
+  readonly linkedElementId: string | null;
+  /** The protected element's TYPE, or `null` — paired with `linkedElementId` for routing. */
+  readonly linkedElementType: string | null;
   /** True for A-priority items (the `--protected` accent bar). */
   readonly protected: boolean;
   readonly due: QueueDueState;
@@ -2173,6 +2181,80 @@ export interface ConceptsMembersResult {
 }
 
 // ---------------------------------------------------------------------------
+// tasks.*  (T092 — verification tasks: scheduled `task`-type elements)
+// ---------------------------------------------------------------------------
+
+/** The closed verification-task kinds (mirrors the core TASK_TYPES tuple). */
+export type TaskType =
+  | "verify_claim"
+  | "find_better_source"
+  | "update_outdated_card"
+  | "check_current_version"
+  | "custom";
+
+/** A flat verification-task summary — the inspector/queue read shape. */
+export interface TaskSummary {
+  readonly id: string;
+  readonly taskType: TaskType;
+  readonly title: string;
+  readonly note: string | null;
+  readonly status: string;
+  readonly dueAt: string | null;
+  readonly priority: number;
+  /** The element this task protects, or `null`. */
+  readonly linkedElement: {
+    readonly id: string;
+    readonly type: string;
+    readonly title: string;
+  } | null;
+}
+
+/** The explicit schedule choice a task accepts (mirrors {@link QueueScheduleChoice}). */
+export type TaskDueChoice = QueueScheduleChoice;
+
+export interface TasksCreateRequest {
+  readonly taskType: TaskType;
+  readonly title: string;
+  readonly note?: string;
+  readonly linkedElementId?: string | null;
+  readonly priority?: PriorityLabel;
+  readonly dueChoice?: TaskDueChoice;
+}
+export interface TasksCreateResult {
+  readonly task: TaskSummary;
+}
+
+export interface TasksListRequest {
+  readonly linkedElementId?: string | null;
+}
+export interface TasksListResult {
+  readonly tasks: readonly TaskSummary[];
+}
+
+export interface TasksCompleteRequest {
+  readonly id: string;
+  /** When set (>0), explicitly bump the protected card's `review_by` forward by N days. */
+  readonly bumpReviewByDays?: number;
+}
+export interface TasksCompleteResult {
+  readonly task: TaskSummary;
+}
+
+export interface TasksPostponeRequest {
+  readonly id: string;
+  readonly choice?: TaskDueChoice;
+}
+export interface TasksPostponeResult {
+  readonly task: TaskSummary;
+}
+
+export type TasksGenerateFromExpiryRequest = Record<string, never>;
+export interface TasksGenerateFromExpiryResult {
+  readonly created: number;
+  readonly tasks: readonly TaskSummary[];
+}
+
+// ---------------------------------------------------------------------------
 // retention.*  (T079 — desired retention by priority band / concept / card)
 // ---------------------------------------------------------------------------
 
@@ -2994,6 +3076,15 @@ export interface AppApi {
     unassign(request: ConceptsUnassignRequest): Promise<ConceptsUnassignResult>;
     members(request: ConceptsMembersRequest): Promise<ConceptsMembersResult>;
   };
+  readonly tasks: {
+    create(request: TasksCreateRequest): Promise<TasksCreateResult>;
+    list(request: TasksListRequest): Promise<TasksListResult>;
+    complete(request: TasksCompleteRequest): Promise<TasksCompleteResult>;
+    postpone(request: TasksPostponeRequest): Promise<TasksPostponeResult>;
+    generateFromExpiry(
+      request: TasksGenerateFromExpiryRequest,
+    ): Promise<TasksGenerateFromExpiryResult>;
+  };
   readonly retention: {
     get(): Promise<RetentionGetResult>;
     setBand(request: RetentionSetBandRequest): Promise<RetentionUpdatedResult>;
@@ -3623,6 +3714,35 @@ export const appApi = {
    */
   conceptMembers(request: ConceptsMembersRequest): Promise<ConceptsMembersResult> {
     return requireAppApi().concepts.members(request);
+  },
+  /**
+   * Create a verification task (T092) — the `task`-type element + its `tasks` row + the
+   * `references` link, in one transaction (`create_element` + `add_relation`).
+   * Attention-scheduled (never FSRS); priority inherited from the linked element.
+   */
+  createTask(request: TasksCreateRequest): Promise<TasksCreateResult> {
+    return requireAppApi().tasks.create(request);
+  },
+  /** Open tasks (optionally protecting one element) — the inspector Maintenance read (T092). */
+  listTasks(request: TasksListRequest): Promise<TasksListResult> {
+    return requireAppApi().tasks.list(request);
+  },
+  /** Complete a task (T092) — status → `done` (`reschedule_element`); optional review_by bump. */
+  completeTask(request: TasksCompleteRequest): Promise<TasksCompleteResult> {
+    return requireAppApi().tasks.complete(request);
+  },
+  /** Postpone a task (T092) — reschedule further out (`reschedule_element`, growing). */
+  postponeTask(request: TasksPostponeRequest): Promise<TasksPostponeResult> {
+    return requireAppApi().tasks.postpone(request);
+  },
+  /**
+   * Generate verification tasks from T090 expiry (T092) — explicit/opt-in, idempotent,
+   * priority-inherited. Returns the created count + the created tasks.
+   */
+  generateTasksFromExpiry(
+    request: TasksGenerateFromExpiryRequest = {},
+  ): Promise<TasksGenerateFromExpiryResult> {
+    return requireAppApi().tasks.generateFromExpiry(request);
   },
   /**
    * The current desired-retention targets (T079) — global, per-band enable + map, and

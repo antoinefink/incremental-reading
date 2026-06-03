@@ -13,6 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { MIGRATIONS_DIR, openDatabase } from "@interleave/db";
+import { seedDemoCollection } from "@interleave/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SourcesUpdateReliabilityRequestSchema } from "../shared/contract";
 import { DbService } from "./db-service";
@@ -2751,7 +2752,7 @@ describe("DbService — backup support (T047)", () => {
   it("getSchemaVersion returns the latest applied Drizzle migration tag", () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
-    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe("0024_minor_ravenous");
+    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe("0025_noisy_korath");
     svc.close();
   });
 
@@ -3144,6 +3145,77 @@ describe("DbService — mature-card retirement (T082)", () => {
     const stateAfter = second.repos.review.findReviewState(cardId as never);
     expect(stateAfter?.dueAt).toBe(stateBefore?.dueAt);
     expect(stateAfter?.stability).toBe(stateBefore?.stability);
+    second.close();
+  });
+});
+
+describe("DbService tasks.* (T092 — verification tasks)", () => {
+  it("createTask returns a TaskSummary with the resolved linkedElement and inherits priority", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const demo = seedDemoCollection(svc.repos, svc.raw.db);
+
+    // The seed already links a `verify_claim` task to this card; a DIFFERENT kind
+    // (`find_better_source`) is allowed on the same card (the partial index only dedups
+    // by (linked_element_id, task_type)).
+    const res = svc.createTask({
+      taskType: "find_better_source",
+      title: "Find a peer-reviewed source",
+      note: "Check the 2024 revision",
+      linkedElementId: demo.qaCard.element.id,
+    });
+    expect(res.task.taskType).toBe("find_better_source");
+    expect(res.task.note).toBe("Check the 2024 revision");
+    expect(res.task.linkedElement?.id).toBe(demo.qaCard.element.id);
+    expect(res.task.linkedElement?.type).toBe("card");
+    // Inherited from the A-priority seeded card.
+    expect(res.task.priority).toBe(demo.qaCard.element.priority);
+    svc.close();
+  });
+
+  it("list returns the seeded verify task; complete moves it out of the open set", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const demo = seedDemoCollection(svc.repos, svc.raw.db);
+
+    const before = svc.listTasks({ linkedElementId: demo.qaCard.element.id });
+    expect(before.tasks.map((t) => t.id)).toContain(demo.verifyTask.id);
+
+    const done = svc.completeTask({ id: demo.verifyTask.id });
+    expect(done.task.status).toBe("done");
+    const after = svc.listTasks({ linkedElementId: demo.qaCard.element.id });
+    expect(after.tasks.map((t) => t.id)).not.toContain(demo.verifyTask.id);
+    svc.close();
+  });
+
+  it("generateFromExpiry creates a task for the expired seeded card and is idempotent", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    seedDemoCollection(svc.repos, svc.raw.db);
+
+    const first = svc.generateVerificationTasks({});
+    // The seeded Q&A card is expired (past valid_until) → update_outdated_card.
+    expect(first.created).toBeGreaterThanOrEqual(1);
+    expect(first.tasks.some((t) => t.taskType === "update_outdated_card")).toBe(true);
+
+    const second = svc.generateVerificationTasks({});
+    expect(second.created).toBe(0);
+    svc.close();
+  });
+
+  it("createTask / verify task SURVIVES a close + reopen (restart) with its link intact", () => {
+    const first = new DbService();
+    first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const demo = seedDemoCollection(first.repos, first.raw.db);
+    const taskId = demo.verifyTask.id;
+    const cardId = demo.qaCard.element.id;
+    first.close();
+
+    const second = new DbService();
+    second.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const open = second.listTasks({ linkedElementId: cardId });
+    expect(open.tasks.map((t) => t.id)).toContain(taskId);
+    expect(open.tasks.find((t) => t.id === taskId)?.linkedElement?.id).toBe(cardId);
     second.close();
   });
 });

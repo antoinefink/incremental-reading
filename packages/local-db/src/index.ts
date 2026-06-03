@@ -295,6 +295,13 @@ export {
   type SourceYieldSourceRef,
   type SourceYieldSummary,
 } from "./source-yield-query";
+export {
+  type CreateTaskInput,
+  type GenerateVerificationResult,
+  TASK_STAGE,
+  TaskService,
+  type TaskSummary,
+} from "./task-service";
 export { type TrashItem, TrashRepository } from "./trash-query";
 export type { DbClient, TransactionClient } from "./types";
 export { type UndoResult, UndoService } from "./undo-service";
@@ -341,6 +348,13 @@ export interface Repositories {
    * the concept lineage. NO op-log, NO new relation types — a read-only surface.
    */
   readonly related: import("./related-service").RelatedService;
+  /**
+   * Verification tasks (T092) — create / schedule / complete / postpone `task`-type
+   * elements, and generate them from T090 expiry. Attention-scheduled (never FSRS); a
+   * task + its `references` link is created in one transaction (`create_element` +
+   * `add_relation`); generation is idempotent + priority-inherited.
+   */
+  readonly tasks: import("./task-service").TaskService;
 }
 
 import type { InterleaveDatabase } from "@interleave/db";
@@ -365,6 +379,7 @@ import { SourceDedupQuery } from "./source-dedup-query";
 import { resolveSourceRef } from "./source-ref-query";
 import { SourceRepository } from "./source-repository";
 import { SourceYieldQuery } from "./source-yield-query";
+import { TaskService } from "./task-service";
 import { TrashRepository } from "./trash-query";
 
 /** Options for {@link createRepositories}. */
@@ -415,6 +430,7 @@ export function createRepositories(
     extractStagnation: new ExtractStagnationQuery(db),
     embeddings,
     semanticSearch: new SemanticSearchRepository(search, embeddings),
+    tasks: new TaskService(db),
     // Built last: it resolves an item's refblock through the SAME `resolveSourceRef`
     // the inspector/review/library use (needs the assembled repos), so it captures
     // `repos` for the lazy ref resolution. It is a DERIVED read — no op-log.

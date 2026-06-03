@@ -52,6 +52,8 @@ const h = vi.hoisted(() => {
     siblingGroupId: null,
     sourceId: null,
     cardType: null,
+    linkedElementId: null,
+    linkedElementType: null,
     protected: false,
     due: "today",
     dueLabel: "Due today",

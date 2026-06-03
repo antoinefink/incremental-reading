@@ -176,6 +176,13 @@
       "when": 1780439875169,
       "tag": "0024_minor_ravenous",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1780442015796,
+      "tag": "0025_noisy_korath",
+      "breakpoints": true
     }
   ]
 }

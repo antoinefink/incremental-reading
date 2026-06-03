@@ -301,11 +301,30 @@ export function QueueScreen() {
 
   const onOpen = useCallback(
     (item: QueueItemSummary) => {
+      // A verification TASK (T092) is a maintenance action that PROTECTS another
+      // element — opening it should JUMP TO that protected card/source/extract's reader
+      // (the verification deliverable), not open the task itself. Select the protected
+      // element + route to its dedicated surface (source/topic → reader, extract →
+      // extract view, card → select-in-inspector — same routing as the lineage nodes).
+      // A task with no linked element (a free-standing reminder) falls through to /process.
+      if (item.type === "task" && item.linkedElementId) {
+        select(item.linkedElementId);
+        const linkedId = item.linkedElementId;
+        const linkedType = item.linkedElementType;
+        if (linkedType === "source" || linkedType === "topic") {
+          void navigate({ to: "/source/$id", params: { id: linkedId } });
+        } else if (linkedType === "extract") {
+          void navigate({ to: "/extract/$id", params: { id: linkedId } });
+        }
+        // card / synthesis_note / anything without a dedicated page: the select above
+        // already drives the shell inspector to the protected element's context.
+        return;
+      }
       select(item.id);
       // Per-type routing that respects the load-bearing FSRS-vs-attention split:
       //  - source  → the reader; extract → the extract view (their own surfaces);
       //  - card    → the FSRS active-recall review session (cards ONLY);
-      //  - every OTHER due attention type (topic / task / synthesis_note) → the
+      //  - every OTHER due attention type (topic / unlinked task / synthesis_note) → the
       //    one-at-a-time /process loop (carrying `asOf`), NOT /review — an
       //    attention-scheduled element has no card to grade in the review session.
       if (item.type === "source") {

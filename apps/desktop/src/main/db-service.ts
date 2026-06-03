@@ -281,6 +281,16 @@ import type {
   TagsListResult,
   TagsRemoveRequest,
   TagsRemoveResult,
+  TasksCompleteRequest,
+  TasksCompleteResult,
+  TasksCreateRequest,
+  TasksCreateResult,
+  TasksGenerateFromExpiryRequest,
+  TasksGenerateFromExpiryResult,
+  TasksListRequest,
+  TasksListResult,
+  TasksPostponeRequest,
+  TasksPostponeResult,
   TrashEmptyResult,
   TrashListResult,
   TrashPurgeRequest,
@@ -3876,6 +3886,78 @@ export class DbService {
       });
     }
     return { members };
+  }
+
+  // -------------------------------------------------------------------------
+  // tasks.* (T092 — verification tasks)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Create a verification task (T092) through {@link TaskService}: the `task`-type
+   * element (`create_element`) + its `tasks` row + the `references` link
+   * (`add_relation`) in ONE transaction. Attention-scheduled (never FSRS); priority
+   * inherited from the linked element. No new op type.
+   */
+  createTask(request: TasksCreateRequest): TasksCreateResult {
+    const task = this.repos.tasks.createTask({
+      taskType: request.taskType,
+      title: request.title,
+      ...(request.note !== undefined ? { note: request.note } : {}),
+      ...(request.linkedElementId ? { linkedElementId: request.linkedElementId as ElementId } : {}),
+      ...(request.priority ? { priority: priorityFromLabel(request.priority) } : {}),
+      ...(request.dueChoice ? { dueChoice: this.taskDueChoice(request.dueChoice) } : {}),
+    });
+    return { task };
+  }
+
+  /** Open tasks (optionally protecting one element) — the inspector Maintenance read (T092). */
+  listTasks(request: TasksListRequest): TasksListResult {
+    return {
+      tasks: this.repos.tasks.listOpenTasks(
+        request.linkedElementId ? { linkedElementId: request.linkedElementId as ElementId } : {},
+      ),
+    };
+  }
+
+  /**
+   * Complete a task (T092) — status → `done` (`reschedule_element`). When
+   * `bumpReviewByDays` is set, EXPLICITLY pushes the protected card's `review_by`
+   * forward (a T090 `update_element`) so a completed task stops re-surfacing the fact.
+   */
+  completeTask(request: TasksCompleteRequest): TasksCompleteResult {
+    const task = this.repos.tasks.completeTask(
+      request.id as ElementId,
+      request.bumpReviewByDays !== undefined ? { bumpReviewByDays: request.bumpReviewByDays } : {},
+    );
+    return { task };
+  }
+
+  /** Postpone a task (T092) — reschedule further out (`reschedule_element`, growing). */
+  postponeTask(request: TasksPostponeRequest): TasksPostponeResult {
+    const task = this.repos.tasks.postponeTask(
+      request.id as ElementId,
+      request.choice ? this.taskDueChoice(request.choice) : undefined,
+    );
+    return { task };
+  }
+
+  /**
+   * Generate verification tasks from T090 expiry (T092) — explicit/opt-in. Scans
+   * card-backed facts past `review_by`/`valid_until` and creates one task per protected
+   * card without an open task of that kind (idempotent, priority-inherited).
+   */
+  generateVerificationTasks(
+    _request: TasksGenerateFromExpiryRequest,
+  ): TasksGenerateFromExpiryResult {
+    const { created, tasks } = this.repos.tasks.generateVerificationTasks();
+    return { created, tasks };
+  }
+
+  /** Convert the contract's `{ kind, date }` schedule union to the scheduler's `ScheduleChoice`. */
+  private taskDueChoice(
+    choice: NonNullable<TasksCreateRequest["dueChoice"]>,
+  ): "tomorrow" | "nextWeek" | "nextMonth" | { manual: IsoTimestamp } {
+    return choice.kind === "manual" ? { manual: choice.date as IsoTimestamp } : choice.kind;
   }
 
   /** All tags with their live usage count (T041) — the library filterbar. Read-only. */

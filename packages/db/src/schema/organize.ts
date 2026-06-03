@@ -11,7 +11,8 @@
  * element is modeled as a typed edge in `element_relations` (`concept_membership`).
  */
 
-import { ELEMENT_STATUSES } from "@interleave/core";
+import { ELEMENT_STATUSES, TASK_TYPES } from "@interleave/core";
+import { sql } from "drizzle-orm";
 import {
   type AnySQLiteColumn,
   check,
@@ -95,15 +96,50 @@ export const tasks = sqliteTable(
     elementId: text("element_id")
       .primaryKey()
       .references(() => elements.id, { onDelete: "cascade" }),
-    /** Kind of maintenance action, e.g. `verify_claim`, `update_card`. */
+    /**
+     * Kind of maintenance action (T092) — one of the `@interleave/core`
+     * {@link TASK_TYPES} (`verify_claim` / `find_better_source` /
+     * `update_outdated_card` / `check_current_version` / `custom`). The CHECK is
+     * built from the SAME core tuple as the domain union (the DB + domain can't drift).
+     */
     taskType: text("task_type").notNull(),
     dueAt: text("due_at"),
     /** Task status — reuses the canonical `ElementStatus` vocabulary. */
     status: text("status").notNull(),
+    /**
+     * The element this verification task PROTECTS (T092) — the card/extract/source it
+     * watches over, or `null` for a hand-created custom task with no link. DUAL-MODELED
+     * (like `cards.source_location_id`): the canonical lineage is the `references`
+     * `element_relations` edge written in the same create transaction; this denormalized
+     * column is a convenience for cheap inspector/queue joins. `on delete set null` so a
+     * soft/hard-deleted protected element does not orphan the task.
+     */
+    linkedElementId: text("linked_element_id").references((): AnySQLiteColumn => elements.id, {
+      onDelete: "set null",
+    }),
+    /** Free-text task detail ("v18 released, check the hook API"), ≤2048, or `null`. */
+    note: text("note"),
   },
   (table) => [
     check("tasks_status_check", inList(table.status, ELEMENT_STATUSES)),
+    // The verification-task kind is the closed core vocabulary (T092).
+    check("tasks_task_type_check", inList(table.taskType, TASK_TYPES)),
     index("tasks_due_idx").on(table.dueAt),
+    // Cheap reverse lookup: "open tasks protecting element X" (the inspector Maintenance
+    // read + the generation idempotency check).
+    index("tasks_linked_element_idx").on(table.linkedElementId),
+    // PARTIAL unique index (T092): at most ONE OPEN task of a given kind may protect a
+    // given element, so `generateVerificationTasks` is idempotent at the DB level (a
+    // duplicate generation insert FAILS rather than relying on the read-check
+    // serializing). The `WHERE status NOT IN (...)` predicate excludes terminal rows so a
+    // SECOND task of the same kind is allowed once the first is done/dismissed/deleted; a
+    // NULL `linked_element_id` (a custom, unlinked task) is never deduped (NULLs are
+    // distinct in a UNIQUE index). NOTE: Drizzle's SQLite generator can drop the `.where()`
+    // predicate — the generated migration is hand-verified to emit `WHERE status NOT IN
+    // (...)` (see migration 0025 + the migration-level test).
+    uniqueIndex("tasks_open_link_type_uq")
+      .on(table.linkedElementId, table.taskType)
+      .where(sql`status NOT IN ('done', 'dismissed', 'deleted')`),
   ],
 );
 

@@ -22,6 +22,7 @@
  * stage, postponed ×N, `--sched-attn`).
  */
 
+import { taskTypeLabel } from "@interleave/core";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -43,6 +44,8 @@ import {
   type SemanticRelatedResult,
   type SourceProvenance,
   type SourceTypeInput,
+  type TaskSummary,
+  type TaskType,
 } from "../../lib/appApi";
 import { useNavigateToLocation } from "../../reader/navigateToLocation";
 import { useSelection } from "../../shell/selection";
@@ -989,6 +992,233 @@ export function ExpirySection({
   );
 }
 
+/** The verification-task kinds the "Create task" picker offers (T092). */
+const TASK_TYPE_OPTIONS: readonly { value: TaskType; label: string }[] = [
+  { value: "verify_claim", label: "Verify claim" },
+  { value: "find_better_source", label: "Find better source" },
+  { value: "update_outdated_card", label: "Update outdated card" },
+  { value: "check_current_version", label: "Check current version" },
+  { value: "custom", label: "Custom task" },
+];
+
+/**
+ * The "Maintenance" section (T092) — the open verification TASKS protecting a
+ * card/extract/source, with complete/postpone per task, plus a "Create verification
+ * task" control (kind picker + note + a tomorrow/next-week/next-month schedule). A
+ * `task` is the EXISTING core element type, ATTENTION-scheduled (never FSRS); creating
+ * one logs `create_element` + `add_relation`, completing/postponing logs
+ * `reschedule_element` — all through the typed `tasks.*` `window.appApi`. The list is
+ * fetched on mount + after every mutation (and via the external `refreshTick`), so a
+ * task generated from expiry or created on the review banner shows up here too.
+ */
+export function MaintenanceSection({
+  elementId,
+  onChanged,
+  refreshTick = 0,
+}: {
+  elementId: string;
+  onChanged: () => void;
+  refreshTick?: number;
+}) {
+  const [tasks, setTasks] = useState<TaskSummary[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [taskType, setTaskType] = useState<TaskType>("verify_claim");
+  const [note, setNote] = useState("");
+  const [dueChoice, setDueChoice] = useState<"tomorrow" | "nextWeek" | "nextMonth">("tomorrow");
+
+  const load = useCallback(() => {
+    if (!isDesktop()) return;
+    appApi
+      .listTasks({ linkedElementId: elementId })
+      .then((res) => setTasks([...res.tasks]))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }, [elementId]);
+
+  // Re-load on element change + on the external refresh tick (post-mutation elsewhere).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick is a deliberate re-fetch trigger
+  useEffect(() => {
+    load();
+  }, [load, refreshTick]);
+
+  const run = useCallback(
+    async (fn: () => Promise<unknown>) => {
+      if (busy) return;
+      setBusy(true);
+      setError(null);
+      try {
+        await fn();
+        load();
+        onChanged();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, load, onChanged],
+  );
+
+  const onCreate = () => {
+    void run(async () => {
+      await appApi.createTask({
+        taskType,
+        title: `${taskTypeLabel(taskType)}: this item`,
+        ...(note.trim() ? { note: note.trim() } : {}),
+        linkedElementId: elementId,
+        dueChoice: { kind: dueChoice },
+      });
+      setNote("");
+      setTaskType("verify_claim");
+      setDueChoice("tomorrow");
+      setCreating(false);
+    });
+  };
+
+  return (
+    <div className="insp-sec" data-testid="maintenance-section">
+      <div className="insp-sec__title">
+        <span>Maintenance</span>
+        <span className="insp-sec__count" data-testid="maintenance-count">
+          {tasks.length}
+        </span>
+      </div>
+
+      {tasks.length > 0 ? (
+        <div className="insp-task-list" data-testid="maintenance-task-list">
+          {tasks.map((t) => (
+            <div
+              className="insp-task"
+              data-testid="maintenance-task"
+              data-task-id={t.id}
+              key={t.id}
+            >
+              <div className="insp-task__main">
+                <span className="insp-task__kind">
+                  <Icon name="task" size={13} /> {taskTypeLabel(t.taskType)}
+                </span>
+                {t.note ? <span className="insp-task__note">{t.note}</span> : null}
+              </div>
+              <div className="insp-task__acts">
+                <button
+                  type="button"
+                  className="insp-task__act"
+                  data-testid="maintenance-complete"
+                  title="Complete"
+                  aria-label="Complete task"
+                  disabled={busy}
+                  onClick={() => run(() => appApi.completeTask({ id: t.id }))}
+                >
+                  <Icon name="check" size={13} />
+                </button>
+                <button
+                  type="button"
+                  className="insp-task__act"
+                  data-testid="maintenance-postpone"
+                  title="Postpone"
+                  aria-label="Postpone task"
+                  disabled={busy}
+                  onClick={() => run(() => appApi.postponeTask({ id: t.id }))}
+                >
+                  <Icon name="postpone" size={13} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="insp-empty" data-testid="maintenance-empty">
+          No open maintenance tasks.
+        </p>
+      )}
+
+      {creating ? (
+        <div className="meta-list" style={{ marginTop: 8 }}>
+          <div className="meta-row meta-row--stack">
+            <span className="meta-key">Task</span>
+            <select
+              className="insp-add__select"
+              data-testid="maintenance-type"
+              value={taskType}
+              onChange={(e) => setTaskType(e.target.value as TaskType)}
+            >
+              {TASK_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="meta-row meta-row--stack">
+            <span className="meta-key">Note</span>
+            <input
+              className="insp-add__input"
+              data-testid="maintenance-note"
+              placeholder="What needs checking?"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
+          <div className="meta-row meta-row--stack">
+            <span className="meta-key">Schedule</span>
+            <select
+              className="insp-add__select"
+              data-testid="maintenance-due"
+              value={dueChoice}
+              onChange={(e) =>
+                setDueChoice(e.target.value as "tomorrow" | "nextWeek" | "nextMonth")
+              }
+            >
+              <option value="tomorrow">Tomorrow</option>
+              <option value="nextWeek">Next week</option>
+              <option value="nextMonth">Next month</option>
+            </select>
+          </div>
+          <div className="insp-add" style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="insp-add__btn"
+              data-testid="maintenance-create-save"
+              disabled={busy}
+              onClick={onCreate}
+            >
+              <Icon name="check" size={13} />
+              Create task
+            </button>
+            <button
+              type="button"
+              className="insp-add__btn"
+              data-testid="maintenance-create-cancel"
+              disabled={busy}
+              onClick={() => setCreating(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="insp-add__btn"
+          data-testid="maintenance-create"
+          onClick={() => setCreating(true)}
+          style={{ marginTop: 8 }}
+        >
+          <Icon name="plus" size={13} />
+          Create verification task
+        </button>
+      )}
+
+      {error ? (
+        <span className="text-danger" data-testid="maintenance-error">
+          {error}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 /** The source-type options for the reliability picker (T091). */
 const SOURCE_TYPE_OPTIONS: readonly { value: SourceTypeInput; label: string }[] = [
   { value: "paper", label: "Paper" },
@@ -1498,6 +1728,7 @@ function InspectorBody({
   onSetPriority,
   onOrganizeChanged,
   priorityBusy,
+  refreshTick,
 }: {
   data: InspectorData;
   lineage: LineageData | null;
@@ -1508,6 +1739,7 @@ function InspectorBody({
   onSetPriority: (action: ElementsSetPriorityAction) => void;
   onOrganizeChanged: () => void;
   priorityBusy: boolean;
+  refreshTick: number;
 }) {
   const {
     element,
@@ -1809,6 +2041,19 @@ function InspectorBody({
         <ExpirySection cardId={element.id} lifetime={lifetime} onChanged={onOrganizeChanged} />
       ) : null}
 
+      {/* Maintenance / verification tasks (T092) — on protectable elements (card /
+          extract / source): list the open tasks watching this element + a "Create
+          verification task" control. Tasks are attention-scheduled `task` elements; a
+          task generated from this card's expiry (or created on the review banner) also
+          surfaces here. */}
+      {(element.type === "card" || element.type === "extract" || element.type === "source") && (
+        <MaintenanceSection
+          elementId={element.id}
+          onChanged={onOrganizeChanged}
+          refreshTick={refreshTick}
+        />
+      )}
+
       {/* Concepts + tags (T041) — assign/unassign + add/remove, through the bridge. */}
       <OrganizeSection
         elementId={element.id}
@@ -2016,6 +2261,7 @@ export function Inspector() {
             onSetPriority={onSetPriority}
             onOrganizeChanged={onOrganizeChanged}
             priorityBusy={priorityBusy}
+            refreshTick={refreshTick}
           />
         ) : selectedId && !data ? (
           <p className="insp-empty" data-testid="inspector-missing">

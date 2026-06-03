@@ -47,6 +47,8 @@ import {
   SOURCE_TYPES,
   type SourceRef,
   type SourceType,
+  TASK_TYPES,
+  type TaskType,
   THEMES,
 } from "@interleave/core";
 import { z } from "zod";
@@ -600,6 +602,14 @@ export interface QueueItemSummary {
   readonly sourceId: string | null;
   /** Card kind (`qa`/`cloze`); null for non-cards. */
   readonly cardType: string | null;
+  /**
+   * The element a `task`-type row protects (its `tasks.linked_element_id`), or `null` —
+   * lets the queue/process "Open" affordance JUMP TO the protected card/source/extract's
+   * reader (T092) instead of opening the maintenance task itself. Task rows only.
+   */
+  readonly linkedElementId: string | null;
+  /** The protected element's TYPE, or `null` — paired with {@link linkedElementId}. */
+  readonly linkedElementType: string | null;
   /** True for A-priority items (the `--protected` accent bar). */
   readonly protected: boolean;
   /** Overdue / today / soon, relative to `asOf`. */
@@ -3534,6 +3544,119 @@ export interface ConceptsMembersResult {
 }
 
 // ---------------------------------------------------------------------------
+// tasks.*  (T092 — verification tasks: scheduled `task`-type elements)
+//
+// A `task` is the EXISTING core element type — an ATTENTION-scheduled maintenance
+// action ("verify this claim" / "find a better source" / "update this outdated card"
+// / "check the current version" / "custom") that protects time-sensitive knowledge
+// from rotting. It is NEVER a card and NEVER FSRS-scheduled. Tasks are created by
+// hand (the inspector / a review banner) or GENERATED from T090 expiry (a fact past
+// `review_by`/`valid_until`), link back to the element they protect (a `references`
+// edge + `linked_element_id`), appear in the daily queue + the inspector, and
+// complete/postpone like any attention item. Every mutation is ONE transaction + the
+// correct EXISTING op — NO new op types: create → `create_element`; link →
+// `add_relation`; schedule/complete/postpone → `reschedule_element`. There is still no
+// generic `db.query`.
+// ---------------------------------------------------------------------------
+
+/** The closed verification-task kinds (the core TASK_TYPES tuple). */
+export const TaskTypeSchema = z.enum(TASK_TYPES);
+export type TaskTypeInput = z.infer<typeof TaskTypeSchema>;
+
+/** A bounded task title (1–256 chars). */
+const TaskTitleSchema = z.string().trim().min(1).max(256);
+/** A bounded, optional task note (≤2048 chars). */
+const TaskNoteSchema = z.string().trim().max(2048).optional();
+
+/** The explicit schedule choice a task accepts (reuses the queue's choice union). */
+const TaskDueChoiceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("tomorrow") }),
+  z.object({ kind: z.literal("nextWeek") }),
+  z.object({ kind: z.literal("nextMonth") }),
+  z.object({ kind: z.literal("manual"), date: z.string().trim().min(1).max(64) }),
+]);
+
+/** A flat verification-task summary — the inspector/queue read shape. */
+export interface TaskSummary {
+  readonly id: string;
+  readonly taskType: TaskType;
+  readonly title: string;
+  readonly note: string | null;
+  readonly status: string;
+  readonly dueAt: string | null;
+  /** Numeric priority (0..1); the UI derives the A/B/C/D label. */
+  readonly priority: number;
+  /** The element this task protects (resolved from the link), or `null`. */
+  readonly linkedElement: {
+    readonly id: string;
+    readonly type: string;
+    readonly title: string;
+  } | null;
+}
+
+export const TasksCreateRequestSchema = z.object({
+  taskType: TaskTypeSchema,
+  title: TaskTitleSchema,
+  note: TaskNoteSchema,
+  /** The element the task protects (links it + inherits its priority); omit/null for a custom task. */
+  linkedElementId: ElementIdSchema.nullable().optional(),
+  /** Optional explicit priority band; default = the linked element's priority, else B. */
+  priority: PriorityLabelSchema.optional(),
+  /** Optional explicit schedule; default = an attention interval by priority. */
+  dueChoice: TaskDueChoiceSchema.optional(),
+});
+export type TasksCreateRequest = z.infer<typeof TasksCreateRequestSchema>;
+
+export interface TasksCreateResult {
+  readonly task: TaskSummary;
+}
+
+export const TasksListRequestSchema = z.object({
+  /** Narrow to OPEN tasks protecting one element (the inspector Maintenance read). */
+  linkedElementId: ElementIdSchema.nullable().optional(),
+});
+export type TasksListRequest = z.infer<typeof TasksListRequestSchema>;
+
+export interface TasksListResult {
+  readonly tasks: readonly TaskSummary[];
+}
+
+export const TasksCompleteRequestSchema = z.object({
+  id: ElementIdSchema,
+  /**
+   * When set (>0), EXPLICITLY bump the protected card's `review_by` forward by N days
+   * (a T090 `update_element`) so a completed verify/update task stops re-surfacing the
+   * fact. Never automatic — the user opts in (they may complete without refreshing).
+   */
+  bumpReviewByDays: z.number().int().positive().max(36500).optional(),
+});
+export type TasksCompleteRequest = z.infer<typeof TasksCompleteRequestSchema>;
+
+export interface TasksCompleteResult {
+  readonly task: TaskSummary;
+}
+
+export const TasksPostponeRequestSchema = z.object({
+  id: ElementIdSchema,
+  /** Optional explicit choice; default = the growing by-priority postpone interval. */
+  choice: TaskDueChoiceSchema.optional(),
+});
+export type TasksPostponeRequest = z.infer<typeof TasksPostponeRequestSchema>;
+
+export interface TasksPostponeResult {
+  readonly task: TaskSummary;
+}
+
+/** `tasks.generateFromExpiry({})` — generate verification tasks from T090 expiry. */
+export const TasksGenerateFromExpiryRequestSchema = z.object({}).strict();
+export type TasksGenerateFromExpiryRequest = z.infer<typeof TasksGenerateFromExpiryRequestSchema>;
+
+export interface TasksGenerateFromExpiryResult {
+  readonly created: number;
+  readonly tasks: readonly TaskSummary[];
+}
+
+// ---------------------------------------------------------------------------
 // retention.*  (T079 — desired retention by priority band / concept / card)
 //
 // A card's FSRS desired-retention target is RESOLVED from an ordered rule set
@@ -4993,6 +5116,28 @@ export interface AppApi {
      * by `ConceptRepository.elementsForConcept`, enriched per element. Read-only.
      */
     members(request: ConceptsMembersRequest): Promise<ConceptsMembersResult>;
+  };
+  readonly tasks: {
+    /**
+     * Create a verification task (T092) — the `task`-type element + its `tasks` row +
+     * the `references` link, in one transaction (`create_element` + `add_relation`).
+     * Attention-scheduled (never FSRS); priority inherited from the linked element.
+     */
+    create(request: TasksCreateRequest): Promise<TasksCreateResult>;
+    /** Open tasks (optionally protecting one element) — the inspector Maintenance read. Read-only. */
+    list(request: TasksListRequest): Promise<TasksListResult>;
+    /** Complete a task (T092) — status → `done` (`reschedule_element`); optional review_by bump. */
+    complete(request: TasksCompleteRequest): Promise<TasksCompleteResult>;
+    /** Postpone a task (T092) — reschedule further out (`reschedule_element`, growing). */
+    postpone(request: TasksPostponeRequest): Promise<TasksPostponeResult>;
+    /**
+     * Generate verification tasks from T090 expiry (T092) — explicit/opt-in. Scans
+     * card-backed facts past `review_by`/`valid_until` and creates one task per
+     * protected card without an open task of that kind (idempotent, priority-inherited).
+     */
+    generateFromExpiry(
+      request: TasksGenerateFromExpiryRequest,
+    ): Promise<TasksGenerateFromExpiryResult>;
   };
   readonly retention: {
     /**

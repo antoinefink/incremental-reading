@@ -113,6 +113,11 @@ import {
   SourceYieldListRequestSchema,
   TagsAddRequestSchema,
   TagsRemoveRequestSchema,
+  TasksCompleteRequestSchema,
+  TasksCreateRequestSchema,
+  TasksGenerateFromExpiryRequestSchema,
+  TasksListRequestSchema,
+  TasksPostponeRequestSchema,
   VaultCollectOrphansRequestSchema,
   type VaultCollectOrphansResult,
   type VaultOrphansResult,
@@ -209,6 +214,11 @@ describe("IPC channels", () => {
         "concepts:assign",
         "concepts:unassign",
         "concepts:members",
+        "tasks:create",
+        "tasks:list",
+        "tasks:complete",
+        "tasks:postpone",
+        "tasks:generateFromExpiry",
         "retention:get",
         "retention:setBand",
         "retention:setBandEnabled",
@@ -2464,5 +2474,64 @@ describe("Worker message schemas (T058)", () => {
       WorkerMessageSchema.parse({ kind: "progress", jobId: "j", progress: { ratio: 2 } }),
     ).toThrow();
     expect(() => WorkerMessageSchema.parse({ kind: "error", code: "c", message: "m" })).toThrow();
+  });
+});
+
+describe("Verification-task schemas (T092)", () => {
+  it("TasksCreateRequestSchema accepts a valid create and rejects bad input", () => {
+    const ok = TasksCreateRequestSchema.parse({
+      taskType: "verify_claim",
+      title: "Verify the definition",
+      note: "check 2024",
+      linkedElementId: "el-1",
+      dueChoice: { kind: "tomorrow" },
+    });
+    expect(ok.taskType).toBe("verify_claim");
+    expect(ok.linkedElementId).toBe("el-1");
+
+    // A minimal create (no link / note / due) is valid.
+    expect(TasksCreateRequestSchema.parse({ taskType: "custom", title: "Tidy" }).title).toBe(
+      "Tidy",
+    );
+
+    // Bad: empty title; oversized note; unknown taskType.
+    expect(
+      TasksCreateRequestSchema.safeParse({ taskType: "verify_claim", title: "  " }).success,
+    ).toBe(false);
+    expect(
+      TasksCreateRequestSchema.safeParse({
+        taskType: "verify_claim",
+        title: "x",
+        note: "n".repeat(2049),
+      }).success,
+    ).toBe(false);
+    expect(TasksCreateRequestSchema.safeParse({ taskType: "nope", title: "x" }).success).toBe(
+      false,
+    );
+  });
+
+  it("TasksList / Complete / Postpone / GenerateFromExpiry validate their shapes", () => {
+    expect(TasksListRequestSchema.parse({}).linkedElementId).toBeUndefined();
+    expect(TasksListRequestSchema.parse({ linkedElementId: "el-1" }).linkedElementId).toBe("el-1");
+
+    expect(TasksCompleteRequestSchema.parse({ id: "t-1" }).id).toBe("t-1");
+    expect(
+      TasksCompleteRequestSchema.parse({ id: "t-1", bumpReviewByDays: 30 }).bumpReviewByDays,
+    ).toBe(30);
+    // bumpReviewByDays must be a positive int.
+    expect(TasksCompleteRequestSchema.safeParse({ id: "t-1", bumpReviewByDays: 0 }).success).toBe(
+      false,
+    );
+    expect(TasksCompleteRequestSchema.safeParse({ id: "t-1", bumpReviewByDays: -5 }).success).toBe(
+      false,
+    );
+    expect(TasksCompleteRequestSchema.safeParse({}).success).toBe(false);
+
+    expect(
+      TasksPostponeRequestSchema.parse({ id: "t-1", choice: { kind: "nextWeek" } }).choice,
+    ).toEqual({ kind: "nextWeek" });
+    expect(TasksGenerateFromExpiryRequestSchema.parse({})).toEqual({});
+    // strict: an unexpected key is rejected.
+    expect(TasksGenerateFromExpiryRequestSchema.safeParse({ extra: 1 }).success).toBe(false);
   });
 });

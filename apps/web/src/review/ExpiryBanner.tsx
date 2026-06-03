@@ -12,10 +12,13 @@
  *
  * The derived `status` is computed MAIN-side (`deriveExpiryStatus`); this component
  * only renders it. A fresh / lifetime-less card carries `expiry: null` and renders
- * nothing. An optional "Create verify task" affordance is wired by T092 (the
- * verification-task generation); T090 leaves the hook un-rendered.
+ * nothing. The optional "Create verify task" affordance (T092) — when `onCreateTask`
+ * is supplied — lets the user turn a stale fact into a scheduled `task`-type element
+ * (`tasks.create` with `taskType: "verify_claim"` + the card's id) without leaving
+ * review; it rides the same post-reveal gate so it never leaks the answer.
  */
 
+import { useState } from "react";
 import { Icon } from "../components/Icon";
 import type { ReviewCardExpiry } from "../lib/appApi";
 
@@ -27,8 +30,17 @@ function contextLine(expiry: ReviewCardExpiry): string | null {
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
-export function ExpiryBanner({ expiry }: { expiry: ReviewCardExpiry }) {
+export function ExpiryBanner({
+  expiry,
+  onCreateTask,
+}: {
+  expiry: ReviewCardExpiry;
+  /** When supplied (T092), render a "Create verify task" button that calls this. */
+  onCreateTask?: () => void | Promise<void>;
+}) {
   const expired = expiry.status === "expired";
+  const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
   const title = expired
     ? expiry.validUntil
       ? `This fact may be out of date (expired ${expiry.validUntil})`
@@ -37,6 +49,18 @@ export function ExpiryBanner({ expiry }: { expiry: ReviewCardExpiry }) {
       ? `Due for review by ${expiry.reviewBy}`
       : "Due for review";
   const context = contextLine(expiry);
+
+  const handleCreate = async () => {
+    if (!onCreateTask || busy || done) return;
+    setBusy(true);
+    try {
+      await onCreateTask();
+      setDone(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div
       className={`banner ${expired ? "banner--expired" : "banner--review"}`}
@@ -53,6 +77,18 @@ export function ExpiryBanner({ expiry }: { expiry: ReviewCardExpiry }) {
             : "Re-check this claim — it may have changed since it was last verified."}
           {context ? ` (${context})` : ""}
         </div>
+        {onCreateTask ? (
+          <button
+            type="button"
+            className="banner__action"
+            data-testid="review-create-verify-task"
+            disabled={busy || done}
+            onClick={() => void handleCreate()}
+          >
+            <Icon name="task" size={13} />
+            {done ? "Verify task created" : "Create verify task"}
+          </button>
+        ) : null}
       </div>
     </div>
   );

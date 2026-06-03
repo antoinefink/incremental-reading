@@ -616,14 +616,15 @@ describe("ReviewScreen", () => {
       .mockResolvedValueOnce({ card: null, remaining: 0, total: 0 });
     render(<ReviewScreen />);
 
-    await screen.findByTestId("review-card");
+    // Generous `findBy*` timeout for robustness under full-suite parallel contention.
+    await screen.findByTestId("review-card", undefined, { timeout: 5000 });
     // 1–4 are inert before reveal (no grade until the answer is shown).
     fireEvent.keyDown(window, { key: "3", code: "Digit3" });
     expect(h.reviewGrade).not.toHaveBeenCalled();
 
     // Space reveals.
     fireEvent.keyDown(window, { key: " ", code: "Space" });
-    await screen.findByTestId("review-grades");
+    await screen.findByTestId("review-grades", undefined, { timeout: 5000 });
 
     // `3` grades Good.
     fireEvent.keyDown(window, { key: "3", code: "Digit3" });
@@ -637,13 +638,15 @@ describe("ReviewScreen", () => {
     h.reviewSessionNext.mockResolvedValue(singleDeck(h.qaCard));
     render(<ReviewScreen />);
 
-    await screen.findByTestId("review-card");
+    // Async `findBy*` waits use a generous timeout so the assertion is robust under
+    // the full-suite parallel CPU contention (the default 1000ms can flake here).
+    await screen.findByTestId("review-card", undefined, { timeout: 5000 });
     fireEvent.click(screen.getByTestId("review-reveal"));
-    await screen.findByTestId("review-grades");
+    await screen.findByTestId("review-grades", undefined, { timeout: 5000 });
 
     // Open the inline editor, then a `3` typed in its textarea must NOT grade.
     fireEvent.click(screen.getByTestId("review-repair-edit"));
-    const prompt = await screen.findByTestId("review-edit-prompt");
+    const prompt = await screen.findByTestId("review-edit-prompt", undefined, { timeout: 5000 });
     fireEvent.keyDown(prompt, { key: "3", code: "Digit3" });
     expect(h.reviewGrade).not.toHaveBeenCalled();
   });

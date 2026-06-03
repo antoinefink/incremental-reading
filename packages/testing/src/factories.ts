@@ -36,6 +36,8 @@ import {
   OcclusionService,
   type Repositories,
   type SourceWithElement,
+  TaskService,
+  type TaskSummary,
 } from "@interleave/local-db";
 
 /**
@@ -300,6 +302,18 @@ export const DEMO_FIXTURES = {
     parent: { name: "Cognition" },
     child: { name: "Intelligence" },
   },
+  /**
+   * A verification task (T092) linked to the EXPIRED Q&A card — a "verify this claim"
+   * maintenance action, due today, so the queue/inspector specs have a live `task`
+   * element (the first seeded `task`). Created through the SAME production path
+   * (`TaskService.createTask`: `task` element + `tasks` row + the `references` edge in
+   * one transaction; attention-scheduled, never FSRS).
+   */
+  verifyTask: {
+    taskType: "verify_claim" as const,
+    title: "Verify Chollet's definition of intelligence",
+    note: "Confirm the skill-acquisition-efficiency framing still holds.",
+  },
   /** A second, lower-priority inbox source so triage screens have variety. */
   inboxSource: {
     title: "The Bitter Lesson",
@@ -453,6 +467,12 @@ export interface DemoCollection {
   readonly leechCard: CardWithElement;
   /** A retired mature Q&A card (`cards.is_retired`) — the retired-inventory seed (T082). */
   readonly retiredCard: CardWithElement;
+  /**
+   * An open `verify_claim` verification task (T092) linked to the EXPIRED Q&A card —
+   * the first seeded `task` element, due today, so the queue/inspector specs have a
+   * live maintenance task to exercise.
+   */
+  readonly verifyTask: TaskSummary;
   readonly concepts: SeededConcepts;
   readonly siblingGroupId: SiblingGroupId;
   /**
@@ -668,6 +688,19 @@ export function seedDemoCollection(repos: Repositories, db: InterleaveDatabase):
     reason: "Low-value, well-learned",
   });
 
+  // 7d) A verification task (T092) linked to the EXPIRED Q&A card — a "verify this
+  //     claim" maintenance action due today, the FIRST seeded `task` element. Created
+  //     through the real TaskService (the `task` element + the `tasks` row + the
+  //     `references` edge in ONE transaction; attention-scheduled, never FSRS) so the
+  //     queue/inspector specs have a live task to exercise.
+  const verifyTask = new TaskService(db).createTask({
+    taskType: f.verifyTask.taskType,
+    title: f.verifyTask.title,
+    note: f.verifyTask.note,
+    linkedElementId: qaCard.element.id,
+    dueChoice: "tomorrow",
+  });
+
   // 8) Concepts (hierarchical) + membership edges, and tags on the extract. Built
   //    through the ConceptRepository (T041) — `createConcept` writes the
   //    `concept`-type element (logging `create_element`) AND the `concepts`
@@ -858,6 +891,7 @@ export function seedDemoCollection(repos: Repositories, db: InterleaveDatabase):
     clozeCard,
     leechCard,
     retiredCard: retiredCardAfter,
+    verifyTask,
     concepts: { parentConceptId, childConceptId },
     siblingGroupId,
     occlusion: {

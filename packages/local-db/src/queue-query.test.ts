@@ -158,6 +158,31 @@ describe("QueueQuery", () => {
     expect(extract?.schedulerSignals.kind).toBe("attention");
   });
 
+  it("carries linkedElementId + linkedElementType on a due verification task row (the queue jump)", () => {
+    // A verification TASK (T092) linked to the source — the queue row must expose the
+    // protected element's id + type so the renderer's "Open" can JUMP TO its reader.
+    const { sourceId } = buildDueSet();
+    const task = repos.tasks.createTask({
+      taskType: "verify_claim",
+      title: "Verify Chollet's definition",
+      linkedElementId: sourceId,
+    });
+    // Make the task due (overdue) on the attention scheduler.
+    repos.elements.reschedule(task.id, iso("2026-05-29T08:00:00.000Z"));
+
+    const { items } = queue.list({ asOf: NOW });
+    const row = items.find((i) => i.id === task.id);
+    expect(row).toBeDefined();
+    expect(row?.type).toBe("task");
+    expect(row?.scheduler).toBe("attention");
+    expect(row?.linkedElementId).toBe(sourceId);
+    expect(row?.linkedElementType).toBe("source");
+
+    // Non-task rows never carry a link (the source/extract/card rows stay null).
+    expect(items.find((i) => i.id === sourceId)?.linkedElementId).toBeNull();
+    expect(items.find((i) => i.id === sourceId)?.linkedElementType).toBeNull();
+  });
+
   it("sorts by priority desc, then due date asc", () => {
     buildDueSet();
     const { items } = queue.list({ asOf: NOW });

@@ -113,6 +113,11 @@ import type {
   SourceYieldListRequest,
   TagsAddRequest,
   TagsRemoveRequest,
+  TasksCompleteRequest,
+  TasksCreateRequest,
+  TasksGenerateFromExpiryRequest,
+  TasksListRequest,
+  TasksPostponeRequest,
   TrashPurgeRequest,
   TrashRestoreRequest,
   VaultCollectOrphansRequest,
@@ -297,6 +302,16 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.conceptsUnassign, request),
     members: (request: ConceptsMembersRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.conceptsMembers, request),
+  },
+  tasks: {
+    create: (request: TasksCreateRequest) => ipcRenderer.invoke(IPC_CHANNELS.tasksCreate, request),
+    list: (request: TasksListRequest) => ipcRenderer.invoke(IPC_CHANNELS.tasksList, request),
+    complete: (request: TasksCompleteRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.tasksComplete, request),
+    postpone: (request: TasksPostponeRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.tasksPostpone, request),
+    generateFromExpiry: (request: TasksGenerateFromExpiryRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.tasksGenerateFromExpiry, request),
   },
   retention: {
     get: () => ipcRenderer.invoke(IPC_CHANNELS.retentionGet),

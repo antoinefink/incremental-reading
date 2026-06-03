@@ -278,6 +278,9 @@ export {
   YIELD_WEIGHT_EXTRACT,
   YIELD_WEIGHT_MATURE_CARD,
 } from "./source-yield";
+// Verification-task vocabulary (T092) — the closed `task` kinds + their labels.
+export type { TaskType } from "./task";
+export { isTaskType, TASK_TYPE_LABEL, TASK_TYPES, taskTypeLabel } from "./task";
 // URL canonicalization for provenance/duplicate detection — pure, fetch-free (./url).
 export { canonicalizeUrl } from "./url";
 // Desktop pivot: filesystem asset vault vocabulary (./vault).
