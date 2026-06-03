@@ -18,7 +18,13 @@ import { defineConfig } from "vitest/config";
  */
 export default defineConfig({
   test: {
-    include: ["src/**/*.test.ts"],
+    include: [
+      "src/**/*.test.ts",
+      "bench/bench-harness.test.ts",
+      "bench/scale.bench.test.ts",
+      "vitest.config.test.ts",
+      "vitest.bench-gate.config.test.ts",
+    ],
     testTimeout: 30_000,
     hookTimeout: 30_000,
   },
