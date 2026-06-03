@@ -26,6 +26,7 @@ import {
   typeLabel,
 } from "../components/inspector/primitives";
 import { RefBlock } from "../components/RefBlock";
+import { AutoVirtualList } from "../components/VirtualList";
 import "../components/inspector/inspector.css";
 import {
   appApi,
@@ -282,6 +283,48 @@ export function LibraryScreen() {
     [navigate],
   );
 
+  /** One result row — shared by the inline (small) + virtualized (large) group paths. */
+  const renderResult = useCallback(
+    (r: LibraryRow) => (
+      <button
+        type="button"
+        key={r.id}
+        className={`result${selId === r.id ? " result--on" : ""}`}
+        data-testid="library-result"
+        data-result-id={r.id}
+        data-result-type={r.type}
+        onClick={() => setSelId(r.id)}
+        onDoubleClick={() => open(r)}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div className="result__title">
+            {highlight(r.title, debouncedQuery)}
+            {r.semantic ? (
+              <span
+                className="badge badge--soft"
+                data-testid="library-related-badge"
+                title="Surfaced by meaning, not just keywords"
+                style={{ marginLeft: 8 }}
+              >
+                related
+              </span>
+            ) : null}
+          </div>
+          <div className="result__meta">
+            {r.concept ? <ConceptTag name={r.concept} /> : null}
+            {r.sourceTitle ? <span>{r.sourceTitle}</span> : null}
+            {r.sourceLocationLabel ? <span>{r.sourceLocationLabel}</span> : null}
+            {r.snippet ? (
+              <span className="result__snippet">{highlight(r.snippet, debouncedQuery)}</span>
+            ) : null}
+          </div>
+        </div>
+        <Prio priority={r.priority} />
+      </button>
+    ),
+    [selId, open, debouncedQuery],
+  );
+
   // The Map tab's "members" volume — the GLOBAL member count across all element
   // types (NOT filter-scoped). This is intentionally distinct from the filterbar
   // concept chip's drill-down `conceptCounts` (keyword/type-scoped): the Map shows
@@ -523,47 +566,19 @@ export function LibraryScreen() {
                             {g.title} · {rows.length}
                           </span>
                         </div>
-                        {rows.map((r) => (
-                          <button
-                            type="button"
-                            key={r.id}
-                            className={`result${selId === r.id ? " result--on" : ""}`}
-                            data-testid="library-result"
-                            data-result-id={r.id}
-                            data-result-type={r.type}
-                            onClick={() => setSelId(r.id)}
-                            onDoubleClick={() => open(r)}
-                          >
-                            <div style={{ minWidth: 0 }}>
-                              <div className="result__title">
-                                {highlight(r.title, debouncedQuery)}
-                                {r.semantic ? (
-                                  <span
-                                    className="badge badge--soft"
-                                    data-testid="library-related-badge"
-                                    title="Surfaced by meaning, not just keywords"
-                                    style={{ marginLeft: 8 }}
-                                  >
-                                    related
-                                  </span>
-                                ) : null}
-                              </div>
-                              <div className="result__meta">
-                                {r.concept ? <ConceptTag name={r.concept} /> : null}
-                                {r.sourceTitle ? <span>{r.sourceTitle}</span> : null}
-                                {r.sourceLocationLabel ? (
-                                  <span>{r.sourceLocationLabel}</span>
-                                ) : null}
-                                {r.snippet ? (
-                                  <span className="result__snippet">
-                                    {highlight(r.snippet, debouncedQuery)}
-                                  </span>
-                                ) : null}
-                              </div>
-                            </div>
-                            <Prio priority={r.priority} />
-                          </button>
-                        ))}
+                        {/* Virtualized once a single type-group crosses the threshold
+                            (years-of-use scale, T100); inline below it so the everyday
+                            result list keeps its exact kit layout. */}
+                        <AutoVirtualList
+                          items={rows}
+                          itemKey={(r) => r.id}
+                          estimateSize={64}
+                          height={520}
+                          className="lib-sec__vlist"
+                          testId={`library-group-${g.type}-list`}
+                          renderInline={() => <>{rows.map((r) => renderResult(r))}</>}
+                          renderItem={(r) => renderResult(r)}
+                        />
                       </div>
                     );
                   })

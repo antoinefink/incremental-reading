@@ -21,6 +21,7 @@ import { Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { Icon, type IconName } from "../components/Icon";
 import { Snackbar } from "../components/Snackbar";
+import { AutoVirtualList } from "../components/VirtualList";
 import {
   appApi,
   type BrokenSourceRowSummary,
@@ -545,32 +546,40 @@ function BrokenPanel({
 }) {
   if (!rows) return <p className="mt-muted">Loading…</p>;
   if (rows.length === 0) return <EmptyRow message="No broken sources." />;
+  const renderRow = (r: BrokenSourceRowSummary) => (
+    <li key={r.source.id} data-testid="broken-row" data-element-id={r.source.id}>
+      <span className="mt-dup-title" title={r.source.title}>
+        {r.source.title}
+      </span>
+      <span className="badge badge--soft" data-testid="broken-reason">
+        {r.reason === "missingFile" ? "file missing" : "no snapshot"}
+      </span>
+      <Link to="/source/$id" params={{ id: r.source.id }} className="mt-row-btn">
+        Open
+      </Link>
+      <button
+        type="button"
+        className="mt-row-btn"
+        data-testid="broken-trash"
+        disabled={busy}
+        onClick={() => onTrash([r.source.id])}
+      >
+        Trash
+      </button>
+    </li>
+  );
   return (
     <div data-testid="broken-panel">
-      <ul className="mt-dup-list">
-        {rows.map((r) => (
-          <li key={r.source.id} data-testid="broken-row" data-element-id={r.source.id}>
-            <span className="mt-dup-title" title={r.source.title}>
-              {r.source.title}
-            </span>
-            <span className="badge badge--soft" data-testid="broken-reason">
-              {r.reason === "missingFile" ? "file missing" : "no snapshot"}
-            </span>
-            <Link to="/source/$id" params={{ id: r.source.id }} className="mt-row-btn">
-              Open
-            </Link>
-            <button
-              type="button"
-              className="mt-row-btn"
-              data-testid="broken-trash"
-              disabled={busy}
-              onClick={() => onTrash([r.source.id])}
-            >
-              Trash
-            </button>
-          </li>
-        ))}
-      </ul>
+      {/* Virtualized once the report crosses the threshold (T100); inline below it. */}
+      <AutoVirtualList
+        items={rows}
+        itemKey={(r) => r.source.id}
+        estimateSize={40}
+        height={420}
+        className="mt-dup-list mt-dup-list--virtual"
+        renderInline={() => <ul className="mt-dup-list">{rows.map(renderRow)}</ul>}
+        renderItem={renderRow}
+      />
     </div>
   );
 }
@@ -586,30 +595,38 @@ function SourcelessPanel({
 }) {
   if (!rows) return <p className="mt-muted">Loading…</p>;
   if (rows.length === 0) return <EmptyRow message="No cards without sources." />;
+  const renderRow = (r: LineageGapRowSummary) => (
+    <li key={r.card.id} data-testid="sourceless-row" data-element-id={r.card.id}>
+      <span className="mt-dup-title" title={r.card.title}>
+        {r.card.title}
+      </span>
+      <button
+        type="button"
+        className="mt-row-btn"
+        data-testid="sourceless-trash"
+        disabled={busy}
+        onClick={() => onTrash([r.card.id])}
+      >
+        Trash
+      </button>
+    </li>
+  );
   return (
     <div data-testid="sourceless-panel">
       <p className="mt-muted">
         These cards trace to no source. Open one to attach a source (fix the lineage), or trash it —
         a sourceless card may be intentional, so nothing is auto-deleted.
       </p>
-      <ul className="mt-dup-list">
-        {rows.map((r) => (
-          <li key={r.card.id} data-testid="sourceless-row" data-element-id={r.card.id}>
-            <span className="mt-dup-title" title={r.card.title}>
-              {r.card.title}
-            </span>
-            <button
-              type="button"
-              className="mt-row-btn"
-              data-testid="sourceless-trash"
-              disabled={busy}
-              onClick={() => onTrash([r.card.id])}
-            >
-              Trash
-            </button>
-          </li>
-        ))}
-      </ul>
+      {/* Virtualized once the report crosses the threshold (T100); inline below it. */}
+      <AutoVirtualList
+        items={rows}
+        itemKey={(r) => r.card.id}
+        estimateSize={40}
+        height={420}
+        className="mt-dup-list mt-dup-list--virtual"
+        renderInline={() => <ul className="mt-dup-list">{rows.map(renderRow)}</ul>}
+        renderItem={renderRow}
+      />
     </div>
   );
 }
@@ -662,18 +679,30 @@ function LowValuePanel({
           Trash all
         </button>
       </div>
-      <ul className="mt-dup-list">
-        {rows.map((r) => (
-          <li key={r.element.id} data-testid="lowvalue-row" data-element-id={r.element.id}>
-            <span className="badge badge--soft">{r.element.priorityLabel ?? r.element.type}</span>
-            <span className="mt-dup-title" title={r.element.title}>
-              {r.element.title}
-            </span>
-            <span className="mt-muted">{r.daysSinceActivity}d stale</span>
-          </li>
-        ))}
-      </ul>
+      {/* Virtualized once the report crosses the threshold (T100); inline below it. */}
+      <AutoVirtualList
+        items={rows}
+        itemKey={(r) => r.element.id}
+        estimateSize={40}
+        height={420}
+        className="mt-dup-list mt-dup-list--virtual"
+        renderInline={() => <ul className="mt-dup-list">{rows.map(renderLowValueRow)}</ul>}
+        renderItem={renderLowValueRow}
+      />
     </div>
+  );
+}
+
+/** One low-value row — shared by the inline + virtualized paths. */
+function renderLowValueRow(r: LowValueRowSummary) {
+  return (
+    <li key={r.element.id} data-testid="lowvalue-row" data-element-id={r.element.id}>
+      <span className="badge badge--soft">{r.element.priorityLabel ?? r.element.type}</span>
+      <span className="mt-dup-title" title={r.element.title}>
+        {r.element.title}
+      </span>
+      <span className="mt-muted">{r.daysSinceActivity}d stale</span>
+    </li>
   );
 }
 

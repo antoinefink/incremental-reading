@@ -108,6 +108,23 @@ function bootstrap(): void {
     }
   }
 
+  // 2b'') Dev/E2E convenience: seed an empty database with the T100 CI-bounded SCALE
+  //       collection (a few thousand elements via the bulk fast path) so the
+  //       `scale-smoke` E2E can verify backup/restore + integrity + the MVP flow after
+  //       restart at scale. Opt-in via INTERLEAVE_SEED_SCALE; never seeds a non-empty
+  //       DB (so a restart never re-seeds), and production never seeds.
+  if (process.env.INTERLEAVE_SEED_SCALE === "1") {
+    try {
+      const stats = dbService.seedScaleIfEmpty();
+      if (stats)
+        console.log(
+          `[main] seeded scale collection: ${stats.cards} cards, ${stats.extracts} extracts, ${stats.reviewLogs} logs`,
+        );
+    } catch (error) {
+      console.error("[main] seed-scale failed:", error);
+    }
+  }
+
   // 2c) E2E convenience: pre-set the "seen onboarding" flag so the first-run
   //     welcome overlay (T050) does not cover the UI in the existing feature
   //     specs (which all start from a fresh, empty data dir). Opt-in via

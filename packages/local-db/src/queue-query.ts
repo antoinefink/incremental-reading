@@ -32,6 +32,7 @@ import type {
   ElementStatus,
   ElementType,
   IsoTimestamp,
+  ReviewState,
   SiblingGroupId,
 } from "@interleave/core";
 import { priorityToLabel } from "@interleave/core";
@@ -172,6 +173,20 @@ const FSRS_FACTOR = 19 / 81;
 const DAY_MS = 86_400_000;
 
 /**
+ * The most soonest-due CARDS that get a full summary + the T076 score (T100). In deep
+ * overload a 100k collection can have tens of thousands of cards due at once, but the
+ * user only ever SEES `limit` (≈50) and can process at most a few hundred a day; the
+ * exact ordering of the 5,000th-vs-6,000th due card is immaterial. Scoring only the
+ * soonest-due `SCORE_CANDIDATE_CAP` (the due reads are due-ASC ordered) keeps the
+ * surfaced top-N identical to scoring the whole pool for any realistic session while
+ * bounding the per-read work, so the queue stays fast as the collection grows. The
+ * per-type COUNTS + the budget gauge are still computed from the FULL due set (a cheap
+ * pass that builds no summaries), so "N due" stays truthful. Attention items are few
+ * and never capped. Generously above any day's processing — purely an overload bound.
+ */
+const SCORE_CANDIDATE_CAP = 2000;
+
+/**
  * Approximate retrievability `R(t) = (1 + FACTOR · t / S)^DECAY` from stability
  * `S` (days) + days since the last review. A never-reviewed card has no value.
  * Mirrors `inspector-query.ts` so the queue + inspector agree until FSRS (T036)
@@ -216,6 +231,18 @@ function dueLabelFor(dueAt: string | null, state: QueueDueState, asOf: number): 
 }
 
 /**
+ * The pre-built batched maps a `list()` read passes to the per-row decorators so the
+ * scoring inputs (sibling group, review state → retrievability, first concept name)
+ * resolve by map lookup instead of a per-row query (T100 — the N+1 fix). The expensive
+ * DISPLAY-only fields are NOT in here: they are deferred to `decorateDisplay` on the
+ * ≤limit survivors.
+ */
+interface BatchContext {
+  readonly siblingGroups: Map<ElementId, SiblingGroupId>;
+  readonly conceptNames: Map<ElementId, string>;
+}
+
+/**
  * Read-only queue query layer. Constructed once per open database (alongside
  * {@link Repositories}); the main process exposes it over validated IPC.
  */
@@ -246,66 +273,95 @@ export class QueueQuery {
     const filters = options.filters ?? {};
     const mode = options.mode ?? "full";
 
-    // The two distinct due reads (the FSRS join vs the attention `due_at` read).
-    const dueCards = this.repos.queue.dueCards(asOfIso);
+    // The two distinct due reads. Cards come WITH their FSRS state from the SAME join
+    // (T100 — no separate review-state scan), attention items by `elements.due_at`.
+    // Both reads are ordered soonest-due first.
+    const dueCardsFull = this.repos.queue.dueCardsWithState(asOfIso);
     const dueAttention = this.repos.queue.dueAttentionItems(asOfIso);
 
-    // Resolve the sibling-group key for every card in ONE batched read (not N+1) so
-    // the T076 score's sibling-spacing pass has the identifier without a per-row query.
-    const siblingGroups = this.repos.elements.liveSiblingGroupMap();
-
-    const cardRows = dueCards.map((el) => this.toCardSummary(el, asOfMs, siblingGroups));
-    const attentionRows = dueAttention.map((el) => this.toAttentionSummary(el, asOfMs));
-    const all = [...cardRows, ...attentionRows];
-
-    // Pre-resolve concept membership ONCE (not per-row): when a concept-name filter
-    // is active, build the canonical `member -> Set<liveConceptId>` map a single time
-    // and the set of live concept ids carrying that name, so `matchesFilters` does a
-    // map lookup instead of a `conceptsForElement` query per row (no N+1).
+    // Pre-resolve concept membership ONCE (not per-row): when a concept-name filter is
+    // active, build the canonical `member -> Set<liveConceptId>` map a single time so
+    // the filter is a map lookup, not a `conceptsForElement` query per row (no N+1).
     const conceptMatch = filters.concept ? this.buildConceptMatcher(filters.concept) : null;
 
-    // DRILL-DOWN counts (the count-vs-list invariant): the per-type / at-risk counts
-    // must respect every ACTIVE filter EXCEPT the type dimension (the chips drive that
-    // dimension, so its own value is dropped) — so a chip's number equals the rows you
-    // get when that chip is selected together with the OTHER active filters (status /
-    // concept / tag). Previously these were over the WHOLE due set ignoring the active
-    // status filter, so e.g. the "Active" status filter narrowed the list to 1 source
-    // while the "Sources" chip still showed 2 — the same count-vs-list mismatch class as
-    // the reported Library bug. We count over the rows that pass status/concept/tag (the
-    // non-type predicates); the `/queue` UI applies the type chip client-side and never
-    // sends `types`, so this set carries every type and the per-type counts match what
-    // each chip shows. (`{ countType: true }` would additionally honour the type filter,
-    // but the type dimension is intentionally OMITTED here so the chips drill down.)
-    const nonTypeMatched = all.filter((r) =>
-      this.matchesFilters(r, filters, conceptMatch, { countType: false }),
-    );
+    // DRILL-DOWN counts + the budget gauge over the FULL due set (T100) — a CHEAP pass
+    // straight over the raw elements (no summaries, no scoring): the per-type / at-risk
+    // counts must respect every ACTIVE filter EXCEPT the type dimension (the chips drive
+    // that dimension), so a chip's number equals the rows shown when that chip is
+    // selected with the other active filters (status/concept/tag). Counting here, before
+    // the score-candidate cap, keeps "N due" truthful even in deep overload.
     const counts = {
-      all: nonTypeMatched.length,
-      card: nonTypeMatched.filter((r) => r.type === "card").length,
-      source: nonTypeMatched.filter((r) => r.type === "source").length,
-      extract: nonTypeMatched.filter((r) => r.type === "extract").length,
-      topic: nonTypeMatched.filter((r) => r.type === "topic").length,
-      task: nonTypeMatched.filter((r) => r.type === "task").length,
-      highPriority: nonTypeMatched.filter((r) => r.protected).length,
-      overdue: nonTypeMatched.filter((r) => r.due === "overdue").length,
-      protected: nonTypeMatched.filter((r) => r.protected).length,
+      all: 0,
+      card: 0,
+      source: 0,
+      extract: 0,
+      topic: 0,
+      task: 0,
+      highPriority: 0,
+      overdue: 0,
+      protected: 0,
     };
+    const countOne = (element: Element, dueAt: string | null): void => {
+      if (!this.matchesElementFilters(element, filters, conceptMatch)) return;
+      counts.all++;
+      const t = element.type;
+      if (t === "card") counts.card++;
+      else if (t === "source") counts.source++;
+      else if (t === "extract") counts.extract++;
+      else if (t === "topic") counts.topic++;
+      else if (t === "task") counts.task++;
+      if (priorityToLabel(element.priority) === "A") {
+        counts.highPriority++;
+        counts.protected++;
+      }
+      if (dueStateFor(dueAt, asOfMs) === "overdue") counts.overdue++;
+    };
+    for (const { element, state } of dueCardsFull) countOne(element, state.dueAt);
+    for (const element of dueAttention) countOne(element, element.dueAt);
 
-    // Apply ALL active filters (type included), then ORDER by the T076 scoring
-    // function (priority/due/retrievability/type + sibling/source/concept de-clumping,
-    // modulated by the session `mode`) — replacing the old priority-desc/due-asc sort.
-    // With the type dimension driven client-side this equals `nonTypeMatched`, so
-    // `counts.all === items.length` (before the optional limit). The score is the
-    // deterministic ordering; the renderer's seeded jitter still runs on top.
+    // SCORE-CANDIDATE CAP (T100): only the soonest-due `SCORE_CANDIDATE_CAP` cards get a
+    // full summary + the T076 score — generously above any day's processing, so the
+    // surfaced top-N is identical for any realistic session, but the per-read work is
+    // bounded as the collection grows (the residual cost after the N+1 fix was building
+    // + scoring a summary for EVERY one of tens of thousands of due cards). Attention
+    // items are few and never capped.
+    const dueCards =
+      dueCardsFull.length > SCORE_CANDIDATE_CAP
+        ? dueCardsFull.slice(0, SCORE_CANDIDATE_CAP)
+        : dueCardsFull;
+
+    // BATCHED scoring inputs (T100): the per-row `findReviewState` / `firstConceptName`
+    // / `sourceContext` decoration over every due card was the N+1 that made this read
+    // take ~24s. The sibling-group + first-concept-name maps are built ONCE; each card's
+    // review state rides the due join. The EXPENSIVE display-only fields (source
+    // title/author, card kind, postpone count) are NOT needed to SCORE, so they are
+    // deferred to a second pass over only the rows that survive the score+filter+limit.
+    const batch: BatchContext = {
+      siblingGroups: this.repos.elements.liveSiblingGroupMap(),
+      conceptNames: this.repos.concepts.firstConceptNameMap(),
+    };
+    const cardRows = dueCards.map(({ element, state }) =>
+      this.toCardSummary(element, asOfMs, batch, state),
+    );
+    const attentionRows = dueAttention.map((el) => this.toAttentionSummary(el, asOfMs, batch));
+    const all = [...cardRows, ...attentionRows];
+
+    // Apply ALL active filters (type included), then ORDER by the T076 scoring function
+    // (priority/due/retrievability/type + sibling/source/concept de-clumping, modulated
+    // by the session `mode`). The renderer's seeded jitter still runs on top.
     let rows = all.filter((r) => this.matchesFilters(r, filters, conceptMatch));
     rows = scoreQueueItems(rows, { mode, asOf: asOfIso });
     if (options.limit !== undefined) rows = rows.slice(0, options.limit);
 
-    // The budget gauge counts the items the user actually faces today — the filtered
-    // due set (so a status/concept filter narrows the gauge with the list), not the raw
-    // pre-filter merge.
+    // SECOND PASS (T100): now that the list is scored, filtered, and LIMITED, decorate
+    // ONLY the surviving ≤limit rows with the expensive display-only fields (source
+    // title/author, card kind, attention postpone count) — at most `limit` (≈50) reads.
+    rows = rows.map((r) => this.decorateDisplay(r));
+
+    // The budget gauge counts the items the user actually faces today — the FULL filtered
+    // due set (so a status/concept filter narrows the gauge with the list).
     const target = this.repos.settings.getAppSettings().dailyReviewBudget;
-    const used = nonTypeMatched.length;
+    const used = counts.all;
 
     return { items: rows, counts, budget: { used, target } };
   }
@@ -362,6 +418,31 @@ export class QueueQuery {
    * other active filters but not its own value (the count-vs-list invariant); the
    * result-list match uses the default `true` so the items honour every filter.
    */
+  /**
+   * The non-type filter predicate evaluated on a RAW {@link Element} (T100) — the
+   * cheap counterpart of {@link matchesFilters} used by the full-due-set count pass,
+   * which deliberately runs BEFORE the score-candidate cap + summary build so the
+   * per-type counts + budget stay truthful in deep overload without materializing a
+   * summary per row. It applies status/concept/tag (the type dimension is dropped, as
+   * the drill-down counts require) reading the element's own `status`/`id`.
+   */
+  private matchesElementFilters(
+    element: Element,
+    filters: QueueFilters,
+    conceptMatch: ((elementId: ElementId) => boolean) | null,
+  ): boolean {
+    if (filters.statuses && filters.statuses.length > 0) {
+      if (!filters.statuses.includes(element.status as ElementStatus)) return false;
+    }
+    if (filters.concept) {
+      if (!conceptMatch?.(element.id)) return false;
+    }
+    if (filters.tag) {
+      if (!this.repos.elements.listTags(element.id).includes(filters.tag)) return false;
+    }
+    return true;
+  }
+
   private matchesFilters(
     row: QueueItemSummary,
     filters: QueueFilters,
@@ -390,26 +471,36 @@ export class QueueQuery {
   }
 
   /**
-   * Build a card (FSRS) queue row from its element + review state. The optional
-   * batched `siblingGroups` map (built once per `list()`) supplies the card's
-   * sibling-group key without an N+1 per-row read; the single-row {@link summaryFor}
-   * path falls back to a per-card resolve when the map is absent.
+   * Build a card (FSRS) queue row. When a {@link BatchContext} is supplied (the
+   * `list()` path), the scoring inputs come from the pre-built maps (no N+1), and the
+   * EXPENSIVE display-only fields — `sourceTitle`/`author`/`cardType` — are left as
+   * placeholders for {@link decorateDisplay} to fill on the ≤limit survivors only.
+   * Without a batch (the single-row {@link summaryFor} path) every field is resolved
+   * inline so the returned row is complete on its own.
    */
   private toCardSummary(
     element: Element,
     asOfMs: number,
-    siblingGroups?: Map<ElementId, SiblingGroupId>,
+    batch?: BatchContext,
+    /** The card's FSRS state, when the caller already has it (the batched due join). */
+    batchedState?: ReviewState,
   ): QueueItemSummary {
-    const state = this.repos.review.findReviewState(element.id);
-    const card = this.repos.review.findCardById(element.id);
+    const state = batch ? (batchedState ?? null) : this.repos.review.findReviewState(element.id);
     const retrievability = state
       ? approximateRetrievability(state.stability, state.lastReviewedAt, asOfMs)
       : null;
     const dueAt = state?.dueAt ?? element.dueAt;
     const due = dueStateFor(dueAt, asOfMs);
-    const { sourceTitle, author, sourceId } = this.sourceContext(element);
+    const sourceId = element.type === "source" ? element.id : element.sourceId;
     const siblingGroupId =
-      (siblingGroups ? siblingGroups.get(element.id) : this.siblingGroupOf(element.id)) ?? null;
+      (batch ? batch.siblingGroups.get(element.id) : this.siblingGroupOf(element.id)) ?? null;
+    const concept = batch
+      ? (batch.conceptNames.get(element.id) ?? null)
+      : this.conceptFor(element.id);
+    // Display-only fields: deferred (filled by decorateDisplay) when batched; resolved
+    // inline for the single-row summaryFor path.
+    const ctx = batch ? null : this.sourceContext(element);
+    const card = batch ? null : this.repos.review.findCardById(element.id);
     return {
       id: element.id,
       type: element.type,
@@ -428,11 +519,11 @@ export class QueueQuery {
         stage: element.stage,
         postponed: 0,
       },
-      sourceTitle,
-      author,
-      concept: this.conceptFor(element.id),
+      sourceTitle: ctx ? ctx.sourceTitle : null,
+      author: ctx ? ctx.author : null,
+      concept,
       siblingGroupId,
-      sourceId,
+      sourceId: sourceId ?? null,
       cardType: card?.card.kind ?? null,
       // A card is the FSRS leaf — it protects nothing else, never a verification task.
       linkedElementId: null,
@@ -443,13 +534,27 @@ export class QueueQuery {
     };
   }
 
-  /** Build an attention (source/topic/extract/task/…) queue row. */
-  private toAttentionSummary(element: Element, asOfMs: number): QueueItemSummary {
+  /**
+   * Build an attention (source/topic/extract/task/…) queue row. When batched (the
+   * `list()` path), `sourceTitle`/`author`/`postponed` are deferred to
+   * {@link decorateDisplay} (filled on the ≤limit survivors); without a batch the
+   * single-row {@link summaryFor} path resolves them inline.
+   */
+  private toAttentionSummary(
+    element: Element,
+    asOfMs: number,
+    batch?: BatchContext,
+  ): QueueItemSummary {
     const due = dueStateFor(element.dueAt, asOfMs);
-    const { sourceTitle, author, sourceId } = this.sourceContext(element);
+    const sourceId = element.type === "source" ? element.id : element.sourceId;
+    const ctx = batch ? null : this.sourceContext(element);
+    const concept = batch
+      ? (batch.conceptNames.get(element.id) ?? null)
+      : this.conceptFor(element.id);
     // ONLY a verification `task` protects another element — resolve its
     // `tasks.linked_element_id` (+ type) ONCE so the "Open" affordance jumps to that
-    // card/source's reader. Every other attention type resolves to `null`.
+    // card/source's reader. Every other attention type resolves to `null`. This is a
+    // task-only read (rare), so it stays inline even when batched.
     const linked =
       element.type === "task"
         ? (this.repos.tasks.findTask(element.id)?.linkedElement ?? null)
@@ -470,21 +575,47 @@ export class QueueQuery {
         fsrsState: null,
         lapses: null,
         stage: element.stage,
-        postponed: this.countPostpones(element.id),
+        postponed: batch ? 0 : this.countPostpones(element.id),
       },
-      sourceTitle,
-      author,
-      concept: this.conceptFor(element.id),
+      sourceTitle: ctx ? ctx.sourceTitle : null,
+      author: ctx ? ctx.author : null,
+      concept,
       // Attention items never carry a sibling group (cards-only relation); `sourceId`
       // is the owning source (or the element itself when it IS a source).
       siblingGroupId: null,
-      sourceId,
+      sourceId: sourceId ?? null,
       cardType: null,
       linkedElementId: linked?.id ?? null,
       linkedElementType: linked?.type ?? null,
       protected: priorityToLabel(element.priority) === "A",
       due,
       dueLabel: dueLabelFor(element.dueAt, due, asOfMs),
+    };
+  }
+
+  /**
+   * Fill the EXPENSIVE display-only fields a batched {@link toCardSummary} /
+   * {@link toAttentionSummary} left as placeholders (T100): the owning source's
+   * title + author, the card kind, and (attention rows) the postpone count. Called
+   * on ONLY the ≤limit rows that survive the score+filter+limit, so these per-row
+   * reads run at most `limit` times instead of once per due element.
+   */
+  private decorateDisplay(row: QueueItemSummary): QueueItemSummary {
+    const element = this.repos.elements.findById(row.id as ElementId);
+    if (!element) return row;
+    const { sourceTitle, author } = this.sourceContext(element);
+    if (row.scheduler === "fsrs") {
+      const card = this.repos.review.findCardById(row.id as ElementId);
+      return { ...row, sourceTitle, author, cardType: card?.card.kind ?? null };
+    }
+    return {
+      ...row,
+      sourceTitle,
+      author,
+      schedulerSignals: {
+        ...row.schedulerSignals,
+        postponed: this.countPostpones(row.id as ElementId),
+      },
     };
   }
 

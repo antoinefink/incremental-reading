@@ -223,6 +223,15 @@
   flex-direction: column;
   gap: 8px;
 }
+/* Virtualized queue list (T100): the scroll container is the VirtualList; the
+   absolute-positioned rows can't use the flex `gap`, so each virtual row carries its
+   own bottom padding to reproduce the 8px rhythm. */
+.q-list--virtual {
+  border-radius: var(--r-lg);
+}
+.q-list__vrow {
+  padding-bottom: 8px;
+}
 .qitem {
   display: grid;
   grid-template-columns: auto 1fr auto auto;

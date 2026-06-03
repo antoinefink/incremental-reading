@@ -99,7 +99,14 @@ export class ReviewSessionService {
    */
   nextReviewCard(input: NextReviewCardInput): NextReviewCard {
     const exclude = new Set<string>(input.exclude ?? []);
-    const due = this.queue.dueCards(input.asOf);
+    // Bound the SQL read (T100): the deck only ever needs the first `limit` non-excluded
+    // due cards, so fetch `limit + exclude.size` rows (soonest-due first) rather than
+    // materializing ALL due cards — at 100k that was tens of thousands of rows + a
+    // per-row `rowToElement` just to slice to ~50. When no `limit` is given we keep the
+    // full read (the caller wants the whole deck, e.g. a count).
+    const fetchLimit =
+      input.limit !== undefined ? Math.max(0, input.limit) + exclude.size : undefined;
+    const due = this.queue.dueCards(input.asOf, fetchLimit);
     // The surfaceable deck: due cards not already seen, bounded by the optional cap.
     let deck = due.filter((c) => !exclude.has(c.id));
     if (input.limit !== undefined) deck = deck.slice(0, Math.max(0, input.limit));
@@ -109,7 +116,9 @@ export class ReviewSessionService {
     const bury = input.burySiblings ?? true;
     const recent = new Set<string>(input.recentSiblingGroups ?? []);
 
-    // Resolve each candidate's sibling group once (a small read per card).
+    // Resolve each candidate's sibling group with a small per-card read. The deck is
+    // now SQL-bounded (≤ limit + exclude), so this runs ~`limit` times (≈50) — cheaper
+    // than building the whole-cards-table sibling map for a handful of lookups.
     const withGroup = deck.map((c) => ({
       id: c.id as ElementId,
       group: this.siblingGroupOf(c.id as ElementId),

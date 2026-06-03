@@ -16,7 +16,7 @@
     "build": "echo \"@interleave/local-db: no build step\"",
     "test": "vitest run",
     "lint": "echo \"@interleave/local-db: linted from repo root via biome\"",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.bench.json --noEmit"
   },
   "dependencies": {
     "@interleave/core": "workspace:*",

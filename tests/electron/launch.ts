@@ -107,6 +107,13 @@ export interface LaunchOptions {
    */
   readonly seedMaintenance?: boolean;
   /**
+   * Seed the T100 CI-bounded SCALE collection (a few thousand elements via the bulk
+   * fast path) when the database is empty, so the `scale-smoke` E2E can verify
+   * backup/restore + integrity + the MVP flow after restart at scale. Sets
+   * `INTERLEAVE_SEED_SCALE=1`.
+   */
+  readonly seedScale?: boolean;
+  /**
    * Show the first-run onboarding overlay (T050). DEFAULTS to suppressed: the
    * existing feature specs start from a fresh, empty data dir, where the welcome
    * overlay would otherwise cover the UI. The dedicated onboarding spec passes
@@ -205,6 +212,7 @@ export async function launchApp(
       INTERLEAVE_DATA_DIR: dataDir,
       ...(options.seedOnEmpty ? { INTERLEAVE_SEED_ON_EMPTY: "1" } : {}),
       ...(options.seedMaintenance ? { INTERLEAVE_SEED_MAINTENANCE: "1" } : {}),
+      ...(options.seedScale ? { INTERLEAVE_SEED_SCALE: "1" } : {}),
       ...(options.allowLoopbackImport ? { INTERLEAVE_ALLOW_LOOPBACK_IMPORT: "1" } : {}),
       ...(options.captureEnabled ? { INTERLEAVE_CAPTURE_ENABLED: "1" } : {}),
       ...(options.pdfImportPath ? { INTERLEAVE_PDF_IMPORT_PATH: options.pdfImportPath } : {}),

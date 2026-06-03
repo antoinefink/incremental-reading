@@ -22,3 +22,18 @@ export {
   seedDemoCollection,
   seedMaintenanceCollection,
 } from "./factories";
+/**
+ * Large-collection seed harness for the scale benchmark + scale-smoke (T100). Builds
+ * a configurable collection up to the ~100k scale matrix into an open, migrated DB
+ * via a documented bulk fast path; `seedSmokeControl` is the real-repository control
+ * that proves the bulk rows are schema-identical.
+ */
+export {
+  CI_SCALE_PROFILE,
+  DEFAULT_LARGE_PROFILE,
+  type LargeSeedOptions,
+  type LargeSeedStats,
+  SMOKE_LARGE_PROFILE,
+  seedLargeCollection,
+  seedSmokeControl,
+} from "./large-seed";

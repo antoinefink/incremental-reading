@@ -55,7 +55,7 @@ import {
   judgeBalance,
 } from "@interleave/core";
 import { elements, type InterleaveDatabase, reviewLogs } from "@interleave/db";
-import { and, eq, gte, isNotNull, lte } from "drizzle-orm";
+import { and, eq, gte, isNotNull, lte, count as sqlCount } from "drizzle-orm";
 import { QueueRepository } from "./queue-repository";
 import { ReviewRepository } from "./review-repository";
 
@@ -244,22 +244,25 @@ export class AnalyticsService {
     const newCards = this.countCreatedInWindow("card", windowStartIso, asOf);
     const newExtracts = this.countCreatedInWindow("extract", windowStartIso, asOf);
 
-    // ---- deletions in the window (trash-rate) ----
-    const deletions = this.db
-      .select({ id: elements.id })
-      .from(elements)
-      .where(
-        and(
-          isNotNull(elements.deletedAt),
-          gte(elements.deletedAt, windowStartIso),
-          lte(elements.deletedAt, asOf),
-        ),
-      )
-      .all().length;
+    // ---- deletions in the window (trash-rate) — cheap SQL COUNT(*) (T100) ----
+    const deletions =
+      this.db
+        .select({ n: sqlCount() })
+        .from(elements)
+        .where(
+          and(
+            isNotNull(elements.deletedAt),
+            gte(elements.deletedAt, windowStartIso),
+            lte(elements.deletedAt, asOf),
+          ),
+        )
+        .get()?.n ?? 0;
 
     // ---- live due counts (the two-scheduler split) + leeches ----
-    const dueCards = this.queue.dueCards(asOf).length;
-    const dueTopics = this.queue.dueAttentionItems(asOf).length;
+    // Cheap SQL COUNT(*) (T100) — never materialize tens of thousands of rows just to
+    // count them on the analytics path.
+    const dueCards = this.queue.dueCardCount(asOf);
+    const dueTopics = this.queue.dueAttentionCount(asOf);
     const leeches = this.review.listLeechCards().length;
     // Retired cards (T082) — out of active review, kept for reference. The
     // maintenance inventory + analytics surface count them like leeches.
@@ -330,18 +333,28 @@ export class AnalyticsService {
     };
   }
 
-  /** Count elements of `type` whose `createdAt` is within `[start, end]` (inclusive). */
+  /**
+   * Count elements of `type` whose `createdAt` is within `[start, end]` (inclusive) —
+   * a cheap SQL `COUNT(*)` (T100) served by the `0027` `elements(type, created_at)`
+   * index (EXPLAIN QUERY PLAN: `SEARCH ... USING INDEX elements_type_created_idx`).
+   */
   private countCreatedInWindow(
     type: "card" | "extract" | "source",
     start: string,
     end: string,
   ): number {
-    return this.db
-      .select({ id: elements.id })
-      .from(elements)
-      .where(
-        and(eq(elements.type, type), gte(elements.createdAt, start), lte(elements.createdAt, end)),
-      )
-      .all().length;
+    return (
+      this.db
+        .select({ n: sqlCount() })
+        .from(elements)
+        .where(
+          and(
+            eq(elements.type, type),
+            gte(elements.createdAt, start),
+            lte(elements.createdAt, end),
+          ),
+        )
+        .get()?.n ?? 0
+    );
   }
 }

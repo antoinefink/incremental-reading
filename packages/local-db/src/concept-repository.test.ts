@@ -247,6 +247,56 @@ describe("ConceptRepository membership reads", () => {
     expect(concepts.liveMembershipMap().get(a)).toEqual(new Set([live.id]));
   });
 
+  it("firstConceptNameMap matches firstConceptName per-row, incl. a dead concept earlier in the edge list (T100 batched display value)", () => {
+    // The queue/search/review DISPLAY value (`row.concept`) is produced through the
+    // batched `firstConceptNameMap`, NOT the single-row `firstConceptName` walk. They
+    // MUST agree, including the load-bearing edge case: a member assigned to a
+    // soft-deleted concept FIRST then a live one — the dead concept must not mask the
+    // live name, and the batched map must pick the same "first LIVE concept in edge
+    // order" the single-row walk does.
+    const multi = makeExtract("multi-membership"); // dead concept assigned first
+    const single = makeExtract("single-membership");
+    const none = makeExtract("no-membership");
+    const dead = concepts.createConcept({ name: "Dead" });
+    const cog = concepts.createConcept({ name: "Cognition" });
+    const mem = concepts.createConcept({ name: "Memory" });
+
+    // `multi` joins the dead concept FIRST (earlier edge), then two live concepts.
+    concepts.assignConcept(multi, dead.id);
+    concepts.assignConcept(multi, cog.id);
+    concepts.assignConcept(multi, mem.id);
+    concepts.assignConcept(single, mem.id);
+    elements.softDelete(dead.id);
+
+    const map = concepts.firstConceptNameMap();
+
+    // The batched display map equals the single-row walk for EVERY member…
+    for (const member of [multi, single]) {
+      expect(map.get(member)).toBe(concepts.firstConceptName(member));
+    }
+    // …and concretely: the dead first edge is skipped, so the first LIVE concept wins.
+    expect(map.get(multi)).toBe("Cognition");
+    expect(map.get(single)).toBe("Memory");
+    // A member with no live membership is absent from the map (no display name), just
+    // like `firstConceptName` returns null.
+    expect(map.has(none)).toBe(false);
+    expect(concepts.firstConceptName(none)).toBeNull();
+  });
+
+  it("firstConceptNameMap omits soft-deleted MEMBERS (a trashed element never gets a display name)", () => {
+    const live = makeExtract("live member");
+    const trashed = makeExtract("trashed member");
+    const concept = concepts.createConcept({ name: "Memory" });
+    concepts.assignConcept(live, concept.id);
+    concepts.assignConcept(trashed, concept.id);
+
+    elements.softDelete(trashed);
+    const map = concepts.firstConceptNameMap();
+
+    expect(map.get(live)).toBe("Memory");
+    expect(map.has(trashed)).toBe(false);
+  });
+
   it("drops a concept_membership edge whose `to` endpoint is a NON-concept element (load-bearing liveness/type guard)", () => {
     // assignConcept rejects a non-concept target at write time, but a RAW addRelation
     // (used for duplicates) or legacy/imported data can still create a

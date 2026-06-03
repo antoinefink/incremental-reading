@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Icon, type IconName } from "../components/Icon";
 import { Snackbar } from "../components/Snackbar";
+import { AutoVirtualList } from "../components/VirtualList";
 import { appApi, isDesktop, type TrashItemSummary } from "../lib/appApi";
 import "./trash.css";
 
@@ -137,6 +138,79 @@ export function TrashScreen() {
     }
   }, [load]);
 
+  /** One trash row — shared by the inline (small-list) + virtualized (large-list) paths. */
+  const renderRow = useCallback(
+    (item: TrashItemSummary) => (
+      <div className="trash-row" key={item.id} data-testid="trash-row" data-id={item.id}>
+        <span className="trash-row__icon">
+          <Icon name={typeIcon(item.type)} size={16} />
+        </span>
+        <div className="trash-row__body">
+          <div className="trash-row__title" data-testid="trash-row-title">
+            {item.title}
+          </div>
+          <div className="trash-row__meta">
+            <span className="trash-row__type">{item.type}</span>
+            {item.sourceTitle ? (
+              <>
+                <span className="trash-row__dot">·</span>
+                <span>from {item.sourceTitle}</span>
+              </>
+            ) : null}
+            <span className="trash-row__dot">·</span>
+            <span>deleted {deletedAgo(item.deletedAt)}</span>
+          </div>
+        </div>
+        <div className="trash-row__actions">
+          <button
+            type="button"
+            className="trash-btn"
+            data-testid="trash-restore"
+            disabled={busyId === item.id}
+            onClick={() => void restore(item)}
+          >
+            <Icon name="restore" size={14} />
+            Restore
+          </button>
+          {confirmPurgeId === item.id ? (
+            <>
+              <button
+                type="button"
+                className="trash-btn trash-btn--danger"
+                data-testid="trash-purge-yes"
+                disabled={busyId === item.id}
+                onClick={() => void purge(item.id)}
+              >
+                Delete forever
+              </button>
+              <button
+                type="button"
+                className="trash-btn"
+                data-testid="trash-purge-cancel"
+                onClick={() => setConfirmPurgeId(null)}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="trash-btn trash-btn--icon trash-btn--danger"
+              data-testid="trash-purge"
+              title="Delete permanently"
+              aria-label="Delete permanently"
+              disabled={busyId === item.id}
+              onClick={() => setConfirmPurgeId(item.id)}
+            >
+              <Icon name="trash" size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+    ),
+    [busyId, confirmPurgeId, restore, purge],
+  );
+
   if (!desktop) {
     return (
       <div className="trash-shell" data-testid="route-trash">
@@ -218,76 +292,22 @@ export function TrashScreen() {
           </p>
         </div>
       ) : (
-        <div className="trash-list" data-testid="trash-list">
-          {items.map((item) => (
-            <div className="trash-row" key={item.id} data-testid="trash-row" data-id={item.id}>
-              <span className="trash-row__icon">
-                <Icon name={typeIcon(item.type)} size={16} />
-              </span>
-              <div className="trash-row__body">
-                <div className="trash-row__title" data-testid="trash-row-title">
-                  {item.title}
-                </div>
-                <div className="trash-row__meta">
-                  <span className="trash-row__type">{item.type}</span>
-                  {item.sourceTitle ? (
-                    <>
-                      <span className="trash-row__dot">·</span>
-                      <span>from {item.sourceTitle}</span>
-                    </>
-                  ) : null}
-                  <span className="trash-row__dot">·</span>
-                  <span>deleted {deletedAgo(item.deletedAt)}</span>
-                </div>
-              </div>
-              <div className="trash-row__actions">
-                <button
-                  type="button"
-                  className="trash-btn"
-                  data-testid="trash-restore"
-                  disabled={busyId === item.id}
-                  onClick={() => void restore(item)}
-                >
-                  <Icon name="restore" size={14} />
-                  Restore
-                </button>
-                {confirmPurgeId === item.id ? (
-                  <>
-                    <button
-                      type="button"
-                      className="trash-btn trash-btn--danger"
-                      data-testid="trash-purge-yes"
-                      disabled={busyId === item.id}
-                      onClick={() => void purge(item.id)}
-                    >
-                      Delete forever
-                    </button>
-                    <button
-                      type="button"
-                      className="trash-btn"
-                      data-testid="trash-purge-cancel"
-                      onClick={() => setConfirmPurgeId(null)}
-                    >
-                      Cancel
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    className="trash-btn trash-btn--icon trash-btn--danger"
-                    data-testid="trash-purge"
-                    title="Delete permanently"
-                    aria-label="Delete permanently"
-                    disabled={busyId === item.id}
-                    onClick={() => setConfirmPurgeId(item.id)}
-                  >
-                    <Icon name="trash" size={14} />
-                  </button>
-                )}
-              </div>
+        // Virtualized once it crosses the threshold (years-of-use scale, T100); inline
+        // below it so the everyday trash keeps its exact kit layout.
+        <AutoVirtualList
+          items={items}
+          itemKey={(item) => item.id}
+          estimateSize={72}
+          height={560}
+          className="trash-list trash-list--virtual"
+          testId="trash-list"
+          renderInline={() => (
+            <div className="trash-list" data-testid="trash-list">
+              {items.map((item) => renderRow(item))}
             </div>
-          ))}
-        </div>
+          )}
+          renderItem={(item) => renderRow(item)}
+        />
       )}
 
       <Snackbar

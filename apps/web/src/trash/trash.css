@@ -82,6 +82,17 @@
 .trash-row + .trash-row {
   border-top: 1px solid var(--border-faint, var(--border));
 }
+/* Virtualized trash list (T100): the rows are absolutely positioned (no adjacency),
+   so the `.trash-row + .trash-row` separator can't apply — each virtual row carries
+   its own bottom border + the list its side padding to reproduce the divided look. */
+.trash-list--virtual {
+  max-width: 760px;
+  margin: 0 auto var(--s-6, 24px);
+  padding: 0 var(--s-6, 24px);
+}
+.trash-list--virtual .trash-row {
+  border-bottom: 1px solid var(--border-faint, var(--border));
+}
 .trash-row__icon {
   flex: none;
   display: inline-flex;

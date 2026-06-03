@@ -30,6 +30,7 @@ import { Prio, SchedulerChip, TypeIcon } from "../../components/inspector/primit
 import { BudgetMeter } from "../../components/queue/BudgetMeter";
 import { QueueSnackbar } from "../../components/queue/QueueSnackbar";
 import { ScheduleMenu } from "../../components/queue/ScheduleMenu";
+import { AutoVirtualList } from "../../components/VirtualList";
 import "../../components/inspector/inspector.css";
 import {
   appApi,
@@ -609,12 +610,35 @@ export function QueueScreen() {
           ))}
         </div>
 
-        {/* list */}
+        {/* list — virtualized once it crosses the threshold (years-of-use scale, T100),
+            inline below it so the everyday queue keeps its exact kit layout. */}
         {visible.length > 0 ? (
-          <div className="q-list" data-testid="queue-list">
-            {visible.map((item) => (
+          <AutoVirtualList
+            items={visible}
+            itemKey={(item) => item.id}
+            estimateSize={72}
+            height={620}
+            className="q-list q-list--virtual"
+            rowClassName="q-list__vrow"
+            testId="queue-list"
+            renderInline={() => (
+              <div className="q-list" data-testid="queue-list">
+                {visible.map((item) => (
+                  <QueueItem
+                    key={item.id}
+                    item={item}
+                    active={selectedId === item.id}
+                    busy={busyId !== null}
+                    onSelect={onSelect}
+                    onOpen={onOpen}
+                    onAction={onAction}
+                    onSchedule={onSchedule}
+                  />
+                ))}
+              </div>
+            )}
+            renderItem={(item) => (
               <QueueItem
-                key={item.id}
                 item={item}
                 active={selectedId === item.id}
                 // While ANY row's action is in flight the queue is mid-mutation and
@@ -627,8 +651,8 @@ export function QueueScreen() {
                 onAction={onAction}
                 onSchedule={onSchedule}
               />
-            ))}
-          </div>
+            )}
+          />
         ) : dueCount === 0 ? (
           <div className="q-panel">
             <div className="q-empty" data-testid="queue-empty">

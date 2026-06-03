@@ -65,6 +65,22 @@ export const elements = sqliteTable(
     index("elements_source_idx").on(table.sourceId),
     index("elements_type_status_idx").on(table.type, table.status),
     index("elements_due_idx").on(table.dueAt),
+    // T100 (migration 0027): the analytics "new X in window" scans filter
+    // `type = ? AND created_at BETWEEN ? AND ?` (AnalyticsService.countCreatedInWindow);
+    // EXPLAIN QUERY PLAN at scale showed a full `SCAN elements` without this composite
+    // and a clean `SEARCH ... USING INDEX elements_type_created_idx` with it. PROVEN.
+    index("elements_type_created_idx").on(table.type, table.createdAt),
+    // T100 (migration 0027): the analytics `deletions` count + the trash list both scan
+    // `deleted_at` (`WHERE deleted_at IS NOT NULL [AND BETWEEN] ORDER BY deleted_at`).
+    // EXPLAIN QUERY PLAN at scale showed a full `SCAN elements` + a TEMP B-TREE for the
+    // trash sort without it, both eliminated with `SEARCH ... USING INDEX
+    // elements_deleted_at_idx`. PROVEN. (The candidate `elements(type, due_at)` was
+    // measured and REJECTED: for the `dueAttentionItems` read — `type NOT IN ('card')
+    // AND deleted_at IS NULL AND ... AND due_at <= ? ORDER BY due_at` — the planner
+    // keeps `elements_due_idx` (verified via EXPLAIN QUERY PLAN at scale, post-ANALYZE),
+    // because a leading `type` column under `NOT IN ('card')` is non-sargable, so a
+    // `(type, due_at)` composite cannot seek and would only ever be a redundant cost.)
+    index("elements_deleted_at_idx").on(table.deletedAt),
   ],
 );
 

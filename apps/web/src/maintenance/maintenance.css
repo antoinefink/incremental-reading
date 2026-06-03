@@ -148,6 +148,14 @@
   gap: 8px;
   padding: 4px 0;
 }
+/* Virtualized maintenance drill-down (T100): the VirtualList container owns the
+   scroll + absolute row layout, so it must NOT be the `flex` column the inline
+   `.mt-dup-list` is — reset it back to block flow so the absolute rows position
+   correctly. The descendant `.mt-dup-list li` styling still applies to each row. */
+.mt-dup-list--virtual {
+  display: block;
+  gap: 0;
+}
 .mt-dup-title {
   flex: 1 1 auto;
   min-width: 0;

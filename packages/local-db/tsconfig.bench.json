@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "rootDir": "..",
+    "outDir": "./.tsbuild-bench",
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["bench/**/*.ts", "src/**/*.ts", "../testing/src/large-seed.ts"]
+}

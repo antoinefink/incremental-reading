@@ -503,6 +503,50 @@ export class ConceptRepository {
   }
 
   /**
+   * The {@link firstConceptName} of EVERY member, as a `Map<memberId, conceptName>`,
+   * built in a CONSTANT number of reads (T100) — the batched counterpart the queue
+   * uses to decorate thousands of rows without a per-row `firstConceptName` walk (the
+   * N+1 that helped make `QueueQuery.list` take ~24s at 100k). Preserves the SAME
+   * "first LIVE membership in edge order" semantics: it scans the
+   * `concept_membership` edges in their stored row order and records, per member, the
+   * title of the FIRST edge whose concept element is live. Read-only.
+   */
+  firstConceptNameMap(): Map<ElementId, string> {
+    // Live concept id -> title, in one read.
+    const conceptTitle = new Map<string, string>();
+    for (const row of this.db
+      .select({ id: elements.id, title: elements.title })
+      .from(elements)
+      .where(and(eq(elements.type, "concept"), isNull(elements.deletedAt)))
+      .all()) {
+      conceptTitle.set(row.id, row.title);
+    }
+    // Live (non-deleted) member ids, so a soft-deleted member never gets a name.
+    const liveMemberIds = new Set(
+      this.db
+        .select({ id: elements.id })
+        .from(elements)
+        .where(isNull(elements.deletedAt))
+        .all()
+        .map((r) => r.id),
+    );
+    // Scan the membership edges in stored row order; the FIRST live-concept edge per
+    // member wins (matches the single-row walk above).
+    const firstName = new Map<ElementId, string>();
+    for (const edge of this.db
+      .select()
+      .from(elementRelations)
+      .where(eq(elementRelations.relationType, "concept_membership"))
+      .all()) {
+      const memberId = edge.fromElementId as ElementId;
+      if (firstName.has(memberId) || !liveMemberIds.has(memberId)) continue;
+      const title = conceptTitle.get(edge.toElementId);
+      if (title !== undefined) firstName.set(memberId, title);
+    }
+    return firstName;
+  }
+
+  /**
    * The LIVE element ids that are members of a concept (feeds concept filtering +
    * counts). Reads the `concept_membership` edges (`to = concept`) and keeps only
    * members whose element is not soft-deleted, deduped, in first-seen edge order.

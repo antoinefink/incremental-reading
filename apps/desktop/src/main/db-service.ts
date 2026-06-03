@@ -104,8 +104,11 @@ import {
   type WorkloadChange,
 } from "@interleave/scheduler";
 import {
+  CI_SCALE_PROFILE,
+  type LargeSeedStats,
   type MaintenanceCollection,
   seedDemoCollection,
+  seedLargeCollection,
   seedMaintenanceCollection,
 } from "@interleave/testing";
 import type {
@@ -4992,6 +4995,25 @@ export class DbService {
     const repos = this.repos;
     if (repos.elements.listByType("source").length > 0) return null;
     return seedMaintenanceCollection(repos, this.require().db);
+  }
+
+  /**
+   * Populate an EMPTY database with the T100 CI-bounded SCALE collection (a few
+   * THOUSAND elements via the bulk fast path) so the `scale-smoke` E2E can exercise
+   * backup/restore, `integrity_check`, the two-scheduler split, and the MVP flow
+   * after restart against a realistic-but-fast collection. A no-op when any element
+   * exists (so a restart never re-seeds). Opt-in via `INTERLEAVE_SEED_SCALE` in
+   * `bootstrap`; production never seeds. The bulk path runs only against this
+   * throwaway E2E data dir (never the dev/user DB) and restores its pragmas after.
+   * Returns the {@link LargeSeedStats} or `null` when not empty.
+   */
+  seedScaleIfEmpty(): LargeSeedStats | null {
+    const repos = this.repos;
+    if (repos.elements.listByType("source").length > 0) return null;
+    return seedLargeCollection(repos, this.require().db, {
+      ...CI_SCALE_PROFILE,
+      seed: "interleave-scale-e2e",
+    });
   }
 
   /** Cheap connectivity check used by `app.health()`. */

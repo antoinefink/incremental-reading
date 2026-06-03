@@ -2957,7 +2957,15 @@ describe("DbService — backup support (T047)", () => {
   it("getSchemaVersion returns the latest applied Drizzle migration tag", () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
-    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe("0026_reflective_magma");
+    // Derive the expected tag from the staged `_journal.json` (the source of truth)
+    // rather than a literal, so this never re-rots when a later migration lands (it
+    // previously pinned `0026_reflective_magma`, stale once the T100 `0027` migration
+    // landed).
+    const journal = JSON.parse(
+      fs.readFileSync(path.join(MIGRATIONS_DIR, "meta", "_journal.json"), "utf8"),
+    ) as { entries: { tag: string }[] };
+    const expectedTag = journal.entries.at(-1)?.tag;
+    expect(svc.getSchemaVersion(MIGRATIONS_DIR)).toBe(expectedTag);
     svc.close();
   });
 

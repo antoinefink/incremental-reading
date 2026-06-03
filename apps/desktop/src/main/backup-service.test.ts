@@ -33,6 +33,21 @@ import { computeAppPaths, ensureVaultSkeleton } from "./paths";
 let dataDir: string;
 let svc: DbService;
 
+/**
+ * The latest applied Drizzle migration tag — read from the staged `_journal.json`
+ * (the source of truth) rather than hardcoded, so this never re-rots when a later
+ * migration lands (it previously pinned `0026_reflective_magma`, which went stale
+ * once the T100 `0027` index migration landed). Mirrors the E2E backup spec's helper.
+ */
+function latestMigrationTag(): string {
+  const journal = JSON.parse(
+    fs.readFileSync(path.join(MIGRATIONS_DIR, "meta", "_journal.json"), "utf8"),
+  ) as { entries: { tag: string }[] };
+  const last = journal.entries.at(-1);
+  if (!last) throw new Error("no migrations in _journal.json");
+  return last.tag;
+}
+
 beforeEach(() => {
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "interleave-backup-"));
 });
@@ -106,7 +121,7 @@ describe("BackupService.createBackup (T047)", () => {
     expect(fs.existsSync(result.path)).toBe(true);
     expect(result.path.endsWith(".zip")).toBe(true);
     expect(result.sizeBytes).toBeGreaterThan(0);
-    expect(result.schemaVersion).toBe("0026_reflective_magma");
+    expect(result.schemaVersion).toBe(latestMigrationTag());
     // app.sqlite + 2 asset files = 3 captured files.
     expect(result.fileCount).toBe(3);
 
@@ -144,7 +159,7 @@ describe("BackupService.createBackup (T047)", () => {
 
     const manifest = JSON.parse(fs.readFileSync(path.join(backupDir, "manifest.json"), "utf8"));
     expect(manifest.formatVersion).toBe(1);
-    expect(manifest.schemaVersion).toBe("0026_reflective_magma");
+    expect(manifest.schemaVersion).toBe(latestMigrationTag());
     expect(manifest.appVersion).toBe("9.9.9");
     expect(typeof manifest.createdAt).toBe("string");
     expect(Number.isNaN(Date.parse(manifest.createdAt))).toBe(false);

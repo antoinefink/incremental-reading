@@ -22,10 +22,21 @@ import type {
   ElementStatus,
   ElementType,
   IsoTimestamp,
+  ReviewState,
 } from "@interleave/core";
 import { cards, elements, type InterleaveDatabase, reviewStates } from "@interleave/db";
-import { and, asc, eq, gte, isNotNull, isNull, lte, notInArray } from "drizzle-orm";
-import { rowToElement } from "./mappers";
+import {
+  and,
+  asc,
+  eq,
+  gte,
+  isNotNull,
+  isNull,
+  lte,
+  notInArray,
+  count as sqlCount,
+} from "drizzle-orm";
+import { rowToElement, rowToReviewState } from "./mappers";
 
 /**
  * Lifecycle statuses that take a row OUT of the due queue, regardless of its
@@ -81,6 +92,37 @@ export class QueueRepository {
   }
 
   /**
+   * Due cards WITH their FSRS `review_states` row, in ONE join (T100). The queue
+   * decorator needs each due card's review state (for the retrievability the score
+   * reads); returning it from the SAME join that already touches `review_states`
+   * avoids a separate whole-table `reviewStateMap()` scan AND a per-row
+   * `findReviewState` (the N+1). Same filter/order as {@link dueCards}.
+   */
+  dueCardsWithState(asOf: IsoTimestamp): { element: Element; state: ReviewState }[] {
+    const rows = this.db
+      .select({ element: elements, state: reviewStates })
+      .from(reviewStates)
+      .innerJoin(elements, eq(elements.id, reviewStates.elementId))
+      .innerJoin(cards, eq(cards.elementId, elements.id))
+      .where(
+        and(
+          eq(elements.type, "card"),
+          isNull(elements.deletedAt),
+          notInArray(elements.status, QUEUE_EXCLUDED_STATUSES as ElementStatus[]),
+          eq(cards.isRetired, false),
+          isNotNull(reviewStates.dueAt),
+          lte(reviewStates.dueAt, asOf),
+        ),
+      )
+      .orderBy(asc(reviewStates.dueAt))
+      .all();
+    return rows.map((r) => ({
+      element: rowToElement(r.element),
+      state: rowToReviewState(r.state),
+    }));
+  }
+
+  /**
    * Sources/topics/extracts due for re-processing at or before `asOf` (attention
    * scheduler), soonest first. Excludes cards (those use {@link dueCards}).
    */
@@ -112,9 +154,51 @@ export class QueueRepository {
     return rows.map(rowToElement);
   }
 
-  /** Count of cards due at or before `asOf` (cheap badge query). */
+  /**
+   * Count of cards due at or before `asOf` — a cheap SQL `COUNT(*)` (T100). Previously
+   * `this.dueCards(asOf).length` materialized + `rowToElement`-mapped every due row
+   * just to count them; at 100k that is tens of thousands of wasted allocations on the
+   * analytics path. Same filter as {@link dueCards} (live, non-excluded, non-retired).
+   */
   dueCardCount(asOf: IsoTimestamp): number {
-    return this.dueCards(asOf).length;
+    const row = this.db
+      .select({ n: sqlCount() })
+      .from(reviewStates)
+      .innerJoin(elements, eq(elements.id, reviewStates.elementId))
+      .innerJoin(cards, eq(cards.elementId, elements.id))
+      .where(
+        and(
+          eq(elements.type, "card"),
+          isNull(elements.deletedAt),
+          notInArray(elements.status, QUEUE_EXCLUDED_STATUSES as ElementStatus[]),
+          eq(cards.isRetired, false),
+          isNotNull(reviewStates.dueAt),
+          lte(reviewStates.dueAt, asOf),
+        ),
+      )
+      .get();
+    return row?.n ?? 0;
+  }
+
+  /**
+   * Count of attention items (sources/topics/extracts) due at or before `asOf` — the
+   * cheap SQL `COUNT(*)` counterpart of {@link dueAttentionItems} (T100), same filter.
+   */
+  dueAttentionCount(asOf: IsoTimestamp): number {
+    const row = this.db
+      .select({ n: sqlCount() })
+      .from(elements)
+      .where(
+        and(
+          notInArray(elements.type, ["card"]),
+          isNull(elements.deletedAt),
+          notInArray(elements.status, QUEUE_EXCLUDED_STATUSES as ElementStatus[]),
+          isNotNull(elements.dueAt),
+          lte(elements.dueAt, asOf),
+        ),
+      )
+      .get();
+    return row?.n ?? 0;
   }
 
   /**
