@@ -81,12 +81,15 @@
 .shell-brand__logo {
   width: 26px;
   height: 26px;
-  border-radius: var(--r-sm);
-  background: var(--accent);
-  color: var(--text-on-accent);
   display: grid;
   place-items: center;
   flex: none;
+}
+.shell-brand__logo-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 .shell-brand__name {
   font-size: var(--t-base);

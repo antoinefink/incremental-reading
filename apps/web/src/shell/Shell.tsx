@@ -164,8 +164,13 @@ function Sidebar({
   return (
     <aside className="shell-sidebar">
       <div className="shell-brand">
-        <span className="shell-brand__logo">
-          <Icon name="layers" size={16} />
+        <span className="shell-brand__logo" aria-hidden="true">
+          <img
+            className="shell-brand__logo-img"
+            src="/logo.png"
+            alt=""
+            data-testid="shell-brand-logo"
+          />
         </span>
         <div className="flex flex-col">
           <span className="shell-brand__name">Interleave</span>

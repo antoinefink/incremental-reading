@@ -139,6 +139,7 @@ describe("Shell", () => {
 
     expect(screen.getByTestId("route-outlet")).toBeInTheDocument();
     expect(screen.getByTestId("mock-inspector")).toBeInTheDocument();
+    expect(screen.getByTestId("shell-brand-logo")).toHaveAttribute("src", "/logo.png");
     expect(screen.getByTestId("nav-queue")).toHaveAttribute("aria-current", "page");
     expect(screen.getByTestId("nav-queue-badge")).toHaveTextContent("3");
     expect(screen.getByTestId("shell-streak")).toHaveTextContent("5-day streak");
