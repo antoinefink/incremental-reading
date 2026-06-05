@@ -78,7 +78,11 @@ const h = vi.hoisted(() => {
       postponed: 0,
     },
   });
-  const extractA = mk({ id: "extract-1", title: "skill-acquisition efficiency" });
+  const extractA = mk({
+    id: "extract-1",
+    title: "skill-acquisition efficiency",
+    sourceId: "source-1",
+  });
   const source = mk({
     id: "source-1",
     type: "source",
@@ -157,10 +161,60 @@ const h = vi.hoisted(() => {
     selectSpy: vi.fn(),
     listQueue: vi.fn().mockResolvedValue(result),
     actOnQueueItem: vi.fn().mockResolvedValue({ item: null, removed: true, undo: null }),
-    getDocument: vi
-      .fn()
-      .mockResolvedValue({ document: { plainText: "Body preview text." }, extractedBlockIds: [] }),
+    getDocument: vi.fn().mockResolvedValue({
+      document: {
+        prosemirrorJson: { type: "doc", content: [], mockPlainText: "Body preview text." },
+        plainText: "Body preview text.",
+      },
+      extractedBlockIds: [],
+    }),
     getInspectorData: vi.fn().mockResolvedValue({ data: null }),
+    updateExtractStage: vi.fn().mockResolvedValue({
+      extract: {
+        id: "extract-1",
+        type: "extract",
+        status: "scheduled",
+        stage: "atomic_statement",
+        priority: 0.625,
+        title: "skill-acquisition efficiency",
+        dueAt: "2026-05-31T06:00:00.000Z",
+        sourceId: "source-1",
+        parentId: null,
+      },
+    }),
+    rewriteExtract: vi.fn().mockResolvedValue({
+      extract: {
+        id: "extract-1",
+        type: "extract",
+        status: "scheduled",
+        stage: "clean_extract",
+        priority: 0.625,
+        title: "skill-acquisition efficiency",
+        dueAt: "2026-05-31T06:00:00.000Z",
+        sourceId: "source-1",
+        parentId: null,
+      },
+      plainText: "Edited extract body.",
+    }),
+    siblingCardAnswers: vi.fn().mockResolvedValue({ cards: [] }),
+    createExtraction: vi.fn().mockResolvedValue({
+      extract: { id: "subextract-1", parentId: "extract-1", sourceId: "source-1" },
+      location: { sourceElementId: "extract-1" },
+    }),
+    createCard: vi.fn().mockResolvedValue({
+      card: { id: "card-new", siblingGroupId: "sib-1" },
+    }),
+    selectionLocation: {
+      current: null as null | {
+        selectedText: string;
+        blockIds: string[];
+        startOffset: number;
+        endOffset: number;
+      },
+    },
+    selectionPosition: { current: null as null | { top: number; left: number } },
+    dismissSelection: vi.fn(),
+    staleEditorJson: false,
     reviewCard: vi.fn().mockResolvedValue({ card: cardView }),
     reviewPreview: vi.fn().mockResolvedValue({ intervals: previews }),
     reviewGrade: vi.fn().mockResolvedValue({
@@ -182,6 +236,7 @@ const h = vi.hoisted(() => {
         lastReviewedAt: "2026-05-30T08:00:05.000Z",
       },
     }),
+    cardView,
   };
 });
 
@@ -195,12 +250,94 @@ vi.mock("../../lib/appApi", async () => {
       actOnQueueItem: h.actOnQueueItem,
       getDocument: h.getDocument,
       getInspectorData: h.getInspectorData,
+      updateExtractStage: h.updateExtractStage,
+      rewriteExtract: h.rewriteExtract,
+      siblingCardAnswers: h.siblingCardAnswers,
+      createExtraction: h.createExtraction,
+      createCard: h.createCard,
       reviewCard: h.reviewCard,
       reviewPreview: h.reviewPreview,
       reviewGrade: h.reviewGrade,
     },
   };
 });
+
+vi.mock("@interleave/editor", async () => {
+  const actual = await vi.importActual<typeof import("@interleave/editor")>("@interleave/editor");
+  const React = await vi.importActual<typeof import("react")>("react");
+  return {
+    ...actual,
+    emptyDoc: () => ({ type: "doc", content: [], mockPlainText: "" }),
+    setReaderDecorations: vi.fn(),
+    toPlainText: (doc: { mockPlainText?: string } | null | undefined) =>
+      doc?.mockPlainText ?? "Edited extract body.",
+    toBlockInputs: vi.fn(() => [
+      { blockType: "paragraph", order: 0, stableBlockId: "blk_process_extract" },
+    ]),
+    SourceEditor: ({
+      onChange,
+      onEditorReady,
+    }: {
+      onChange?: (change: { prosemirrorJson: unknown; plainText: string }) => void;
+      onEditorReady?: (editor: { getJSON(): unknown } | null) => void;
+    }) => {
+      const [value, setValue] = React.useState("Body preview text.");
+      const valueRef = React.useRef(value);
+      valueRef.current = value;
+      React.useEffect(() => {
+        onEditorReady?.({
+          getJSON: () => ({
+            type: "doc",
+            content: [],
+            mockPlainText: h.staleEditorJson ? "Body preview text." : valueRef.current,
+          }),
+        });
+        return () => onEditorReady?.(null);
+      }, [onEditorReady]);
+      if (h.staleEditorJson) {
+        return (
+          <div data-testid="mock-source-editor">
+            <div
+              className="ProseMirror"
+              contentEditable
+              suppressContentEditableWarning
+              onInput={(e) => {
+                const plainText = e.currentTarget.textContent ?? "";
+                valueRef.current = plainText;
+                setValue(plainText);
+              }}
+            >
+              {value}
+            </div>
+          </div>
+        );
+      }
+      return (
+        <textarea
+          data-testid="mock-source-editor"
+          value={value}
+          onChange={(e) => {
+            const plainText = e.target.value;
+            valueRef.current = plainText;
+            setValue(plainText);
+            onChange?.({
+              prosemirrorJson: { type: "doc", content: [], mockPlainText: plainText },
+              plainText,
+            });
+          }}
+        />
+      );
+    },
+  };
+});
+
+vi.mock("../../reader/useTextSelection", () => ({
+  useTextSelection: () => ({
+    position: h.selectionPosition.current,
+    location: h.selectionLocation.current,
+    dismiss: h.dismissSelection,
+  }),
+}));
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => h.navigateSpy,
@@ -226,11 +363,40 @@ import { ProcessQueue } from "./ProcessQueue";
 beforeEach(() => {
   vi.clearAllMocks();
   h.actOnQueueItem.mockResolvedValue({ item: null, removed: true, undo: null });
+  h.staleEditorJson = false;
+  h.selectionLocation.current = null;
+  h.selectionPosition.current = null;
 });
 
 /** The id of the single rendered process item (the cursor item), or null. */
 function currentItemId(): string | null {
   return screen.queryByTestId("process-item")?.getAttribute("data-element-id") ?? null;
+}
+
+function stageMutation(stage: string) {
+  return {
+    extract: {
+      id: "extract-1",
+      type: "extract",
+      status: "scheduled",
+      stage,
+      priority: 0.625,
+      title: "skill-acquisition efficiency",
+      dueAt: "2026-05-31T06:00:00.000Z",
+      sourceId: "source-1",
+      parentId: null,
+    },
+  };
+}
+
+async function moveToExtract(): Promise<void> {
+  // The deterministic mock order is card -> source -> extract.
+  await screen.findByTestId("process-item");
+  fireEvent.click(screen.getByTestId("process-action-skip"));
+  await waitFor(() => expect(currentItemId()).toBe("source-1"));
+  fireEvent.click(screen.getByTestId("process-action-skip"));
+  await waitFor(() => expect(currentItemId()).toBe("extract-1"));
+  await screen.findByTestId("process-extract-workbench");
 }
 
 describe("ProcessQueue", () => {
@@ -323,6 +489,41 @@ describe("ProcessQueue", () => {
     expect(screen.getByTestId("route-process")).toBeInTheDocument();
   });
 
+  it("does not repeat a duplicate source snippet in the inline card answer", async () => {
+    const duplicateCard: ReviewCardView = {
+      ...h.cardView,
+      answer:
+        "p - by focusing on admiration, i.e., the way we fawn over people we respect. Admiration evolved to help us curry favor with actual or potential teammates.",
+      sourceRef: {
+        sourceElementId: "src-2",
+        sourceTitle: "Social Status II: Cults and Loyalty",
+        url: "https://meltingasphalt.com/social-status-ii-cults-and-loyalty/",
+        author: "Kevin Simler",
+        publishedAt: null,
+        locationLabel: "¶1",
+        snippet:
+          "p - by focusing on admiration, i.e., the way we fawn over people we respect. Admiration evolved to help us curry favor with actual or potential teammates.",
+        sourceType: null,
+        reliabilityTier: null,
+        confidence: null,
+        reliabilityNotes: null,
+      },
+      sourceTitle: "Social Status II: Cults and Loyalty",
+      sourceLocationLabel: "¶1",
+    };
+    h.reviewCard.mockResolvedValueOnce({ card: duplicateCard });
+    render(<ProcessQueue />);
+    await screen.findByTestId("process-item");
+
+    fireEvent.click(screen.getByTestId("process-card-reveal"));
+
+    const answer = await screen.findByTestId("process-card-answer");
+    expect(answer).toHaveTextContent(/focusing on admiration/i);
+    await screen.findByTestId("process-card-refblock");
+    expect(screen.queryByTestId("process-card-refblock-quote")).not.toBeInTheDocument();
+    expect(screen.getByTestId("process-card-refblock-citation")).toHaveTextContent("Kevin Simler");
+  });
+
   it("grades a revealed card via review.grade and advances the cursor (no navigation)", async () => {
     render(<ProcessQueue />);
     await screen.findByTestId("process-item");
@@ -356,6 +557,244 @@ describe("ProcessQueue", () => {
     await screen.findByTestId("process-item");
     expect(currentItemId()).toBe("card-1");
     expect(screen.queryByTestId("schedule-menu")).toBeNull();
+  });
+
+  it("renders an extract as an inline distillation workbench", async () => {
+    render(<ProcessQueue />);
+    await moveToExtract();
+
+    expect(screen.getByTestId("process-extract-workbench")).toBeInTheDocument();
+    expect(screen.getByTestId("process-extract-stage-stepper")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-source-editor")).toBeInTheDocument();
+    expect(screen.getByTestId("process-extract-save")).toBeInTheDocument();
+    expect(screen.getByTestId("process-extract-subextract")).toBeInTheDocument();
+    expect(screen.getByTestId("process-extract-make-qa")).toBeInTheDocument();
+    expect(h.navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("shows extract-specific selection actions inside the inline workbench", async () => {
+    h.selectionLocation.current = {
+      selectedText: "skill-acquisition efficiency",
+      blockIds: ["blk_process_extract"],
+      startOffset: 0,
+      endOffset: 28,
+    };
+    h.selectionPosition.current = { top: 120, left: 240 };
+    render(<ProcessQueue />);
+    await moveToExtract();
+
+    await screen.findByTestId("selection-toolbar");
+    expect(screen.getByTestId("sel-tool-extract")).toHaveTextContent("Sub-extract");
+    expect(screen.getByTestId("sel-tool-cloze")).toHaveTextContent("Cloze");
+    expect(screen.getByTestId("sel-tool-copy")).toHaveTextContent("Copy");
+    expect(screen.queryByTestId("sel-tool-highlight")).not.toBeInTheDocument();
+  });
+
+  it("creates a sub-extract from selected text without advancing the process cursor", async () => {
+    h.selectionLocation.current = {
+      selectedText: "skill-acquisition efficiency",
+      blockIds: ["blk_process_extract"],
+      startOffset: 0,
+      endOffset: 28,
+    };
+    h.selectionPosition.current = { top: 120, left: 240 };
+    render(<ProcessQueue />);
+    await moveToExtract();
+
+    fireEvent.click(await screen.findByTestId("sel-tool-extract"));
+
+    await waitFor(() =>
+      expect(h.createExtraction).toHaveBeenCalledWith({
+        sourceElementId: "source-1",
+        parentId: "extract-1",
+        selectedText: "skill-acquisition efficiency",
+        blockIds: ["blk_process_extract"],
+        startOffset: 0,
+        endOffset: 28,
+      }),
+    );
+    expect(currentItemId()).toBe("extract-1");
+    expect(h.actOnQueueItem).not.toHaveBeenCalled();
+    expect(h.navigateSpy).not.toHaveBeenCalled();
+    expect(h.dismissSelection).toHaveBeenCalled();
+  });
+
+  it("opens the cloze builder from selected text with the deletion pre-wrapped", async () => {
+    h.selectionLocation.current = {
+      selectedText: "skill-acquisition efficiency",
+      blockIds: ["blk_process_extract"],
+      startOffset: 0,
+      endOffset: 28,
+    };
+    h.selectionPosition.current = { top: 120, left: 240 };
+    render(<ProcessQueue />);
+    await moveToExtract();
+
+    fireEvent.click(await screen.findByTestId("sel-tool-cloze"));
+
+    await screen.findByTestId("process-extract-builder");
+    expect(screen.getByTestId("cb-tab-cloze")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("cb-cloze-text")).toHaveValue("{{c1::skill-acquisition efficiency}}");
+    expect(currentItemId()).toBe("extract-1");
+    expect(h.navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("advances an extract stage inline without leaving /process", async () => {
+    render(<ProcessQueue />);
+    await moveToExtract();
+
+    fireEvent.click(screen.getByTestId("process-extract-advance"));
+
+    await waitFor(() => expect(h.updateExtractStage).toHaveBeenCalledWith({ id: "extract-1" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("process-extract-stage-atomic_statement")).toHaveAttribute(
+        "data-active",
+        "true",
+      ),
+    );
+    expect(currentItemId()).toBe("extract-1");
+    expect(h.navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("sets an explicit extract stage inline without queue-acting or navigating", async () => {
+    h.updateExtractStage.mockResolvedValueOnce(stageMutation("raw_extract"));
+    render(<ProcessQueue />);
+    await moveToExtract();
+
+    fireEvent.click(screen.getByTestId("process-extract-stage-raw_extract"));
+
+    await waitFor(() =>
+      expect(h.updateExtractStage).toHaveBeenCalledWith({
+        id: "extract-1",
+        stage: "raw_extract",
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("process-extract-stage-raw_extract")).toHaveAttribute(
+        "data-active",
+        "true",
+      ),
+    );
+    expect(currentItemId()).toBe("extract-1");
+    expect(h.actOnQueueItem).not.toHaveBeenCalled();
+    expect(h.navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("saves an edited extract body through extracts.rewrite", async () => {
+    render(<ProcessQueue />);
+    await moveToExtract();
+
+    fireEvent.change(screen.getByTestId("mock-source-editor"), {
+      target: { value: "Edited extract body." },
+    });
+    fireEvent.click(screen.getByTestId("process-extract-save"));
+
+    await waitFor(() =>
+      expect(h.rewriteExtract).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "extract-1",
+          plainText: "Edited extract body.",
+          blocks: [{ blockType: "paragraph", order: 0, stableBlockId: "blk_process_extract" }],
+        }),
+      ),
+    );
+    expect(currentItemId()).toBe("extract-1");
+    expect(h.actOnQueueItem).not.toHaveBeenCalled();
+  });
+
+  it("trims an extract body through the same rewrite path without advancing the queue", async () => {
+    render(<ProcessQueue />);
+    await moveToExtract();
+
+    fireEvent.change(screen.getByTestId("mock-source-editor"), {
+      target: { value: "  Messy    extract  \n\n\n second   line  " },
+    });
+    fireEvent.click(screen.getByTestId("process-extract-trim"));
+
+    await waitFor(() =>
+      expect(h.rewriteExtract).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "extract-1",
+          plainText: "Messy extract\n\nsecond line",
+        }),
+      ),
+    );
+    expect(currentItemId()).toBe("extract-1");
+    expect(h.actOnQueueItem).not.toHaveBeenCalled();
+  });
+
+  it("saves the visible editor text when editor JSON lags behind the DOM", async () => {
+    h.staleEditorJson = true;
+    render(<ProcessQueue />);
+    await moveToExtract();
+
+    const editor = screen.getByTestId("mock-source-editor").querySelector(".ProseMirror");
+    if (!editor) throw new Error("mock ProseMirror surface not found");
+    editor.textContent = "Visible edited extract body.";
+    fireEvent.input(editor);
+    fireEvent.click(screen.getByTestId("process-extract-save"));
+
+    await waitFor(() =>
+      expect(h.rewriteExtract).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "extract-1",
+          plainText: "Visible edited extract body.",
+        }),
+      ),
+    );
+  });
+
+  it("opens the existing card builder inline and creates a Q&A card from the extract", async () => {
+    render(<ProcessQueue />);
+    await moveToExtract();
+
+    fireEvent.click(screen.getByTestId("process-extract-make-qa"));
+    await screen.findByTestId("process-extract-builder");
+
+    fireEvent.change(screen.getByTestId("cb-qa-front"), {
+      target: { value: "What is skill-acquisition efficiency?" },
+    });
+    fireEvent.click(screen.getByTestId("cb-create"));
+
+    await waitFor(() =>
+      expect(h.createCard).toHaveBeenCalledWith(
+        expect.objectContaining({
+          extractId: "extract-1",
+          kind: "qa",
+          prompt: "What is skill-acquisition efficiency?",
+          answer: "Body preview text.",
+        }),
+      ),
+    );
+    expect(currentItemId()).toBe("extract-1");
+    expect(h.navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("opens the cloze builder inline with the extract body and creates a cloze card", async () => {
+    render(<ProcessQueue />);
+    await moveToExtract();
+
+    fireEvent.click(screen.getByTestId("process-extract-make-cloze"));
+    await screen.findByTestId("process-extract-builder");
+    expect(screen.getByTestId("cb-tab-cloze")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("cb-cloze-text")).toHaveValue("Body preview text.");
+
+    fireEvent.change(screen.getByTestId("cb-cloze-text"), {
+      target: { value: "{{Body}} preview text." },
+    });
+    fireEvent.click(screen.getByTestId("cb-create"));
+
+    await waitFor(() =>
+      expect(h.createCard).toHaveBeenCalledWith(
+        expect.objectContaining({
+          extractId: "extract-1",
+          kind: "cloze",
+          cloze: "{{c1::Body}} preview text.",
+        }),
+      ),
+    );
+    expect(currentItemId()).toBe("extract-1");
+    expect(h.navigateSpy).not.toHaveBeenCalled();
   });
 
   it("opens the current item in full via the open action (the only navigation)", async () => {

@@ -2,8 +2,10 @@
  * Selection toolbar component + location-resolution tests (T019).
  *
  * Covers the T019 deliverables at the renderer seam:
- *  - a selection of ≥3 chars shows the toolbar with all FIVE actions (Extract,
- *    Cloze, Highlight, Copy, Cancel);
+ *  - a source selection shows the default five actions (Extract, Cloze, Highlight,
+ *    Copy, Cancel);
+ *  - an extract selection can provide a context-specific action set (Sub-extract,
+ *    Cloze, Copy, Cancel);
  *  - each button dispatches its action, and pressing a button does NOT clear the
  *    selection (the toolbar prevents the mousedown default);
  *  - Cancel / Escape hide the toolbar without mutating anything;
@@ -21,7 +23,11 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { Node as PmNode } from "@tiptap/pm/model";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
 import { describe, expect, it, vi } from "vitest";
-import { SelectionToolbar, type SelectionToolbarAction } from "./SelectionToolbar";
+import {
+  EXTRACT_SELECTION_ACTIONS,
+  SelectionToolbar,
+  type SelectionToolbarAction,
+} from "./SelectionToolbar";
 
 const POS = { top: 120, left: 240 } as const;
 
@@ -43,6 +49,17 @@ describe("SelectionToolbar — presentation + actions", () => {
     ]) {
       expect(screen.getByTestId(id)).toBeInTheDocument();
     }
+  });
+
+  it("supports an extract-specific toolbar without a misleading Highlight action", () => {
+    render(
+      <SelectionToolbar position={POS} actions={EXTRACT_SELECTION_ACTIONS} onAction={() => {}} />,
+    );
+
+    expect(screen.getByTestId("sel-tool-extract")).toHaveTextContent("Sub-extract");
+    expect(screen.getByTestId("sel-tool-cloze")).toHaveTextContent("Cloze");
+    expect(screen.getByTestId("sel-tool-copy")).toHaveTextContent("Copy");
+    expect(screen.queryByTestId("sel-tool-highlight")).not.toBeInTheDocument();
   });
 
   it("anchors fixed above the selection rect (translate(-50%,-100%))", () => {

@@ -33,14 +33,24 @@
  */
 
 import { renderClozePrompt } from "@interleave/core";
+import {
+  type Editor,
+  SourceEditor,
+  type SourceEditorChange,
+  setReaderDecorations,
+  toBlockInputs,
+  toPlainText,
+} from "@interleave/editor";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "../../components/Icon";
+import { requestInspectorRefresh } from "../../components/inspector/Inspector";
 import {
   FsrsStats,
   Prio,
   SchedulerChip,
   Stage,
+  stageLabel,
   TypeIcon,
 } from "../../components/inspector/primitives";
 import { ScheduleMenu } from "../../components/queue/ScheduleMenu";
@@ -48,6 +58,9 @@ import { RefBlock } from "../../components/RefBlock";
 import "../../components/inspector/inspector.css";
 import {
   appApi,
+  type CardKind,
+  type ExtractStage,
+  type InspectorData,
   isDesktop,
   type QueueActAction,
   type QueueItemSummary,
@@ -59,7 +72,17 @@ import {
 } from "../../lib/appApi";
 import { CardBody } from "../../review/CardBody";
 import { CardFront } from "../../review/CardFront";
+import { type UseDocumentResult, useDocument } from "../source/useDocument";
 import "../../review/review.css";
+import { CardBuilder } from "../../reader/CardBuilder";
+import "../../reader/extract-view.css";
+import {
+  EXTRACT_SELECTION_ACTIONS,
+  SelectionToolbar,
+  type SelectionToolbarAction,
+  type SelectionToolbarPosition,
+} from "../../reader/SelectionToolbar";
+import { useTextSelection } from "../../reader/useTextSelection";
 import { useActiveScope } from "../../shell/activeScope";
 import { Kbd } from "../../shell/Kbd";
 import { useSelection } from "../../shell/selection";
@@ -92,12 +115,12 @@ const GRADES: readonly { rating: ReviewRating; label: string; key: string }[] = 
 /** The inline non-open actions a loop item exposes (the T030 set + skip). */
 type LoopActionKind = QueueActAction["kind"];
 
-/** A loaded body preview for the current item (attention items render their text). */
-interface ItemBody {
-  readonly title: string;
-  readonly sourceTitle: string | null;
-  readonly bodyText: string | null;
-}
+/** The three extract distillation stages, in chain order (mirrors `ExtractView`). */
+const EXTRACT_STAGES: readonly ExtractStage[] = [
+  "raw_extract",
+  "clean_extract",
+  "atomic_statement",
+];
 
 /** The per-type title prefix (mirrors the queue list). */
 function titleFor(item: QueueItemSummary): string {
@@ -170,7 +193,15 @@ export function ProcessQueue() {
   const [cursor, setCursor] = useState(0);
   /** How many items the user has processed this session (acted/scheduled/graded). */
   const [processed, setProcessed] = useState(0);
-  const [body, setBody] = useState<ItemBody | null>(null);
+  const [inspector, setInspector] = useState<InspectorData | null>(null);
+  const [extractDraft, setExtractDraft] = useState<SourceEditorChange | null>(null);
+  const [extractEditor, setExtractEditor] = useState<Editor | null>(null);
+  const [extractEditorReady, setExtractEditorReady] = useState(false);
+  const [extractBuilder, setExtractBuilder] = useState<{
+    tab: CardKind;
+    clozeText?: string;
+  } | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -199,15 +230,81 @@ export function ProcessQueue() {
 
   const total = order.length;
   const current = cursor < total ? order[cursor] : null;
+  const currentId = current?.id ?? null;
+  const currentType = current?.type ?? null;
   const done = total === 0 || cursor >= total;
   const isCard = current?.type === "card";
   /** Items left to look at (this one + everything after) — the full mixed deck. */
   const remaining = Math.max(0, total - cursor);
+  const documentElementId = current && current.type !== "card" ? current.id : null;
+  const doc = useDocument(documentElementId);
+  const extractSelection = useTextSelection(
+    current?.type === "extract" ? extractEditor : null,
+    current?.type === "extract" && extractEditorReady,
+  );
 
   // Read the latest mode without making `load` depend on it, so a load triggered by
   // the clock alone uses whatever mode is current (a mode switch passes it explicitly).
   const modeRef = useRef(mode);
   modeRef.current = mode;
+
+  const toast = useCallback((message: string) => {
+    setFlash(message);
+    window.setTimeout(() => setFlash(null), 1600);
+  }, []);
+
+  const patchCurrentExtract = useCallback(
+    (extract: {
+      id: string;
+      status: string;
+      stage: string;
+      priority: number;
+      title: string;
+      dueAt: string | null;
+    }) => {
+      setOrder((items) =>
+        items.map((item) =>
+          item.id === extract.id
+            ? {
+                ...item,
+                status: extract.status,
+                stage: extract.stage,
+                priority: extract.priority,
+                title: extract.title,
+                dueAt: extract.dueAt,
+                schedulerSignals: { ...item.schedulerSignals, stage: extract.stage },
+              }
+            : item,
+        ),
+      );
+      setInspector((prev) =>
+        prev?.element.id === extract.id
+          ? {
+              ...prev,
+              element: {
+                ...prev.element,
+                status: extract.status,
+                stage: extract.stage,
+                priority: extract.priority,
+                title: extract.title,
+                dueAt: extract.dueAt,
+              },
+              scheduler: { ...prev.scheduler, stage: extract.stage },
+            }
+          : prev,
+      );
+    },
+    [],
+  );
+
+  const reloadInspector = useCallback(async (id: string) => {
+    try {
+      const res = await appApi.getInspectorData({ id });
+      setInspector(res.data);
+    } catch {
+      setInspector(null);
+    }
+  }, []);
 
   // Load the queue (on mount, when the clock changes, and on a mode switch). `mode`
   // flows to `queue.list` as a SOFT ordering bias, so the loop reads the FULL mixed
@@ -238,26 +335,30 @@ export function ProcessQueue() {
     void load();
   }, [load]);
 
-  // Load the current item's body preview (attention items show their text) OR the
-  // current card's full reveal-ready view (so reveal can unmask cloze / show the
-  // Q&A answer + source ref). Read-only, through the typed bridge.
+  // Load the current card's full reveal-ready view OR the current attention item's
+  // inspector context. The body itself comes from `useDocument`, so extract editing
+  // and the generic preview read through the same document hook.
   useEffect(() => {
     let cancelled = false;
     // Reset the per-item reveal/grade surface whenever the item changes.
     setRevealed(false);
     setPreviews(null);
     revealAtRef.current = null;
-    if (!current) {
-      setBody(null);
+    setExtractDraft(null);
+    setExtractEditor(null);
+    setExtractEditorReady(false);
+    setExtractBuilder(null);
+    if (!currentId || !currentType) {
       setCardView(null);
+      setInspector(null);
       return;
     }
-    if (current.type === "card") {
-      setBody(null);
+    if (currentType === "card") {
+      setInspector(null);
       void (async () => {
         try {
           const res = await appApi.reviewCard({
-            cardId: current.id,
+            cardId: currentId,
             ...(asOf ? { asOf } : {}),
           });
           if (cancelled) return;
@@ -274,30 +375,23 @@ export function ProcessQueue() {
     setCardView(null);
     void (async () => {
       try {
-        const [doc, insp] = await Promise.all([
-          appApi.getDocument({ elementId: current.id }),
-          appApi.getInspectorData({ id: current.id }),
-        ]);
+        const insp = await appApi.getInspectorData({ id: currentId });
         if (cancelled) return;
-        setBody({
-          title: insp.data?.element.title ?? current.title,
-          sourceTitle: insp.data?.source?.title ?? current.sourceTitle,
-          bodyText: doc.document?.plainText ?? null,
-        });
+        setInspector(insp.data);
       } catch {
         if (cancelled) return;
-        setBody({ title: current.title, sourceTitle: current.sourceTitle, bodyText: null });
+        setInspector(null);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [current, asOf]);
+  }, [currentId, currentType, asOf]);
 
   // Selecting the current item drives the shell inspector to its context.
   useEffect(() => {
-    if (current) select(current.id);
-  }, [current, select]);
+    if (currentId) select(currentId);
+  }, [currentId, select]);
 
   const advance = useCallback(() => {
     setCursor((c) => c + 1);
@@ -363,6 +457,210 @@ export function ProcessQueue() {
     },
     [current, busy, advance],
   );
+
+  const onExtractChange = useCallback((change: SourceEditorChange) => {
+    setExtractDraft(change);
+  }, []);
+
+  const onExtractEditorReady = useCallback((instance: Editor | null) => {
+    setExtractEditor(instance);
+    setExtractEditorReady(instance !== null);
+  }, []);
+
+  useEffect(() => {
+    if (current?.type !== "extract" || !extractEditor || !extractEditorReady) return;
+    setReaderDecorations(extractEditor, {
+      firstUnreadBlockId: null,
+      readPointBlockId: null,
+      extractedBlockIds: doc.extractedBlockIds,
+      highlights: [],
+      processed: [],
+      flashedBlockId: null,
+    });
+  }, [current?.type, extractEditor, extractEditorReady, doc.extractedBlockIds]);
+
+  const setExtractStage = useCallback(
+    async (target?: ExtractStage) => {
+      if (current?.type !== "extract" || busy || !isDesktop()) return;
+      setBusy(true);
+      try {
+        const res = await appApi.updateExtractStage(
+          target ? { id: current.id, stage: target } : { id: current.id },
+        );
+        patchCurrentExtract(res.extract);
+        await reloadInspector(current.id);
+        requestInspectorRefresh();
+        toast(`Advanced to ${stageLabel(res.extract.stage)}`);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        toast("Could not change stage");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [current, busy, patchCurrentExtract, reloadInspector, toast],
+  );
+
+  const saveExtract = useCallback(
+    async (kind: "trim" | "rewrite") => {
+      if (current?.type !== "extract" || busy || !isDesktop()) return;
+      setBusy(true);
+      try {
+        await settleEditorInput();
+        const liveJson = extractEditor?.getJSON();
+        let prosemirrorJson =
+          liveJson ?? extractDraft?.prosemirrorJson ?? doc.currentDoc ?? doc.initialDoc;
+        let plainText = liveJson
+          ? toPlainText(liveJson)
+          : (extractDraft?.plainText ?? doc.plainText);
+        const visibleText = visibleEditorPlainText(extractEditor);
+        if (
+          visibleText !== null &&
+          normalizePlainText(visibleText) !== normalizePlainText(plainText)
+        ) {
+          plainText = visibleText;
+          prosemirrorJson = plainTextToSimpleDoc(plainText, prosemirrorJson);
+        }
+        if (kind === "trim") {
+          plainText = plainText
+            .split(/\n/)
+            .map((line) => line.replace(/[ \t]+/g, " ").trim())
+            .join("\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+          prosemirrorJson = plainTextToSimpleDoc(plainText, prosemirrorJson);
+        }
+        const blocks = toBlockInputs(prosemirrorJson);
+        const res = await appApi.rewriteExtract({
+          id: current.id,
+          prosemirrorJson: prosemirrorJson ?? { type: "doc", content: [] },
+          plainText,
+          ...(blocks ? { blocks } : {}),
+        });
+        patchCurrentExtract(res.extract);
+        setExtractDraft({
+          prosemirrorJson: prosemirrorJson ?? { type: "doc", content: [] },
+          plainText,
+        });
+        await reloadInspector(current.id);
+        requestInspectorRefresh();
+        toast(kind === "trim" ? "Trimmed extract" : "Extract saved");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        toast(kind === "trim" ? "Could not trim" : "Could not save");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      current,
+      busy,
+      extractDraft,
+      doc.currentDoc,
+      doc.initialDoc,
+      doc.plainText,
+      extractEditor,
+      patchCurrentExtract,
+      reloadInspector,
+      toast,
+    ],
+  );
+
+  const onCardCreatedFromExtract = useCallback(() => {
+    if (current?.type === "extract") {
+      void reloadInspector(current.id);
+      requestInspectorRefresh();
+    }
+  }, [current, reloadInspector]);
+
+  const createProcessSubExtract = useCallback(async () => {
+    const loc = extractSelection.location;
+    if (!loc) {
+      toast("Select text in the extract to sub-extract it");
+      return;
+    }
+    if (current?.type !== "extract" || busy || !isDesktop()) return;
+    const sourceRootId = inspector?.source?.id ?? current.sourceId ?? null;
+    if (!sourceRootId) {
+      toast("Could not find the source for this extract");
+      extractSelection.dismiss();
+      return;
+    }
+    setBusy(true);
+    try {
+      await appApi.createExtraction({
+        sourceElementId: sourceRootId,
+        parentId: current.id,
+        selectedText: loc.selectedText,
+        blockIds: loc.blockIds,
+        startOffset: loc.startOffset,
+        endOffset: loc.endOffset,
+      });
+      doc.markExtracted(loc.blockIds);
+      await reloadInspector(current.id);
+      requestInspectorRefresh();
+      toast("Sub-extract created");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      toast("Could not create sub-extract");
+    } finally {
+      setBusy(false);
+      extractSelection.dismiss();
+    }
+  }, [current, busy, inspector, extractSelection, doc, reloadInspector, toast]);
+
+  const onExtractSelectionAction = useCallback(
+    (action: SelectionToolbarAction) => {
+      const loc = extractSelection.location;
+      switch (action) {
+        case "extract":
+          void createProcessSubExtract();
+          break;
+        case "cloze": {
+          const selected = loc?.selectedText.trim();
+          setExtractBuilder(
+            selected ? { tab: "cloze", clozeText: `{{c1::${selected}}}` } : { tab: "cloze" },
+          );
+          extractSelection.dismiss();
+          break;
+        }
+        case "copy": {
+          if (loc?.selectedText && typeof navigator !== "undefined" && navigator.clipboard) {
+            void navigator.clipboard.writeText(loc.selectedText).then(
+              () => toast("Copied to clipboard"),
+              () => toast("Could not copy"),
+            );
+          }
+          extractSelection.dismiss();
+          break;
+        }
+        case "highlight":
+        case "cancel":
+          extractSelection.dismiss();
+          break;
+      }
+    },
+    [extractSelection, createProcessSubExtract, toast],
+  );
+
+  useEffect(() => {
+    if (!desktop || current?.type !== "extract" || !extractSelection.position) return;
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+      const k = e.key.toLowerCase();
+      if (k === "e") {
+        e.preventDefault();
+        onExtractSelectionAction("extract");
+      } else if (k === "c") {
+        e.preventDefault();
+        onExtractSelectionAction("cloze");
+      }
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [desktop, current?.type, extractSelection.position, onExtractSelectionAction]);
 
   /** Skip the current item without mutating it (just advance the cursor). */
   const skip = useCallback(() => {
@@ -591,7 +889,10 @@ export function ProcessQueue() {
         ) : current ? (
           <ProcessCard
             item={current}
-            body={body}
+            doc={doc}
+            inspector={inspector}
+            extractDraft={extractDraft}
+            extractBuilder={extractBuilder}
             cardView={cardView}
             revealed={revealed}
             previews={previews}
@@ -600,11 +901,299 @@ export function ProcessQueue() {
             onSchedule={schedule}
             onSkip={skip}
             onOpen={open}
+            onExtractChange={onExtractChange}
+            extractSelectionPosition={extractSelection.position}
+            onExtractSelectionAction={onExtractSelectionAction}
+            onExtractEditorReady={onExtractEditorReady}
+            onSetExtractStage={setExtractStage}
+            onSaveExtract={saveExtract}
+            onCreateSubExtract={() => void createProcessSubExtract()}
+            onOpenExtractBuilder={(tab) => setExtractBuilder({ tab })}
+            onCloseExtractBuilder={() => setExtractBuilder(null)}
+            onExtractCardCreated={onCardCreatedFromExtract}
+            onToast={toast}
             onReveal={() => void reveal()}
             onGrade={(rating) => void grade(rating)}
           />
         ) : null}
       </div>
+      {flash ? (
+        <div className="reader-flash" data-testid="process-flash" role="status">
+          <span className="extract-flash__pill">
+            <Icon name="check" size={14} />
+            {flash}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function asExtractStage(stage: string | null | undefined): ExtractStage {
+  return EXTRACT_STAGES.includes(stage as ExtractStage) ? (stage as ExtractStage) : "raw_extract";
+}
+
+function wordCount(text: string): number {
+  const trimmed = text.trim();
+  return trimmed ? trimmed.split(/\s+/).length : 0;
+}
+
+async function settleEditorInput(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
+function normalizePlainText(text: string): string {
+  return text
+    .replace(/\u00a0/g, " ")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function visibleEditorPlainText(editor: Editor | null): string | null {
+  const dom =
+    (editor as { view?: { dom?: HTMLElement } } | null)?.view?.dom ??
+    (document.querySelector(
+      '[data-testid="process-extract-editor"] .ProseMirror',
+    ) as HTMLElement | null);
+  if (!dom) return null;
+  return normalizePlainText(dom.innerText ?? dom.textContent ?? "");
+}
+
+function plainTextToSimpleDoc(plainText: string, previousDoc: unknown): unknown {
+  const existingIds = toBlockInputs(previousDoc).map((b) => b.stableBlockId);
+  const paragraphs = plainText
+    .split(/\n{2,}/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const content = (paragraphs.length > 0 ? paragraphs : [""]).map((text, index) => {
+    const blockId = existingIds[index] ?? newProcessBlockId();
+    return {
+      type: "paragraph",
+      attrs: { blockId },
+      ...(text ? { content: [{ type: "text", text }] } : {}),
+    };
+  });
+  return { type: "doc", content };
+}
+
+function newProcessBlockId(): string {
+  const random =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+  return `process_${random}`;
+}
+
+function ProcessExtractWorkbench({
+  item,
+  doc,
+  inspector,
+  draft,
+  builder,
+  busy,
+  selectionPosition,
+  onChange,
+  onEditorReady,
+  onSelectionAction,
+  onSetStage,
+  onSave,
+  onCreateSubExtract,
+  onOpenBuilder,
+  onCloseBuilder,
+  onCardCreated,
+  onToast,
+}: {
+  item: QueueItemSummary;
+  doc: UseDocumentResult;
+  inspector: InspectorData | null;
+  draft: SourceEditorChange | null;
+  builder: { tab: CardKind; clozeText?: string } | null;
+  busy: boolean;
+  selectionPosition: SelectionToolbarPosition | null;
+  onChange: (change: SourceEditorChange) => void;
+  onEditorReady: (editor: Editor | null) => void;
+  onSelectionAction: (action: SelectionToolbarAction) => void;
+  onSetStage: (stage?: ExtractStage) => void;
+  onSave: (kind: "trim" | "rewrite") => void;
+  onCreateSubExtract: () => void;
+  onOpenBuilder: (tab: CardKind) => void;
+  onCloseBuilder: () => void;
+  onCardCreated: () => void;
+  onToast: (message: string) => void;
+}) {
+  const stage = asExtractStage(inspector?.element.stage ?? item.stage);
+  const stageIdx = Math.max(0, EXTRACT_STAGES.indexOf(stage));
+  const plainText = draft?.plainText ?? doc.plainText;
+  const sourceTitle = inspector?.source?.title ?? item.sourceTitle;
+  const sourceRef = inspector?.sourceRef ?? null;
+  const hasSource = inspector?.location != null || inspector?.source != null;
+
+  return (
+    <div className="pq-extract" data-testid="process-extract-workbench">
+      <div className="pq-extract__top">
+        <div className="pq-extract__source">
+          {sourceTitle ? (
+            <span className="pq-body__src">
+              <Icon name="source" size={13} /> {sourceTitle}
+            </span>
+          ) : (
+            <span className="pq-body__src pq-body__src--muted">
+              <Icon name="source" size={13} /> No source title
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          className="pq-btn pq-btn--primary"
+          data-testid="process-extract-advance"
+          disabled={busy || stageIdx >= EXTRACT_STAGES.length - 1}
+          onClick={() => onSetStage()}
+        >
+          <Icon name="sparkle" size={14} />
+          Advance stage
+        </button>
+      </div>
+
+      <div className="stage-stepper pq-stage-stepper" data-testid="process-extract-stage-stepper">
+        {EXTRACT_STAGES.map((s, i) => (
+          <div className="stage-step" key={s}>
+            <button
+              type="button"
+              className="stage-step__btn"
+              data-testid={`process-extract-stage-${s}`}
+              data-active={i === stageIdx ? "true" : "false"}
+              data-done={i <= stageIdx ? "true" : "false"}
+              disabled={busy}
+              onClick={() => onSetStage(s)}
+            >
+              <span className="stage-step__num" data-on={i <= stageIdx ? "true" : "false"}>
+                {i + 1}
+              </span>
+              <span className="stage-step__label" data-current={i === stageIdx ? "true" : "false"}>
+                {stageLabel(s)}
+              </span>
+            </button>
+            {i < EXTRACT_STAGES.length - 1 ? (
+              <span className="stage-step__line" data-done={i < stageIdx ? "true" : "false"} />
+            ) : null}
+          </div>
+        ))}
+      </div>
+
+      {sourceRef ? (
+        <div className="pq-extract__ref">
+          <RefBlock ref={sourceRef} testId="process-extract-refblock" />
+        </div>
+      ) : null}
+
+      <div className="pq-extract__editor" data-testid="process-extract-editor">
+        {doc.status === "loading" ? (
+          <p className="pq-body__text pq-body__text--empty">Loading extract…</p>
+        ) : doc.status === "error" ? (
+          <p className="pq-error" data-testid="process-extract-error">
+            {doc.error ?? "Failed to load this extract."}
+          </p>
+        ) : (
+          <SourceEditor
+            key={`${item.id}:${doc.status}`}
+            initialDoc={doc.initialDoc}
+            editable
+            readerDecorations
+            debounceMs={120}
+            onChange={onChange}
+            onEditorReady={onEditorReady}
+          />
+        )}
+        <div className="pq-extract__meta">
+          <span>{wordCount(plainText)} words</span>
+          {doc.saving ? <span>saving…</span> : null}
+        </div>
+      </div>
+
+      <div className="pq-extract__tools" data-testid="process-extract-tools">
+        <button
+          type="button"
+          className="pq-btn"
+          data-testid="process-extract-trim"
+          disabled={busy}
+          onClick={() => onSave("trim")}
+        >
+          <Icon name="trim" size={14} />
+          Trim
+        </button>
+        <button
+          type="button"
+          className="pq-btn"
+          data-testid="process-extract-subextract"
+          disabled={busy}
+          onClick={onCreateSubExtract}
+        >
+          <Icon name="extract" size={14} />
+          Sub-extract
+        </button>
+        <button
+          type="button"
+          className="pq-btn"
+          data-testid="process-extract-save"
+          disabled={busy}
+          onClick={() => onSave("rewrite")}
+        >
+          <Icon name="bookmark" size={14} />
+          Save
+        </button>
+        <span className="pq-extract__toolspacer" />
+        <button
+          type="button"
+          className="pq-btn pq-btn--primary"
+          data-testid="process-extract-make-qa"
+          disabled={busy}
+          onClick={() => onOpenBuilder("qa")}
+        >
+          <Icon name="card" size={14} />
+          Make Q&amp;A
+        </button>
+        <button
+          type="button"
+          className="pq-btn"
+          data-testid="process-extract-make-cloze"
+          disabled={busy}
+          onClick={() => onOpenBuilder("cloze")}
+        >
+          <Icon name="sparkle" size={14} />
+          Make cloze
+        </button>
+      </div>
+
+      {builder ? (
+        <div className="pq-extract__builder" data-testid="process-extract-builder">
+          <CardBuilder
+            key={`${item.id}:${builder.tab}`}
+            extractId={item.id}
+            extractPriority={item.priority}
+            hasSource={hasSource}
+            {...(inspector?.provenance?.publishedAt != null
+              ? { sourceDate: inspector.provenance.publishedAt }
+              : {})}
+            seedBody={plainText}
+            initialTab={builder.tab}
+            {...(builder.clozeText !== undefined ? { initialClozeText: builder.clozeText } : {})}
+            onToast={onToast}
+            onCardCreated={onCardCreated}
+            onClose={onCloseBuilder}
+          />
+        </div>
+      ) : null}
+
+      <SelectionToolbar
+        position={selectionPosition}
+        actions={EXTRACT_SELECTION_ACTIONS}
+        onAction={onSelectionAction}
+      />
     </div>
   );
 }
@@ -612,7 +1201,10 @@ export function ProcessQueue() {
 /** The one-at-a-time process surface for the current item. */
 function ProcessCard({
   item,
-  body,
+  doc,
+  inspector,
+  extractDraft,
+  extractBuilder,
   cardView,
   revealed,
   previews,
@@ -621,11 +1213,25 @@ function ProcessCard({
   onSchedule,
   onSkip,
   onOpen,
+  onExtractChange,
+  extractSelectionPosition,
+  onExtractSelectionAction,
+  onExtractEditorReady,
+  onSetExtractStage,
+  onSaveExtract,
+  onCreateSubExtract,
+  onOpenExtractBuilder,
+  onCloseExtractBuilder,
+  onExtractCardCreated,
+  onToast,
   onReveal,
   onGrade,
 }: {
   item: QueueItemSummary;
-  body: ItemBody | null;
+  doc: UseDocumentResult;
+  inspector: InspectorData | null;
+  extractDraft: SourceEditorChange | null;
+  extractBuilder: { tab: CardKind; clozeText?: string } | null;
   /** The full reveal-ready view for a CARD item (fetched by id), or null. */
   cardView: ReviewCardView | null;
   revealed: boolean;
@@ -636,14 +1242,26 @@ function ProcessCard({
   onSchedule: (choice: QueueScheduleChoice) => void;
   onSkip: () => void;
   onOpen: () => void;
+  onExtractChange: (change: SourceEditorChange) => void;
+  extractSelectionPosition: SelectionToolbarPosition | null;
+  onExtractSelectionAction: (action: SelectionToolbarAction) => void;
+  onExtractEditorReady: (editor: Editor | null) => void;
+  onSetExtractStage: (stage?: ExtractStage) => void;
+  onSaveExtract: (kind: "trim" | "rewrite") => void;
+  onCreateSubExtract: () => void;
+  onOpenExtractBuilder: (tab: CardKind) => void;
+  onCloseExtractBuilder: () => void;
+  onExtractCardCreated: () => void;
+  onToast: (message: string) => void;
   onReveal: () => void;
   onGrade: (rating: ReviewRating) => void;
 }) {
   const isCard = item.type === "card";
+  const isExtract = item.type === "extract";
 
   return (
     <div
-      className="pq-card fade-up"
+      className={`pq-card fade-up${isExtract ? " pq-card--extract" : ""}${extractBuilder ? " pq-card--builder" : ""}`}
       data-testid="process-item"
       data-element-id={item.id}
       data-element-type={item.type}
@@ -693,6 +1311,7 @@ function ProcessCard({
               {cardView.sourceRef ? (
                 <RefBlock
                   ref={cardView.sourceRef}
+                  dedupeSnippetAgainst={cardView.kind === "qa" ? cardView.answer : null}
                   testId="process-card-refblock"
                   style={{ marginTop: "var(--space-3)" }}
                 />
@@ -746,15 +1365,35 @@ function ProcessCard({
             </button>
           )}
         </div>
+      ) : isExtract ? (
+        <ProcessExtractWorkbench
+          item={item}
+          doc={doc}
+          inspector={inspector}
+          draft={extractDraft}
+          builder={extractBuilder}
+          busy={busy}
+          selectionPosition={extractSelectionPosition}
+          onChange={onExtractChange}
+          onEditorReady={onExtractEditorReady}
+          onSelectionAction={onExtractSelectionAction}
+          onSetStage={onSetExtractStage}
+          onSave={onSaveExtract}
+          onCreateSubExtract={onCreateSubExtract}
+          onOpenBuilder={onOpenExtractBuilder}
+          onCloseBuilder={onCloseExtractBuilder}
+          onCardCreated={onExtractCardCreated}
+          onToast={onToast}
+        />
       ) : (
         <div className="pq-body" data-testid="process-body">
-          {body?.sourceTitle ? (
+          {(inspector?.source?.title ?? item.sourceTitle) ? (
             <div className="pq-body__src">
-              <Icon name="source" size={13} /> {body.sourceTitle}
+              <Icon name="source" size={13} /> {inspector?.source?.title ?? item.sourceTitle}
             </div>
           ) : null}
-          {body?.bodyText ? (
-            <p className="pq-body__text">{body.bodyText.slice(0, 900)}</p>
+          {doc.plainText ? (
+            <p className="pq-body__text">{doc.plainText.slice(0, 900)}</p>
           ) : (
             <p className="pq-body__text pq-body__text--empty">No body to preview for this item.</p>
           )}

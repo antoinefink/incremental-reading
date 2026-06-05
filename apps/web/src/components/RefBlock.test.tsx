@@ -67,6 +67,31 @@ describe("RefBlock", () => {
     expect(screen.getByTestId("rb-citation")).toBeInTheDocument();
   });
 
+  it("suppresses a duplicate snippet while keeping citation and URL visible", () => {
+    render(
+      <RefBlock
+        ref={FULL}
+        testId="rb"
+        dedupeSnippetAgainst="Intelligence is skill acquisition efficiency"
+      />,
+    );
+
+    expect(screen.queryByTestId("rb-quote")).not.toBeInTheDocument();
+    expect(screen.getByTestId("rb-citation")).toHaveTextContent("François Chollet");
+    expect(screen.getByTestId("rb-url")).toHaveAttribute(
+      "href",
+      "https://arxiv.org/abs/1911.01547",
+    );
+  });
+
+  it("keeps the snippet when the nearby answer is materially different", () => {
+    render(<RefBlock ref={FULL} testId="rb" dedupeSnippetAgainst="A different answer." />);
+
+    expect(screen.getByTestId("rb-quote")).toHaveTextContent(
+      "Intelligence is skill-acquisition efficiency.",
+    );
+  });
+
   it("renders the reliability badge + note for a reliable source (T091)", () => {
     render(
       <RefBlock

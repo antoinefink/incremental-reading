@@ -107,6 +107,7 @@ const h = vi.hoisted(() => {
     // The selection the toolbar/Split act on. `null` by default (no live selection);
     // tests override `current` to simulate a selection inside the extract body.
     selectionLocation: { current: null as null | Record<string, unknown> },
+    selectionPosition: { current: null as null | { top: number; left: number } },
   };
 });
 
@@ -210,7 +211,7 @@ vi.mock("@interleave/editor", () => ({
 // hoisted `selectionLocation.current` so Split/Sub-extract have something to act on.
 vi.mock("./useTextSelection", () => ({
   useTextSelection: () => ({
-    position: null,
+    position: h.selectionPosition.current,
     location: h.selectionLocation.current,
     dismiss: vi.fn(),
   }),
@@ -226,6 +227,7 @@ import { ExtractView } from "./ExtractView";
 beforeEach(() => {
   vi.clearAllMocks();
   h.selectionLocation.current = null;
+  h.selectionPosition.current = null;
 });
 
 async function lineageNode(id: string): Promise<HTMLElement> {
@@ -396,6 +398,23 @@ describe("ExtractView — sub-extract (T025)", () => {
     );
     // A sub-extract is NOT a stage transition and never touches the card builder.
     expect(h.updateStage).not.toHaveBeenCalled();
+  });
+
+  it("shows extract-specific selection actions and omits Highlight", async () => {
+    h.selectionLocation.current = {
+      selectedText: "definition paragraph two.",
+      blockIds: ["blk_ex_1"],
+      startOffset: 4,
+      endOffset: 29,
+    };
+    h.selectionPosition.current = { top: 120, left: 240 };
+    render(<ExtractView />);
+
+    await screen.findByTestId("selection-toolbar");
+    expect(screen.getByTestId("sel-tool-extract")).toHaveTextContent("Sub-extract");
+    expect(screen.getByTestId("sel-tool-cloze")).toHaveTextContent("Cloze");
+    expect(screen.getByTestId("sel-tool-copy")).toHaveTextContent("Copy");
+    expect(screen.queryByTestId("sel-tool-highlight")).not.toBeInTheDocument();
   });
 
   it("Split with a live selection also creates a sub-extract (same path)", async () => {

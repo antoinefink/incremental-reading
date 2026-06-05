@@ -271,6 +271,68 @@ async function cardLogCount(page: Page, cardId: string): Promise<number> {
   }, cardId);
 }
 
+/** Inspect one element's persisted stage/status and live children. */
+async function inspectElement(page: Page, id: string) {
+  return page.evaluate(async (elementId) => {
+    const api = window.appApi as unknown as {
+      inspector: {
+        get(req: { id: string }): Promise<{
+          data: {
+            element: { stage: string; status: string; dueAt: string | null };
+            children: { id: string; type: string; title: string; stage: string }[];
+          } | null;
+        }>;
+      };
+    };
+    const { data } = await api.inspector.get({ id: elementId });
+    return data;
+  }, id);
+}
+
+/** Read the persisted plain-text document body for one element. */
+async function documentText(page: Page, id: string): Promise<string> {
+  return page.evaluate(async (elementId) => {
+    const api = window.appApi as unknown as {
+      documents: {
+        get(req: { elementId: string }): Promise<{ document: { plainText: string } | null }>;
+      };
+    };
+    const { document } = await api.documents.get({ elementId });
+    return document?.plainText ?? "";
+  }, id);
+}
+
+/** Move the `/process` cursor to a specific item by skipping intervening rows. */
+async function moveProcessCursorTo(page: Page, id: string): Promise<void> {
+  for (let i = 0; i < 80; i++) {
+    if (
+      await page
+        .getByTestId("process-done")
+        .isVisible()
+        .catch(() => false)
+    ) {
+      break;
+    }
+    const item = page.getByTestId("process-item");
+    await expect(item).toHaveCount(1);
+    const current = await item.getAttribute("data-element-id");
+    if (current === id) return;
+    await item.getByTestId("process-action-skip").click();
+    await page.waitForTimeout(40);
+  }
+  throw new Error(`process item ${id} did not surface before the queue ended`);
+}
+
+/** Triple-click the first block in the inline process extract editor. */
+async function selectProcessExtractBodyText(page: Page): Promise<string> {
+  const block = page
+    .locator('[data-testid="process-extract-editor"] .reader .ProseMirror [data-block-id]')
+    .first();
+  await expect(block).toBeVisible();
+  await block.click({ clickCount: 3 });
+  return page.evaluate(() => window.getSelection()?.toString() ?? "");
+}
+
 test("reveals + grades a due card INLINE inside /process (no detour to /review), and the review log persists across restart", async () => {
   // Fresh data dir so this test owns its deck: the loop must grade a real seeded due
   // card inline (Space reveal → 3 = Good), the cursor must advance, the URL must stay
@@ -352,6 +414,94 @@ test("reveals + grades a due card INLINE inside /process (no detour to /review),
   page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");
   expect(await cardLogCount(page, cardId)).toBe(before + 1);
+
+  await app.close();
+});
+
+test("distills an extract inline inside /process and persists stage, body, and created card after restart", async () => {
+  const freshDir = makeDataDir();
+  let app = await launchApp(freshDir, { seedOnEmpty: true });
+  let page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+  const url = new URL(page.url());
+  baseUrl = `${url.protocol}//${url.host}`;
+
+  const sourceId = await findSourceId(page);
+  const [extractId] = await createExtracts(page, sourceId, 1);
+  if (!extractId) throw new Error("failed to create process extract");
+
+  await openProcess(page, AS_OF);
+  await moveProcessCursorTo(page, extractId);
+  await expect(page.getByTestId("process-extract-workbench")).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/process");
+
+  // Advance raw -> clean in-place. This is a distillation action, so the cursor
+  // stays on the extract rather than advancing to the next queue item.
+  await page.getByTestId("process-extract-advance").click();
+  await expect
+    .poll(async () => (await inspectElement(page, extractId))?.element.stage)
+    .toBe("clean_extract");
+  await expect(page.getByTestId("process-item")).toHaveAttribute("data-element-id", extractId);
+  await expect(page.getByTestId("process-extract-save")).toBeEnabled();
+
+  // Rewrite the extract body inside the process workbench and save through the
+  // existing extracts.rewrite command.
+  const editor = page.locator('[data-testid="process-extract-editor"] .ProseMirror');
+  await expect(editor).toBeVisible();
+  await editor.click();
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+  await page.keyboard.type("Edited inline process extract.\n\nIt is ready for a card.");
+  await expect(editor).toContainText("Edited inline process extract");
+  await page.getByTestId("process-extract-save").click();
+  await expect(page.getByTestId("process-flash")).toContainText("Extract saved");
+  await expect
+    .poll(async () => documentText(page, extractId))
+    .toContain("Edited inline process extract");
+
+  // Select text inside the inline extract editor and lift it into a child extract
+  // without opening /extract/:id. The toolbar is extract-specific: Sub-extract,
+  // Cloze, Copy; no dead Highlight action.
+  const selected = await selectProcessExtractBodyText(page);
+  expect(selected.trim().length).toBeGreaterThanOrEqual(3);
+  await expect(page.getByTestId("selection-toolbar")).toBeVisible();
+  await expect(page.getByTestId("sel-tool-extract")).toContainText("Sub-extract");
+  await expect(page.getByTestId("sel-tool-highlight")).toHaveCount(0);
+  await page.getByTestId("sel-tool-extract").click();
+  await expect(page.getByTestId("process-flash")).toContainText("Sub-extract created");
+  await expect
+    .poll(
+      async () =>
+        (await inspectElement(page, extractId))?.children.filter((c) => c.type === "extract")
+          .length ?? 0,
+    )
+    .toBeGreaterThan(0);
+
+  // Open the existing card builder inline and create a real Q&A card from the extract.
+  await page.getByTestId("process-extract-make-qa").click();
+  await expect(page.getByTestId("process-extract-builder")).toBeVisible();
+  await page.getByTestId("cb-qa-front").fill("What did the inline process session produce?");
+  await page.getByTestId("cb-create").click();
+  await expect(page.getByTestId("process-flash")).toContainText(/Q&A card created/);
+  await expect
+    .poll(
+      async () =>
+        (await inspectElement(page, extractId))?.children.filter((c) => c.type === "card").length ??
+        0,
+    )
+    .toBeGreaterThan(0);
+
+  await app.close();
+
+  // RESTART against the same data dir — the inline distillation mutations are durable.
+  app = await launchApp(freshDir);
+  page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  const afterRestart = await inspectElement(page, extractId);
+  expect(afterRestart?.element.stage).toBe("clean_extract");
+  expect(await documentText(page, extractId)).toContain("Edited inline process extract");
+  expect((afterRestart?.children ?? []).some((c) => c.type === "extract")).toBe(true);
+  expect((afterRestart?.children ?? []).some((c) => c.type === "card")).toBe(true);
 
   await app.close();
 });

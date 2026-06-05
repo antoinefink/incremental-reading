@@ -63,7 +63,11 @@ import { AiAssist } from "./AiAssist";
 import { CardBuilder } from "./CardBuilder";
 import { ClipMiniPlayer } from "./ClipMiniPlayer";
 import { useNavigateToLocation } from "./navigateToLocation";
-import { SelectionToolbar, type SelectionToolbarAction } from "./SelectionToolbar";
+import {
+  EXTRACT_SELECTION_ACTIONS,
+  SelectionToolbar,
+  type SelectionToolbarAction,
+} from "./SelectionToolbar";
 import { useTextSelection } from "./useTextSelection";
 import "../pages/source/reader.css";
 import "./extract-view.css";
@@ -868,7 +872,11 @@ export function ExtractView() {
         ) : null}
       </div>
 
-      <SelectionToolbar position={selection.position} onAction={onSelectionAction} />
+      <SelectionToolbar
+        position={selection.position}
+        actions={EXTRACT_SELECTION_ACTIONS}
+        onAction={onSelectionAction}
+      />
 
       {flash ? (
         <div className="reader-flash" data-testid="extract-flash" role="status">

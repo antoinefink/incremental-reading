@@ -503,6 +503,9 @@ mark.extracted {
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-pop);
 }
+.sel-tool-wrap {
+  display: contents;
+}
 .sel-tool {
   display: inline-flex;
   align-items: center;

@@ -50,10 +50,37 @@ export interface RefBlockProps {
   readonly onOpenSource?: () => void;
   /** Render the verbatim source snippet as the block body (default true). */
   readonly showSnippet?: boolean;
+  /**
+   * Optional body text already rendered nearby. When the source snippet is effectively
+   * the same text, RefBlock suppresses only the quote body and keeps citation/provenance.
+   */
+  readonly dedupeSnippetAgainst?: string | null;
   /** Test id for the block root (defaults to `refblock`). */
   readonly testId?: string;
   /** Extra inline style passthrough (e.g. top margin in review). */
   readonly style?: React.CSSProperties;
+}
+
+function normalizeForSnippetDedupe(text: string): string {
+  return text
+    .toLocaleLowerCase()
+    .replace(/\{\{c\d+::([^}]+)\}\}/g, "$1")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isDuplicateSnippet(snippet: string | null, compare: string | null | undefined): boolean {
+  if (!snippet || !compare) return false;
+  const a = normalizeForSnippetDedupe(snippet);
+  const b = normalizeForSnippetDedupe(compare);
+  if (!a || !b) return false;
+  if (a === b) return true;
+
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length > b.length ? a : b;
+  if (shorter.length < 40) return false;
+  return longer.includes(shorter) && shorter.length / longer.length >= 0.65;
 }
 
 /**
@@ -64,6 +91,7 @@ export function RefBlock({
   ref,
   onOpenSource,
   showSnippet = true,
+  dedupeSnippetAgainst,
   testId = "refblock",
   style,
 }: RefBlockProps) {
@@ -78,9 +106,12 @@ export function RefBlock({
     );
   }
 
+  const shouldShowSnippet =
+    showSnippet && f.snippet && !isDuplicateSnippet(f.snippet, dedupeSnippetAgainst);
+
   return (
     <div className="refblock serif" data-testid={testId} style={style}>
-      {showSnippet && f.snippet ? (
+      {shouldShowSnippet ? (
         <span className="refblock__quote" data-testid={`${testId}-quote`}>
           {f.snippet}
         </span>

@@ -796,6 +796,7 @@ export function ReviewScreen() {
                         {card.sourceRef ? (
                           <RefBlock
                             ref={card.sourceRef}
+                            dedupeSnippetAgainst={card.kind === "qa" ? card.answer : null}
                             testId="review-refblock"
                             style={{ marginTop: 16 }}
                             {...(card.sourceLocationLabel ? { onOpenSource: openSource } : {})}

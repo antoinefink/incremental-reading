@@ -18,11 +18,37 @@
  * applied through Tiptap commands, never DOM surgery — see the T019 risk note).
  */
 
-import { Icon } from "../components/Icon";
+import { Icon, type IconName } from "../components/Icon";
 import { Kbd } from "../shell/Kbd";
 
 /** The action a toolbar button dispatches. */
 export type SelectionToolbarAction = "extract" | "cloze" | "highlight" | "copy" | "cancel";
+
+export interface SelectionToolbarItem {
+  readonly action: SelectionToolbarAction;
+  readonly label: string;
+  readonly icon: IconName;
+  readonly keys?: string;
+  readonly accent?: boolean;
+  readonly title?: string;
+  readonly ariaLabel?: string;
+  readonly dividerBefore?: boolean;
+}
+
+export const SOURCE_SELECTION_ACTIONS: readonly SelectionToolbarItem[] = [
+  { action: "extract", label: "Extract", icon: "extract", keys: "E", accent: true },
+  { action: "cloze", label: "Cloze", icon: "cloze", keys: "C" },
+  { action: "highlight", label: "Highlight", icon: "highlight", keys: "H" },
+  { action: "copy", label: "Copy", icon: "copy", title: "Copy selection", dividerBefore: true },
+  { action: "cancel", label: "", icon: "x", title: "Cancel (Esc)", ariaLabel: "Cancel" },
+];
+
+export const EXTRACT_SELECTION_ACTIONS: readonly SelectionToolbarItem[] = [
+  { action: "extract", label: "Sub-extract", icon: "extract", keys: "E", accent: true },
+  { action: "cloze", label: "Cloze", icon: "cloze", keys: "C" },
+  { action: "copy", label: "Copy", icon: "copy", title: "Copy selection", dividerBefore: true },
+  { action: "cancel", label: "", icon: "x", title: "Cancel (Esc)", ariaLabel: "Cancel" },
+];
 
 /** Where to anchor the toolbar: the top + horizontal-centre of the selection rect. */
 export interface SelectionToolbarPosition {
@@ -37,6 +63,8 @@ export interface SelectionToolbarProps {
   readonly position: SelectionToolbarPosition | null;
   /** Dispatch a toolbar action. The reader maps these to the M4 commands. */
   readonly onAction: (action: SelectionToolbarAction) => void;
+  /** Context-specific buttons. Defaults to the source-reader action set. */
+  readonly actions?: readonly SelectionToolbarItem[];
 }
 
 /**
@@ -49,6 +77,7 @@ export interface SelectionToolbarProps {
 export function SelectionToolbar({
   position,
   onAction,
+  actions = SOURCE_SELECTION_ACTIONS,
 }: SelectionToolbarProps): React.ReactElement | null {
   if (!position) return null;
   return (
@@ -67,50 +96,28 @@ export function SelectionToolbar({
       // Keep the live ProseMirror selection alive when a button is pressed.
       onMouseDown={(e) => e.preventDefault()}
     >
-      <button
-        type="button"
-        className="sel-tool sel-tool--accent"
-        data-testid="sel-tool-extract"
-        onClick={() => onAction("extract")}
-      >
-        <Icon name="extract" size={14} /> Extract <Kbd keys="E" />
-      </button>
-      <button
-        type="button"
-        className="sel-tool"
-        data-testid="sel-tool-cloze"
-        onClick={() => onAction("cloze")}
-      >
-        <Icon name="cloze" size={14} /> Cloze <Kbd keys="C" />
-      </button>
-      <button
-        type="button"
-        className="sel-tool"
-        data-testid="sel-tool-highlight"
-        onClick={() => onAction("highlight")}
-      >
-        <Icon name="highlight" size={14} /> Highlight <Kbd keys="H" />
-      </button>
-      <span className="tool-div" aria-hidden />
-      <button
-        type="button"
-        className="sel-tool"
-        data-testid="sel-tool-copy"
-        title="Copy selection"
-        onClick={() => onAction("copy")}
-      >
-        <Icon name="copy" size={14} /> Copy
-      </button>
-      <button
-        type="button"
-        className="sel-tool"
-        data-testid="sel-tool-cancel"
-        title="Cancel (Esc)"
-        aria-label="Cancel"
-        onClick={() => onAction("cancel")}
-      >
-        <Icon name="x" size={14} />
-      </button>
+      {actions.map((item) => (
+        <span className="sel-tool-wrap" key={item.action}>
+          {item.dividerBefore ? <span className="tool-div" aria-hidden /> : null}
+          <button
+            type="button"
+            className={`sel-tool${item.accent ? " sel-tool--accent" : ""}`}
+            data-testid={`sel-tool-${item.action}`}
+            title={item.title}
+            aria-label={item.ariaLabel}
+            onClick={() => onAction(item.action)}
+          >
+            <Icon name={item.icon} size={14} />
+            {item.label ? <> {item.label}</> : null}
+            {item.keys ? (
+              <>
+                {" "}
+                <Kbd keys={item.keys} />
+              </>
+            ) : null}
+          </button>
+        </span>
+      ))}
     </div>
   );
 }

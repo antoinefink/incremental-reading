@@ -172,6 +172,28 @@ const h = vi.hoisted(() => {
       reliabilityNotes: null,
     },
   };
+  const duplicateEvidenceCard: ReviewCardView = {
+    ...qaCard,
+    id: "card-duplicate-evidence",
+    answer:
+      "p - by focusing on admiration, i.e., the way we fawn over people we respect. Admiration evolved to help us curry favor with actual or potential teammates.",
+    sourceRef: {
+      sourceElementId: "src-2",
+      sourceTitle: "Social Status II: Cults and Loyalty",
+      url: "https://meltingasphalt.com/social-status-ii-cults-and-loyalty/",
+      author: "Kevin Simler",
+      publishedAt: null,
+      locationLabel: "¶1",
+      snippet:
+        "p - by focusing on admiration, i.e., the way we fawn over people we respect. Admiration evolved to help us curry favor with actual or potential teammates.",
+      sourceType: null,
+      reliabilityTier: null,
+      confidence: null,
+      reliabilityNotes: null,
+    },
+    sourceTitle: "Social Status II: Cults and Loyalty",
+    sourceLocationLabel: "¶1",
+  };
   return {
     navigateSpy: vi.fn(),
     selectSpy: vi.fn(),
@@ -190,6 +212,7 @@ const h = vi.hoisted(() => {
     audioAnswerCard,
     expiredCard,
     reliableCard,
+    duplicateEvidenceCard,
   };
 });
 
@@ -319,6 +342,24 @@ describe("ReviewScreen", () => {
       "On the Measure of Intelligence (2019)",
     );
     expect(screen.getByTestId("review-refblock-open-source")).toBeInTheDocument();
+  });
+
+  it("does not repeat the source snippet when it duplicates the revealed Q&A answer", async () => {
+    h.reviewSessionNext.mockResolvedValue(singleDeck(h.duplicateEvidenceCard));
+    render(<ReviewScreen />);
+
+    await screen.findByTestId("review-card");
+    fireEvent.click(screen.getByTestId("review-reveal"));
+
+    const answer = await screen.findByTestId("review-answer");
+    expect(answer).toHaveTextContent(/focusing on admiration/i);
+    await screen.findByTestId("review-refblock");
+    expect(screen.queryByTestId("review-refblock-quote")).not.toBeInTheDocument();
+    expect(screen.getByTestId("review-refblock-citation")).toHaveTextContent("Kevin Simler");
+    expect(screen.getByTestId("review-refblock-url")).toHaveAttribute(
+      "href",
+      "https://meltingasphalt.com/social-status-ii-cults-and-loyalty/",
+    );
   });
 
   it("hides the expiry banner until reveal, then shows it for an expired card (T090 reveal gate)", async () => {
