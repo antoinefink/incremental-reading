@@ -168,6 +168,12 @@ const h = vi.hoisted(() => {
       },
       extractedBlockIds: [],
     }),
+    saveDocument: vi.fn().mockResolvedValue({
+      document: {
+        prosemirrorJson: { type: "doc", content: [], mockPlainText: "Edited source body." },
+        plainText: "Edited source body.",
+      },
+    }),
     getInspectorData: vi.fn().mockResolvedValue({ data: null }),
     updateExtractStage: vi.fn().mockResolvedValue({
       extract: {
@@ -214,6 +220,26 @@ const h = vi.hoisted(() => {
     },
     selectionPosition: { current: null as null | { top: number; left: number } },
     dismissSelection: vi.fn(),
+    markExtracted: vi.fn(),
+    readPointState: {
+      status: "ready",
+      readPoint: null as null | { blockId: string; offset: number },
+      saving: false,
+      error: null as string | null,
+      setFromSelection: vi.fn().mockResolvedValue({ blockId: "blk_source", offset: 42 }),
+      markReadThrough: vi.fn().mockResolvedValue({ blockId: "blk_source", offset: 99 }),
+      jump: vi.fn(),
+      firstUnreadBlockId: vi.fn(() => "blk_source"),
+      progress: vi.fn(() => ({ index: 0, total: 4 })),
+      progressFraction: vi.fn(() => 0.25),
+      isAtOrAfterReadPoint: vi.fn(() => true),
+    },
+    highlightsState: {
+      highlights: [] as unknown[],
+      add: vi.fn().mockResolvedValue(undefined),
+      remove: vi.fn().mockResolvedValue(undefined),
+      error: null as string | null,
+    },
     staleEditorJson: false,
     reviewCard: vi.fn().mockResolvedValue({ card: cardView }),
     reviewPreview: vi.fn().mockResolvedValue({ intervals: previews }),
@@ -249,6 +275,7 @@ vi.mock("../../lib/appApi", async () => {
       listQueue: h.listQueue,
       actOnQueueItem: h.actOnQueueItem,
       getDocument: h.getDocument,
+      saveDocument: h.saveDocument,
       getInspectorData: h.getInspectorData,
       updateExtractStage: h.updateExtractStage,
       rewriteExtract: h.rewriteExtract,
@@ -339,6 +366,14 @@ vi.mock("../../reader/useTextSelection", () => ({
   }),
 }));
 
+vi.mock("../source/useReadPoint", () => ({
+  useReadPoint: () => h.readPointState,
+}));
+
+vi.mock("../source/useHighlights", () => ({
+  useHighlights: () => h.highlightsState,
+}));
+
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => h.navigateSpy,
   useSearch: () => ({}),
@@ -363,9 +398,30 @@ import { ProcessQueue } from "./ProcessQueue";
 beforeEach(() => {
   vi.clearAllMocks();
   h.actOnQueueItem.mockResolvedValue({ item: null, removed: true, undo: null });
+  h.getInspectorData.mockResolvedValue({ data: null });
   h.staleEditorJson = false;
   h.selectionLocation.current = null;
   h.selectionPosition.current = null;
+  h.readPointState.readPoint = null;
+  h.readPointState.saving = false;
+  h.readPointState.error = null;
+  h.readPointState.setFromSelection.mockClear();
+  h.readPointState.markReadThrough.mockClear();
+  h.readPointState.jump.mockClear();
+  h.readPointState.firstUnreadBlockId.mockClear();
+  h.readPointState.progress.mockClear();
+  h.readPointState.progressFraction.mockClear();
+  h.readPointState.isAtOrAfterReadPoint.mockClear();
+  h.highlightsState.highlights = [];
+  h.highlightsState.add.mockClear();
+  h.highlightsState.remove.mockClear();
+  h.highlightsState.error = null;
+  h.saveDocument.mockResolvedValue({
+    document: {
+      prosemirrorJson: { type: "doc", content: [], mockPlainText: "Edited source body." },
+      plainText: "Edited source body.",
+    },
+  });
 });
 
 /** The id of the single rendered process item (the cursor item), or null. */
@@ -397,6 +453,14 @@ async function moveToExtract(): Promise<void> {
   fireEvent.click(screen.getByTestId("process-action-skip"));
   await waitFor(() => expect(currentItemId()).toBe("extract-1"));
   await screen.findByTestId("process-extract-workbench");
+}
+
+async function moveToSource(): Promise<void> {
+  await screen.findByTestId("process-item");
+  fireEvent.click(screen.getByTestId("process-action-skip"));
+  await waitFor(() => expect(currentItemId()).toBe("source-1"));
+  await screen.findByTestId("process-source-workbench");
+  await screen.findByTestId("mock-source-editor");
 }
 
 describe("ProcessQueue", () => {
@@ -559,6 +623,119 @@ describe("ProcessQueue", () => {
     expect(screen.queryByTestId("schedule-menu")).toBeNull();
   });
 
+  it("renders a source as an inline reading workbench", async () => {
+    render(<ProcessQueue />);
+    await moveToSource();
+
+    expect(screen.getByTestId("process-source-workbench")).toBeInTheDocument();
+    expect(screen.getByTestId("process-source-progress")).toHaveTextContent("block 1 of 4");
+    expect(screen.getByTestId("process-source-readpoint")).toBeInTheDocument();
+    expect(screen.getByTestId("process-source-extract")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-source-editor")).toBeInTheDocument();
+    expect(h.navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("persists source edits through the document save path", async () => {
+    render(<ProcessQueue />);
+    await moveToSource();
+
+    fireEvent.change(screen.getByTestId("mock-source-editor"), {
+      target: { value: "Edited source body." },
+    });
+
+    await waitFor(
+      () =>
+        expect(h.saveDocument).toHaveBeenCalledWith(
+          expect.objectContaining({
+            elementId: "source-1",
+            plainText: "Edited source body.",
+          }),
+        ),
+      { timeout: 1200 },
+    );
+    expect(h.rewriteExtract).not.toHaveBeenCalled();
+  });
+
+  it("sets a source read-point inline without advancing the process cursor", async () => {
+    render(<ProcessQueue />);
+    await moveToSource();
+
+    fireEvent.click(screen.getByTestId("process-source-readpoint"));
+
+    await waitFor(() => expect(h.readPointState.setFromSelection).toHaveBeenCalledTimes(1));
+    expect(currentItemId()).toBe("source-1");
+    expect(h.actOnQueueItem).not.toHaveBeenCalled();
+    expect(h.navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("shows source-specific selection actions inside the inline source workbench", async () => {
+    h.selectionLocation.current = {
+      selectedText: "source passage",
+      blockIds: ["blk_source"],
+      startOffset: 3,
+      endOffset: 17,
+    };
+    h.selectionPosition.current = { top: 120, left: 240 };
+    render(<ProcessQueue />);
+    await moveToSource();
+
+    await screen.findByTestId("selection-toolbar");
+    expect(screen.getByTestId("sel-tool-extract")).toHaveTextContent("Extract");
+    expect(screen.getByTestId("sel-tool-highlight")).toHaveTextContent("Highlight");
+    expect(screen.getByTestId("sel-tool-copy")).toHaveTextContent("Copy");
+    expect(screen.queryByTestId("sel-tool-cloze")).not.toBeInTheDocument();
+  });
+
+  it("creates an extract from selected source text without advancing the process cursor", async () => {
+    h.selectionLocation.current = {
+      selectedText: "source passage",
+      blockIds: ["blk_source"],
+      startOffset: 3,
+      endOffset: 17,
+    };
+    h.selectionPosition.current = { top: 120, left: 240 };
+    render(<ProcessQueue />);
+    await moveToSource();
+
+    fireEvent.click(await screen.findByTestId("sel-tool-extract"));
+
+    await waitFor(() =>
+      expect(h.createExtraction).toHaveBeenCalledWith({
+        sourceElementId: "source-1",
+        selectedText: "source passage",
+        blockIds: ["blk_source"],
+        startOffset: 3,
+        endOffset: 17,
+      }),
+    );
+    expect(h.readPointState.markReadThrough).toHaveBeenCalled();
+    expect(currentItemId()).toBe("source-1");
+    expect(h.actOnQueueItem).not.toHaveBeenCalled();
+    expect(h.navigateSpy).not.toHaveBeenCalled();
+    expect(h.dismissSelection).toHaveBeenCalled();
+  });
+
+  it("highlights selected source text without advancing the process cursor", async () => {
+    const location = {
+      selectedText: "source passage",
+      blockIds: ["blk_source"],
+      startOffset: 3,
+      endOffset: 17,
+    };
+    h.selectionLocation.current = location;
+    h.selectionPosition.current = { top: 120, left: 240 };
+    render(<ProcessQueue />);
+    await moveToSource();
+
+    fireEvent.click(await screen.findByTestId("sel-tool-highlight"));
+
+    await waitFor(() => expect(h.highlightsState.add).toHaveBeenCalledWith(location));
+    expect(currentItemId()).toBe("source-1");
+    expect(h.actOnQueueItem).not.toHaveBeenCalled();
+    expect(h.navigateSpy).not.toHaveBeenCalled();
+    expect(h.dismissSelection).toHaveBeenCalled();
+  });
+
   it("renders an extract as an inline distillation workbench", async () => {
     render(<ProcessQueue />);
     await moveToExtract();
@@ -570,6 +747,59 @@ describe("ProcessQueue", () => {
     expect(screen.getByTestId("process-extract-subextract")).toBeInTheDocument();
     expect(screen.getByTestId("process-extract-make-qa")).toBeInTheDocument();
     expect(h.navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not repeat the source quote when it duplicates the inline extract body", async () => {
+    h.getInspectorData.mockImplementation(async ({ id }: { id: string }) => ({
+      data:
+        id === "extract-1"
+          ? {
+              element: {
+                id: "extract-1",
+                type: "extract",
+                status: "scheduled",
+                stage: "clean_extract",
+                priority: 0.625,
+                title: "skill-acquisition efficiency",
+                dueAt: "2026-05-31T06:00:00.000Z",
+              },
+              scheduler: { stage: "clean_extract" },
+              source: { id: "source-1", type: "source", title: "On the Measure of Intelligence" },
+              sourceRef: {
+                sourceElementId: "source-1",
+                sourceTitle: "On the Measure of Intelligence",
+                url: null,
+                author: "François Chollet",
+                publishedAt: null,
+                locationLabel: "¶1",
+                snippet: "Body preview text.",
+                sourceType: null,
+                reliabilityTier: null,
+                confidence: null,
+                reliabilityNotes: null,
+              },
+              location: {
+                sourceElementId: "source-1",
+                blockIds: ["blk_process_extract"],
+                startOffset: 0,
+                endOffset: 18,
+                selectedText: "Body preview text.",
+                label: "¶1",
+                page: null,
+              },
+              provenance: null,
+              children: [],
+            }
+          : null,
+    }));
+    render(<ProcessQueue />);
+    await moveToExtract();
+
+    await screen.findByTestId("process-extract-refblock");
+    expect(screen.queryByTestId("process-extract-refblock-quote")).not.toBeInTheDocument();
+    expect(screen.getByTestId("process-extract-refblock-citation")).toHaveTextContent(
+      "François Chollet",
+    );
   });
 
   it("shows extract-specific selection actions inside the inline workbench", async () => {

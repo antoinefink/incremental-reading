@@ -73,6 +73,8 @@ import {
 import { CardBody } from "../../review/CardBody";
 import { CardFront } from "../../review/CardFront";
 import { type UseDocumentResult, useDocument } from "../source/useDocument";
+import { useHighlights } from "../source/useHighlights";
+import { type UseReadPointResult, useReadPoint } from "../source/useReadPoint";
 import "../../review/review.css";
 import { CardBuilder } from "../../reader/CardBuilder";
 import "../../reader/extract-view.css";
@@ -80,6 +82,7 @@ import {
   EXTRACT_SELECTION_ACTIONS,
   SelectionToolbar,
   type SelectionToolbarAction,
+  type SelectionToolbarItem,
   type SelectionToolbarPosition,
 } from "../../reader/SelectionToolbar";
 import { useTextSelection } from "../../reader/useTextSelection";
@@ -120,6 +123,13 @@ const EXTRACT_STAGES: readonly ExtractStage[] = [
   "raw_extract",
   "clean_extract",
   "atomic_statement",
+];
+
+const PROCESS_SOURCE_SELECTION_ACTIONS: readonly SelectionToolbarItem[] = [
+  { action: "extract", label: "Extract", icon: "extract", keys: "E", accent: true },
+  { action: "highlight", label: "Highlight", icon: "highlight", keys: "H" },
+  { action: "copy", label: "Copy", icon: "copy", title: "Copy selection", dividerBefore: true },
+  { action: "cancel", label: "", icon: "x", title: "Cancel (Esc)", ariaLabel: "Cancel" },
 ];
 
 /** The per-type title prefix (mirrors the queue list). */
@@ -195,6 +205,9 @@ export function ProcessQueue() {
   const [processed, setProcessed] = useState(0);
   const [inspector, setInspector] = useState<InspectorData | null>(null);
   const [extractDraft, setExtractDraft] = useState<SourceEditorChange | null>(null);
+  const [sourceEditor, setSourceEditor] = useState<Editor | null>(null);
+  const [sourceEditorReady, setSourceEditorReady] = useState(false);
+  const sourceJumpedRef = useRef<string | null>(null);
   const [extractEditor, setExtractEditor] = useState<Editor | null>(null);
   const [extractEditorReady, setExtractEditorReady] = useState(false);
   const [extractBuilder, setExtractBuilder] = useState<{
@@ -238,6 +251,12 @@ export function ProcessQueue() {
   const remaining = Math.max(0, total - cursor);
   const documentElementId = current && current.type !== "card" ? current.id : null;
   const doc = useDocument(documentElementId);
+  const sourceReadPoint = useReadPoint(current?.type === "source" ? current.id : null);
+  const sourceHighlights = useHighlights(current?.type === "source" ? current.id : null);
+  const sourceSelection = useTextSelection(
+    current?.type === "source" ? sourceEditor : null,
+    current?.type === "source" && sourceEditorReady,
+  );
   const extractSelection = useTextSelection(
     current?.type === "extract" ? extractEditor : null,
     current?.type === "extract" && extractEditorReady,
@@ -345,8 +364,7 @@ export function ProcessQueue() {
     setPreviews(null);
     revealAtRef.current = null;
     setExtractDraft(null);
-    setExtractEditor(null);
-    setExtractEditorReady(false);
+    sourceJumpedRef.current = null;
     setExtractBuilder(null);
     if (!currentId || !currentType) {
       setCardView(null);
@@ -467,6 +485,37 @@ export function ProcessQueue() {
     setExtractEditorReady(instance !== null);
   }, []);
 
+  const onSourceEditorReady = useCallback((instance: Editor | null) => {
+    setSourceEditor(instance);
+    setSourceEditorReady(instance !== null);
+  }, []);
+
+  useEffect(() => {
+    if (currentType !== "source" || !sourceEditor || !sourceEditorReady) return;
+    setReaderDecorations(sourceEditor, {
+      firstUnreadBlockId: sourceReadPoint.firstUnreadBlockId(doc.currentDoc),
+      readPointBlockId: sourceReadPoint.readPoint?.blockId ?? null,
+      extractedBlockIds: doc.extractedBlockIds,
+      highlights: sourceHighlights.highlights,
+      processed: [],
+      flashedBlockId: null,
+    });
+    if (currentId && sourceReadPoint.readPoint && sourceJumpedRef.current !== currentId) {
+      sourceReadPoint.jump(sourceEditor);
+      sourceJumpedRef.current = currentId;
+    }
+  }, [
+    currentId,
+    currentType,
+    sourceEditor,
+    sourceEditorReady,
+    sourceReadPoint,
+    sourceReadPoint.readPoint,
+    doc.currentDoc,
+    doc.extractedBlockIds,
+    sourceHighlights.highlights,
+  ]);
+
   useEffect(() => {
     if (current?.type !== "extract" || !extractEditor || !extractEditorReady) return;
     setReaderDecorations(extractEditor, {
@@ -572,6 +621,124 @@ export function ProcessQueue() {
       requestInspectorRefresh();
     }
   }, [current, reloadInspector]);
+
+  const setSourceReadPoint = useCallback(async () => {
+    if (current?.type !== "source" || !sourceEditor) return;
+    const resolved = await sourceReadPoint.setFromSelection(sourceEditor);
+    toast(resolved ? "Read-point set here" : "Place the caret in the source first");
+    if (resolved) {
+      requestInspectorRefresh();
+      await reloadInspector(current.id);
+    }
+  }, [current, sourceEditor, sourceReadPoint, reloadInspector, toast]);
+
+  const createProcessSourceExtract = useCallback(async () => {
+    const loc = sourceSelection.location;
+    if (!loc) {
+      toast("Select text in the source to extract it");
+      return;
+    }
+    if (current?.type !== "source" || busy || !isDesktop()) return;
+    setBusy(true);
+    try {
+      await appApi.createExtraction({
+        sourceElementId: current.id,
+        selectedText: loc.selectedText,
+        blockIds: loc.blockIds,
+        startOffset: loc.startOffset,
+        endOffset: loc.endOffset,
+      });
+      doc.markExtracted(loc.blockIds);
+      const lastBlockId = loc.blockIds.at(-1);
+      if (
+        sourceEditor &&
+        lastBlockId &&
+        sourceReadPoint.isAtOrAfterReadPoint(doc.currentDoc, lastBlockId)
+      ) {
+        void sourceReadPoint.markReadThrough(sourceEditor, lastBlockId);
+      }
+      await reloadInspector(current.id);
+      requestInspectorRefresh();
+      toast("Extracted");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      toast("Could not extract");
+    } finally {
+      setBusy(false);
+      sourceSelection.dismiss();
+    }
+  }, [current, busy, sourceSelection, doc, sourceEditor, sourceReadPoint, reloadInspector, toast]);
+
+  const highlightProcessSourceSelection = useCallback(async () => {
+    const loc = sourceSelection.location;
+    if (!loc) {
+      toast("Select text in the source to highlight it");
+      return;
+    }
+    if (current?.type !== "source" || busy || !isDesktop()) return;
+    setBusy(true);
+    try {
+      await sourceHighlights.add(loc);
+      toast("Highlighted");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      toast("Could not highlight");
+    } finally {
+      setBusy(false);
+      sourceSelection.dismiss();
+    }
+  }, [current, busy, sourceSelection, sourceHighlights, toast]);
+
+  const onSourceSelectionAction = useCallback(
+    (action: SelectionToolbarAction) => {
+      const loc = sourceSelection.location;
+      switch (action) {
+        case "extract":
+          void createProcessSourceExtract();
+          break;
+        case "highlight":
+          void highlightProcessSourceSelection();
+          break;
+        case "copy": {
+          if (loc?.selectedText && typeof navigator !== "undefined" && navigator.clipboard) {
+            void navigator.clipboard.writeText(loc.selectedText).then(
+              () => toast("Copied to clipboard"),
+              () => toast("Could not copy"),
+            );
+          }
+          sourceSelection.dismiss();
+          break;
+        }
+        case "cloze":
+          toast("Create an extract first, then make a cloze");
+          sourceSelection.dismiss();
+          break;
+        case "cancel":
+          sourceSelection.dismiss();
+          break;
+      }
+    },
+    [sourceSelection, createProcessSourceExtract, highlightProcessSourceSelection, toast],
+  );
+
+  useEffect(() => {
+    if (!desktop || current?.type !== "source" || !sourceSelection.position) return;
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+      const k = e.key.toLowerCase();
+      if (k === "e") {
+        e.preventDefault();
+        onSourceSelectionAction("extract");
+      } else if (k === "h") {
+        e.preventDefault();
+        onSourceSelectionAction("highlight");
+      }
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [desktop, current?.type, sourceSelection.position, onSourceSelectionAction]);
 
   const createProcessSubExtract = useCallback(async () => {
     const loc = extractSelection.location;
@@ -902,6 +1069,12 @@ export function ProcessQueue() {
             onSkip={skip}
             onOpen={open}
             onExtractChange={onExtractChange}
+            sourceReadPoint={sourceReadPoint}
+            sourceSelectionPosition={sourceSelection.position}
+            onSourceSelectionAction={onSourceSelectionAction}
+            onSourceEditorReady={onSourceEditorReady}
+            onSetSourceReadPoint={() => void setSourceReadPoint()}
+            onCreateSourceExtract={() => void createProcessSourceExtract()}
             extractSelectionPosition={extractSelection.position}
             onExtractSelectionAction={onExtractSelectionAction}
             onExtractEditorReady={onExtractEditorReady}
@@ -987,6 +1160,131 @@ function newProcessBlockId(): string {
       ? crypto.randomUUID()
       : Math.random().toString(36).slice(2);
   return `process_${random}`;
+}
+
+function ProcessSourceWorkbench({
+  item,
+  doc,
+  inspector,
+  readPoint,
+  busy,
+  selectionPosition,
+  onEditorReady,
+  onSelectionAction,
+  onSetReadPoint,
+  onCreateExtract,
+}: {
+  item: QueueItemSummary;
+  doc: UseDocumentResult;
+  inspector: InspectorData | null;
+  readPoint: UseReadPointResult;
+  busy: boolean;
+  selectionPosition: SelectionToolbarPosition | null;
+  onEditorReady: (editor: Editor | null) => void;
+  onSelectionAction: (action: SelectionToolbarAction) => void;
+  onSetReadPoint: () => void;
+  onCreateExtract: () => void;
+}) {
+  const progress = readPoint.progress(doc.currentDoc);
+  const progressPct = readPoint.progressFraction(doc.currentDoc) * 100;
+  const sourceTitle = inspector?.element.title ?? item.title;
+
+  if (doc.sourceFormat === "pdf" || doc.sourceFormat === "video") {
+    return (
+      <div className="pq-source" data-testid="process-source-workbench">
+        <div className="pq-source__top">
+          <span className="pq-body__src">
+            <Icon name="source" size={13} /> {sourceTitle}
+          </span>
+          <span className="pq-source__format">
+            {doc.sourceFormat === "pdf" ? "PDF source" : "Media source"}
+          </span>
+        </div>
+        <p className="pq-body__text pq-body__text--empty">
+          This source uses a specialized reader. Open it in full to extract from pages, regions, or
+          media timestamps.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pq-source" data-testid="process-source-workbench">
+      <div className="pq-source__top">
+        <div className="pq-source__progress">
+          <span className="pq-body__src">
+            <Icon name="source" size={13} /> {sourceTitle}
+          </span>
+          <span className="pq-source__progresslabel" data-testid="process-source-progress">
+            {progress.total > 0
+              ? `block ${Math.min(progress.index + 1, progress.total)} of ${progress.total} · ${Math.round(progressPct)}%`
+              : "no readable blocks"}
+          </span>
+          <div className="pbar pq-source__pbar">
+            <div
+              className="pbar__fill"
+              data-testid="process-source-pbar-fill"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        </div>
+        <button
+          type="button"
+          className="pq-btn pq-btn--primary"
+          data-testid="process-source-readpoint"
+          disabled={busy || readPoint.saving}
+          onClick={onSetReadPoint}
+        >
+          <Icon name="bookmark" size={14} />
+          Set read-point
+        </button>
+      </div>
+
+      <div className="pq-source__editor" data-testid="process-source-editor">
+        {doc.status === "loading" ? (
+          <p className="pq-body__text pq-body__text--empty">Loading source…</p>
+        ) : doc.status === "error" ? (
+          <p className="pq-error" data-testid="process-source-error">
+            {doc.error ?? "Failed to load this source."}
+          </p>
+        ) : (
+          <SourceEditor
+            key={`${item.id}:${doc.status}`}
+            initialDoc={doc.initialDoc}
+            editable
+            readerDecorations
+            debounceMs={180}
+            onChange={doc.save}
+            onEditorReady={onEditorReady}
+          />
+        )}
+        <div className="pq-extract__meta">
+          <span>{wordCount(doc.plainText)} words</span>
+          {doc.saving ? <span>saving…</span> : null}
+        </div>
+      </div>
+
+      <div className="pq-extract__tools" data-testid="process-source-tools">
+        <button
+          type="button"
+          className="pq-btn"
+          data-testid="process-source-extract"
+          disabled={busy}
+          onClick={onCreateExtract}
+        >
+          <Icon name="extract" size={14} />
+          Extract selection
+        </button>
+        <span className="pq-source__hint">Select text to extract, highlight, or copy.</span>
+      </div>
+
+      <SelectionToolbar
+        position={selectionPosition}
+        actions={PROCESS_SOURCE_SELECTION_ACTIONS}
+        onAction={onSelectionAction}
+      />
+    </div>
+  );
 }
 
 function ProcessExtractWorkbench({
@@ -1087,7 +1385,11 @@ function ProcessExtractWorkbench({
 
       {sourceRef ? (
         <div className="pq-extract__ref">
-          <RefBlock ref={sourceRef} testId="process-extract-refblock" />
+          <RefBlock
+            ref={sourceRef}
+            dedupeSnippetAgainst={plainText}
+            testId="process-extract-refblock"
+          />
         </div>
       ) : null}
 
@@ -1214,6 +1516,12 @@ function ProcessCard({
   onSkip,
   onOpen,
   onExtractChange,
+  sourceReadPoint,
+  sourceSelectionPosition,
+  onSourceSelectionAction,
+  onSourceEditorReady,
+  onSetSourceReadPoint,
+  onCreateSourceExtract,
   extractSelectionPosition,
   onExtractSelectionAction,
   onExtractEditorReady,
@@ -1243,6 +1551,12 @@ function ProcessCard({
   onSkip: () => void;
   onOpen: () => void;
   onExtractChange: (change: SourceEditorChange) => void;
+  sourceReadPoint: UseReadPointResult;
+  sourceSelectionPosition: SelectionToolbarPosition | null;
+  onSourceSelectionAction: (action: SelectionToolbarAction) => void;
+  onSourceEditorReady: (editor: Editor | null) => void;
+  onSetSourceReadPoint: () => void;
+  onCreateSourceExtract: () => void;
   extractSelectionPosition: SelectionToolbarPosition | null;
   onExtractSelectionAction: (action: SelectionToolbarAction) => void;
   onExtractEditorReady: (editor: Editor | null) => void;
@@ -1258,10 +1572,11 @@ function ProcessCard({
 }) {
   const isCard = item.type === "card";
   const isExtract = item.type === "extract";
+  const isSource = item.type === "source";
 
   return (
     <div
-      className={`pq-card fade-up${isExtract ? " pq-card--extract" : ""}${extractBuilder ? " pq-card--builder" : ""}`}
+      className={`pq-card fade-up${isExtract || isSource ? " pq-card--extract" : ""}${extractBuilder ? " pq-card--builder" : ""}`}
       data-testid="process-item"
       data-element-id={item.id}
       data-element-type={item.type}
@@ -1365,6 +1680,19 @@ function ProcessCard({
             </button>
           )}
         </div>
+      ) : isSource ? (
+        <ProcessSourceWorkbench
+          item={item}
+          doc={doc}
+          inspector={inspector}
+          readPoint={sourceReadPoint}
+          busy={busy}
+          selectionPosition={sourceSelectionPosition}
+          onEditorReady={onSourceEditorReady}
+          onSelectionAction={onSourceSelectionAction}
+          onSetReadPoint={onSetSourceReadPoint}
+          onCreateExtract={onCreateSourceExtract}
+        />
       ) : isExtract ? (
         <ProcessExtractWorkbench
           item={item}

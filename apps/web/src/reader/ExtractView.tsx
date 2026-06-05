@@ -627,6 +627,7 @@ export function ExtractView() {
           {inspector?.sourceRef ? (
             <RefBlock
               ref={inspector.sourceRef}
+              dedupeSnippetAgainst={doc.plainText}
               testId="extract-refblock"
               {...(location ? { onOpenSource: () => navigateToLocation(location) } : {})}
             />

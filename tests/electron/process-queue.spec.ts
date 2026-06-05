@@ -112,6 +112,21 @@ async function createExtracts(page: Page, sourceId: string, n: number): Promise<
   );
 }
 
+/** Schedule one attention item so it is due at the fixed process-clock date. */
+async function scheduleDueForProcess(page: Page, id: string): Promise<void> {
+  await page.evaluate(
+    async ({ id, dueAt }) => {
+      const api = window.appApi as unknown as {
+        queue: {
+          schedule(req: { id: string; choice: { kind: "manual"; date: string } }): Promise<unknown>;
+        };
+      };
+      await api.queue.schedule({ id, choice: { kind: "manual", date: dueAt } });
+    },
+    { id, dueAt: "2027-05-31T12:00:00.000Z" },
+  );
+}
+
 /** Read the current due ids/types at the fixed clock via the typed bridge. */
 async function dueIds(page: Page): Promise<{ id: string; type: string }[]> {
   return page.evaluate(async (asOf) => {
@@ -258,6 +273,65 @@ test("keyboard controls drive the loop (mark done with `d` advances the cursor)"
   await app.close();
 });
 
+test("extracts and highlights source text inline inside /process, then persists the child extract after restart", async () => {
+  const freshDir = makeDataDir();
+  let app = await launchApp(freshDir, { seedOnEmpty: true });
+  let page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+  const url = new URL(page.url());
+  baseUrl = `${url.protocol}//${url.host}`;
+
+  const sourceId = await findSourceId(page);
+  await scheduleDueForProcess(page, sourceId);
+  const beforeExtracts =
+    (await inspectElement(page, sourceId))?.children.filter((c) => c.type === "extract").length ??
+    0;
+  const beforeHighlights = await highlightCount(page, sourceId);
+
+  await openProcess(page, AS_OF);
+  await moveProcessCursorTo(page, sourceId);
+  await expect(page.getByTestId("process-source-workbench")).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/process");
+
+  let selected = await selectProcessSourceBodyText(page);
+  expect(selected.trim().length).toBeGreaterThanOrEqual(3);
+  await expect(page.getByTestId("selection-toolbar")).toBeVisible();
+  await expect(page.getByTestId("sel-tool-extract")).toContainText("Extract");
+  await expect(page.getByTestId("sel-tool-highlight")).toContainText("Highlight");
+  await expect(page.getByTestId("sel-tool-cloze")).toHaveCount(0);
+  await page.getByTestId("sel-tool-highlight").click();
+  await expect(page.getByTestId("process-flash")).toContainText("Highlighted");
+  await expect.poll(() => highlightCount(page, sourceId)).toBeGreaterThan(beforeHighlights);
+  await expect(page.getByTestId("process-item")).toHaveAttribute("data-element-id", sourceId);
+
+  selected = await selectProcessSourceBodyText(page);
+  expect(selected.trim().length).toBeGreaterThanOrEqual(3);
+  await page.getByTestId("sel-tool-extract").click();
+  await expect(page.getByTestId("process-flash")).toContainText("Extracted");
+  await expect
+    .poll(
+      async () =>
+        (await inspectElement(page, sourceId))?.children.filter((c) => c.type === "extract")
+          .length ?? 0,
+    )
+    .toBeGreaterThan(beforeExtracts);
+  await expect(page.getByTestId("process-item")).toHaveAttribute("data-element-id", sourceId);
+
+  await app.close();
+
+  app = await launchApp(freshDir, { seedOnEmpty: true });
+  page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+  await expect
+    .poll(
+      async () =>
+        (await inspectElement(page, sourceId))?.children.filter((c) => c.type === "extract")
+          .length ?? 0,
+    )
+    .toBeGreaterThan(beforeExtracts);
+  await app.close();
+});
+
 /** A card's durable review-log count via the inspector (recomputed from `review_logs`). */
 async function cardLogCount(page: Page, cardId: string): Promise<number> {
   return page.evaluate(async (id) => {
@@ -302,6 +376,19 @@ async function documentText(page: Page, id: string): Promise<string> {
   }, id);
 }
 
+async function highlightCount(page: Page, id: string): Promise<number> {
+  return page.evaluate(async (elementId) => {
+    const api = window.appApi as unknown as {
+      documents: {
+        marks: {
+          list(req: { elementId: string; markType: "highlight" }): Promise<{ marks: unknown[] }>;
+        };
+      };
+    };
+    return (await api.documents.marks.list({ elementId, markType: "highlight" })).marks.length;
+  }, id);
+}
+
 /** Move the `/process` cursor to a specific item by skipping intervening rows. */
 async function moveProcessCursorTo(page: Page, id: string): Promise<void> {
   for (let i = 0; i < 80; i++) {
@@ -327,6 +414,16 @@ async function moveProcessCursorTo(page: Page, id: string): Promise<void> {
 async function selectProcessExtractBodyText(page: Page): Promise<string> {
   const block = page
     .locator('[data-testid="process-extract-editor"] .reader .ProseMirror [data-block-id]')
+    .first();
+  await expect(block).toBeVisible();
+  await block.click({ clickCount: 3 });
+  return page.evaluate(() => window.getSelection()?.toString() ?? "");
+}
+
+/** Triple-click the first block in the inline process source reader. */
+async function selectProcessSourceBodyText(page: Page): Promise<string> {
+  const block = page
+    .locator('[data-testid="process-source-editor"] .reader .ProseMirror [data-block-id]')
     .first();
   await expect(block).toBeVisible();
   await block.click({ clickCount: 3 });
