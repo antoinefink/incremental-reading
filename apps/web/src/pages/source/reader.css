@@ -244,8 +244,9 @@ mark.extracted {
 .readpoint__hint {
   position: absolute;
   right: 0;
-  top: -8px;
+  bottom: var(--s-2);
   font-size: var(--t-2xs);
+  line-height: 1;
   color: var(--text-3);
   font-family: var(--font-mono);
 }
