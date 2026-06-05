@@ -614,7 +614,7 @@ export function InboxScreen() {
                 onClick={onClick}
                 className={
                   enabled
-                    ? "flex items-center gap-2.5 rounded-md border border-border bg-surface px-3.5 py-2.5 text-left hover:border-border-strong"
+                    ? "flex cursor-pointer items-center gap-2.5 rounded-md border border-border bg-surface px-3.5 py-2.5 text-left hover:border-border-strong"
                     : "flex cursor-not-allowed items-center gap-2.5 rounded-md border border-border bg-surface px-3.5 py-2.5 text-left opacity-50"
                 }
               >

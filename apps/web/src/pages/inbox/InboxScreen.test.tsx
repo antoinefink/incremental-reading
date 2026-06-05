@@ -228,6 +228,15 @@ describe("InboxScreen", () => {
     await waitFor(() => expect(h.listInbox).toHaveBeenCalledTimes(4));
   });
 
+  it("marks enabled import options as clickable", async () => {
+    const { getByTestId, findByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-import-paste-url");
+    expect(getByTestId("inbox-import-paste-url")).toHaveClass("cursor-pointer");
+    expect(getByTestId("inbox-import-import-pdf")).toHaveClass("cursor-pointer");
+    expect(getByTestId("inbox-import-browser-capture")).toHaveClass("cursor-pointer");
+  });
+
   it("imports PDF/media and routes browser capture to settings", async () => {
     const { getByTestId, findByTestId } = render(<InboxScreen />);
 
