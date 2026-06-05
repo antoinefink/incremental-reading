@@ -251,7 +251,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "<b>Start session</b> routes to <code>/process</code>, the one-at-a-time keyboard loop. It takes the same due set as the Queue and presents items one by one, mixing all types — cards, sources, extracts, tasks, synthesis notes — sorted by priority then due date. For each item you can: open it in full (<kbd>O</kbd> or <kbd>Enter</kbd>), postpone (<kbd>P</kbd>), mark done (<kbd>D</kbd>), dismiss (<kbd>X</kbd>), delete (<kbd>Backspace</kbd>), or skip (<kbd>N</kbd>). Cards get the full reveal-and-grade flow inline: <kbd>Space</kbd> reveals, then <kbd>1</kbd>–<kbd>4</kbd> grades.",
+      text: "<b>Start session</b> routes to <code>/process</code>, the one-at-a-time keyboard loop. It takes the same due set as the Queue and presents items one by one, mixing all types — cards, sources, extracts, tasks, synthesis notes — sorted by priority then due date. For each item you can: open it in full (<kbd>O</kbd> or <kbd>Enter</kbd>), postpone (<kbd>P</kbd>), mark done (<kbd>D</kbd>), dismiss (<kbd>X</kbd>), delete (<kbd>Backspace</kbd>), undo the last process action (<kbd>⌘Z</kbd>), or skip (<kbd>N</kbd>). Cards get the full reveal-and-grade flow inline: <kbd>Space</kbd> reveals, then <kbd>1</kbd>–<kbd>4</kbd> grades.",
     },
     {
       type: "p",
@@ -260,7 +260,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     {
       type: "callout",
       icon: "warn",
-      text: "Delete in the process loop has no undo snackbar. The item still goes to Trash and <kbd>⌘Z</kbd> still works globally — but there is no per-action undo banner as there is in the Queue list.",
+      text: "Recoverable process actions show the same undo snackbar as the Queue list. Click <b>Undo</b> or press <kbd>⌘Z</kbd> while the snackbar is visible to restore the item and return the session cursor to it.",
     },
     {
       type: "h2",

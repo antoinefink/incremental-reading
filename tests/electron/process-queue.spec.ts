@@ -33,6 +33,7 @@ let baseUrl: string;
 
 /** A fixed future clock so the seeded/near-future due dates read as due. */
 const AS_OF = "2027-06-01T12:00:00.000Z";
+const UNDO_KEY = process.platform === "darwin" ? "Meta+z" : "Control+z";
 
 test.beforeAll(() => {
   ensureBuilt();
@@ -626,7 +627,7 @@ test("undoes a lifecycle action inside /process and persists the restored item a
     .poll(async () => (await inspectElement(page, extractId))?.element.status)
     .toBe("done");
 
-  await page.getByTestId("queue-snackbar-undo").click();
+  await page.keyboard.press(UNDO_KEY);
   await expect
     .poll(async () => (await inspectElement(page, extractId))?.element.status)
     .toBe("scheduled");

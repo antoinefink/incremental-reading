@@ -62,7 +62,7 @@ describe("cheat sheet is derived from the registry (cannot drift)", () => {
     }
   });
 
-  it("covers the load-bearing T048 shortcuts (next/extract/cloze/postpone/done/delete/+/-/search/open-source/open-parent)", () => {
+  it("covers the load-bearing T048 shortcuts (next/extract/cloze/postpone/done/delete/undo/+/-/search/open-source/open-parent)", () => {
     const ids = new Set(SHORTCUTS.map((s) => s.id));
     for (const id of [
       "next-item",
@@ -71,6 +71,7 @@ describe("cheat sheet is derived from the registry (cannot drift)", () => {
       "postpone",
       "done",
       "delete",
+      "process-undo",
       "raise-priority",
       "lower-priority",
       "search",

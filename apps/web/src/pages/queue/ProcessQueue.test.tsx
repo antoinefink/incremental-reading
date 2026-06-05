@@ -549,6 +549,30 @@ describe("ProcessQueue", () => {
     expect(screen.getByTestId("process-progress")).toHaveTextContent("1 / 3");
   });
 
+  it("undoes a process lifecycle action from the keyboard with command-z", async () => {
+    h.actOnQueueItem.mockResolvedValueOnce({
+      item: null,
+      removed: true,
+      undo: { kind: "status", previousStatus: "scheduled" },
+    });
+    render(<ProcessQueue />);
+    await screen.findByTestId("process-item");
+
+    fireEvent.click(screen.getByTestId("process-action-markDone"));
+    await screen.findByTestId("queue-snackbar");
+    await waitFor(() => expect(currentItemId()).toBe("source-1"));
+
+    fireEvent.keyDown(window, { key: "z", metaKey: true });
+
+    await waitFor(() =>
+      expect(h.undoQueueAction).toHaveBeenCalledWith({
+        id: "card-1",
+        undo: { kind: "status", previousStatus: "scheduled" },
+      }),
+    );
+    await waitFor(() => expect(currentItemId()).toBe("card-1"));
+  });
+
   it("offers command-log undo after postponing and restores the process cursor", async () => {
     render(<ProcessQueue />);
     await moveToSource();

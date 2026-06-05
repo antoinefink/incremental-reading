@@ -297,6 +297,13 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     group: "Triage",
     scope: "queue",
   },
+  {
+    id: "process-undo",
+    label: "Undo process action",
+    keys: ["⌘", "Z"],
+    group: "Triage",
+    scope: "queue",
+  },
 ] as const;
 
 /** The cheat-sheet group display order. */

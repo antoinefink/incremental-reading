@@ -4,6 +4,7 @@ import { type ProcessShortcutHandlers, useProcessShortcuts } from "./useProcessS
 
 function makeHandlers(overrides: Partial<ProcessShortcutHandlers> = {}): ProcessShortcutHandlers {
   return {
+    canProcess: true,
     next: vi.fn(),
     postpone: vi.fn(),
     markDone: vi.fn(),
@@ -12,6 +13,8 @@ function makeHandlers(overrides: Partial<ProcessShortcutHandlers> = {}): Process
     raise: vi.fn(),
     lower: vi.fn(),
     open: vi.fn(),
+    canUndo: false,
+    undo: vi.fn(),
     isCard: false,
     revealed: false,
     reveal: vi.fn(),
@@ -92,6 +95,59 @@ describe("useProcessShortcuts", () => {
     rerender(<Host handlers={h} enabled={false} />);
     fireEvent.keyDown(window, { key: "n" });
     expect(h.next).not.toHaveBeenCalled();
+  });
+
+  it("captures command undo only while a local process undo is pending", () => {
+    const globalUndo = vi.fn();
+    window.addEventListener("keydown", globalUndo);
+    const noUndo = makeHandlers({ canUndo: false });
+    try {
+      const { rerender } = render(<Host handlers={noUndo} />);
+
+      const first = new KeyboardEvent("keydown", {
+        key: "z",
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(first);
+      expect(noUndo.undo).not.toHaveBeenCalled();
+      expect(first.defaultPrevented).toBe(false);
+      expect(globalUndo).toHaveBeenCalledTimes(1);
+
+      const withUndo = makeHandlers({ canUndo: true });
+      rerender(<Host handlers={withUndo} />);
+      globalUndo.mockClear();
+
+      const second = new KeyboardEvent("keydown", {
+        key: "z",
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(second);
+      expect(withUndo.undo).toHaveBeenCalledTimes(1);
+      expect(second.defaultPrevented).toBe(true);
+      expect(globalUndo).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", globalUndo);
+    }
+  });
+
+  it("leaves non-undo process keys inert on the done state", () => {
+    const h = makeHandlers({ canProcess: false, canUndo: true });
+    render(<Host handlers={h} />);
+
+    fireEvent.keyDown(window, { key: "d" });
+    fireEvent.keyDown(window, { key: "p" });
+    fireEvent.keyDown(window, { key: "n" });
+
+    expect(h.markDone).not.toHaveBeenCalled();
+    expect(h.postpone).not.toHaveBeenCalled();
+    expect(h.next).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: "z", metaKey: true });
+    expect(h.undo).toHaveBeenCalledTimes(1);
   });
 
   it("uses card semantics: Space reveals, 1-4 grade only after reveal", () => {

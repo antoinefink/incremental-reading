@@ -1045,9 +1045,11 @@ export function ProcessQueue() {
   // CARD, Space reveals and 1–4 grade (after reveal) — exactly like the review
   // session — and these win over next/skip; on a non-card, Space is next/skip.
   const loopActive = desktop && !done;
+  const processKeysActive = desktop && (!done || undoState !== null);
   useActiveScope("queue", loopActive);
   useProcessShortcuts(
     {
+      canProcess: !done,
       next: skip,
       postpone: () => void act("postpone"),
       markDone: () => void act("markDone"),
@@ -1056,12 +1058,14 @@ export function ProcessQueue() {
       raise: () => void act("raise"),
       lower: () => void act("lower"),
       open,
+      canUndo: undoState !== null,
+      undo: () => void undoLastProcessAction(),
       isCard: !!isCard,
       revealed,
       reveal: () => void reveal(),
       grade: (rating) => void grade(rating),
     },
-    loopActive,
+    processKeysActive,
   );
 
   if (!desktop) {
@@ -1180,6 +1184,7 @@ export function ProcessQueue() {
             revealed={revealed}
             previews={previews}
             busy={busy}
+            canUndo={undoState !== null}
             onAction={act}
             onSchedule={schedule}
             onSkip={skip}
@@ -1632,6 +1637,7 @@ function ProcessCard({
   revealed,
   previews,
   busy,
+  canUndo,
   onAction,
   onSchedule,
   onSkip,
@@ -1666,6 +1672,7 @@ function ProcessCard({
   revealed: boolean;
   previews: Record<ReviewRating, ReviewIntervalPreview> | null;
   busy: boolean;
+  canUndo: boolean;
   onAction: (kind: LoopActionKind) => void;
   /** Explicit (tomorrow/next-week/next-month/manual) scheduling — attention items only. */
   onSchedule: (choice: QueueScheduleChoice) => void;
@@ -1942,11 +1949,23 @@ function ProcessCard({
           <>
             <kbd>␣</kbd> reveal · <kbd>1</kbd>–<kbd>4</kbd> grade · <kbd>d</kbd> done · <kbd>x</kbd>{" "}
             dismiss · <kbd>o</kbd> open · <kbd>n</kbd> next
+            {canUndo ? (
+              <>
+                {" "}
+                · <kbd>⌘Z</kbd> undo
+              </>
+            ) : null}
           </>
         ) : (
           <>
             <kbd>d</kbd> done · <kbd>p</kbd> postpone · <kbd>x</kbd> dismiss · <kbd>+</kbd>/
             <kbd>-</kbd> priority · <kbd>o</kbd> open · <kbd>n</kbd> next
+            {canUndo ? (
+              <>
+                {" "}
+                · <kbd>⌘Z</kbd> undo
+              </>
+            ) : null}
           </>
         )}
       </p>
