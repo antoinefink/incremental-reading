@@ -212,6 +212,7 @@
 .help-inline svg {
   width: 12px;
   height: 12px;
+  flex: none;
 }
 
 /* ---------- Inline hint ---------- */
@@ -232,10 +233,11 @@
   opacity: 0.85;
 }
 .inline-hint .help-inline {
-  display: inline;
+  display: inline-flex;
   /* Keep the link text + its chevron together so the chevron never orphans onto
      its own line; the whole link wraps as a unit at the end of a sentence. */
   white-space: nowrap;
+  vertical-align: baseline;
 }
 .inline-hint--warn > svg {
   color: var(--warn);

@@ -38,6 +38,20 @@ describe("HelpLink", () => {
     );
     expect(screen.getByRole("button", { name: /About lineage/ })).toBeInTheDocument();
   });
+
+  it("keeps the inline chevron inside the same help button", () => {
+    render(
+      <HelpProvider value={provide({})}>
+        <HelpLink slug="what-to-import" variant="inline">
+          What to import
+        </HelpLink>
+      </HelpProvider>,
+    );
+
+    const link = screen.getByRole("button", { name: /What to import/ });
+    expect(link).toHaveClass("help-inline");
+    expect(link.querySelector("svg")).toBeInTheDocument();
+  });
 });
 
 describe("InlineHint", () => {
