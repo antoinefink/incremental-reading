@@ -22,9 +22,11 @@ const VALID_ROUTES = new Set([
   "/",
   "/inbox",
   "/queue",
+  "/process",
   "/review",
   "/maintenance",
   "/maintenance/leeches",
+  "/maintenance/retired",
   "/maintenance/stagnant",
   "/search",
   "/library",
@@ -88,6 +90,11 @@ describe("shell nav config", () => {
     }
   });
 
+  it("has unique command labels, so palette rows have stable keys", () => {
+    const labels = COMMAND_ITEMS.map((c) => c.label);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
   it("has unique nav ids (used as `nav-<id>` test hooks)", () => {
     const ids = ALL_NAV.map((n) => n.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -103,11 +110,12 @@ describe("shell nav config", () => {
     expect(GOTO_MAP.c).toBe("/concepts");
   });
 
-  it("points the 'Concept map' command at /concepts (re-pointed off /search), keeping G,C", () => {
-    const conceptMap = COMMAND_ITEMS.find((c) => c.label === "Concept map");
-    expect(conceptMap).toBeDefined();
-    expect(conceptMap?.to).toBe("/concepts");
-    expect(conceptMap?.kbd).toEqual(["G", "C"]);
+  it("points the Concepts command at /concepts and keeps concept-map search terms", () => {
+    const concepts = COMMAND_ITEMS.find((c) => c.label === "Concepts");
+    expect(concepts).toBeDefined();
+    expect(concepts?.to).toBe("/concepts");
+    expect(concepts?.kbd).toEqual(["G", "C"]);
+    expect(concepts?.keywords).toContain("concept map");
   });
 
   it("exposes a 'Go to Home command center' command pointing at `/`", () => {
@@ -115,6 +123,22 @@ describe("shell nav config", () => {
     expect(home).toBeDefined();
     expect(home?.group).toBe("Go to");
     expect(home?.kbd).toEqual(["G", "H"]);
+  });
+
+  it("exposes every sidebar destination through a searchable Go to command", () => {
+    for (const nav of ALL_NAV) {
+      const command = COMMAND_ITEMS.find((c) => c.group === "Go to" && c.to === nav.to);
+      expect(command, `${nav.label} is missing from command palette`).toBeDefined();
+      const haystack = [command?.label, command?.to, ...(command?.keywords ?? [])]
+        .join(" ")
+        .toLowerCase();
+      expect(haystack).toContain(nav.label.toLowerCase());
+    }
+  });
+
+  it("exposes route-only sections that are not sidebar entries", () => {
+    expect(COMMAND_ITEMS.find((c) => c.label === "Process queue")?.to).toBe("/process");
+    expect(COMMAND_ITEMS.find((c) => c.label === "Retired cards")?.to).toBe("/maintenance/retired");
   });
 
   it("provides a non-empty cheat sheet with key rows", () => {

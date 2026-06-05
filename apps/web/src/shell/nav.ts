@@ -174,6 +174,8 @@ export type CommandItem = {
   readonly label: string;
   /** Route to navigate to when chosen (optional for action-only commands). */
   readonly to?: string;
+  /** Extra searchable terms: route path, plural names, synonyms, or old labels. */
+  readonly keywords?: readonly string[];
   /** Optional keyboard hint rendered on the right. */
   readonly kbd?: readonly string[];
   /**
@@ -227,32 +229,161 @@ export const START_TOUR_EVENT = "interleave:start-tour";
 /**
  * Action entries DERIVED from the single shortcut registry (T048) — the palette's
  * "do something" commands (Open source, Open parent, Raise/Lower priority, Start
- * review, Search). Each carries the registry's `actionId` so `CommandPalette`'s
+ * review). Search is represented by the exhaustive Go to list below, still with
+ * its registry `actionId`. Each action command carries the registry's `actionId` so `CommandPalette`'s
  * `runItem` dispatches the SAME `window.appApi`-backed handler as the on-screen
  * button (no second mutation path). Context-scoped actions are gated by `when` so
  * they only appear when an element is selected. Built from the registry so the
  * palette can never drift from the documented shortcuts.
  */
-const ACTION_COMMAND_ITEMS: readonly CommandItem[] = paletteShortcuts().map((s) => {
-  const p = s.palette;
-  // Only the element-targeted actions are context-scoped; nav/session ones are
-  // always available.
-  const contextScoped =
-    p?.actionId === "open-source" ||
-    p?.actionId === "open-parent" ||
-    p?.actionId === "raise-priority" ||
-    p?.actionId === "lower-priority";
-  const item: CommandItem = {
-    group: p?.group ?? "Actions",
-    icon: (p?.icon ?? "play") as IconName,
-    label: s.label,
-    kbd: s.keys,
-    ...(p?.to ? { to: p.to } : {}),
-    ...(p?.actionId ? { actionId: p.actionId } : {}),
-    ...(contextScoped ? { when: (ctx: CommandContext) => ctx.hasSelection } : {}),
-  };
-  return item;
-});
+const ACTION_COMMAND_ITEMS: readonly CommandItem[] = paletteShortcuts()
+  .filter((s) => s.palette?.actionId !== "search")
+  .map((s) => {
+    const p = s.palette;
+    // Only the element-targeted actions are context-scoped; nav/session ones are
+    // always available.
+    const contextScoped =
+      p?.actionId === "open-source" ||
+      p?.actionId === "open-parent" ||
+      p?.actionId === "raise-priority" ||
+      p?.actionId === "lower-priority";
+    const item: CommandItem = {
+      group: p?.group ?? "Actions",
+      icon: (p?.icon ?? "play") as IconName,
+      label: s.label,
+      kbd: s.keys,
+      ...(p?.to ? { to: p.to } : {}),
+      ...(p?.actionId ? { actionId: p.actionId } : {}),
+      ...(contextScoped ? { when: (ctx: CommandContext) => ctx.hasSelection } : {}),
+    };
+    return item;
+  });
+
+/** Dedicated route commands. Keep these exhaustive for every stable app section. */
+const GO_TO_COMMAND_ITEMS: readonly CommandItem[] = [
+  {
+    group: "Go to",
+    icon: "layers",
+    label: "Home command center",
+    to: "/",
+    keywords: ["home", "dashboard", "command center", "/"],
+    kbd: ["G", "H"],
+  },
+  {
+    group: "Go to",
+    icon: "queue",
+    label: "Daily Queue",
+    to: "/queue",
+    keywords: ["queue", "daily", "due", "/queue"],
+    kbd: ["G", "Q"],
+  },
+  {
+    group: "Go to",
+    icon: "play",
+    label: "Process queue",
+    to: "/process",
+    keywords: ["process", "session", "focus", "/process"],
+  },
+  {
+    group: "Go to",
+    icon: "inbox",
+    label: "Inbox triage",
+    to: "/inbox",
+    keywords: ["inbox", "triage", "imports", "/inbox"],
+    kbd: ["G", "I"],
+  },
+  {
+    group: "Go to",
+    icon: "review",
+    label: "Review session",
+    to: "/review",
+    keywords: ["review", "cards", "active recall", "/review"],
+    kbd: ["G", "R"],
+  },
+  {
+    group: "Go to",
+    icon: "library",
+    label: "Library",
+    to: "/library",
+    keywords: ["library", "browse", "/library"],
+    kbd: ["G", "L"],
+  },
+  {
+    group: "Go to",
+    icon: "search",
+    label: "Search",
+    to: "/search",
+    actionId: "search",
+    keywords: ["search", "find", "fts", "/search"],
+    kbd: ["/"],
+  },
+  {
+    group: "Go to",
+    icon: "concepts",
+    label: "Concepts",
+    to: "/concepts",
+    keywords: ["concept", "concept map", "knowledge map", "/concepts"],
+    kbd: ["G", "C"],
+  },
+  {
+    group: "Go to",
+    icon: "analytics",
+    label: "Analytics",
+    to: "/analytics",
+    keywords: ["analytics", "learning health", "stats", "/analytics"],
+    kbd: ["G", "A"],
+  },
+  {
+    group: "Go to",
+    icon: "library",
+    label: "Source yield",
+    to: "/analytics/sources",
+    keywords: ["sources", "yield", "low yield", "/analytics/sources"],
+  },
+  {
+    group: "Go to",
+    icon: "shield",
+    label: "Maintenance",
+    to: "/maintenance",
+    keywords: ["maintenance", "cleanup", "health", "/maintenance"],
+  },
+  {
+    group: "Go to",
+    icon: "leech",
+    label: "Leeches",
+    to: "/maintenance/leeches",
+    keywords: ["leech", "leeches", "cleanup", "/maintenance/leeches"],
+  },
+  {
+    group: "Go to",
+    icon: "archive",
+    label: "Retired cards",
+    to: "/maintenance/retired",
+    keywords: ["retired", "retirement", "mature cards", "/maintenance/retired"],
+  },
+  {
+    group: "Go to",
+    icon: "hourglass",
+    label: "Stagnant extracts",
+    to: "/maintenance/stagnant",
+    keywords: ["stagnant", "extracts", "stalled", "/maintenance/stagnant"],
+  },
+  {
+    group: "Go to",
+    icon: "trash",
+    label: "Trash",
+    to: "/trash",
+    keywords: ["trash", "deleted", "restore", "bin", "/trash"],
+  },
+  {
+    group: "Go to",
+    icon: "settings",
+    label: "Settings",
+    to: "/settings",
+    keywords: ["settings", "preferences", "/settings"],
+    kbd: ["G", "S"],
+  },
+];
 
 /**
  * ⌘K catalogue — the kit's navigation/create commands PLUS the registry-derived
@@ -260,13 +391,7 @@ const ACTION_COMMAND_ITEMS: readonly CommandItem[] = paletteShortcuts().map((s) 
  * the action entries run a typed command via `actionId`.
  */
 export const COMMAND_ITEMS: readonly CommandItem[] = [
-  { group: "Go to", icon: "layers", label: "Home command center", to: "/", kbd: ["G", "H"] },
-  { group: "Go to", icon: "queue", label: "Daily Queue", to: "/queue", kbd: ["G", "Q"] },
-  { group: "Go to", icon: "inbox", label: "Inbox triage", to: "/inbox", kbd: ["G", "I"] },
-  { group: "Go to", icon: "review", label: "Review session", to: "/review", kbd: ["G", "R"] },
-  { group: "Go to", icon: "library", label: "Library", to: "/library", kbd: ["G", "L"] },
-  { group: "Go to", icon: "concepts", label: "Concept map", to: "/concepts", kbd: ["G", "C"] },
-  { group: "Go to", icon: "settings", label: "Settings", to: "/settings", kbd: ["G", "S"] },
+  ...GO_TO_COMMAND_ITEMS,
   { group: "Create", icon: "link", label: "Import from URL…", to: "/inbox" },
   {
     group: "Create",

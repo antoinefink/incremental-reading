@@ -84,6 +84,30 @@ describe("CommandPalette — action entries (T048)", () => {
     expect(onAction).not.toHaveBeenCalled();
   });
 
+  it("finds sidebar maintenance sections such as Trash by search query", () => {
+    const { onNavigate, onAction } = setup(false);
+    const input = screen.getByLabelText("Command palette search");
+
+    fireEvent.change(input, { target: { value: "trash" } });
+
+    expect(screen.getByText("Trash")).toBeInTheDocument();
+    expect(screen.queryByText(/No commands match/)).toBeNull();
+    clickRow("Trash");
+    expect(onNavigate).toHaveBeenCalledWith("/trash");
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("finds route-only sections by aliases and paths", () => {
+    setup(false);
+    const input = screen.getByLabelText("Command palette search");
+
+    fireEvent.change(input, { target: { value: "retired" } });
+    expect(screen.getByText("Retired cards")).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "/process" } });
+    expect(screen.getByText("Process queue")).toBeInTheDocument();
+  });
+
   it("runs the action on Enter after filtering to it", () => {
     const { onAction } = setup(true);
     const input = screen.getByLabelText("Command palette search");

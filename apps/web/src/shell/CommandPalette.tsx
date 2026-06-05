@@ -27,6 +27,14 @@ export type CommandPaletteProps = {
   hasSelection: boolean;
 };
 
+function matchesCommand(item: CommandItem, query: string): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (normalized.length === 0) return true;
+  return [item.label, item.to, ...(item.keywords ?? [])]
+    .filter((part): part is string => Boolean(part))
+    .some((part) => part.toLowerCase().includes(normalized));
+}
+
 export function CommandPalette({
   open,
   onClose,
@@ -41,10 +49,7 @@ export function CommandPalette({
   const ctx = useMemo<CommandContext>(() => ({ hasSelection }), [hasSelection]);
 
   const filtered = useMemo(
-    () =>
-      COMMAND_ITEMS.filter(
-        (i) => (i.when ? i.when(ctx) : true) && i.label.toLowerCase().includes(query.toLowerCase()),
-      ),
+    () => COMMAND_ITEMS.filter((i) => (i.when ? i.when(ctx) : true) && matchesCommand(i, query)),
     [query, ctx],
   );
 
