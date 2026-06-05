@@ -288,6 +288,7 @@ export function ProcessQueue() {
   const doc = useDocument(documentElementId);
   const sourceReadPoint = useReadPoint(current?.type === "source" ? current.id : null);
   const sourceHighlights = useHighlights(current?.type === "source" ? current.id : null);
+  const extractHighlights = useHighlights(current?.type === "extract" ? current.id : null);
   const sourceSelection = useTextSelection(
     current?.type === "source" ? sourceEditor : null,
     current?.type === "source" && sourceEditorReady,
@@ -618,11 +619,17 @@ export function ProcessQueue() {
       firstUnreadBlockId: null,
       readPointBlockId: null,
       extractedBlockIds: doc.extractedBlockIds,
-      highlights: [],
+      highlights: extractHighlights.highlights,
       processed: [],
       flashedBlockId: null,
     });
-  }, [current?.type, extractEditor, extractEditorReady, doc.extractedBlockIds]);
+  }, [
+    current?.type,
+    extractEditor,
+    extractEditorReady,
+    doc.extractedBlockIds,
+    extractHighlights.highlights,
+  ]);
 
   const setExtractStage = useCallback(
     async (target?: ExtractStage) => {
@@ -890,6 +897,27 @@ export function ProcessQueue() {
     }
   }, [current, busy, clearUndo, inspector, extractSelection, doc, reloadInspector, toast]);
 
+  const highlightProcessExtractSelection = useCallback(async () => {
+    const loc = extractSelection.location;
+    if (!loc) {
+      toast("Select text in the extract to highlight it");
+      return;
+    }
+    if (current?.type !== "extract" || busy || !isDesktop()) return;
+    clearUndo();
+    setBusy(true);
+    try {
+      await extractHighlights.add(loc);
+      toast("Highlighted");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      toast("Could not highlight");
+    } finally {
+      setBusy(false);
+      extractSelection.dismiss();
+    }
+  }, [current, busy, clearUndo, extractSelection, extractHighlights, toast]);
+
   const onExtractSelectionAction = useCallback(
     (action: SelectionToolbarAction) => {
       const loc = extractSelection.location;
@@ -916,12 +944,14 @@ export function ProcessQueue() {
           break;
         }
         case "highlight":
+          void highlightProcessExtractSelection();
+          break;
         case "cancel":
           extractSelection.dismiss();
           break;
       }
     },
-    [extractSelection, createProcessSubExtract, toast],
+    [extractSelection, createProcessSubExtract, highlightProcessExtractSelection, toast],
   );
 
   useEffect(() => {
@@ -937,6 +967,9 @@ export function ProcessQueue() {
       } else if (k === "c") {
         e.preventDefault();
         onExtractSelectionAction("cloze");
+      } else if (k === "h") {
+        e.preventDefault();
+        onExtractSelectionAction("highlight");
       }
     }
     window.addEventListener("keydown", onKey, true);

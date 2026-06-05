@@ -556,14 +556,24 @@ test("distills an extract inline inside /process and persists stage, body, and c
     .poll(async () => documentText(page, extractId))
     .toContain("Edited inline process extract");
 
-  // Select text inside the inline extract editor and lift it into a child extract
-  // without opening /extract/:id. The toolbar is extract-specific: Sub-extract,
-  // Cloze, Copy; no dead Highlight action.
+  // Select text inside the inline extract editor. The toolbar is extract-specific
+  // but still includes the normal reading annotation affordance: Sub-extract,
+  // Cloze, Highlight, Copy.
+  const beforeExtractHighlights = await highlightCount(page, extractId);
   const selected = await selectProcessExtractBodyText(page);
   expect(selected.trim().length).toBeGreaterThanOrEqual(3);
   await expect(page.getByTestId("selection-toolbar")).toBeVisible();
   await expect(page.getByTestId("sel-tool-extract")).toContainText("Sub-extract");
-  await expect(page.getByTestId("sel-tool-highlight")).toHaveCount(0);
+  await expect(page.getByTestId("sel-tool-highlight")).toContainText("Highlight");
+  await page.getByTestId("sel-tool-highlight").click();
+  await expect(page.getByTestId("process-flash")).toContainText("Highlighted");
+  await expect
+    .poll(async () => highlightCount(page, extractId))
+    .toBeGreaterThan(beforeExtractHighlights);
+
+  // Reselect the body and lift it into a child extract without opening /extract/:id.
+  const subExtractSelection = await selectProcessExtractBodyText(page);
+  expect(subExtractSelection.trim().length).toBeGreaterThanOrEqual(3);
   await page.getByTestId("sel-tool-extract").click();
   await expect(page.getByTestId("process-flash")).toContainText("Sub-extract created");
   await expect
@@ -598,6 +608,7 @@ test("distills an extract inline inside /process and persists stage, body, and c
   const afterRestart = await inspectElement(page, extractId);
   expect(afterRestart?.element.stage).toBe("clean_extract");
   expect(await documentText(page, extractId)).toContain("Edited inline process extract");
+  expect(await highlightCount(page, extractId)).toBeGreaterThan(beforeExtractHighlights);
   expect((afterRestart?.children ?? []).some((c) => c.type === "extract")).toBe(true);
   expect((afterRestart?.children ?? []).some((c) => c.type === "card")).toBe(true);
 

@@ -46,6 +46,7 @@ export const SOURCE_SELECTION_ACTIONS: readonly SelectionToolbarItem[] = [
 export const EXTRACT_SELECTION_ACTIONS: readonly SelectionToolbarItem[] = [
   { action: "extract", label: "Sub-extract", icon: "extract", keys: "E", accent: true },
   { action: "cloze", label: "Cloze", icon: "cloze", keys: "C" },
+  { action: "highlight", label: "Highlight", icon: "highlight", keys: "H" },
   { action: "copy", label: "Copy", icon: "copy", title: "Copy selection", dividerBefore: true },
   { action: "cancel", label: "", icon: "x", title: "Cancel (Esc)", ariaLabel: "Cancel" },
 ];

@@ -963,8 +963,48 @@ describe("ProcessQueue", () => {
     await screen.findByTestId("selection-toolbar");
     expect(screen.getByTestId("sel-tool-extract")).toHaveTextContent("Sub-extract");
     expect(screen.getByTestId("sel-tool-cloze")).toHaveTextContent("Cloze");
+    expect(screen.getByTestId("sel-tool-highlight")).toHaveTextContent("Highlight");
     expect(screen.getByTestId("sel-tool-copy")).toHaveTextContent("Copy");
-    expect(screen.queryByTestId("sel-tool-highlight")).not.toBeInTheDocument();
+  });
+
+  it("highlights selected extract text without advancing the process cursor", async () => {
+    const location = {
+      selectedText: "skill-acquisition efficiency",
+      blockIds: ["blk_process_extract"],
+      startOffset: 0,
+      endOffset: 28,
+    };
+    h.selectionLocation.current = location;
+    h.selectionPosition.current = { top: 120, left: 240 };
+    render(<ProcessQueue />);
+    await moveToExtract();
+
+    fireEvent.click(await screen.findByTestId("sel-tool-highlight"));
+
+    await waitFor(() => expect(h.highlightsState.add).toHaveBeenCalledWith(location));
+    expect(currentItemId()).toBe("extract-1");
+    expect(h.actOnQueueItem).not.toHaveBeenCalled();
+    expect(h.navigateSpy).not.toHaveBeenCalled();
+    expect(h.dismissSelection).toHaveBeenCalled();
+  });
+
+  it("highlights selected extract text from the H keyboard shortcut", async () => {
+    const location = {
+      selectedText: "skill-acquisition efficiency",
+      blockIds: ["blk_process_extract"],
+      startOffset: 0,
+      endOffset: 28,
+    };
+    h.selectionLocation.current = location;
+    h.selectionPosition.current = { top: 120, left: 240 };
+    render(<ProcessQueue />);
+    await moveToExtract();
+    await screen.findByTestId("selection-toolbar");
+
+    fireEvent.keyDown(window, { key: "h" });
+
+    await waitFor(() => expect(h.highlightsState.add).toHaveBeenCalledWith(location));
+    expect(currentItemId()).toBe("extract-1");
   });
 
   it("creates a sub-extract from selected text without advancing the process cursor", async () => {

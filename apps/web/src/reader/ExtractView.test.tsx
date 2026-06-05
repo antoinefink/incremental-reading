@@ -104,6 +104,12 @@ const h = vi.hoisted(() => {
       extract: { id: "sub_1", parentId: "ex_1", sourceId: "src_1" },
       location: { sourceElementId: "ex_1" },
     }),
+    highlightsState: {
+      highlights: [],
+      add: vi.fn().mockResolvedValue(undefined),
+      remove: vi.fn().mockResolvedValue(undefined),
+      error: null,
+    },
     // The selection the toolbar/Split act on. `null` by default (no live selection);
     // tests override `current` to simulate a selection inside the extract body.
     selectionLocation: { current: null as null | Record<string, unknown> },
@@ -215,6 +221,10 @@ vi.mock("./useTextSelection", () => ({
     location: h.selectionLocation.current,
     dismiss: vi.fn(),
   }),
+}));
+
+vi.mock("../pages/source/useHighlights", () => ({
+  useHighlights: () => h.highlightsState,
 }));
 
 // The inspector refresh is a window event; stub it so it is a no-op in the test.
@@ -400,7 +410,7 @@ describe("ExtractView — sub-extract (T025)", () => {
     expect(h.updateStage).not.toHaveBeenCalled();
   });
 
-  it("shows extract-specific selection actions and omits Highlight", async () => {
+  it("shows extract-specific selection actions including Highlight", async () => {
     h.selectionLocation.current = {
       selectedText: "definition paragraph two.",
       blockIds: ["blk_ex_1"],
@@ -413,8 +423,41 @@ describe("ExtractView — sub-extract (T025)", () => {
     await screen.findByTestId("selection-toolbar");
     expect(screen.getByTestId("sel-tool-extract")).toHaveTextContent("Sub-extract");
     expect(screen.getByTestId("sel-tool-cloze")).toHaveTextContent("Cloze");
+    expect(screen.getByTestId("sel-tool-highlight")).toHaveTextContent("Highlight");
     expect(screen.getByTestId("sel-tool-copy")).toHaveTextContent("Copy");
-    expect(screen.queryByTestId("sel-tool-highlight")).not.toBeInTheDocument();
+  });
+
+  it("highlights selected extract text through document marks", async () => {
+    const location = {
+      selectedText: "definition paragraph two.",
+      blockIds: ["blk_ex_1"],
+      startOffset: 4,
+      endOffset: 29,
+    };
+    h.selectionLocation.current = location;
+    h.selectionPosition.current = { top: 120, left: 240 };
+    render(<ExtractView />);
+
+    fireEvent.click(await screen.findByTestId("sel-tool-highlight"));
+
+    await waitFor(() => expect(h.highlightsState.add).toHaveBeenCalledWith(location));
+  });
+
+  it("highlights selected extract text from the H keyboard shortcut", async () => {
+    const location = {
+      selectedText: "definition paragraph two.",
+      blockIds: ["blk_ex_1"],
+      startOffset: 4,
+      endOffset: 29,
+    };
+    h.selectionLocation.current = location;
+    h.selectionPosition.current = { top: 120, left: 240 };
+    render(<ExtractView />);
+    await screen.findByTestId("selection-toolbar");
+
+    fireEvent.keyDown(window, { key: "h" });
+
+    await waitFor(() => expect(h.highlightsState.add).toHaveBeenCalledWith(location));
   });
 
   it("Split with a live selection also creates a sub-extract (same path)", async () => {

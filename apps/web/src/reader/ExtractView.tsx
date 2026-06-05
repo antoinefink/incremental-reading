@@ -58,6 +58,7 @@ import {
   type LineageData,
 } from "../lib/appApi";
 import { useDocument } from "../pages/source/useDocument";
+import { useHighlights } from "../pages/source/useHighlights";
 import { useSelection } from "../shell/selection";
 import { AiAssist } from "./AiAssist";
 import { CardBuilder } from "./CardBuilder";
@@ -330,6 +331,7 @@ export function ExtractView() {
   // The hook owns the anchor + resolved location; this view owns only the action
   // wiring. Using or dismissing the toolbar never mutates the extract body.
   const selection = useTextSelection(editor, editorReady);
+  const highlights = useHighlights(id);
 
   // T025 — Sub-extract: lift the current selection in THIS extract's body into a
   // NEW child extract via the SAME `extractions.create` command as T021. Only the
@@ -366,10 +368,28 @@ export function ExtractView() {
     }
   }, [id, selection, sourceRootId, busy, doc, reload, toast]);
 
+  const onHighlightSelection = useCallback(async () => {
+    const loc = selection.location;
+    if (!id || !loc || busy) {
+      selection.dismiss();
+      return;
+    }
+    setBusy(true);
+    try {
+      await highlights.add(loc);
+      toast("Highlighted");
+    } catch {
+      toast("Could not highlight");
+    } finally {
+      setBusy(false);
+      selection.dismiss();
+    }
+  }, [id, selection, busy, highlights, toast]);
+
   // The selection toolbar maps Extract/Cloze/Highlight/Copy/Cancel actions inside
   // the extract body. Extract == Sub-extract here (the selection is lifted into a
-  // child of THIS extract). Cloze/Highlight are deferred (M6 / not in the extract
-  // review surface); Copy/Cancel are renderer-only.
+  // child of THIS extract). Cloze opens the card builder; Highlight persists a
+  // lightweight document mark on THIS extract; Copy/Cancel are renderer-only.
   const onSelectionAction = useCallback(
     (action: SelectionToolbarAction) => {
       const loc = selection.location;
@@ -397,12 +417,14 @@ export function ExtractView() {
           break;
         }
         case "highlight":
+          void onHighlightSelection();
+          break;
         case "cancel":
           selection.dismiss();
           break;
       }
     },
-    [selection, onSubExtract, toast],
+    [selection, onSubExtract, onHighlightSelection, toast],
   );
 
   // The action-bar Split / Sub-extract buttons act on the live selection. When there
@@ -433,6 +455,9 @@ export function ExtractView() {
       } else if (k === "c") {
         e.preventDefault();
         onSelectionAction("cloze");
+      } else if (k === "h") {
+        e.preventDefault();
+        onSelectionAction("highlight");
       }
     }
     window.addEventListener("keydown", onKey, true);
@@ -450,13 +475,13 @@ export function ExtractView() {
       firstUnreadBlockId: null,
       readPointBlockId: null,
       extractedBlockIds: doc.extractedBlockIds,
-      highlights: [],
+      highlights: highlights.highlights,
       // Processed-span dimming (T026) is a SOURCE-reader affordance; the extract
       // body doesn't surface it here.
       processed: [],
       flashedBlockId: null,
     });
-  }, [editorReady, doc.extractedBlockIds]);
+  }, [editorReady, doc.extractedBlockIds, highlights.highlights]);
 
   if (!desktop) {
     return (
