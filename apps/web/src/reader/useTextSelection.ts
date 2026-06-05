@@ -41,6 +41,19 @@ export interface TextSelectionState {
   readonly dismiss: () => void;
 }
 
+function editorDom(editor: Editor): HTMLElement | null {
+  if (typeof HTMLElement === "undefined") return null;
+  const dom = (editor as Editor & { view?: { dom?: unknown } }).view?.dom;
+  return dom instanceof HTMLElement ? dom : null;
+}
+
+function domSelectionBelongsToEditor(editor: Editor, selection: Selection): boolean {
+  const dom = editorDom(editor);
+  if (!dom) return true;
+  const { anchorNode, focusNode } = selection;
+  return Boolean(anchorNode && focusNode && dom.contains(anchorNode) && dom.contains(focusNode));
+}
+
 /**
  * Track the reader's text selection and resolve the toolbar anchor + location.
  *
@@ -74,6 +87,15 @@ export function useTextSelection(editor: Editor | null, editorReady: boolean): T
     // The DOM rect comes from the browser selection, not ProseMirror, so the
     // toolbar floats exactly over what the user highlighted on screen.
     const domSelection = typeof window !== "undefined" ? window.getSelection() : null;
+    if (
+      domSelection &&
+      domSelection.rangeCount > 0 &&
+      !domSelectionBelongsToEditor(editor, domSelection)
+    ) {
+      setPosition(null);
+      setLocation(null);
+      return;
+    }
     if (!domSelection || domSelection.rangeCount === 0) {
       // No DOM rect available (headless/edge) — keep the location but no anchor.
       setLocation(resolved);

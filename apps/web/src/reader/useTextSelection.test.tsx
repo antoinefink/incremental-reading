@@ -29,33 +29,47 @@ const DOC = {
   ],
 };
 
-/** A minimal fake Tiptap editor exposing the `.state` + `.isFocused` the hook reads. */
-function fakeEditor(from: number, to: number): Editor {
+/** A minimal fake Tiptap editor exposing the `.state`, `.view.dom`, and `.isFocused` the hook reads. */
+function fakeEditor(from: number, to: number): { editor: Editor; selectedNode: Text } {
   const doc = PmNode.fromJSON(schema, DOC);
   let state = EditorState.create({ schema, doc });
   state = state.apply(state.tr.setSelection(TextSelection.create(doc, from, to)));
-  return { state, isFocused: true } as unknown as Editor;
+  const editorDom = document.createElement("div");
+  const selectedNode = document.createTextNode("Alpha beta gamma.");
+  editorDom.append(selectedNode);
+  document.body.append(editorDom);
+
+  return {
+    editor: { state, isFocused: true, view: { dom: editorDom } } as unknown as Editor,
+    selectedNode,
+  };
 }
 
 /** Stub the DOM selection so the hook can read a bounding rect on mouseup. */
-function stubDomSelection() {
+function stubDomSelection(anchorNode: Node) {
   const range = {
     getBoundingClientRect: () => ({ top: 100, left: 200, width: 80, height: 18 }),
   };
   vi.spyOn(window, "getSelection").mockReturnValue({
     rangeCount: 1,
+    anchorNode,
+    focusNode: anchorNode,
     getRangeAt: () => range,
   } as unknown as Selection);
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+  document.body.innerHTML = "";
+});
 
 describe("useTextSelection", () => {
   it("surfaces a position + location for a ≥3-char selection on mouseup", () => {
-    stubDomSelection();
     vi.useFakeTimers();
     // "Alpha" = positions 1..6 inside the single paragraph.
-    const editor = fakeEditor(1, 6);
+    const { editor, selectedNode } = fakeEditor(1, 6);
+    stubDomSelection(selectedNode);
     const { result } = renderHook(() => useTextSelection(editor, true));
 
     expect(result.current.position).toBeNull();
@@ -66,20 +80,18 @@ describe("useTextSelection", () => {
     expect(result.current.position).toEqual({ top: 92, left: 240 }); // top-8, left+width/2
     expect(result.current.location?.blockIds).toEqual(["blk_1"]);
     expect(result.current.location?.selectedText).toBe("Alpha");
-    vi.useRealTimers();
   });
 
   it("Escape dismisses the toolbar", () => {
-    stubDomSelection();
     vi.useFakeTimers();
-    const editor = fakeEditor(1, 6);
+    const { editor, selectedNode } = fakeEditor(1, 6);
+    stubDomSelection(selectedNode);
     const { result } = renderHook(() => useTextSelection(editor, true));
     act(() => {
       window.dispatchEvent(new MouseEvent("mouseup"));
       vi.runAllTimers();
     });
     expect(result.current.position).not.toBeNull();
-    vi.useRealTimers();
 
     act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
@@ -89,16 +101,37 @@ describe("useTextSelection", () => {
   });
 
   it("does not show the toolbar for a sub-3-char selection", () => {
-    stubDomSelection();
     vi.useFakeTimers();
     // "Al" = positions 1..3 → 2 chars, below the threshold.
-    const editor = fakeEditor(1, 3);
+    const { editor, selectedNode } = fakeEditor(1, 3);
+    stubDomSelection(selectedNode);
     const { result } = renderHook(() => useTextSelection(editor, true));
     act(() => {
       window.dispatchEvent(new MouseEvent("mouseup"));
       vi.runAllTimers();
     });
     expect(result.current.position).toBeNull();
-    vi.useRealTimers();
+  });
+
+  it("does not anchor the toolbar to a selection outside the editor, such as a quality check row", () => {
+    vi.useFakeTimers();
+    const { editor } = fakeEditor(1, 6);
+    const qualityCheck = document.createElement("div");
+    qualityCheck.className = "qc qc--warn";
+    qualityCheck.textContent =
+      "Nearly identical to another card — they may interfere; merge or differentiate";
+    document.body.append(qualityCheck);
+    const qualityText = qualityCheck.firstChild;
+    if (!qualityText) throw new Error("Expected quality-check text node.");
+    stubDomSelection(qualityText);
+
+    const { result } = renderHook(() => useTextSelection(editor, true));
+    act(() => {
+      window.dispatchEvent(new MouseEvent("mouseup"));
+      vi.runAllTimers();
+    });
+
+    expect(result.current.position).toBeNull();
+    expect(result.current.location).toBeNull();
   });
 });
