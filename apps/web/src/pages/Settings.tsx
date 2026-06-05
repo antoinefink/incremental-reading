@@ -1076,7 +1076,7 @@ export function Settings() {
       </SectionPanel>
 
       <SectionPanel title="Data & backup">
-        <div className="mb-2">
+        <div className="border-border-faint border-b py-3.5" data-testid="settings-backup-note">
           <InlineHint slug="backup-vs-export" slugLabel="Backup vs Export">
             A backup is a full, recoverable copy of everything (DB + assets). An export pulls
             specific content out to Markdown or Anki — it is not a backup.

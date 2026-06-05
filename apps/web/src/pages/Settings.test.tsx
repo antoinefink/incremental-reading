@@ -173,6 +173,19 @@ describe("Settings", () => {
     expect(getByTestId("settings-backup-result")).toHaveTextContent("3 files");
   });
 
+  it("keeps the backup explanation aligned inside the data section rhythm", async () => {
+    const { getByTestId, findByTestId } = render(<Settings />);
+
+    await findByTestId("settings-backup-now");
+    const note = getByTestId("settings-backup-note");
+
+    expect(note).toHaveClass("py-3.5");
+    expect(note).toHaveClass("border-b");
+    expect(note).not.toHaveClass("mb-2");
+    expect(note).toHaveTextContent("A backup is a full, recoverable copy");
+    expect(note).toHaveTextContent("Backup vs Export");
+  });
+
   it("enables capture server and reveals running status", async () => {
     h.getCapturePairing
       .mockResolvedValueOnce({
