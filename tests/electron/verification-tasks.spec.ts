@@ -15,7 +15,8 @@
  *
  *   1. the `tasks.*` bridge surface exists (no raw SQL);
  *   2. from the expired card's inspector, CREATE a "verify this claim" task → it appears
- *      in the inspector's Maintenance section AND in the daily queue as a task row;
+ *      in the inspector's Maintenance section AND in the daily queue as a task row, whose
+ *      open affordance jumps to the protected card's review surface;
  *   3. COMPLETE a task from the inspector → it leaves the open Maintenance list;
  *   4. run "generate from expiry" → a task is created for the still-expired card and a
  *      SECOND run creates NO duplicate (idempotent);
@@ -146,16 +147,19 @@ test("inspector Maintenance: create a verification task → it shows in the sect
   await expect(page.getByTestId("route-queue")).toBeVisible();
   const taskRows = page.locator('[data-testid="queue-item"][data-element-type="task"]');
   await expect(taskRows.first()).toBeVisible();
-  await expect(taskRows.first()).toContainText(/Task/i);
+  await expect(taskRows.first()).toContainText(/Protects card|Verify/i);
 
   // The seeded task PROTECTS the card → its open affordance reads "Verify" (a jump to
   // the protected element), not the generic "Open" (T092). Clicking it SELECTS the
-  // protected CARD in the shell inspector (the card has no dedicated reader page, so
-  // the jump resolves to selecting it), never opening the maintenance task itself.
+  // protected CARD in the shell inspector and opens the FSRS review surface with the
+  // same fixed clock, never opening the maintenance task itself.
   const seededTaskRow = taskRows.filter({ hasText: CARD_TITLE }).first();
   await expect(seededTaskRow).toBeVisible();
+  await expect(seededTaskRow).toContainText(/Protects card/i);
   await expect(seededTaskRow.getByTestId("queue-open")).toContainText(/Verify/i);
   await seededTaskRow.getByTestId("queue-open").click();
+  expect(new URL(page.url()).pathname).toBe("/review");
+  expect(new URL(page.url()).searchParams.get("asOf")).toBe(FUTURE);
   await expect(page.getByTestId("inspector-title")).toHaveText(CARD_TITLE);
 
   await app.close();

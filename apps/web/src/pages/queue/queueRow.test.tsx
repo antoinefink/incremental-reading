@@ -76,6 +76,11 @@ describe("queue row helpers", () => {
 
     rerender(metaFor(queueItem({ type: "task" })));
     expect(getByText("Task")).toBeInTheDocument();
+
+    rerender(
+      metaFor(queueItem({ type: "task", linkedElementId: "card-1", linkedElementType: "card" })),
+    );
+    expect(getByText("Protects card")).toBeInTheDocument();
   });
 
   it("maps due state to the stable badge classes", () => {

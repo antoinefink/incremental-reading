@@ -5,8 +5,8 @@
  * typed `tasks.*` `window.appApi`; this asserts the RENDERER seam only:
  *  - the section lists the open tasks protecting the element (with the kind label);
  *  - "Create verification task" opens the picker and `tasks.create` is called with the
- *    chosen kind + the linked element id + the schedule choice;
- *  - completing a task calls `tasks.complete`.
+ *    chosen kind + protected element title + linked element id + the schedule choice;
+ *  - completing/postponing a task calls the typed task API.
  *
  * `appApi` is mocked so the test exercises only this component's wiring — no IPC/SQLite.
  */
@@ -54,11 +54,18 @@ beforeEach(() => {
   h.listTasks.mockResolvedValue({ tasks: [TASK] });
   h.createTask.mockResolvedValue({ task: TASK });
   h.completeTask.mockResolvedValue({ task: { ...TASK, status: "done" } });
+  h.postponeTask.mockResolvedValue({ task: { ...TASK, dueAt: "2026-06-10T00:00:00.000Z" } });
 });
 
 describe("Inspector MaintenanceSection (T092)", () => {
   it("lists the open tasks protecting the element with the kind label", async () => {
-    render(<MaintenanceSection elementId="card-1" onChanged={vi.fn()} />);
+    render(
+      <MaintenanceSection
+        elementId="card-1"
+        elementTitle="Chollet's definition of intelligence"
+        onChanged={vi.fn()}
+      />,
+    );
     await waitFor(() => {
       expect(h.listTasks).toHaveBeenCalledWith({ linkedElementId: "card-1" });
     });
@@ -71,14 +78,26 @@ describe("Inspector MaintenanceSection (T092)", () => {
 
   it("shows the empty state when there are no open tasks", async () => {
     h.listTasks.mockResolvedValue({ tasks: [] });
-    render(<MaintenanceSection elementId="card-1" onChanged={vi.fn()} />);
+    render(
+      <MaintenanceSection
+        elementId="card-1"
+        elementTitle="Chollet's definition of intelligence"
+        onChanged={vi.fn()}
+      />,
+    );
     expect(await screen.findByTestId("maintenance-empty")).toBeInTheDocument();
   });
 
   it("creates a verification task with the chosen kind + linked id + schedule", async () => {
     h.listTasks.mockResolvedValue({ tasks: [] });
     const onChanged = vi.fn();
-    render(<MaintenanceSection elementId="card-1" onChanged={onChanged} />);
+    render(
+      <MaintenanceSection
+        elementId="card-1"
+        elementTitle="Chollet's definition of intelligence"
+        onChanged={onChanged}
+      />,
+    );
     await screen.findByTestId("maintenance-empty");
 
     fireEvent.click(screen.getByTestId("maintenance-create"));
@@ -95,6 +114,7 @@ describe("Inspector MaintenanceSection (T092)", () => {
       expect(h.createTask).toHaveBeenCalledWith(
         expect.objectContaining({
           taskType: "find_better_source",
+          title: "Find better source: Chollet's definition of intelligence",
           linkedElementId: "card-1",
           note: "swap the pre-print for the published version",
           dueChoice: { kind: "nextWeek" },
@@ -105,11 +125,32 @@ describe("Inspector MaintenanceSection (T092)", () => {
   });
 
   it("completes a task via tasks.complete", async () => {
-    render(<MaintenanceSection elementId="card-1" onChanged={vi.fn()} />);
+    render(
+      <MaintenanceSection
+        elementId="card-1"
+        elementTitle="Chollet's definition of intelligence"
+        onChanged={vi.fn()}
+      />,
+    );
     const completeBtn = await screen.findByTestId("maintenance-complete");
     fireEvent.click(completeBtn);
     await waitFor(() => {
       expect(h.completeTask).toHaveBeenCalledWith({ id: "task-1" });
+    });
+  });
+
+  it("postpones a task via tasks.postpone", async () => {
+    render(
+      <MaintenanceSection
+        elementId="card-1"
+        elementTitle="Chollet's definition of intelligence"
+        onChanged={vi.fn()}
+      />,
+    );
+    const postponeBtn = await screen.findByTestId("maintenance-postpone");
+    fireEvent.click(postponeBtn);
+    await waitFor(() => {
+      expect(h.postponeTask).toHaveBeenCalledWith({ id: "task-1" });
     });
   });
 });

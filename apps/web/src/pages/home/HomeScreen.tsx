@@ -42,8 +42,10 @@ import {
 import { ReviewModeButton } from "../../review/ReviewModeButton";
 import "../../review/review.css";
 import { UNDO_EVENT } from "../../shell/nav";
+import { useSelection } from "../../shell/selection";
 import "../../analytics/analytics.css";
 import "../queue/queue.css";
+import { openQueueItem } from "../queue/openQueueItem";
 import { actionFor, DueBadge, metaFor, titleFor } from "../queue/queueRow";
 import "./home.css";
 
@@ -160,6 +162,7 @@ function PreviewRow({
 export function HomeScreen() {
   const desktop = isDesktop();
   const navigate = useNavigate();
+  const { select } = useSelection();
   // The index route declares no `validateSearch`, so search is loosely typed. An
   // optional `asOf` date-scopes BOTH reads (used by the E2E to drive a fixed clock);
   // in normal use the reads default to the server's "now".
@@ -216,24 +219,9 @@ export function HomeScreen() {
 
   const onOpen = useCallback(
     (item: QueueItemSummary) => {
-      // Per-type routing that respects the load-bearing FSRS-vs-attention split:
-      //  - source  → the reader; extract → the extract view (their own surfaces);
-      //  - card    → the FSRS active-recall review session (cards ONLY);
-      //  - every OTHER due attention type (topic / task / synthesis_note) → the
-      //    one-at-a-time /process loop (carrying `asOf`), NOT /review — sending an
-      //    attention-scheduled element into the card review session would land on an
-      //    empty deck and cross the two-scheduler boundary.
-      if (item.type === "source") {
-        void navigate({ to: "/source/$id", params: { id: item.id } });
-      } else if (item.type === "extract") {
-        void navigate({ to: "/extract/$id", params: { id: item.id } });
-      } else if (item.type === "card") {
-        void navigate({ to: "/review" });
-      } else {
-        void navigate({ to: "/process", search: asOf ? { asOf } : {} });
-      }
+      openQueueItem({ item, navigate, select, asOf });
     },
-    [navigate, asOf],
+    [navigate, select, asOf],
   );
 
   const startSession = useCallback(() => {

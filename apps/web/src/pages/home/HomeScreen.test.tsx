@@ -12,8 +12,9 @@
  *  - the leech maintenance banner shows ONLY when `leeches > 0`, and clicking it
  *    routes to /maintenance/leeches;
  *  - "Start session" navigates to /process and a top-due preview row navigates to
- *    the right element route, RESPECTING the FSRS-vs-attention split (source →
- *    /source/$id, extract → /extract/$id, card → /review, topic/task → /process);
+ *    the right element route, RESPECTING the FSRS-vs-attention split and linked
+ *    task jumps (source → /source/$id, extract → /extract/$id, card → /review,
+ *    topic/unlinked task → /process, linked task → protected element surface);
  *  - a failed read shows the error line + a calm "—" placeholder (never fabricated
  *    zeros / a false "Queue clear" empty state);
  *  - the `asOf` clock is forwarded to BOTH reads and into /process;
@@ -178,6 +179,36 @@ const h = vi.hoisted(() => {
     },
     budget: { used: 4, target: 30 },
   };
+  const taskRow: QueueItemSummary = {
+    id: "task-1",
+    type: "task",
+    status: "scheduled",
+    stage: "rough_topic",
+    priority: 0.75,
+    title: "Verify claim: What does FSRS schedule?",
+    dueAt: "2026-05-30T04:00:00.000Z",
+    scheduler: "attention",
+    schedulerSignals: {
+      kind: "attention",
+      retrievability: null,
+      stability: null,
+      fsrsState: null,
+      lapses: null,
+      stage: "rough_topic",
+      postponed: 0,
+    },
+    sourceTitle: null,
+    author: null,
+    concept: null,
+    siblingGroupId: null,
+    sourceId: null,
+    cardType: null,
+    linkedElementId: "card-1",
+    linkedElementType: "card",
+    protected: false,
+    due: "overdue",
+    dueLabel: "Overdue",
+  };
   const analytics: AnalyticsGetResult = {
     asOf: "2026-05-30T18:00:00.000Z",
     windowDays: 30,
@@ -203,6 +234,7 @@ const h = vi.hoisted(() => {
     listQueue: vi.fn(),
     getAnalytics: vi.fn(),
     navigateSpy: vi.fn(),
+    selectSpy: vi.fn(),
     // Flipped per-test so the non-desktop fallback can be exercised without a
     // module reset (the global mock delegates `isDesktop` to this spy).
     isDesktop: vi.fn(() => true),
@@ -212,6 +244,7 @@ const h = vi.hoisted(() => {
     extractRow,
     topicRow,
     cardRow,
+    taskRow,
   };
 });
 
@@ -228,6 +261,10 @@ vi.mock("../../lib/appApi", async () => {
     appApi: { listQueue: h.listQueue, getAnalytics: h.getAnalytics },
   };
 });
+
+vi.mock("../../shell/selection", () => ({
+  useSelection: () => ({ selectedId: null, select: h.selectSpy }),
+}));
 
 import { HomeScreen } from "./HomeScreen";
 
@@ -334,6 +371,22 @@ describe("HomeScreen", () => {
     fireEvent.click(rowFor("topic-1"));
     expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/process", search: {} });
     expect(h.navigateSpy).not.toHaveBeenCalledWith({ to: "/review" });
+  });
+
+  it("a linked task preview row jumps to the protected card review surface", async () => {
+    h.listQueue.mockResolvedValue({
+      ...h.queue,
+      items: [h.taskRow],
+      counts: { ...h.queue.counts, all: 1, task: 1, overdue: 1 },
+      budget: { used: 1, target: 30 },
+    });
+    render(<HomeScreen />);
+    await screen.findByTestId("home-preview");
+
+    fireEvent.click(screen.getByTestId("home-preview-row"));
+
+    expect(h.selectSpy).toHaveBeenCalledWith("card-1");
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/review" });
   });
 
   it("'See full queue' navigates to /queue", async () => {

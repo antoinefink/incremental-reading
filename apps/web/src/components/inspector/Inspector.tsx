@@ -1024,10 +1024,12 @@ const TASK_TYPE_OPTIONS: readonly { value: TaskType; label: string }[] = [
  */
 export function MaintenanceSection({
   elementId,
+  elementTitle,
   onChanged,
   refreshTick = 0,
 }: {
   elementId: string;
+  elementTitle: string;
   onChanged: () => void;
   refreshTick?: number;
 }) {
@@ -1075,7 +1077,7 @@ export function MaintenanceSection({
     void run(async () => {
       await appApi.createTask({
         taskType,
-        title: `${taskTypeLabel(taskType)}: this item`,
+        title: taskTitleFor(taskType, elementTitle),
         ...(note.trim() ? { note: note.trim() } : {}),
         linkedElementId: elementId,
         dueChoice: { kind: dueChoice },
@@ -1228,6 +1230,11 @@ export function MaintenanceSection({
       ) : null}
     </div>
   );
+}
+
+function taskTitleFor(taskType: TaskType, elementTitle: string): string {
+  const target = elementTitle.trim() || "this item";
+  return `${taskTypeLabel(taskType)}: ${target}`.slice(0, 256);
 }
 
 /** The source-type options for the reliability picker (T091). */
@@ -2086,6 +2093,7 @@ function InspectorBody({
       {(element.type === "card" || element.type === "extract" || element.type === "source") && (
         <MaintenanceSection
           elementId={element.id}
+          elementTitle={element.title}
           onChanged={onOrganizeChanged}
           refreshTick={refreshTick}
         />

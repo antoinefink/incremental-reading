@@ -171,6 +171,13 @@ const h = vi.hoisted(() => {
     due: "overdue",
     dueLabel: "Overdue",
   };
+  const cardTaskRow: QueueItemSummary = {
+    ...taskRow,
+    id: "task-card-1",
+    title: "Verify claim: Chollet's definition of intelligence",
+    linkedElementId: "card-1",
+    linkedElementType: "card",
+  };
   const result: QueueListResult = {
     items: [cardRow, sourceRow, extractRow, topicRow],
     counts: {
@@ -196,9 +203,11 @@ const h = vi.hoisted(() => {
     listQueue: vi.fn().mockResolvedValue(result),
     actOnQueueItem: vi.fn(),
     undoQueueAction: vi.fn().mockResolvedValue({ item: extractRow }),
+    result,
     extractRow,
     topicRow,
     taskRow,
+    cardTaskRow,
   };
 });
 
@@ -229,6 +238,8 @@ import { QueueScreen } from "./QueueScreen";
 beforeEach(() => {
   vi.clearAllMocks();
   h.selectedId.current = null;
+  h.useSearch.mockReturnValue({});
+  h.listQueue.mockResolvedValue(h.result);
 });
 
 describe("QueueScreen", () => {
@@ -353,6 +364,40 @@ describe("QueueScreen", () => {
       params: { id: "source-1" },
     });
     expect(h.navigateSpy).not.toHaveBeenCalledWith({ to: "/process", search: {} });
+  });
+
+  it("opens a card-linked verification task by selecting the card and routing to review", async () => {
+    h.useSearch.mockReturnValue({ asOf: "2026-06-06T12:00:00.000Z" });
+    h.listQueue.mockResolvedValue({
+      items: [h.cardTaskRow],
+      counts: {
+        all: 1,
+        card: 0,
+        source: 0,
+        extract: 0,
+        topic: 0,
+        task: 1,
+        highPriority: 1,
+        overdue: 1,
+        protected: 1,
+      },
+      budget: { used: 1, target: 30 },
+    });
+    render(<QueueScreen />);
+    await screen.findAllByTestId("queue-item");
+    const task = screen
+      .getAllByTestId("queue-item")
+      .find((el) => el.getAttribute("data-element-id") === "task-card-1");
+    const open = task?.querySelector('[data-testid="queue-open"]') as HTMLElement;
+    expect(open).toHaveTextContent("Verify");
+
+    fireEvent.click(open);
+
+    expect(h.selectSpy).toHaveBeenCalledWith("card-1");
+    expect(h.navigateSpy).toHaveBeenCalledWith({
+      to: "/review",
+      search: { asOf: "2026-06-06T12:00:00.000Z" },
+    });
   });
 
   it("renders the BudgetMeter with the items-due / target gauge", async () => {

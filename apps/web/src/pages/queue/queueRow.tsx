@@ -18,6 +18,15 @@ import { Icon, type IconName } from "../../components/Icon";
 import { Stage } from "../../components/inspector/primitives";
 import type { QueueItemSummary } from "../../lib/appApi";
 
+function elementTypeNoun(type: string | null): string {
+  if (type === "source") return "source";
+  if (type === "topic") return "topic";
+  if (type === "extract") return "extract";
+  if (type === "card") return "card";
+  if (type === "synthesis_note") return "synthesis note";
+  return "item";
+}
+
 /**
  * The per-row title with the kit's type prefix ("Extract · …", "Q&A · …").
  *
@@ -80,9 +89,12 @@ export function metaFor(item: QueueItemSummary): ReactElement | null {
     );
   }
   if (item.type === "task") {
+    const detail = item.linkedElementId
+      ? `Protects ${elementTypeNoun(item.linkedElementType)}`
+      : "Task";
     return (
       <span className="qitem__sub">
-        <Icon name="task" size={13} /> Task
+        <Icon name="task" size={13} /> {detail}
       </span>
     );
   }

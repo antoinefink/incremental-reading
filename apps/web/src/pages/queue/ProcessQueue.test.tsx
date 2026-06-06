@@ -1224,6 +1224,61 @@ describe("ProcessQueue", () => {
     expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/source/$id", params: { id: "source-1" } });
   });
 
+  it("opens a card-linked task by selecting the protected card and routing to review", async () => {
+    const task: QueueItemSummary = {
+      id: "task-1",
+      type: "task",
+      status: "scheduled",
+      stage: "rough_topic",
+      priority: 0.875,
+      title: "Verify claim: What does Chollet define intelligence as?",
+      dueAt: "2026-05-30T06:00:00.000Z",
+      scheduler: "attention",
+      schedulerSignals: {
+        kind: "attention",
+        retrievability: null,
+        stability: null,
+        fsrsState: null,
+        lapses: null,
+        stage: "rough_topic",
+        postponed: 0,
+      },
+      sourceTitle: null,
+      author: null,
+      concept: null,
+      siblingGroupId: null,
+      sourceId: null,
+      cardType: null,
+      linkedElementId: "card-1",
+      linkedElementType: "card",
+      protected: true,
+      due: "today",
+      dueLabel: "Due today",
+    };
+    h.listQueue.mockResolvedValueOnce({
+      items: [task],
+      counts: {
+        all: 1,
+        card: 0,
+        source: 0,
+        extract: 0,
+        topic: 0,
+        task: 1,
+        highPriority: 1,
+        overdue: 0,
+        protected: 1,
+      },
+      budget: { used: 1, target: 30 },
+    });
+
+    render(<ProcessQueue />);
+    await waitFor(() => expect(currentItemId()).toBe("task-1"));
+    fireEvent.click(screen.getByTestId("process-action-open"));
+
+    expect(h.selectSpy).toHaveBeenCalledWith("card-1");
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/review" });
+  });
+
   it("T076: requests queue.list with mode `full` on mount", async () => {
     render(<ProcessQueue />);
     await screen.findByTestId("process-item");
