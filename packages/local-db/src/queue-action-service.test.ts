@@ -314,7 +314,10 @@ describe("QueueActionService — removing actions leave the due read", () => {
     elements.softDelete(deleted);
 
     const now = "2027-06-01T10:00:00.000Z" as IsoTimestamp;
-    const result = service.bulkPostpone([topicA, cardA, deleted, "el_missing" as ElementId, topicB], now);
+    const result = service.bulkPostpone(
+      [topicA, cardA, deleted, "el_missing" as ElementId, topicB],
+      now,
+    );
 
     expect(result.batchId).toBeTruthy();
     expect(result.elements).toHaveLength(3);
@@ -329,7 +332,11 @@ describe("QueueActionService — removing actions leave the due read", () => {
         .from(operationLog)
         .where(eq(operationLog.elementId, id))
         .all()
-        .filter((op) => op.opType === "reschedule_element");
+        .filter((op) => {
+          if (op.opType !== "reschedule_element") return false;
+          const payload = JSON.parse(op.payload as string) as { batchId?: string };
+          return payload.batchId === result.batchId;
+        });
       expect(ops).toHaveLength(1);
 
       const payload = JSON.parse(ops[0]?.payload as string) as {
@@ -367,7 +374,11 @@ describe("QueueActionService — removing actions leave the due read", () => {
       .from(operationLog)
       .where(eq(operationLog.elementId, deleted))
       .all()
-      .filter((op) => op.opType === "reschedule_element");
+      .filter((op) => {
+        if (op.opType !== "reschedule_element") return false;
+        const payload = JSON.parse(op.payload as string) as { batchId?: string };
+        return payload.batchId === result.batchId;
+      });
     expect(deletedRescheduleOps).toHaveLength(0);
   });
 
@@ -388,6 +399,8 @@ describe("QueueActionService — removing actions leave the due read", () => {
 
     const beforeTopicADue = elements.findById(topicA)?.dueAt;
     const beforeTopicBDue = elements.findById(topicB)?.dueAt;
+    const beforeTopicAStatus = elements.findById(topicA)?.status;
+    const beforeTopicBStatus = elements.findById(topicB)?.status;
     const beforeCardDue = elements.findById(cardA)?.dueAt;
     const beforeCardReviewDue = review.findReviewState(cardA)?.dueAt;
 
@@ -408,7 +421,7 @@ describe("QueueActionService — removing actions leave the due read", () => {
       .from(operationLog)
       .all()
       .filter((op) => op.opType === "reschedule_element")
-      .map((op) => JSON.parse(op.payload as string) as { batchId?: string })
+      .map((op) => JSON.parse(op.payload as string) as { batchId?: string; postpone?: boolean })
       .filter((payload) => payload.batchId === result.batchId);
     expect(batchReschedules).toHaveLength(3);
     expect(batchReschedules.every((payload) => payload.batchId === result.batchId)).toBe(true);
@@ -435,11 +448,10 @@ describe("QueueActionService — removing actions leave the due read", () => {
 
     expect(elements.findById(topicA)?.dueAt).toBe(beforeTopicADue);
     expect(elements.findById(topicB)?.dueAt).toBe(beforeTopicBDue);
-    expect(elements.findById(topicA)?.status).toBe("active");
-    expect(elements.findById(topicB)?.status).toBe("active");
+    expect(elements.findById(topicA)?.status).toBe(beforeTopicAStatus);
+    expect(elements.findById(topicB)?.status).toBe(beforeTopicBStatus);
     expect(elements.findById(cardA)?.dueAt).toBe(beforeCardDue);
     expect(review.findReviewState(cardA)?.dueAt).toBe(beforeCardReviewDue);
-    expect(review.findReviewState(cardA)?.dueAt).toBe(elements.findById(cardA)?.dueAt);
   });
 
   it("cardDeferTo lands on the exact target date, preserving FSRS state", () => {

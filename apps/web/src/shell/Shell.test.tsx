@@ -139,8 +139,8 @@ vi.mock("./useShellShortcuts", () => ({
   useShellShortcuts: (handlers: unknown) => h.useShellShortcuts(handlers),
 }));
 
-import { Shell } from "./Shell";
 import { OPEN_HELP_EVENT } from "./nav";
+import { Shell } from "./Shell";
 
 beforeEach(() => {
   h.pathname = "/queue";
@@ -269,31 +269,33 @@ describe("Shell", () => {
     await waitFor(() => expect(h.createBackup).toHaveBeenCalledTimes(2));
   });
 
-  it("opens and closes the in-app help center from shell help events", () => {
+  it("opens and closes the in-app help center from shell help events", async () => {
     render(<Shell />);
 
     expect(screen.queryByTestId("help-center")).not.toBeInTheDocument();
 
-    window.dispatchEvent(new CustomEvent(OPEN_HELP_EVENT));
-    expect(screen.getByTestId("help-center")).toBeInTheDocument();
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent(OPEN_HELP_EVENT));
+    });
+    expect(await screen.findByTestId("help-center")).toBeInTheDocument();
     expect(screen.getByText("How can we help?")).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText("Close help center"));
-    expect(screen.queryByTestId("help-center")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("help-center")).not.toBeInTheDocument());
   });
 
-  it("opens help from the user menu and navigates from an article action", () => {
+  it("opens help from the user menu and navigates from an article action", async () => {
     render(<Shell />);
 
     fireEvent.click(screen.getByTestId("user-chip"));
     fireEvent.click(screen.getByTestId("usermenu-help"));
-    expect(screen.getByText("How can we help?")).toBeInTheDocument();
+    expect(await screen.findByText("How can we help?")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Search the help center"), {
-      target: { value: "home dashboard" },
+      target: { value: "home" },
     });
-    fireEvent.click(screen.getByText(/The Home command center/i));
-    fireEvent.click(screen.getByRole("button", { name: "Open the relevant screen" }));
+    fireEvent.click(await screen.findByText(/The Home command center/i));
+    fireEvent.click(await screen.findByRole("button", { name: "Open the relevant screen" }));
 
     expect(h.navigate).toHaveBeenCalledWith({ to: "/" });
   });

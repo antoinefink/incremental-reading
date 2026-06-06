@@ -20,7 +20,9 @@
  *      at stage `card_draft`;
  *   4. inherit the extract's TAGS onto the card (`ElementRepository.addTagWithin`,
  *      logs `add_tag` — mirrors `ExtractionService`'s tag inheritance);
- *   5. SIBLING GROUPING — when a `siblingGroupId` is supplied (subsequent cards
+ *   5. record the `derived_from` edge card → extract (`add_relation`) so lineage
+ *      graph queries can traverse the card hop explicitly;
+ *   6. SIBLING GROUPING — when a `siblingGroupId` is supplied (subsequent cards
  *      from the same extract/cloze-set reuse it; the FIRST card from an extract
  *      mints a fresh one), add a `sibling_group` `element_relations` edge from the
  *      new card to the group (`ElementRepository.addRelationWithin`, logs
@@ -251,7 +253,14 @@ export class CardService {
         this.elements.addTagWithin(tx, created.element.id, tagName);
       }
 
-      // 5) sibling-group edge card → group (add_relation). Burying in review is M7;
+      // 5) derived_from edge card → extract (lineage; add_relation).
+      this.elements.addRelationWithin(tx, {
+        fromElementId: created.element.id,
+        toElementId: parentId,
+        relationType: "derived_from",
+      });
+
+      // 6) sibling-group edge card → group (add_relation). Burying in review is M7;
       //    M6 only RECORDS the grouping so a Q&A + cloze pair / multi-cloze set are linked.
       this.elements.addRelationWithin(tx, {
         fromElementId: created.element.id,

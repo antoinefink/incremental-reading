@@ -8,18 +8,18 @@
  * mix-ups).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { DbHandle } from "@interleave/db";
 import type { BlockId, ElementId } from "@interleave/core";
-import { and, eq } from "drizzle-orm";
+import type { DbHandle } from "@interleave/db";
 import { elementRelations, operationLog } from "@interleave/db";
+import { and, eq } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { CardService } from "./card-service";
+import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
 import { ExtractionService } from "./extraction-service";
-import { createInMemoryDb } from "./test-db";
-import { DocumentRepository } from "./document-repository";
-import { CardService } from "./card-service";
 import { OperationLogRepository } from "./operation-log-repository";
 import { SourceRepository } from "./source-repository";
+import { createInMemoryDb } from "./test-db";
 
 let handle: DbHandle;
 
@@ -40,7 +40,9 @@ function seedSource(handle: DbHandle): ElementId {
 }
 
 function sourceBlocks(handle: DbHandle, sourceId: ElementId): BlockId[] {
-  return new DocumentRepository(handle.db).listBlocks(sourceId).map((block) => block.stableBlockId as BlockId);
+  return new DocumentRepository(handle.db)
+    .listBlocks(sourceId)
+    .map((block) => block.stableBlockId as BlockId);
 }
 
 beforeEach(() => {
@@ -84,7 +86,10 @@ describe("source → extract → card chain operation logs", () => {
       relationType: "derived_from",
     });
 
-    const cardRelation = cardOps.find((op) => op.opType === "add_relation")?.payload;
+    const cardRelation = cardOps
+      .filter((op) => op.opType === "add_relation")
+      .map((op) => op.payload as { relationType?: string })
+      .find((payload) => payload.relationType === "derived_from");
     expect(cardRelation).toMatchObject({
       fromElementId: card.id,
       toElementId: extract.id,
@@ -101,16 +106,23 @@ describe("source → extract → card chain operation logs", () => {
     expect(cardTypes).not.toContain("reschedule_element");
 
     // Derived-from is written once per hop only.
-    expect(handle.db
-      .select()
-      .from(operationLog)
-      .where(and(eq(operationLog.elementId, extract.id), eq(operationLog.opType, "add_relation")))
-      .all().length).toBe(1);
-    expect(handle.db
+    expect(
+      handle.db
+        .select()
+        .from(operationLog)
+        .where(and(eq(operationLog.elementId, extract.id), eq(operationLog.opType, "add_relation")))
+        .all().length,
+    ).toBe(1);
+    const cardDerivedFromOps = handle.db
       .select()
       .from(operationLog)
       .where(and(eq(operationLog.elementId, card.id), eq(operationLog.opType, "add_relation")))
-      .all().length).toBe(1);
+      .all()
+      .filter((op) => {
+        const payload = JSON.parse(op.payload as string) as { relationType?: string };
+        return payload.relationType === "derived_from";
+      });
+    expect(cardDerivedFromOps).toHaveLength(1);
 
     // The same payload used in logs for the extract edge is mirrored by the edge row.
     const dbRelation = handle.db

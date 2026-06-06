@@ -115,7 +115,11 @@ describe("registerIpcHandlers", () => {
 
     const malformed = [
       { channel: IPC_CHANNELS.settingsUpdate, payload: {}, service: "updateSetting" },
-      { channel: IPC_CHANNELS.elementsSetPriority, payload: { id: "el_1", priority: "Z" }, service: "setElementPriority" },
+      {
+        channel: IPC_CHANNELS.elementsSetPriority,
+        payload: { id: "el_1", priority: "Z" },
+        service: "setElementPriority",
+      },
       {
         channel: IPC_CHANNELS.queueSchedule,
         payload: { id: "el_1", choice: { kind: "invalid" as never } },
@@ -212,22 +216,37 @@ describe("registerIpcHandlers", () => {
     const db = fakeDbService();
     registerIpcHandlers(db as never);
 
-    electron.handlers.get(IPC_CHANNELS.settingsUpdate)?.({}, { key: "dailyReviewBudget", value: 24 });
+    electron.handlers.get(IPC_CHANNELS.settingsUpdate)?.(
+      {},
+      { key: "dailyReviewBudget", value: 24 },
+    );
     expect(db.updateSetting).toHaveBeenCalledWith("dailyReviewBudget", 24);
 
-    electron.handlers.get(IPC_CHANNELS.elementsSetPriority)?.({}, { id: "el_1", priority: "A" });
-    expect(db.setElementPriority).toHaveBeenCalledWith({ id: "el_1", priority: "A" });
+    electron.handlers.get(IPC_CHANNELS.elementsSetPriority)?.(
+      {},
+      { id: "el_1", action: { kind: "set", priority: "A" } },
+    );
+    expect(db.setElementPriority).toHaveBeenCalledWith({
+      id: "el_1",
+      action: { kind: "set", priority: "A" },
+    });
 
-    electron.handlers.get(IPC_CHANNELS.queueSchedule)?.({}, { id: "el_1", choice: { kind: "tomorrow" } });
+    electron.handlers.get(IPC_CHANNELS.queueSchedule)?.(
+      {},
+      { id: "el_1", choice: { kind: "tomorrow" } },
+    );
     expect(db.scheduleQueueItem).toHaveBeenCalledWith({
       id: "el_1",
       choice: { kind: "tomorrow" },
     });
 
-    electron.handlers.get(IPC_CHANNELS.queueUndo)?.({}, {
-      id: "el_1",
-      undo: { kind: "restore", previousStatus: "active" },
-    });
+    electron.handlers.get(IPC_CHANNELS.queueUndo)?.(
+      {},
+      {
+        id: "el_1",
+        undo: { kind: "restore", previousStatus: "active" },
+      },
+    );
     expect(db.undoQueueAction).toHaveBeenCalledWith({
       id: "el_1",
       undo: { kind: "restore", previousStatus: "active" },
@@ -245,22 +264,28 @@ describe("registerIpcHandlers", () => {
     electron.handlers.get(IPC_CHANNELS.queueCatchUpApply)?.({}, { spreadDays: 3 });
     expect(db.applyCatchUp).toHaveBeenCalledWith({ spreadDays: 3 });
 
-    electron.handlers.get(IPC_CHANNELS.queueVacation)?.({}, {
-      awayStart: "2027-01-01T00:00:00.000Z",
-      awayEnd: "2027-01-03T23:59:59.000Z",
-      asOf: "2027-01-01T00:00:00.000Z",
-    });
+    electron.handlers.get(IPC_CHANNELS.queueVacation)?.(
+      {},
+      {
+        awayStart: "2027-01-01T00:00:00.000Z",
+        awayEnd: "2027-01-03T23:59:59.000Z",
+        asOf: "2027-01-01T00:00:00.000Z",
+      },
+    );
     expect(db.previewVacation).toHaveBeenCalledWith({
       awayStart: "2027-01-01T00:00:00.000Z",
       awayEnd: "2027-01-03T23:59:59.000Z",
       asOf: "2027-01-01T00:00:00.000Z",
     });
 
-    electron.handlers.get(IPC_CHANNELS.queueVacationApply)?.({}, {
-      awayStart: "2027-01-01T00:00:00.000Z",
-      awayEnd: "2027-01-03T23:59:59.000Z",
-      asOf: "2027-01-01T00:00:00.000Z",
-    });
+    electron.handlers.get(IPC_CHANNELS.queueVacationApply)?.(
+      {},
+      {
+        awayStart: "2027-01-01T00:00:00.000Z",
+        awayEnd: "2027-01-03T23:59:59.000Z",
+        asOf: "2027-01-01T00:00:00.000Z",
+      },
+    );
     expect(db.applyVacation).toHaveBeenCalledWith({
       awayStart: "2027-01-01T00:00:00.000Z",
       awayEnd: "2027-01-03T23:59:59.000Z",
@@ -270,29 +295,38 @@ describe("registerIpcHandlers", () => {
     electron.handlers.get(IPC_CHANNELS.sourcesImportManual)?.({}, { title: "From test" });
     expect(db.importManualSource).toHaveBeenCalledWith({ title: "From test" });
 
-    electron.handlers.get(IPC_CHANNELS.extractionsCreate)?.({}, {
-      sourceElementId: "el_1",
-      selectedText: "selected",
-      blockIds: ["b_1"],
-    });
+    electron.handlers.get(IPC_CHANNELS.extractionsCreate)?.(
+      {},
+      {
+        sourceElementId: "el_1",
+        selectedText: "selected",
+        blockIds: ["b_1"],
+      },
+    );
     expect(db.createExtraction).toHaveBeenCalledWith({
       sourceElementId: "el_1",
       selectedText: "selected",
       blockIds: ["b_1"],
     });
 
-    electron.handlers.get(IPC_CHANNELS.cardsUpdate)?.({}, {
-      cardId: "el_1",
-      prompt: "What changed?",
-    });
+    electron.handlers.get(IPC_CHANNELS.cardsUpdate)?.(
+      {},
+      {
+        cardId: "el_1",
+        prompt: "What changed?",
+      },
+    );
     expect(db.updateCard).toHaveBeenCalledWith({ cardId: "el_1", prompt: "What changed?" });
 
-    electron.handlers.get(IPC_CHANNELS.reviewGrade)?.({}, {
-      cardId: "el_1",
-      rating: "good",
-      responseMs: 1100,
-      asOf: "2027-01-01T00:00:00.000Z",
-    });
+    electron.handlers.get(IPC_CHANNELS.reviewGrade)?.(
+      {},
+      {
+        cardId: "el_1",
+        rating: "good",
+        responseMs: 1100,
+        asOf: "2027-01-01T00:00:00.000Z",
+      },
+    );
     expect(db.reviewGrade).toHaveBeenCalledWith({
       cardId: "el_1",
       rating: "good",
@@ -311,16 +345,11 @@ describe("registerIpcHandlers", () => {
     const cardsCreate = electron.handlers.get(IPC_CHANNELS.cardsCreate);
     expect(cardsCreate).toBeTypeOf("function");
 
-    expect(() =>
-      cardsCreate?.({}, { kind: "qa", prompt: "What is X?", answer: "Y" }),
-    ).toThrow();
+    expect(() => cardsCreate?.({}, { kind: "qa", prompt: "What is X?", answer: "Y" })).toThrow();
     expect(db.createCard).not.toHaveBeenCalled();
 
     expect(() =>
-      cardsCreate?.(
-        {},
-        { extractId: "el_1", kind: "qa", prompt: "What is X?", answer: "Y" },
-      ),
+      cardsCreate?.({}, { extractId: "el_1", kind: "qa", prompt: "What is X?", answer: "Y" }),
     ).not.toThrow();
     expect(db.createCard).toHaveBeenCalledWith({
       extractId: "el_1",
