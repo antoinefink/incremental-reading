@@ -7,11 +7,11 @@
  * highlighted `result` rows, a selection detail panel with the source `refblock`
  * and open-in-context, and the read-only `ConceptGraph` map tab.
  *
- * Architecture (non-negotiable): UI only. All search runs in SQLite FTS5 behind
- * the typed `window.appApi.search.query` command (sanitization, `bm25` ranking,
- * concept/tag filtering all live main-side in `SearchRepository`); the concept
- * list comes from `appApi.listConcepts()`. The renderer holds no SQL, no ranking,
- * and no index logic. Typing debounces the query; an empty query clears results.
+ * Architecture (non-negotiable): UI only. Keyword search runs in SQLite FTS5
+ * behind the typed `window.appApi.search.query` command; empty-query facet
+ * counters/browsing use the typed `window.appApi.library.browse` command. The
+ * renderer holds no SQL, no ranking, and no index logic. Typing debounces the
+ * query; an empty no-facet search stays on the prompt while loading counters.
  */
 
 import { useNavigate } from "@tanstack/react-router";
@@ -32,6 +32,9 @@ import {
   appApi,
   type ConceptNode,
   isDesktop,
+  type LibraryBrowseRequest,
+  type LibraryBrowseResult,
+  type LibraryItem,
   type SearchableType,
   type SearchCounts,
   type SearchResult,
@@ -56,6 +59,7 @@ const TYPE_GROUPS: readonly { type: SearchableType; title: string }[] = [
   { type: "extract", title: "Extracts" },
   { type: "card", title: "Cards" },
 ];
+const SEARCHABLE_TYPES = TYPE_GROUPS.map((g) => g.type);
 
 const PRIORITIES = ["A", "B", "C", "D"] as const;
 type PriorityLetter = (typeof PRIORITIES)[number];
@@ -65,6 +69,60 @@ const EMPTY_SEARCH_COUNTS: SearchCounts = {
   byConcept: {},
   byPriority: { A: 0, B: 0, C: 0, D: 0 },
 };
+
+function searchCountsFromBrowse(counts: LibraryBrowseResult["counts"]): SearchCounts {
+  return {
+    byType: {
+      source: counts.byType.source ?? 0,
+      extract: counts.byType.extract ?? 0,
+      card: counts.byType.card ?? 0,
+    },
+    byConcept: counts.byConcept,
+    byPriority: {
+      A: counts.byPriority.A ?? 0,
+      B: counts.byPriority.B ?? 0,
+      C: counts.byPriority.C ?? 0,
+      D: counts.byPriority.D ?? 0,
+    },
+  };
+}
+
+function isSearchableLibraryItem(
+  item: LibraryItem,
+): item is LibraryItem & { readonly type: SearchableType } {
+  return item.type === "source" || item.type === "extract" || item.type === "card";
+}
+
+function libraryItemToRow(item: LibraryItem & { readonly type: SearchableType }): LibraryRow {
+  return {
+    id: item.id,
+    type: item.type,
+    title: item.title,
+    snippet: "",
+    score: 0,
+    priority: item.priority,
+    priorityLabel: item.priorityLabel,
+    concept: item.concept,
+    sourceTitle: item.sourceTitle,
+    sourceLocationLabel: item.sourceLocationLabel,
+    dueAt: item.dueAt,
+    scheduler: item.scheduler,
+    due: item.due,
+    dueLabel: item.dueLabel,
+  };
+}
+
+function emptyQueryBrowseRequest(filters: {
+  readonly typeFilter: SearchableType | null;
+  readonly conceptFilter: string | null;
+  readonly priorityFilter: PriorityLetter | null;
+}): LibraryBrowseRequest {
+  return {
+    types: filters.typeFilter ? [filters.typeFilter] : SEARCHABLE_TYPES,
+    ...(filters.conceptFilter ? { conceptId: filters.conceptFilter } : {}),
+    ...(filters.priorityFilter ? { priorityLabel: filters.priorityFilter } : {}),
+  };
+}
 
 /** A due-state badge (overdue / today / soon) — matches the queue's `DueBadge`. */
 function DueBadge({ result }: { result: SearchResult }) {
@@ -108,8 +166,9 @@ export function LibraryScreen() {
   const [priorityFilter, setPriorityFilter] = useState<PriorityLetter | null>(null);
 
   const [results, setResults] = useState<readonly LibraryRow[]>([]);
-  // DRILL-DOWN filterbar counts scoped to the active keyword and all OTHER active
-  // facets. Concepts fall back to ConceptNode.memberCount when no keyword exists.
+  // DRILL-DOWN filterbar counts scoped to the active retrieval mode. Keyword and
+  // semantic paths use search/semantic counts; empty-query paths use library browse
+  // counts bounded to source/extract/card. ConceptNode.memberCount is Map volume.
   const [searchCounts, setSearchCounts] = useState<SearchCounts>(EMPTY_SEARCH_COUNTS);
   const [concepts, setConcepts] = useState<readonly ConceptNode[]>([]);
   const [selId, setSelId] = useState<string | null>(null);
@@ -123,6 +182,11 @@ export function LibraryScreen() {
   // "Build index" affordance, per the T087 spec) + an in-flight reindex guard.
   const [semanticIndex, setSemanticIndex] = useState({ embedded: 0, total: 0 });
   const [reindexing, setReindexing] = useState(false);
+
+  const debouncedTerm = debouncedQuery.trim();
+  const hasQuery = debouncedTerm.length > 0;
+  const hasActiveFacet = typeFilter !== null || conceptFilter !== null || priorityFilter !== null;
+  const hasEmptyFacetBrowse = !hasQuery && hasActiveFacet;
 
   // Debounce the raw input into the query that actually hits the bridge.
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -192,20 +256,41 @@ export function LibraryScreen() {
   // Run the search whenever the query or the type/concept filters change.
   useEffect(() => {
     if (!isDesktop()) return;
-    const q = debouncedQuery.trim();
+    const q = debouncedTerm;
     if (q.length === 0) {
-      // DEFERRED (vs the kit's "show all when no query"): the M8 spec scopes
-      // `search.query` to KEYWORD search over the FTS5 index and explicitly
-      // returns [] for an empty query — so an empty-query "browse by concept /
-      // type / priority facet" is intentionally not wired here. A future
-      // browse-by-facet path (so a map-node click populates Results without a
-      // keyword) would add a member-listing bridge surface backed by the existing
-      // `ConceptRepository.elementsForConcept` / the queue concept filter — out of
-      // scope for the keyword-search milestone, tracked as a follow-up.
+      let cancelled = false;
+      setLoading(true);
+      setError(null);
       setResults([]);
-      setSearchCounts(EMPTY_SEARCH_COUNTS);
-      setLoading(false);
-      return;
+      setSelId(null);
+      void appApi
+        .libraryBrowse(
+          emptyQueryBrowseRequest({
+            typeFilter,
+            conceptFilter,
+            priorityFilter,
+          }),
+        )
+        .then((res) => {
+          if (cancelled) return;
+          setSearchCounts(searchCountsFromBrowse(res.counts));
+          setResults(
+            hasEmptyFacetBrowse
+              ? res.items.filter(isSearchableLibraryItem).map(libraryItemToRow)
+              : [],
+          );
+          setSearchMode(semanticEnabled ? "fts" : "disabled");
+          setError(null);
+        })
+        .catch((e) => {
+          if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
     }
     let cancelled = false;
     setLoading(true);
@@ -263,7 +348,14 @@ export function LibraryScreen() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery, typeFilter, conceptFilter, priorityFilter, semanticEnabled]);
+  }, [
+    debouncedTerm,
+    typeFilter,
+    conceptFilter,
+    priorityFilter,
+    semanticEnabled,
+    hasEmptyFacetBrowse,
+  ]);
 
   // The result list IS the backend-narrowed set. The Priority facet is now applied
   // MAIN-side (threaded as `priorityLabel` into the FTS query), so the drill-down
@@ -342,15 +434,6 @@ export function LibraryScreen() {
     return m;
   }, [concepts]);
 
-  // Whether a keyword search is actually running (the drill-down concept counts
-  // only exist once there is a query — FTS returns [] for an empty query). When
-  // there is NO query, the filterbar concept chips fall back to the GLOBAL
-  // `memberCount` (the concept's total reach, the same number the Map shows) so the
-  // empty-search state reads as a browsable facet column — not a wall of `0`s. Once
-  // a keyword is typed, the chips switch to the keyword-scoped DRILL-DOWN
-  // `searchCounts`, preserving the count-matches-the-narrowed-list invariant.
-  const hasQuery = debouncedQuery.trim().length > 0;
-
   if (!desktop) {
     return (
       <div className="lib-shell" data-testid="route-search">
@@ -423,9 +506,7 @@ export function LibraryScreen() {
               >
                 <TypeIcon type={g.type} />
                 <span>{g.title}</span>
-                {hasQuery ? (
-                  <span className="filter-opt__count">{searchCounts.byType[g.type] ?? 0}</span>
-                ) : null}
+                <span className="filter-opt__count">{searchCounts.byType[g.type] ?? 0}</span>
               </button>
             ))}
           </div>
@@ -442,17 +523,10 @@ export function LibraryScreen() {
                   onClick={() => setConceptFilter((cur) => (cur === c.id ? null : c.id))}
                 >
                   <ConceptTag name={c.name} />
-                  {/* With a keyword active: the DRILL-DOWN count (members of this
-                      concept that ALSO match the keyword + type + priority), so the
-                      chip number always matches the narrowed result list. With NO
-                      keyword: the GLOBAL `memberCount` (the concept's total reach) so
-                      the empty state reads as a browsable facet — not a wall of `0`s`
-                      since keyword search returns [] for an empty query. */}
-                  <span className="filter-opt__count">
-                    {hasQuery
-                      ? (searchCounts.byConcept[c.id] ?? 0)
-                      : (conceptVolume.get(c.id) ?? 0)}
-                  </span>
+                  {/* Keyword counts come from `search.query`; empty-query counts come
+                      from `library.browse`, bounded to source/extract/card for this
+                      screen. The Map tab still uses the global concept volume. */}
+                  <span className="filter-opt__count">{searchCounts.byConcept[c.id] ?? 0}</span>
                 </button>
               ))}
             </div>
@@ -470,9 +544,7 @@ export function LibraryScreen() {
               >
                 <span className={`prio-dot prio-dot--${p.toLowerCase()}`} />
                 <span>Priority {p}</span>
-                {hasQuery ? (
-                  <span className="filter-opt__count">{searchCounts.byPriority[p] ?? 0}</span>
-                ) : null}
+                <span className="filter-opt__count">{searchCounts.byPriority[p] ?? 0}</span>
               </button>
             ))}
           </div>
@@ -509,7 +581,7 @@ export function LibraryScreen() {
                 ) : null}
                 {/* Semantic-search affordance (T087): a calm one-liner telling the
                     user which retrieval ran. Only shown once there is a query. */}
-                {debouncedQuery.trim().length > 0 ? (
+                {hasQuery ? (
                   searchMode === "semantic" ? (
                     <div className="lib-hint" data-testid="library-semantic-on">
                       Semantic search on — results include conceptually related items.
@@ -523,7 +595,7 @@ export function LibraryScreen() {
                 {/* T096 — launch a TARGETED review over the CARDS matching this query
                     (keyword always; semantic when enabled). Each button resolves its own
                     subset count and is omitted when no cards match. */}
-                {debouncedQuery.trim().length > 0 ? (
+                {hasQuery ? (
                   <div className="lib-review-modes" data-testid="library-review-modes">
                     <ReviewModeButton
                       selector={{ kind: "search", query: debouncedQuery.trim() }}
@@ -542,7 +614,7 @@ export function LibraryScreen() {
                     ) : null}
                   </div>
                 ) : null}
-                {debouncedQuery.trim().length === 0 ? (
+                {!hasQuery && !hasEmptyFacetBrowse ? (
                   <div className="lib-empty" data-testid="library-prompt">
                     <div className="lib-empty__icon">
                       <Icon name="search" size={26} />
@@ -578,9 +650,15 @@ export function LibraryScreen() {
                     <div className="lib-empty__icon">
                       <Icon name="search" size={26} />
                     </div>
-                    <h2 className="lib-empty__title">No matches for “{debouncedQuery.trim()}”</h2>
+                    <h2 className="lib-empty__title">
+                      {hasQuery
+                        ? `No matches for “${debouncedTerm}”`
+                        : "No matches for selected filters"}
+                    </h2>
                     <p className="lib-empty__body">
-                      Try a different term, or clear the type/concept/priority filters.
+                      {hasQuery
+                        ? "Try a different term, or clear the type/concept/priority filters."
+                        : "Clear the type/concept/priority filters to return to the search prompt."}
                     </p>
                   </div>
                 ) : (

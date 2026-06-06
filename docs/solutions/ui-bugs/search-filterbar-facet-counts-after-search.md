@@ -70,7 +70,7 @@ Concept counts join through live concept endpoints and use distinct matched elem
 
 For semantic search, include `counts` in `SemanticSearchResult`. Count over the fused result universe for Concept and Priority, and populate Type counts by running the fused query per searchable type when a type filter is active. That keeps the visible semantic rows and the Type chips from disagreeing.
 
-In the renderer, store one `searchCounts` object and update it with the same cancellation guard as `results`. Render Type, Concept, and Priority counts from it when a query exists; fall back to global concept volume only when there is no query.
+In the renderer, store one `searchCounts` object and update it with the same cancellation guard as `results`. Render Type, Concept, and Priority counts from keyword or semantic search when a query exists. Empty-query `/search` counts are a separate browse-backed mode; use `library.browse` bounded to source/extract/card there, not global concept volume.
 
 ## Why This Works
 
@@ -91,10 +91,12 @@ counts.byConcept[c] === search({ ...filters, conceptId: c }).results.length;
 
 - Cover every seam where count shape can drift: shared contract, renderer wrapper, `DbService`, `SearchRepository`, `LibraryScreen`, property tests, and Electron E2E.
 - Add semantic-specific tests: semantic results must return counts, and active type filters must still populate inactive Type chip counts.
+- Test keyword and empty-query facet paths independently because they use different bridge commands.
 - Update `results` and `counts` behind the same async cancellation guard so stale responses cannot partially overwrite the current query state.
 
 ## Related Issues
 
+- `docs/solutions/ui-bugs/search-empty-query-facets-browse-rows.md` covers the separate empty-query facet browse path for the same `/search` filterbar.
 - Low-overlap related docs:
   - `docs/solutions/ui-bugs/active-card-rows-open-card-detail-surface.md`
   - `docs/solutions/ui-bugs/url-imported-articles-inbox-processing.md`

@@ -137,6 +137,84 @@ test("typing a seeded term returns the source, extract, and card grouped + highl
   await app.close();
 });
 
+test("empty-query facets show counters and browse the matching collection rows", async () => {
+  const app = await launchApp(dataDir);
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+  await openSearch(page);
+
+  await expect(page.getByTestId("library-prompt")).toBeVisible();
+
+  const seedFacetState = await page.evaluate(async () => {
+    const api = window.appApi as unknown as {
+      library: {
+        browse(r: { types: readonly string[]; conceptId?: string }): Promise<{
+          items: { id: string; type: string }[];
+          counts: {
+            byType: Record<string, number>;
+            byConcept: Record<string, number>;
+            byPriority: Record<string, number>;
+          };
+        }>;
+      };
+      concepts: {
+        list(): Promise<{ concepts: { id: string; name: string }[] }>;
+      };
+    };
+    const base = await api.library.browse({ types: ["source", "extract", "card"] });
+    const concepts = await api.concepts.list();
+    const intelligence = concepts.concepts.find((c) => c.name === "Intelligence");
+    const conceptBrowse = intelligence
+      ? await api.library.browse({
+          types: ["source", "extract", "card"],
+          conceptId: intelligence.id,
+        })
+      : null;
+    return { base, intelligence, conceptBrowse };
+  });
+  expect(seedFacetState.base.counts.byType.source).toBeGreaterThan(0);
+  expect(seedFacetState.intelligence).toBeDefined();
+  expect(seedFacetState.conceptBrowse?.items.length ?? 0).toBeGreaterThan(0);
+
+  await expect(
+    page.getByTestId("library-filter-type-source").locator(".filter-opt__count"),
+  ).toHaveText(String(seedFacetState.base.counts.byType.source));
+  await expect(
+    page.getByTestId("library-filter-type-extract").locator(".filter-opt__count"),
+  ).toHaveText(String(seedFacetState.base.counts.byType.extract));
+  await expect(
+    page.getByTestId("library-filter-type-card").locator(".filter-opt__count"),
+  ).toHaveText(String(seedFacetState.base.counts.byType.card));
+
+  await page.getByTestId("library-filter-type-source").click();
+  await expect(page.getByTestId("library-prompt")).toHaveCount(0);
+  await expect(page.getByTestId("library-group-source")).toBeVisible();
+  await expect(
+    page.locator('[data-testid="library-result"][data-result-type="source"]').first(),
+  ).toBeVisible();
+  await expect(page.locator('[data-testid="library-result"][data-result-type="card"]')).toHaveCount(
+    0,
+  );
+
+  await page.getByTestId("library-filter-type-source").click();
+  await expect(page.getByTestId("library-prompt")).toBeVisible();
+
+  const intelligence = seedFacetState.intelligence;
+  if (!intelligence) throw new Error("Seeded Intelligence concept was not found");
+  await page.getByTestId(`library-filter-concept-${intelligence.id}`).click();
+  await expect(page.getByTestId("library-prompt")).toHaveCount(0);
+  await expect(page.getByTestId("library-result").first()).toBeVisible();
+  const renderedTypes = await page
+    .getByTestId("library-result")
+    .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-result-type")));
+  expect(renderedTypes.length).toBeGreaterThan(0);
+  expect(renderedTypes.every((type) => ["source", "extract", "card"].includes(type ?? ""))).toBe(
+    true,
+  );
+
+  await app.close();
+});
+
 test("the search bridge returns ranked, type-narrowable results", async () => {
   const app = await launchApp(dataDir);
   const page = await app.firstWindow();
