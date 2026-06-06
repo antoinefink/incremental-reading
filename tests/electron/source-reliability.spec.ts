@@ -114,7 +114,7 @@ test("inspector Reliability: set tier=primary / confidence=high / type=paper →
   await page
     .getByTestId("inspector-reliability-notes-input")
     .fill("Foundational ARC paper; widely cited.");
-  await page.getByTestId("inspector-reliability-save").click();
+  await page.getByTestId("inspector-reliability-apply").click();
 
   // The badge reads the assembled label (computed main-side via formatSourceRef).
   const badge = page.getByTestId("inspector-reliability-badge");

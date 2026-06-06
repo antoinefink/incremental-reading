@@ -1287,8 +1287,8 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     {
       type: "ul",
       items: [
-        "<b>Trim</b> — runs a whitespace and filler-word cleanup on the body automatically, then saves.",
-        "<b>Save</b> — saves the current editor content without advancing the stage. Use this after manually rewriting.",
+        "<b>Manual rewrites</b> — edit the body directly; changes save automatically without advancing the stage.",
+        "<b>Trim</b> — runs a whitespace and filler-word cleanup on the body, then saves the cleaned result.",
         "<b>Split</b> — requires a live text selection in the extract body; lifts the selection into a new sibling extract with the same source lineage. The original is not deleted.",
         "<b>Sub-extract</b> — the same gesture as Split; both buttons act on the live selection and behave identically.",
         "<b>Convert to card</b> — opens the card builder as a third column. The extract is not consumed; the card inherits its lineage.",
@@ -1327,13 +1327,13 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "The center column holds the stage stepper (<code>raw_extract → clean_extract → atomic_statement</code>), the <strong>Advance stage</strong> button, an editable body where you rewrite the content, and the action bar.",
+      text: "The center column holds the stage stepper (<code>raw_extract → clean_extract → atomic_statement</code>), the <strong>Advance stage</strong> button, an autosaved editable body where you rewrite the content, and the action bar.",
     },
     {
       type: "ul",
       items: [
+        "<b>Manual rewrites</b> — edit the body directly; changes save automatically without changing the stage.",
         "<b>Trim</b> — automatic whitespace and filler cleanup, saved immediately.",
-        "<b>Save</b> — saves your manual edits without changing the stage.",
         "<b>Split / Sub-extract</b> — select text in the body, then click either button to lift that selection into a new child extract. Both require a live selection.",
         "<b>Convert to card</b> — opens the card builder column. The extract is unchanged and continues to be scheduled.",
         "<b>Postpone</b> — reschedules this extract on the attention scheduler using the heuristic interval.",
@@ -4314,7 +4314,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "After selecting <code>Anthropic</code> or <code>OpenAI</code>, an <b>AI API key</b> field appears. Paste your key and click <b>Save</b>. The field is write-only: the key is stored in this vault's SQLite settings table and is never returned to the renderer or shown in the UI again. If a key is already configured, the field shows <code>•••• configured</code>. Enter a new value and click Save to replace it.",
+      text: "After selecting <code>Anthropic</code> or <code>OpenAI</code>, an <b>AI API key</b> field appears. Paste your key and click <b>Store key</b>. The field is write-only: the key is stored in this vault's SQLite settings table and is never returned to the renderer or shown in the UI again. If a key is already configured, the field shows <code>•••• configured</code>. Enter a new value and store it to replace the old key.",
     },
     {
       type: "h2",
@@ -4397,7 +4397,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "Two options: <code>Local</code> (the default — downloads a small model, computes on-device, fully offline) or <code>API key</code> (uses your own embedding provider key, stored in the vault only, never sent to Interleave). Select <code>API key</code>, paste your key, and click <b>Save</b> to switch providers.",
+      text: "Two options: <code>Local</code> (the default — downloads a small model, computes on-device, fully offline) or <code>API key</code> (uses your own embedding provider key, stored in the vault only, never sent to Interleave). Select <code>API key</code>, paste your key, and click <b>Store key</b> to switch providers.",
     },
     {
       type: "h2",

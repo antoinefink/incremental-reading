@@ -9,8 +9,8 @@
  *
  *   1. the `cards.*` repair bridge surface exists (update / suspend / delete / flag)
  *      and there is no generic `db.query`;
- *   2. in review, EDIT a card's answer → save → the edit is persisted (re-read
- *      through the bridge) and SURVIVES an app restart;
+ *   2. in review, EDIT a card's answer → Done flushes the autosaved edit, it is
+ *      persisted (re-read through the bridge), and SURVIVES an app restart;
  *   3. FLAG a card as bad → the flag persists, rides the review card view, and
  *      survives an app restart;
  *   4. OPEN SOURCE → navigates to the originating source reader (lineage jump-back);
@@ -154,7 +154,7 @@ test("editing a card's body in review persists and survives a restart", async ()
     } else {
       await page.getByTestId("review-edit-answer").fill(newAnswer);
     }
-    await page.getByTestId("review-edit-save").click();
+    await page.getByTestId("review-edit-done").click();
     await expect(page.getByTestId("review-edit")).toHaveCount(0);
 
     // The edit is persisted (read back through the session bridge).

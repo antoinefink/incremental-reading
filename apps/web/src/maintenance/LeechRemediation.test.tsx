@@ -6,8 +6,8 @@
  * `CardRemediationService`); this asserts the RENDERER seam of the remediation screen:
  *  - the leech list loads from `appApi.reviewLeeches()` and renders each card with its
  *    lapse count + source + the FULL action row;
- *  - **Rewrite** opens the inline editor and saves via `appApi.updateCard` (then
- *    un-leeches);
+ *  - **Rewrite** opens the inline editor, autosaves via `appApi.updateCard`, then resolves
+ *    the leech;
  *  - **Split** opens the multi-part editor and calls `appApi.splitCard` with the parts;
  *  - **Add context** calls `appApi.addCardContext`;
  *  - **Back to extract** is DISABLED when `parentExtractId` is `null`, and calls
@@ -131,7 +131,7 @@ describe("LeechRemediation", () => {
     }
   });
 
-  it("rewrites a leech via updateCard then un-leeches it, and refreshes", async () => {
+  it("autosaves a leech rewrite, then resolves the leech and refreshes", async () => {
     render(<LeechRemediation />);
     await screen.findByTestId("leech-card");
     fireEvent.click(screen.getByTestId("leech-rewrite"));
@@ -141,18 +141,48 @@ describe("LeechRemediation", () => {
     fireEvent.change(screen.getByTestId("leech-edit-answer"), {
       target: { value: "Clearer answer." },
     });
-    fireEvent.click(screen.getByTestId("leech-edit-save"));
-    await waitFor(() =>
-      expect(h.updateCard).toHaveBeenCalledWith({
-        cardId: "card-leech",
-        prompt: "Clearer prompt?",
-        answer: "Clearer answer.",
-      }),
+
+    expect(screen.queryByTestId("leech-edit-save")).not.toBeInTheDocument();
+    await waitFor(
+      () =>
+        expect(h.updateCard).toHaveBeenCalledWith({
+          cardId: "card-leech",
+          prompt: "Clearer prompt?",
+          answer: "Clearer answer.",
+        }),
+      { timeout: 1200 },
     );
+    fireEvent.click(screen.getByTestId("leech-edit-resolve"));
     await waitFor(() =>
       expect(h.markLeechCard).toHaveBeenCalledWith({ cardId: "card-leech", leech: false }),
     );
     await waitFor(() => expect(h.reviewLeeches).toHaveBeenCalledTimes(2));
+  });
+
+  it("persists a leech rewrite when closing the editor", async () => {
+    render(<LeechRemediation />);
+    await screen.findByTestId("leech-card");
+    fireEvent.click(screen.getByTestId("leech-rewrite"));
+    fireEvent.change(await screen.findByTestId("leech-edit-prompt"), {
+      target: { value: "Closed prompt?" },
+    });
+    fireEvent.change(screen.getByTestId("leech-edit-answer"), {
+      target: { value: "Closed answer." },
+    });
+
+    fireEvent.click(screen.getByTestId("leech-edit-close"));
+
+    await waitFor(() =>
+      expect(h.updateCard).toHaveBeenCalledWith({
+        cardId: "card-leech",
+        prompt: "Closed prompt?",
+        answer: "Closed answer.",
+      }),
+    );
+    expect(h.markLeechCard).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.queryByTestId("leech-edit-card-leech")).not.toBeInTheDocument(),
+    );
   });
 
   it("splits a leech via splitCard with the authored parts and refreshes", async () => {

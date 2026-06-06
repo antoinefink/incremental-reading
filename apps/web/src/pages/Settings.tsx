@@ -287,7 +287,7 @@ function SemanticSearchPanel({
   patch: (next: Partial<AppSettings>) => Promise<void>;
 }) {
   // The user's OWN embedding key is write-only (T087) — the renderer never reads it back.
-  // It tracks the input locally + persists on save, mirroring the AI key field.
+  // It tracks the input locally + persists when the key is stored, mirroring the AI key field.
   const [embeddingKeyInput, setEmbeddingKeyInput] = useState("");
   const [status, setStatus] = useState<{
     vecAvailable: boolean;
@@ -417,7 +417,7 @@ function SemanticSearchPanel({
             />
             <button
               type="button"
-              data-testid="setting-embedding-save-key"
+              data-testid="setting-embedding-store-key"
               onClick={() => {
                 const trimmed = embeddingKeyInput.trim();
                 if (trimmed.length === 0) return;
@@ -426,7 +426,7 @@ function SemanticSearchPanel({
               }}
               className="rounded-md border border-border bg-surface px-3 py-1 text-sm text-text hover:bg-surface-2"
             >
-              Save
+              Store key
             </button>
           </div>
         </SettingRow>
@@ -589,11 +589,11 @@ function AiAssistancePanel({
             />
             <button
               type="button"
-              data-testid="setting-ai-save-key"
+              data-testid="setting-ai-store-key"
               onClick={() => void onSaveKey()}
               className="rounded-md border border-border bg-surface px-3 py-1 text-sm text-text hover:bg-surface-2"
             >
-              Save
+              Store key
             </button>
           </div>
         </SettingRow>

@@ -89,7 +89,7 @@ describe("Inspector ReliabilitySection (T091)", () => {
     expect(screen.getByTestId("inspector-reliability-edit")).toHaveTextContent(/add reliability/i);
   });
 
-  it("opens the editor, saves via sources.updateReliability, and fires onChanged", async () => {
+  it("opens the editor, applies via sources.updateReliability, and fires onChanged", async () => {
     const onChanged = vi.fn();
     render(<ReliabilitySection sourceId="src-1" provenance={EMPTY} onChanged={onChanged} />);
 
@@ -106,7 +106,7 @@ describe("Inspector ReliabilitySection (T091)", () => {
     fireEvent.change(screen.getByTestId("inspector-reliability-notes-input"), {
       target: { value: "Landmark paper." },
     });
-    fireEvent.click(screen.getByTestId("inspector-reliability-save"));
+    fireEvent.click(screen.getByTestId("inspector-reliability-apply"));
 
     await waitFor(() => {
       expect(h.updateSourceReliability).toHaveBeenCalledWith(

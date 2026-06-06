@@ -780,7 +780,7 @@ const STABILITY_OPTIONS: readonly { value: FactStability; label: string }[] = [
  * `jurisdiction`/`software_version`/`fact_stability`, with inline edit controls that
  * call `cards.setLifetime` (one `update_element`; "expired" stays a derived attribute,
  * never a status). Card-only. When no lifetime is set it offers an "Add expiry"
- * affordance; opening the editor reveals the fields. On save the inspector re-reads
+ * affordance; opening the editor reveals the fields. On apply the inspector re-reads
  * (`onChanged`) so the badge + the review banner reflect the new lifetime.
  */
 export function ExpirySection({
@@ -975,12 +975,12 @@ export function ExpirySection({
             <button
               type="button"
               className="insp-add__btn"
-              data-testid="inspector-expiry-save"
+              data-testid="inspector-expiry-apply"
               disabled={busy}
               onClick={() => void save()}
             >
               <Icon name="check" size={13} />
-              Save
+              Apply
             </button>
             <button
               type="button"
@@ -1286,7 +1286,7 @@ function reliabilityBadgeClass(
  * inline edit controls (three enum pickers + a notes textarea) that call
  * `sources.updateReliability` (one `update_element`; reliability is provenance, not
  * lineage). Source-only. When nothing is set it offers an "Add reliability" affordance.
- * On save the inspector re-reads (`onChanged`) so the badge + the card refblocks derived
+ * On apply the inspector re-reads (`onChanged`) so the badge + the card refblocks derived
  * from this source reflect the new reliability.
  */
 export function ReliabilitySection({
@@ -1492,12 +1492,12 @@ export function ReliabilitySection({
             <button
               type="button"
               className="insp-add__btn"
-              data-testid="inspector-reliability-save"
+              data-testid="inspector-reliability-apply"
               disabled={busy}
               onClick={() => void save()}
             >
               <Icon name="check" size={13} />
-              Save
+              Apply
             </button>
             <button
               type="button"

@@ -103,7 +103,7 @@ test("inspector Expiry: set a past valid_until + review_by → the badge reads E
   await page.getByTestId("inspector-expiry-review-by").fill("2020-01-01");
   await page.getByTestId("inspector-expiry-stability").selectOption("volatile");
   await page.getByTestId("inspector-expiry-jurisdiction").fill("EU");
-  await page.getByTestId("inspector-expiry-save").click();
+  await page.getByTestId("inspector-expiry-apply").click();
 
   // The derived status badge reads "Expired" (computed main-side, not in React).
   const badge = page.getByTestId("inspector-expiry-badge");

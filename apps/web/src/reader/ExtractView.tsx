@@ -9,9 +9,9 @@
  *    affordance (T022), and the full {@link LineageTree} (T023).
  *  - CENTER — distill: the `Stage`/`SchedulerChip` chips, the `Advance stage`
  *    action + a clickable stage stepper (`raw_extract → clean_extract →
- *    atomic_statement`), the editable extract body, and the action bar — Trim,
- *    Rewrite (save), Split (T025), Sub-extract (T025), Convert to card (T033),
- *    Postpone, Mark done, Delete.
+ *    atomic_statement`), the autosaved editable extract body, and the action bar
+ *    — Trim, Split (T025), Sub-extract (T025), Convert to card (T033), Postpone,
+ *    Mark done, Delete.
  *  - RIGHT — the {@link CardBuilder} (T033/T034), mounted as the third `split3`
  *    column when "Convert to card" (or the Cloze selection-toolbar action) opens
  *    it; it authors a Q&A / cloze card from THIS extract via `cards.create`.
@@ -40,6 +40,7 @@ import {
   type SourceEditorChange,
   setReaderDecorations,
   toBlockInputs,
+  toPlainText,
 } from "@interleave/editor";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -117,7 +118,7 @@ export function ExtractView() {
   // re-binds its listeners when the editor (re)mounts; the ref stays for imperative use.
   const [editor, setEditor] = useState<Editor | null>(null);
   const [editorReady, setEditorReady] = useState(false);
-  // The latest edited body, mirrored so Trim/Rewrite can save the current text.
+  // The latest edited body, mirrored so Trim can save the current text.
   const latestChange = useRef<SourceEditorChange | null>(null);
 
   const toast = useCallback((message: string) => {
@@ -182,8 +183,8 @@ export function ExtractView() {
     setEditorReady(instance !== null);
   }, []);
 
-  // Track the latest edited body (the editor debounces and also auto-saves via
-  // `useDocument.save`, but Trim/Rewrite need the current text on demand).
+  // Track the latest edited body. `useDocument.save` is the autosave path; Trim
+  // reads this mirror or the live editor when applying cleanup.
   const onChange = useCallback(
     (change: SourceEditorChange) => {
       latestChange.current = change;
@@ -217,43 +218,39 @@ export function ExtractView() {
     [id, busy, toast, reload],
   );
 
-  // Save the current editor body through `extracts.rewrite` (logs update_document).
-  // `normalize` runs the whitespace/filler trim main-side mirror first — the Trim
-  // button collapses runs of whitespace in the plain text and resaves.
-  const saveBody = useCallback(
-    async (kind: "trim" | "rewrite") => {
-      if (!id || busy) return;
-      const change = latestChange.current;
-      const editor = editorRef.current;
-      const prosemirrorJson = change?.prosemirrorJson ?? doc.currentDoc ?? doc.initialDoc;
-      let plainText = change?.plainText ?? doc.plainText;
-      if (kind === "trim") {
-        plainText = plainText
-          .split(/\n/)
-          .map((line) => line.replace(/[ \t]+/g, " ").trim())
-          .join("\n")
-          .replace(/\n{3,}/g, "\n\n")
-          .trim();
-      }
-      setBusy(true);
-      try {
-        const blocks = editor ? toBlockInputs(editor.getJSON()) : undefined;
-        await appApi.rewriteExtract({
-          id,
-          prosemirrorJson: prosemirrorJson ?? { type: "doc", content: [] },
-          plainText,
-          ...(blocks ? { blocks } : {}),
-        });
-        toast(kind === "trim" ? "Trimmed whitespace & filler" : "Extract saved");
-        reload();
-      } catch {
-        toast(kind === "trim" ? "Could not trim" : "Could not save");
-      } finally {
-        setBusy(false);
-      }
-    },
-    [id, busy, doc, toast, reload],
-  );
+  // Trim the current editor body through `extracts.rewrite` (logs update_document).
+  // Plain edits autosave through `useDocument.save`; this explicit action only
+  // applies whitespace cleanup before persisting the cleaned body.
+  const trimBody = useCallback(async () => {
+    if (!id || busy) return;
+    const change = latestChange.current;
+    const editor = editorRef.current;
+    const liveJson = editor?.getJSON();
+    const prosemirrorJson = liveJson ?? change?.prosemirrorJson ?? doc.currentDoc ?? doc.initialDoc;
+    const baseText = liveJson ? toPlainText(liveJson) : (change?.plainText ?? doc.plainText);
+    const plainText = baseText
+      .split(/\n/)
+      .map((line) => line.replace(/[ \t]+/g, " ").trim())
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    setBusy(true);
+    try {
+      const blocks = editor ? toBlockInputs(editor.getJSON()) : undefined;
+      await appApi.rewriteExtract({
+        id,
+        prosemirrorJson: prosemirrorJson ?? { type: "doc", content: [] },
+        plainText,
+        ...(blocks ? { blocks } : {}),
+      });
+      toast("Trimmed whitespace & filler");
+      reload();
+    } catch {
+      toast("Could not trim");
+    } finally {
+      setBusy(false);
+    }
+  }, [id, busy, doc, toast, reload]);
 
   const onPostpone = useCallback(async () => {
     if (!id || busy) return;
@@ -777,18 +774,9 @@ export function ExtractView() {
               className="reader-btn"
               data-testid="extract-trim"
               disabled={busy}
-              onClick={() => void saveBody("trim")}
+              onClick={() => void trimBody()}
             >
               <Icon name="trim" size={14} /> Trim
-            </button>
-            <button
-              type="button"
-              className="reader-btn"
-              data-testid="extract-rewrite"
-              disabled={busy}
-              onClick={() => void saveBody("rewrite")}
-            >
-              <Icon name="bookmark" size={14} /> Save
             </button>
             <button
               type="button"

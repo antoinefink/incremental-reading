@@ -890,7 +890,7 @@ describe("ProcessQueue", () => {
     expect(screen.getByTestId("process-extract-workbench")).toBeInTheDocument();
     expect(screen.getByTestId("process-extract-stage-stepper")).toBeInTheDocument();
     expect(screen.getByTestId("mock-source-editor")).toBeInTheDocument();
-    expect(screen.getByTestId("process-extract-save")).toBeInTheDocument();
+    expect(screen.queryByTestId("process-extract-save")).not.toBeInTheDocument();
     expect(screen.getByTestId("process-extract-subextract")).toBeInTheDocument();
     expect(screen.getByTestId("process-extract-make-qa")).toBeInTheDocument();
     expect(h.navigateSpy).not.toHaveBeenCalled();
@@ -1097,24 +1097,26 @@ describe("ProcessQueue", () => {
     expect(h.navigateSpy).not.toHaveBeenCalled();
   });
 
-  it("saves an edited extract body through extracts.rewrite", async () => {
+  it("autosaves an edited extract body through the document save path", async () => {
     render(<ProcessQueue />);
     await moveToExtract();
 
     fireEvent.change(screen.getByTestId("mock-source-editor"), {
       target: { value: "Edited extract body." },
     });
-    fireEvent.click(screen.getByTestId("process-extract-save"));
 
-    await waitFor(() =>
-      expect(h.rewriteExtract).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: "extract-1",
-          plainText: "Edited extract body.",
-          blocks: [{ blockType: "paragraph", order: 0, stableBlockId: "blk_process_extract" }],
-        }),
-      ),
+    await waitFor(
+      () =>
+        expect(h.saveDocument).toHaveBeenCalledWith(
+          expect.objectContaining({
+            elementId: "extract-1",
+            plainText: "Edited extract body.",
+            blocks: [{ blockType: "paragraph", order: 0, stableBlockId: "blk_process_extract" }],
+          }),
+        ),
+      { timeout: 1200 },
     );
+    expect(h.rewriteExtract).not.toHaveBeenCalled();
     expect(currentItemId()).toBe("extract-1");
     expect(h.actOnQueueItem).not.toHaveBeenCalled();
   });
@@ -1140,7 +1142,7 @@ describe("ProcessQueue", () => {
     expect(h.actOnQueueItem).not.toHaveBeenCalled();
   });
 
-  it("saves the visible editor text when editor JSON lags behind the DOM", async () => {
+  it("trims the visible editor text when editor JSON lags behind the DOM", async () => {
     h.staleEditorJson = true;
     render(<ProcessQueue />);
     await moveToExtract();
@@ -1149,7 +1151,7 @@ describe("ProcessQueue", () => {
     if (!editor) throw new Error("mock ProseMirror surface not found");
     editor.textContent = "Visible edited extract body.";
     fireEvent.input(editor);
-    fireEvent.click(screen.getByTestId("process-extract-save"));
+    fireEvent.click(screen.getByTestId("process-extract-trim"));
 
     await waitFor(() =>
       expect(h.rewriteExtract).toHaveBeenCalledWith(

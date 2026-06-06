@@ -574,9 +574,13 @@ export function ProcessQueue() {
     }
   }, [undoState, busy, select, toast]);
 
-  const onExtractChange = useCallback((change: SourceEditorChange) => {
-    setExtractDraft(change);
-  }, []);
+  const onExtractChange = useCallback(
+    (change: SourceEditorChange) => {
+      setExtractDraft(change);
+      doc.save(change);
+    },
+    [doc],
+  );
 
   const onExtractEditorReady = useCallback((instance: Editor | null) => {
     setExtractEditor(instance);
@@ -655,72 +659,65 @@ export function ProcessQueue() {
     [current, busy, clearUndo, patchCurrentExtract, reloadInspector, toast],
   );
 
-  const saveExtract = useCallback(
-    async (kind: "trim" | "rewrite") => {
-      if (current?.type !== "extract" || busy || !isDesktop()) return;
-      clearUndo();
-      setBusy(true);
-      try {
-        await settleEditorInput();
-        const liveJson = extractEditor?.getJSON();
-        let prosemirrorJson =
-          liveJson ?? extractDraft?.prosemirrorJson ?? doc.currentDoc ?? doc.initialDoc;
-        let plainText = liveJson
-          ? toPlainText(liveJson)
-          : (extractDraft?.plainText ?? doc.plainText);
-        const visibleText = visibleEditorPlainText(extractEditor);
-        if (
-          visibleText !== null &&
-          normalizePlainText(visibleText) !== normalizePlainText(plainText)
-        ) {
-          plainText = visibleText;
-          prosemirrorJson = plainTextToSimpleDoc(plainText, prosemirrorJson);
-        }
-        if (kind === "trim") {
-          plainText = plainText
-            .split(/\n/)
-            .map((line) => line.replace(/[ \t]+/g, " ").trim())
-            .join("\n")
-            .replace(/\n{3,}/g, "\n\n")
-            .trim();
-          prosemirrorJson = plainTextToSimpleDoc(plainText, prosemirrorJson);
-        }
-        const blocks = toBlockInputs(prosemirrorJson);
-        const res = await appApi.rewriteExtract({
-          id: current.id,
-          prosemirrorJson: prosemirrorJson ?? { type: "doc", content: [] },
-          plainText,
-          ...(blocks ? { blocks } : {}),
-        });
-        patchCurrentExtract(res.extract);
-        setExtractDraft({
-          prosemirrorJson: prosemirrorJson ?? { type: "doc", content: [] },
-          plainText,
-        });
-        await reloadInspector(current.id);
-        requestInspectorRefresh();
-        toast(kind === "trim" ? "Trimmed extract" : "Extract saved");
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-        toast(kind === "trim" ? "Could not trim" : "Could not save");
-      } finally {
-        setBusy(false);
+  const trimExtract = useCallback(async () => {
+    if (current?.type !== "extract" || busy || !isDesktop()) return;
+    clearUndo();
+    setBusy(true);
+    try {
+      await settleEditorInput();
+      const liveJson = extractEditor?.getJSON();
+      let prosemirrorJson =
+        liveJson ?? extractDraft?.prosemirrorJson ?? doc.currentDoc ?? doc.initialDoc;
+      let plainText = liveJson ? toPlainText(liveJson) : (extractDraft?.plainText ?? doc.plainText);
+      const visibleText = visibleEditorPlainText(extractEditor);
+      if (
+        visibleText !== null &&
+        normalizePlainText(visibleText) !== normalizePlainText(plainText)
+      ) {
+        plainText = visibleText;
+        prosemirrorJson = plainTextToSimpleDoc(plainText, prosemirrorJson);
       }
-    },
-    [
-      current,
-      busy,
-      extractDraft,
-      doc.currentDoc,
-      doc.initialDoc,
-      doc.plainText,
-      extractEditor,
-      clearUndo,
-      patchCurrentExtract,
-      reloadInspector,
-      toast,
-    ],
-  );
+      plainText = plainText
+        .split(/\n/)
+        .map((line) => line.replace(/[ \t]+/g, " ").trim())
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+      prosemirrorJson = plainTextToSimpleDoc(plainText, prosemirrorJson);
+      const blocks = toBlockInputs(prosemirrorJson);
+      const res = await appApi.rewriteExtract({
+        id: current.id,
+        prosemirrorJson: prosemirrorJson ?? { type: "doc", content: [] },
+        plainText,
+        ...(blocks ? { blocks } : {}),
+      });
+      patchCurrentExtract(res.extract);
+      setExtractDraft({
+        prosemirrorJson: prosemirrorJson ?? { type: "doc", content: [] },
+        plainText,
+      });
+      await reloadInspector(current.id);
+      requestInspectorRefresh();
+      toast("Trimmed extract");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      toast("Could not trim");
+    } finally {
+      setBusy(false);
+    }
+  }, [
+    current,
+    busy,
+    extractDraft,
+    doc.currentDoc,
+    doc.initialDoc,
+    doc.plainText,
+    extractEditor,
+    clearUndo,
+    patchCurrentExtract,
+    reloadInspector,
+    toast,
+  ]);
 
   const onCardCreatedFromExtract = useCallback(() => {
     clearUndo();
@@ -1210,7 +1207,7 @@ export function ProcessQueue() {
             onExtractSelectionAction={onExtractSelectionAction}
             onExtractEditorReady={onExtractEditorReady}
             onSetExtractStage={setExtractStage}
-            onSaveExtract={saveExtract}
+            onTrimExtract={trimExtract}
             onCreateSubExtract={() => void createProcessSubExtract()}
             onOpenExtractBuilder={(tab) => setExtractBuilder({ tab })}
             onCloseExtractBuilder={() => setExtractBuilder(null)}
@@ -1435,7 +1432,7 @@ function ProcessExtractWorkbench({
   onEditorReady,
   onSelectionAction,
   onSetStage,
-  onSave,
+  onTrim,
   onCreateSubExtract,
   onOpenBuilder,
   onCloseBuilder,
@@ -1453,7 +1450,7 @@ function ProcessExtractWorkbench({
   onEditorReady: (editor: Editor | null) => void;
   onSelectionAction: (action: SelectionToolbarAction) => void;
   onSetStage: (stage?: ExtractStage) => void;
-  onSave: (kind: "trim" | "rewrite") => void;
+  onTrim: () => void;
   onCreateSubExtract: () => void;
   onOpenBuilder: (tab: CardKind) => void;
   onCloseBuilder: () => void;
@@ -1559,7 +1556,7 @@ function ProcessExtractWorkbench({
           className="pq-btn"
           data-testid="process-extract-trim"
           disabled={busy}
-          onClick={() => onSave("trim")}
+          onClick={onTrim}
         >
           <Icon name="trim" size={14} />
           Trim
@@ -1573,16 +1570,6 @@ function ProcessExtractWorkbench({
         >
           <Icon name="extract" size={14} />
           Sub-extract
-        </button>
-        <button
-          type="button"
-          className="pq-btn"
-          data-testid="process-extract-save"
-          disabled={busy}
-          onClick={() => onSave("rewrite")}
-        >
-          <Icon name="bookmark" size={14} />
-          Save
         </button>
         <span className="pq-extract__toolspacer" />
         <button
@@ -1663,7 +1650,7 @@ function ProcessCard({
   onExtractSelectionAction,
   onExtractEditorReady,
   onSetExtractStage,
-  onSaveExtract,
+  onTrimExtract,
   onCreateSubExtract,
   onOpenExtractBuilder,
   onCloseExtractBuilder,
@@ -1699,7 +1686,7 @@ function ProcessCard({
   onExtractSelectionAction: (action: SelectionToolbarAction) => void;
   onExtractEditorReady: (editor: Editor | null) => void;
   onSetExtractStage: (stage?: ExtractStage) => void;
-  onSaveExtract: (kind: "trim" | "rewrite") => void;
+  onTrimExtract: () => void;
   onCreateSubExtract: () => void;
   onOpenExtractBuilder: (tab: CardKind) => void;
   onCloseExtractBuilder: () => void;
@@ -1844,7 +1831,7 @@ function ProcessCard({
           onEditorReady={onExtractEditorReady}
           onSelectionAction={onExtractSelectionAction}
           onSetStage={onSetExtractStage}
-          onSave={onSaveExtract}
+          onTrim={onTrimExtract}
           onCreateSubExtract={onCreateSubExtract}
           onOpenBuilder={onOpenExtractBuilder}
           onCloseBuilder={onCloseExtractBuilder}

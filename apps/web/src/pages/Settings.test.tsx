@@ -233,7 +233,7 @@ describe("Settings", () => {
     fireEvent.change(await findByTestId("setting-embedding-api-key"), {
       target: { value: " embed-key " },
     });
-    fireEvent.click(getByTestId("setting-embedding-save-key"));
+    fireEvent.click(getByTestId("setting-embedding-store-key"));
     await waitFor(() =>
       expect(h.updateAppSettings).toHaveBeenCalledWith({ patch: { embeddingApiKey: "embed-key" } }),
     );
@@ -241,7 +241,7 @@ describe("Settings", () => {
     fireEvent.change(await findByTestId("setting-ai-api-key"), {
       target: { value: " ai-key " },
     });
-    fireEvent.click(getByTestId("setting-ai-save-key"));
+    fireEvent.click(getByTestId("setting-ai-store-key"));
     await waitFor(() =>
       expect(h.updateAppSettings).toHaveBeenCalledWith({ patch: { aiApiKey: "ai-key" } }),
     );

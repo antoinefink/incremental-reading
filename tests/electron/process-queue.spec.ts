@@ -540,18 +540,16 @@ test("distills an extract inline inside /process and persists stage, body, and c
     .poll(async () => (await inspectElement(page, extractId))?.element.stage)
     .toBe("clean_extract");
   await expect(page.getByTestId("process-item")).toHaveAttribute("data-element-id", extractId);
-  await expect(page.getByTestId("process-extract-save")).toBeEnabled();
+  await expect(page.getByTestId("process-extract-save")).toHaveCount(0);
 
-  // Rewrite the extract body inside the process workbench and save through the
-  // existing extracts.rewrite command.
+  // Rewrite the extract body inside the process workbench; editor changes autosave
+  // through the document save path without a manual Save button.
   const editor = page.locator('[data-testid="process-extract-editor"] .ProseMirror');
   await expect(editor).toBeVisible();
   await editor.click();
   await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
   await page.keyboard.type("Edited inline process extract.\n\nIt is ready for a card.");
   await expect(editor).toContainText("Edited inline process extract");
-  await page.getByTestId("process-extract-save").click();
-  await expect(page.getByTestId("process-flash")).toContainText("Extract saved");
   await expect
     .poll(async () => documentText(page, extractId))
     .toContain("Edited inline process extract");

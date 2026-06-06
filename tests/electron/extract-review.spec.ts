@@ -12,8 +12,8 @@
  *       atomic_statement`; each "Advance stage" persists the new `stage` AND
  *       reschedules the extract on the ATTENTION scheduler (a FUTURE `due_at`,
  *       never an FSRS `review_states` row);
- *   (b) ACTIONS: Trim/Save rewrites the body, Postpone reschedules further out +
- *       bumps the postpone count, Mark done sets status `done`;
+ *   (b) ACTIONS: body edits autosave, Trim rewrites the cleaned body, Postpone
+ *       reschedules further out + bumps the postpone count, Mark done sets status `done`;
  *   (c) RESTART: relaunching the Electron app against the same data dir still
  *       shows the advanced stage, the done status, and the future attention
  *       `due_at` — it survives an app restart (the DoD bar).

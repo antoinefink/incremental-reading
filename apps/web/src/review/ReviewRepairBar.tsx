@@ -4,7 +4,7 @@
  * Rebuilt from `design/kit/app/screen-review.jsx`'s repair `Btn` row + context
  * `drawer`. The user fixes a bad card the MOMENT it surfaces, without leaving
  * review:
- *  - **Edit** opens an inline prompt/answer (Q&A) or cloze editor and saves via
+ *  - **Edit** opens an inline prompt/answer (Q&A) or cloze editor and autosaves via
  *    `appApi.updateCard` (`cards.update` → `update_element`); the in-flight card is
  *    patched in place (the FSRS state + lineage are untouched main-side).
  *  - **Open source** jumps back to the originating paragraph via the card's lineage
@@ -21,7 +21,7 @@
  * preload bridge; the main process owns the transaction + the `operation_log` op.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { TypeIcon } from "../components/inspector/primitives";
 import { appApi, type CardEditSummary, type ReviewCardView } from "../lib/appApi";
@@ -64,6 +64,29 @@ function patchFromSummary(card: CardEditSummary): ReviewCardPatch {
   };
 }
 
+const EDIT_AUTOSAVE_MS = 600;
+
+function editFingerprint(patch: Readonly<Record<string, string>>): string {
+  return JSON.stringify(patch);
+}
+
+function editPatchReady(patch: Readonly<Record<string, string>>): boolean {
+  return Object.values(patch).every((value) => value.trim().length > 0);
+}
+
+function reviewEditPatch(
+  kind: ReviewCardView["kind"],
+  values: {
+    readonly prompt: string;
+    readonly answer: string;
+    readonly cloze: string;
+  },
+): Record<string, string> {
+  if (kind === "image_occlusion") return { answer: values.answer };
+  if (kind === "cloze") return { cloze: values.cloze };
+  return { prompt: values.prompt, answer: values.answer };
+}
+
 export function ReviewRepairBar({
   card,
   busy,
@@ -87,34 +110,89 @@ export function ReviewRepairBar({
   const [prompt, setPrompt] = useState("");
   const [answer, setAnswer] = useState("");
   const [cloze, setCloze] = useState("");
+  const editTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedEdit = useRef("");
 
   const openEditor = useCallback(() => {
-    setPrompt(card.prompt ?? "");
-    setAnswer(card.answer ?? "");
-    setCloze(card.cloze ?? card.prompt ?? "");
+    const nextPrompt = card.prompt ?? "";
+    const nextAnswer = card.answer ?? "";
+    const nextCloze = card.cloze ?? card.prompt ?? "";
+    setPrompt(nextPrompt);
+    setAnswer(nextAnswer);
+    setCloze(nextCloze);
+    lastSavedEdit.current = editFingerprint(
+      reviewEditPatch(card.kind, {
+        prompt: nextPrompt,
+        answer: nextAnswer,
+        cloze: nextCloze,
+      }),
+    );
     setError(null);
     setEditing(true);
   }, [card]);
 
-  const saveEdit = useCallback(async () => {
-    if (saving) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await appApi.updateCard({
-        cardId: card.id,
-        // Occlusion: edit the reveal label only (answer). Cloze: the cloze text.
-        // Q&A: prompt + answer.
-        ...(isOcclusion ? { answer } : isCloze ? { cloze } : { prompt, answer }),
-      });
-      onCardUpdated(patchFromSummary(res.card));
-      setEditing(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
+  const currentEditPatch = useCallback(
+    () => reviewEditPatch(card.kind, { prompt, answer, cloze }),
+    [card.kind, answer, cloze, prompt],
+  );
+
+  const persistEdit = useCallback(
+    async (requireReady = false) => {
+      const patch = currentEditPatch();
+      const fingerprint = editFingerprint(patch);
+      if (fingerprint === lastSavedEdit.current) return true;
+      if (!editPatchReady(patch)) {
+        if (requireReady) setError("Complete the editable fields before closing.");
+        return false;
+      }
+      if (editTimer.current) {
+        clearTimeout(editTimer.current);
+        editTimer.current = null;
+      }
+      setSaving(true);
+      setError(null);
+      try {
+        const res = await appApi.updateCard({
+          cardId: card.id,
+          ...patch,
+        });
+        onCardUpdated(patchFromSummary(res.card));
+        lastSavedEdit.current = fingerprint;
+        return true;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [card.id, currentEditPatch, onCardUpdated],
+  );
+
+  useEffect(() => {
+    if (!editing) return;
+    if (editTimer.current) {
+      clearTimeout(editTimer.current);
+      editTimer.current = null;
     }
-  }, [saving, card.id, isOcclusion, isCloze, cloze, prompt, answer, onCardUpdated]);
+    const patch = currentEditPatch();
+    if (!editPatchReady(patch) || editFingerprint(patch) === lastSavedEdit.current) return;
+    editTimer.current = setTimeout(() => {
+      editTimer.current = null;
+      void persistEdit();
+    }, EDIT_AUTOSAVE_MS);
+    return () => {
+      if (editTimer.current) {
+        clearTimeout(editTimer.current);
+        editTimer.current = null;
+      }
+    };
+  }, [editing, currentEditPatch, persistEdit]);
+
+  const closeEditor = useCallback(async () => {
+    const saved = await persistEdit(true);
+    if (saved) setEditing(false);
+  }, [persistEdit]);
 
   const suspend = useCallback(async () => {
     if (busy || saving) return;
@@ -223,6 +301,7 @@ export function ReviewRepairBar({
                 data-testid="review-edit-occlusion-label"
                 value={answer}
                 onChange={(e) => setAnswer(e.target.value)}
+                onBlur={() => void persistEdit()}
                 rows={2}
               />
             </label>
@@ -234,6 +313,7 @@ export function ReviewRepairBar({
                 data-testid="review-edit-cloze"
                 value={cloze}
                 onChange={(e) => setCloze(e.target.value)}
+                onBlur={() => void persistEdit()}
                 rows={3}
               />
             </label>
@@ -246,6 +326,7 @@ export function ReviewRepairBar({
                   data-testid="review-edit-prompt"
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
+                  onBlur={() => void persistEdit()}
                   rows={2}
                 />
               </label>
@@ -256,6 +337,7 @@ export function ReviewRepairBar({
                   data-testid="review-edit-answer"
                   value={answer}
                   onChange={(e) => setAnswer(e.target.value)}
+                  onBlur={() => void persistEdit()}
                   rows={2}
                 />
               </label>
@@ -270,21 +352,11 @@ export function ReviewRepairBar({
             <button
               type="button"
               className="rv-btn"
-              data-testid="review-edit-cancel"
-              onClick={() => setEditing(false)}
+              data-testid="review-edit-done"
+              onClick={() => void closeEditor()}
               disabled={saving}
             >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="rv-btn rv-btn--primary"
-              data-testid="review-edit-save"
-              onClick={() => void saveEdit()}
-              disabled={saving}
-            >
-              <Icon name="check" size={14} />
-              Save
+              Done
             </button>
           </div>
         </div>

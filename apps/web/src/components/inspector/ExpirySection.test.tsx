@@ -76,7 +76,7 @@ describe("Inspector ExpirySection (T090)", () => {
     expect(screen.getByTestId("inspector-expiry-edit")).toHaveTextContent(/add expiry/i);
   });
 
-  it("opens the editor, saves the entered fields via cards.setLifetime, and fires onChanged", async () => {
+  it("opens the editor, applies the entered fields via cards.setLifetime, and fires onChanged", async () => {
     const onChanged = vi.fn();
     render(<ExpirySection cardId="card-1" lifetime={EMPTY} onChanged={onChanged} />);
 
@@ -93,7 +93,7 @@ describe("Inspector ExpirySection (T090)", () => {
     fireEvent.change(screen.getByTestId("inspector-expiry-jurisdiction"), {
       target: { value: "US-CA" },
     });
-    fireEvent.click(screen.getByTestId("inspector-expiry-save"));
+    fireEvent.click(screen.getByTestId("inspector-expiry-apply"));
 
     await waitFor(() => {
       expect(h.setCardLifetime).toHaveBeenCalledWith(

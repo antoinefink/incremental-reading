@@ -81,6 +81,14 @@ const h = vi.hoisted(() => {
     updateStage: vi.fn().mockResolvedValue({
       extract: { ...inspectorData.element, stage: "clean_extract" },
     }),
+    saveDocument: vi.fn().mockResolvedValue({
+      document: {
+        prosemirrorJson: { type: "doc", content: [] },
+        plainText: "Edited full extract.",
+        schemaVersion: 1,
+        updatedAt: "",
+      },
+    }),
     rewrite: vi.fn().mockResolvedValue({ extract: inspectorData.element, plainText: "x" }),
     postpone: vi.fn().mockResolvedValue({ extract: inspectorData.element, postponeCount: 1 }),
     markDone: vi.fn().mockResolvedValue({ extract: inspectorData.element }),
@@ -175,14 +183,7 @@ vi.mock("../lib/appApi", () => ({
       },
       extractedBlockIds: [],
     }),
-    saveDocument: vi.fn().mockResolvedValue({
-      document: {
-        prosemirrorJson: { type: "doc", content: [] },
-        plainText: "body",
-        schemaVersion: 1,
-        updatedAt: "",
-      },
-    }),
+    saveDocument: h.saveDocument,
     updateExtractStage: h.updateStage,
     rewriteExtract: h.rewrite,
     postponeExtract: h.postpone,
@@ -206,8 +207,24 @@ vi.mock("../shell/selection", () => ({
 // Stub the heavy Tiptap editor with a trivial element so the component renders
 // without a real contentEditable. `toBlockInputs` is a no-op here.
 vi.mock("@interleave/editor", () => ({
-  SourceEditor: () => <div data-testid="mock-editor" />,
+  SourceEditor: ({
+    onChange,
+  }: {
+    onChange?: (change: { prosemirrorJson: unknown; plainText: string }) => void;
+  }) => (
+    <textarea
+      data-testid="mock-editor"
+      defaultValue="body"
+      onChange={(e) =>
+        onChange?.({
+          prosemirrorJson: { type: "doc", content: [], mockPlainText: e.target.value },
+          plainText: e.target.value,
+        })
+      }
+    />
+  ),
   toBlockInputs: () => [],
+  toPlainText: (doc: { mockPlainText?: string } | null | undefined) => doc?.mockPlainText ?? "body",
   emptyDoc: () => ({ type: "doc", content: [] }),
   setReaderDecorations: vi.fn(),
 }));
@@ -336,6 +353,26 @@ describe("ExtractView — lineage navigation", () => {
 });
 
 describe("ExtractView — actions", () => {
+  it("autosaves edited extract text through documents.save without a Save button", async () => {
+    render(<ExtractView />);
+    const editor = await screen.findByTestId("mock-editor");
+
+    expect(screen.queryByTestId("extract-rewrite")).not.toBeInTheDocument();
+    fireEvent.change(editor, { target: { value: "Edited full extract." } });
+
+    await waitFor(
+      () =>
+        expect(h.saveDocument).toHaveBeenCalledWith(
+          expect.objectContaining({
+            elementId: "ex_1",
+            plainText: "Edited full extract.",
+          }),
+        ),
+      { timeout: 1200 },
+    );
+    expect(h.rewrite).not.toHaveBeenCalled();
+  });
+
   it("'Convert to card' opens the card builder (Q&A) instead of navigating away (T033)", async () => {
     render(<ExtractView />);
     const convert = await screen.findByTestId("extract-convert");

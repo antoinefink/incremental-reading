@@ -4,7 +4,7 @@
  * The card mutations (edit / suspend / delete / flag) + the `operation_log` ops
  * live MAIN-side (`CardEditService`); this asserts the RENDERER seam the spec
  * calls out:
- *  - Edit opens the inline editor and saves via the typed `appApi.updateCard`,
+ *  - Edit opens the inline editor and autosaves via the typed `appApi.updateCard`,
  *    then patches the in-flight card;
  *  - Open source calls back into the parent's lineage jump-back;
  *  - Suspend / Delete call their commands and advance the session (remove the card);
@@ -151,7 +151,7 @@ beforeEach(() => {
 });
 
 describe("ReviewRepairBar", () => {
-  it("edits the prompt/answer and saves via appApi.updateCard, patching the card", async () => {
+  it("autosaves prompt/answer edits via appApi.updateCard and patches the card", async () => {
     renderBar();
 
     fireEvent.click(screen.getByTestId("review-repair-edit"));
@@ -160,9 +160,9 @@ describe("ReviewRepairBar", () => {
     fireEvent.change(screen.getByTestId("review-edit-answer"), {
       target: { value: "Edited answer." },
     });
-    fireEvent.click(screen.getByTestId("review-edit-save"));
 
-    await waitFor(() => expect(h.updateCard).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("review-edit-save")).not.toBeInTheDocument();
+    await waitFor(() => expect(h.updateCard).toHaveBeenCalledTimes(1), { timeout: 1200 });
     expect(h.updateCard).toHaveBeenCalledWith({
       cardId: "card-qa",
       prompt: "Edited prompt?",
@@ -173,8 +173,26 @@ describe("ReviewRepairBar", () => {
         expect.objectContaining({ id: "card-qa", prompt: "Edited prompt?" }),
       ),
     );
-    // The editor closed after a successful save.
+
+    fireEvent.click(screen.getByTestId("review-edit-done"));
     await waitFor(() => expect(screen.queryByTestId("review-edit")).not.toBeInTheDocument());
+  });
+
+  it("flushes card edits when an edit field blurs", async () => {
+    renderBar();
+
+    fireEvent.click(screen.getByTestId("review-repair-edit"));
+    const prompt = await screen.findByTestId("review-edit-prompt");
+    fireEvent.change(prompt, { target: { value: "Blur-saved prompt?" } });
+    fireEvent.blur(prompt);
+
+    await waitFor(() =>
+      expect(h.updateCard).toHaveBeenCalledWith({
+        cardId: "card-qa",
+        prompt: "Blur-saved prompt?",
+        answer: "As skill-acquisition efficiency.",
+      }),
+    );
   });
 
   it("edits cloze cards through the cloze field (not prompt/answer)", async () => {
@@ -194,7 +212,6 @@ describe("ReviewRepairBar", () => {
     fireEvent.click(screen.getByTestId("review-repair-edit"));
     const cloze = await screen.findByTestId("review-edit-cloze");
     fireEvent.change(cloze, { target: { value: "Intelligence is {{c1::edited}}." } });
-    fireEvent.click(screen.getByTestId("review-edit-save"));
 
     await waitFor(() =>
       expect(h.updateCard).toHaveBeenCalledWith({
@@ -234,7 +251,6 @@ describe("ReviewRepairBar", () => {
     expect(label).toHaveValue("Hippocampus");
 
     fireEvent.change(label, { target: { value: "Amygdala" } });
-    fireEvent.click(screen.getByTestId("review-edit-save"));
 
     // Only the answer (label) is sent — no prompt key.
     await waitFor(() =>
@@ -341,8 +357,8 @@ describe("ReviewRepairBar", () => {
     expect(await screen.findByTestId("review-edit")).toBeInTheDocument();
 
     // While the editor is open the repair keys are suppressed (so `s` typed in the
-    // body never suspends mid-edit). Cancel, then `s` suspends + advances.
-    fireEvent.click(screen.getByTestId("review-edit-cancel"));
+    // body never suspends mid-edit). Close the autosaved editor, then `s` suspends.
+    fireEvent.click(screen.getByTestId("review-edit-done"));
     await waitFor(() => expect(screen.queryByTestId("review-edit")).not.toBeInTheDocument());
 
     fireEvent.keyDown(window, { key: "s" });

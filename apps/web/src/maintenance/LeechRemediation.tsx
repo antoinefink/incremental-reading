@@ -5,8 +5,8 @@
  * A card is automatically flagged a leech once its FSRS `lapses` cross the threshold
  * (4 — `@interleave/scheduler` `LEECH_LAPSE_THRESHOLD`); it surfaces here with its
  * lapse count + source + originating-extract lineage, and the user can repair it:
- *  - **Rewrite** — an inline prompt/answer (Q&A) or cloze editor (`appApi.updateCard`),
- *    which also UN-leeches the card so a fixed card leaves the list.
+ *  - **Rewrite** — an inline prompt/answer (Q&A) or cloze editor that autosaves via
+ *    `appApi.updateCard`; resolving the rewrite then UN-leeches the card so it leaves the list.
  *  - **Split** — a small multi-part editor authoring 2 atomic sibling cards from the
  *    original (`appApi.splitCard`); the original is soft-deleted (recoverable).
  *  - **Add context** — a note field appending a clarifying context note
@@ -31,7 +31,7 @@
  * lower-priority = T027 `elements.setPriority`. No action destroys `review_logs`.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { Prio, priorityLabel } from "../components/inspector/primitives";
 import "../components/inspector/inspector.css";
@@ -48,6 +48,26 @@ import "../review/review.css";
 import "./leech-cleanup.css";
 
 const PRIORITY_BANDS: readonly PriorityLabel[] = ["A", "B", "C", "D"];
+const CARD_EDIT_AUTOSAVE_MS = 600;
+
+function cardEditReady(patch: Readonly<Record<string, string>>): boolean {
+  return Object.values(patch).every((value) => value.trim().length > 0);
+}
+
+function cardEditFingerprint(patch: Readonly<Record<string, string>>): string {
+  return JSON.stringify(patch);
+}
+
+function leechRewritePatch(
+  isCloze: boolean,
+  values: {
+    readonly prompt: string;
+    readonly answer: string;
+    readonly cloze: string;
+  },
+): Record<string, string> {
+  return isCloze ? { cloze: values.cloze } : { prompt: values.prompt, answer: values.answer };
+}
 
 /** The inline rewrite editor for one leech card. */
 function RewriteEditor({
@@ -65,24 +85,93 @@ function RewriteEditor({
   const [cloze, setCloze] = useState(card.cloze ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const editTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedEdit = useRef(
+    cardEditFingerprint(
+      leechRewritePatch(isCloze, {
+        prompt: card.prompt ?? "",
+        answer: card.answer ?? "",
+        cloze: card.cloze ?? "",
+      }),
+    ),
+  );
 
-  const save = useCallback(async () => {
+  const currentPatch = useCallback(
+    () => leechRewritePatch(isCloze, { prompt, answer, cloze }),
+    [isCloze, cloze, prompt, answer],
+  );
+
+  const persistRewrite = useCallback(
+    async (requireReady = false) => {
+      const patch = currentPatch();
+      const fingerprint = cardEditFingerprint(patch);
+      if (fingerprint === lastSavedEdit.current) return true;
+      if (!cardEditReady(patch)) {
+        if (requireReady) setError("Complete the editable fields before continuing.");
+        return false;
+      }
+      if (editTimer.current) {
+        clearTimeout(editTimer.current);
+        editTimer.current = null;
+      }
+      setSaving(true);
+      setError(null);
+      try {
+        await appApi.updateCard({
+          cardId: card.id,
+          ...patch,
+        });
+        lastSavedEdit.current = fingerprint;
+        return true;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [card.id, currentPatch],
+  );
+
+  useEffect(() => {
+    if (editTimer.current) {
+      clearTimeout(editTimer.current);
+      editTimer.current = null;
+    }
+    const patch = currentPatch();
+    if (!cardEditReady(patch) || cardEditFingerprint(patch) === lastSavedEdit.current) return;
+    editTimer.current = setTimeout(() => {
+      editTimer.current = null;
+      void persistRewrite();
+    }, CARD_EDIT_AUTOSAVE_MS);
+    return () => {
+      if (editTimer.current) {
+        clearTimeout(editTimer.current);
+        editTimer.current = null;
+      }
+    };
+  }, [currentPatch, persistRewrite]);
+
+  const resolve = useCallback(async () => {
     if (saving) return;
+    const saved = await persistRewrite(true);
+    if (!saved) return;
     setSaving(true);
     setError(null);
     try {
-      await appApi.updateCard({
-        cardId: card.id,
-        ...(isCloze ? { cloze } : { prompt, answer }),
-      });
-      // A rewrite resolves the leech — un-flag it so it leaves the cleanup list.
       await appApi.markLeechCard({ cardId: card.id, leech: false });
       await onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setSaving(false);
     }
-  }, [saving, card.id, isCloze, cloze, prompt, answer, onSaved]);
+  }, [saving, persistRewrite, card.id, onSaved]);
+
+  const close = useCallback(async () => {
+    if (saving) return;
+    const saved = await persistRewrite(true);
+    if (saved) onCancel();
+  }, [saving, persistRewrite, onCancel]);
 
   return (
     <div className="rv-edit lc-edit" data-testid={`leech-edit-${card.id}`}>
@@ -94,6 +183,7 @@ function RewriteEditor({
             data-testid="leech-edit-cloze"
             value={cloze}
             onChange={(e) => setCloze(e.target.value)}
+            onBlur={() => void persistRewrite()}
             rows={3}
           />
         </label>
@@ -106,6 +196,7 @@ function RewriteEditor({
               data-testid="leech-edit-prompt"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
+              onBlur={() => void persistRewrite()}
               rows={2}
             />
           </label>
@@ -116,6 +207,7 @@ function RewriteEditor({
               data-testid="leech-edit-answer"
               value={answer}
               onChange={(e) => setAnswer(e.target.value)}
+              onBlur={() => void persistRewrite()}
               rows={2}
             />
           </label>
@@ -130,21 +222,21 @@ function RewriteEditor({
         <button
           type="button"
           className="rv-btn"
-          data-testid="leech-edit-cancel"
-          onClick={onCancel}
+          data-testid="leech-edit-close"
+          onClick={() => void close()}
           disabled={saving}
         >
-          Cancel
+          Close
         </button>
         <button
           type="button"
           className="rv-btn rv-btn--primary"
-          data-testid="leech-edit-save"
-          onClick={() => void save()}
+          data-testid="leech-edit-resolve"
+          onClick={() => void resolve()}
           disabled={saving}
         >
           <Icon name="check" size={14} />
-          Save rewrite
+          Resolve
         </button>
       </div>
     </div>
