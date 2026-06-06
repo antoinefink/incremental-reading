@@ -9,6 +9,8 @@ export const DEFAULT_AUTOMATIC_BACKUP_MAX_BYTES = 5 * 1024 * 1024 * 1024;
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const WEEK_MS = 7 * DAY_MS;
+const MONTH_MS = 30 * DAY_MS;
+const YEAR_MS = 365 * DAY_MS;
 
 export interface AutomaticBackupRetentionBucket {
   readonly maxAgeMs: number;
@@ -26,6 +28,7 @@ export const DEFAULT_AUTOMATIC_BACKUP_RETENTION: AutomaticBackupRetentionPolicy 
     { maxAgeMs: 7 * DAY_MS, intervalMs: 6 * HOUR_MS },
     { maxAgeMs: 30 * DAY_MS, intervalMs: DAY_MS },
     { maxAgeMs: 12 * WEEK_MS, intervalMs: WEEK_MS },
+    { maxAgeMs: 2 * YEAR_MS, intervalMs: MONTH_MS },
   ],
   maxBytes: DEFAULT_AUTOMATIC_BACKUP_MAX_BYTES,
 };

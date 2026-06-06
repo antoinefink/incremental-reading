@@ -3674,7 +3674,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "Interleave creates local rolling backups quietly from the desktop main process. The cadence is dense for recent work, then thins out over time: hourly for the first 48 hours, every 6 hours through 7 days, daily through 30 days, and weekly through 12 weeks. Older automatic archives are pruned without deleting manual backups.",
+      text: "Interleave creates local rolling backups quietly from the desktop main process. The cadence is dense for recent work, then thins out over time: hourly for the first 48 hours, every 6 hours through 7 days, daily through 30 days, weekly through 12 weeks, and monthly through 2 years. Older automatic archives are pruned without deleting manual backups.",
     },
     {
       type: "h2",

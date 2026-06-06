@@ -25,7 +25,7 @@ Backups are a durability baseline, not a task the user should be nagged to remem
 - R1. The shell must not render a backup reminder, warning, or success banner during normal app use.
 - R2. Explicit backup actions must keep working through the existing typed `backups.create` path.
 - R3. Automatic backups must run only in Electron main, using `BackupService.createBackup` and the existing restore-ready ZIP layout.
-- R4. Automatic backup retention must preserve a rolling cadence: hourly for the first 48 hours, every 6 hours through 7 days, daily through 30 days, and weekly through 12 weeks.
+- R4. Automatic backup retention must preserve a rolling cadence: hourly for the first 48 hours, every 6 hours through 7 days, daily through 30 days, weekly through 12 weeks, and monthly through 2 years.
 - R5. Automatic backup retention must prune older automatic archives and enforce a total automatic-backup size cap without deleting manual backups, assets, exports, or unrelated files.
 - R6. Scheduler failures must not crash startup, block manual backups, or expose raw filesystem/database access to the renderer.
 - R7. The behavior must be covered by unit tests for cadence, pruning, scheduler startup, and UI banner removal.
@@ -88,7 +88,7 @@ flowchart TB
 - **Files:** Create `apps/desktop/src/main/automatic-backup-service.ts`; modify `apps/desktop/src/main/index.ts`; test in `apps/desktop/src/main/automatic-backup-service.test.ts`.
 - **Approach:** Implement a timer-owned service injected with `DbService`, `AppPaths`, `migrationsDir`, `appVersion`, and a clock. On startup, scan automatic ZIPs in `backupsDir`, decide whether a new backup is due, run one backup at a time, prune by cadence buckets and size cap, and schedule the next check. Catch and log errors so startup and manual backups continue.
 - **Patterns to follow:** Explicit lifecycle ownership in `JobRunner` and `CaptureController` wiring in `apps/desktop/src/main/index.ts`; constructor dependency injection in `BackupService` tests.
-- **Test scenarios:** No prior automatic backup triggers a startup backup; a recent backup suppresses a new automatic duplicate; retention keeps and prunes across the hourly, 6-hour, daily, and weekly buckets; concurrent ticks do not run overlapping backups; backup errors are swallowed after logging and a later tick can retry; `stop()` clears the timer.
+- **Test scenarios:** No prior automatic backup triggers a startup backup; a recent backup suppresses a new automatic duplicate; retention keeps and prunes across the hourly, 6-hour, daily, weekly, and monthly buckets; concurrent ticks do not run overlapping backups; backup errors are swallowed after logging and a later tick can retry; `stop()` clears the timer.
 - **Verification:** Unit tests cover due decisions, lifecycle, failure handling, and pruning integration without launching Electron.
 
 ### U3. Remove backup reminder UI

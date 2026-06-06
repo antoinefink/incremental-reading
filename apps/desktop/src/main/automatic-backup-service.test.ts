@@ -22,6 +22,7 @@ let paths: AppPaths;
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const WEEK_MS = 7 * DAY_MS;
+const MONTH_MS = 30 * DAY_MS;
 
 beforeEach(() => {
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "interleave-auto-backup-"));
@@ -148,7 +149,7 @@ describe("automatic backup retention", () => {
     const newest = autoName("2026-06-06T11:30:00.000Z");
     const duplicateSlot = autoName("2026-06-06T11:15:00.000Z");
     const priorHour = autoName("2026-06-06T09:00:00.000Z");
-    const expired = autoName("2026-02-01T12:00:00.000Z");
+    const expired = autoName("2024-01-01T12:00:00.000Z");
     writeBackup(newest);
     writeBackup(duplicateSlot);
     writeBackup(priorHour);
@@ -163,7 +164,7 @@ describe("automatic backup retention", () => {
     expect(result.pruned.map((a) => a.timestamp)).toEqual([duplicateSlot, expired]);
   });
 
-  it("applies hourly, six-hour, daily, and weekly retention slots", () => {
+  it("applies hourly, six-hour, daily, weekly, and monthly retention slots", () => {
     const now = new Date("2026-06-06T12:00:00.000Z");
     const scenarios = [
       {
@@ -189,6 +190,12 @@ describe("automatic backup retention", () => {
         keptAgeMs: 6 * WEEK_MS,
         duplicateAgeMs: 6 * WEEK_MS + DAY_MS,
         separateSlotAgeMs: 7 * WEEK_MS,
+      },
+      {
+        label: "monthly",
+        keptAgeMs: 6 * MONTH_MS,
+        duplicateAgeMs: 6 * MONTH_MS + WEEK_MS,
+        separateSlotAgeMs: 7 * MONTH_MS,
       },
     ];
 
@@ -287,7 +294,7 @@ describe("automatic backup retention", () => {
   it("deletes only automatic zips and their matching directories", () => {
     const now = new Date("2026-06-06T12:00:00.000Z");
     const keep = autoName("2026-06-06T11:00:00.000Z");
-    const prune = autoName("2026-02-01T12:00:00.000Z");
+    const prune = autoName("2024-01-01T12:00:00.000Z");
     writeBackup(keep);
     writeBackup(prune);
     fs.writeFileSync(path.join(paths.backupsDir, "manual.zip"), "manual");
@@ -306,8 +313,8 @@ describe("automatic backup retention", () => {
 
   it("preserves real manual timestamped backup zips and directories when pruning", () => {
     const now = new Date("2026-06-06T12:00:00.000Z");
-    const prune = autoName("2026-02-01T12:00:00.000Z");
-    const manual = "2026-02-01T12-00-00-000Z";
+    const prune = autoName("2024-01-01T12:00:00.000Z");
+    const manual = "2024-01-01T12-00-00-000Z";
     writeBackup(prune);
     writeBackup(manual);
 
