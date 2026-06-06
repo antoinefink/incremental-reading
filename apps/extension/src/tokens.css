@@ -39,6 +39,10 @@
   --prio-d: oklch(0.6 0.008 262);
   --prio-d-soft: oklch(0.95 0.003 262);
 
+  --s-1: 4px;
+  --s-2: 6px;
+  --s-3: 8px;
+
   --radius: 8px;
   --font: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -177,6 +181,20 @@ button:hover {
 .status.err {
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+.status-action,
+.recent-open {
+  flex: none;
+  padding: var(--s-1) var(--s-3);
+  font-size: 11px;
+  border-color: currentColor;
+  background: var(--surface);
+  color: inherit;
+}
+
+.status-action {
+  margin-left: var(--s-2);
 }
 
 .token {

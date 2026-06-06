@@ -230,6 +230,11 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.sourcesAcceptOcr, request),
     dismissOcr: (request: SourcesAcceptOcrRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.sourcesDismissOcr, request),
+    onOpenReader: (callback: (sourceId: string) => void) => {
+      const listener = (_event: unknown, sourceId: string) => callback(sourceId);
+      ipcRenderer.on(IPC_CHANNELS.sourcesOpenReader, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.sourcesOpenReader, listener);
+    },
   },
   ai: {
     run: (request: AiRunRequest) => ipcRenderer.invoke(IPC_CHANNELS.aiRun, request),

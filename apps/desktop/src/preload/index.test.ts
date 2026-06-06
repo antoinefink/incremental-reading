@@ -92,6 +92,20 @@ describe("preload bridge", () => {
 
     unsubscribe();
     expect(electronMock.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.jobsUpdated, listener);
+
+    const openSource = vi.fn();
+    const unsubscribeOpenSource = api().sources.onOpenReader(openSource);
+    const [openChannel, openListener] = electronMock.on.mock.calls.at(-1) ?? [];
+
+    expect(openChannel).toBe(IPC_CHANNELS.sourcesOpenReader);
+    (openListener as (event: unknown, sourceId: string) => void)({ sender: "raw-event" }, "src-1");
+    expect(openSource).toHaveBeenCalledWith("src-1");
+
+    unsubscribeOpenSource();
+    expect(electronMock.removeListener).toHaveBeenCalledWith(
+      IPC_CHANNELS.sourcesOpenReader,
+      openListener,
+    );
   });
 
   it("returns unsubscribe functions for narrow native menu events", () => {

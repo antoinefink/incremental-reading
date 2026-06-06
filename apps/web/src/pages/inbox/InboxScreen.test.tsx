@@ -86,11 +86,61 @@ vi.mock("./NewSourceModal", () => ({
 }));
 
 vi.mock("./ImportUrlModal", () => ({
-  ImportUrlModal: ({ open, onImported }: { open: boolean; onImported: (id: string) => void }) =>
+  ImportUrlModal: ({
+    open,
+    onImported,
+    onOpenExisting,
+  }: {
+    open: boolean;
+    onImported: (id: string) => void;
+    onOpenExisting?: (match: {
+      elementId: string;
+      title: string;
+      status: string;
+      accessedAt: string | null;
+      matchedBy: "canonicalUrl" | "contentHash";
+    }) => void;
+  }) =>
     open ? (
-      <button type="button" data-testid="mock-url-import" onClick={() => onImported("url-1")}>
-        URL import
-      </button>
+      <div data-testid="mock-url-import-modal">
+        <button type="button" data-testid="mock-url-import" onClick={() => onImported("url-1")}>
+          URL import
+        </button>
+        <button
+          type="button"
+          data-testid="mock-url-open-existing-active"
+          onClick={() =>
+            onOpenExisting
+              ? onOpenExisting({
+                  elementId: "existing-active-1",
+                  title: "Existing active",
+                  status: "active",
+                  accessedAt: null,
+                  matchedBy: "canonicalUrl",
+                })
+              : onImported("existing-active-1")
+          }
+        >
+          Open active existing
+        </button>
+        <button
+          type="button"
+          data-testid="mock-url-open-existing-inbox"
+          onClick={() =>
+            onOpenExisting
+              ? onOpenExisting({
+                  elementId: "existing-inbox-1",
+                  title: "Existing inbox",
+                  status: "inbox",
+                  accessedAt: null,
+                  matchedBy: "canonicalUrl",
+                })
+              : onImported("existing-inbox-1")
+          }
+        >
+          Open inbox existing
+        </button>
+      </div>
     ) : null,
 }));
 
@@ -369,6 +419,53 @@ describe("InboxScreen", () => {
     fireEvent.click(getByTestId("inbox-import-import-file"));
     fireEvent.click(await findByTestId("mock-highlights-import"));
     await waitFor(() => expect(h.listInbox).toHaveBeenCalledTimes(4));
+  });
+
+  it("opens an existing URL duplicate by closing the modal and navigating to its source", async () => {
+    const { getByTestId, findByTestId, queryByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-import-paste-url");
+    fireEvent.click(getByTestId("inbox-import-paste-url"));
+    expect(await findByTestId("mock-url-import-modal")).toBeInTheDocument();
+
+    h.listInbox.mockClear();
+    fireEvent.click(getByTestId("mock-url-open-existing-active"));
+
+    await waitFor(() => expect(queryByTestId("mock-url-import-modal")).not.toBeInTheDocument());
+    expect(h.navigate).toHaveBeenCalledWith({
+      to: "/source/$id",
+      params: { id: "existing-active-1" },
+    });
+    expect(h.triageInboxItem).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: "existing-active-1" }),
+    );
+    expect(h.listInbox).not.toHaveBeenCalled();
+  });
+
+  it("activates an inbox-status URL duplicate before navigating to its source", async () => {
+    h.triageInboxItem.mockResolvedValueOnce({
+      item: { ...items[0], id: "existing-inbox-1", status: "active" },
+      deleted: false,
+    });
+    const { getByTestId, findByTestId, queryByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-import-paste-url");
+    fireEvent.click(getByTestId("inbox-import-paste-url"));
+    expect(await findByTestId("mock-url-import-modal")).toBeInTheDocument();
+
+    h.listInbox.mockClear();
+    fireEvent.click(getByTestId("mock-url-open-existing-inbox"));
+
+    await waitFor(() => expect(queryByTestId("mock-url-import-modal")).not.toBeInTheDocument());
+    expect(h.triageInboxItem).toHaveBeenCalledWith({
+      id: "existing-inbox-1",
+      action: { kind: "accept" },
+    });
+    expect(h.navigate).toHaveBeenCalledWith({
+      to: "/source/$id",
+      params: { id: "existing-inbox-1" },
+    });
+    expect(h.listInbox).not.toHaveBeenCalled();
   });
 
   it("marks enabled import options as clickable", async () => {

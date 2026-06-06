@@ -26,8 +26,13 @@ const h = vi.hoisted(() => ({
   menu: {
     createBackupCallback: undefined as (() => void) | undefined,
   },
+  sourceOpenCallback: undefined as ((sourceId: string) => void) | undefined,
   onMenuCreateBackup: vi.fn((callback: () => void) => {
     h.menu.createBackupCallback = callback;
+    return vi.fn();
+  }),
+  onSourceOpenReader: vi.fn((callback: (sourceId: string) => void) => {
+    h.sourceOpenCallback = callback;
     return vi.fn();
   }),
 }));
@@ -67,6 +72,7 @@ vi.mock("../lib/appApi", async () => {
     appApi: {
       onMenuShowShortcuts: vi.fn(() => vi.fn()),
       onMenuCreateBackup: h.onMenuCreateBackup,
+      onSourceOpenReader: h.onSourceOpenReader,
       updateAppSettings: h.updateAppSettings,
       // The onboarding-flag load: report the welcome as already seen so the
       // first-run modal stays closed in these chrome tests.
@@ -146,7 +152,9 @@ beforeEach(() => {
   h.updateSetting.mockReset();
   h.updateSetting.mockResolvedValue({});
   h.menu.createBackupCallback = undefined;
+  h.sourceOpenCallback = undefined;
   h.onMenuCreateBackup.mockClear();
+  h.onSourceOpenReader.mockClear();
   h.useShellShortcuts.mockReset();
   Object.values(h.globalActions).forEach((fn) => {
     fn.mockReset();
@@ -258,5 +266,20 @@ describe("Shell", () => {
     });
 
     await waitFor(() => expect(h.createBackup).toHaveBeenCalledTimes(2));
+  });
+
+  it("routes main-process source-open events through in-app navigation", async () => {
+    render(<Shell />);
+
+    await waitFor(() => expect(h.onSourceOpenReader).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      h.sourceOpenCallback?.("captured-source-1");
+    });
+
+    expect(h.navigate).toHaveBeenCalledWith({
+      to: "/source/$id",
+      params: { id: "captured-source-1" },
+    });
   });
 });

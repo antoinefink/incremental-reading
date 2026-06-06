@@ -33,7 +33,11 @@ vi.mock("node:http", () => ({
   createServer: httpMock.createServer,
 }));
 
-import { startCaptureServer } from "./capture-server";
+import {
+  type CaptureOpenSourceInput,
+  type CaptureOpenSourceResult,
+  startCaptureServer,
+} from "./capture-server";
 
 class MemorySettings {
   readonly values = new Map<string, unknown>();
@@ -169,13 +173,20 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function start(settings: MemorySettings, importService = fakeImportService()) {
+async function start(
+  settings: MemorySettings,
+  importService = fakeImportService(),
+  openSource: (input: CaptureOpenSourceInput) => Promise<CaptureOpenSourceResult> = vi.fn(
+    async () => ({ status: "opened" as const, activated: true }),
+  ),
+) {
   const handle = await startCaptureServer({
     settings: settings.asRepository(),
     importService,
+    openSource,
     appVersion: "0.2.0",
   });
-  return { handle, importService };
+  return { handle, importService, openSource };
 }
 
 describe("startCaptureServer", () => {
@@ -284,5 +295,253 @@ describe("startCaptureServer", () => {
 
     expect(response.statusCode).toBe(403);
     expect(response.body).toBe("");
+  });
+
+  it("opens a captured source through the authenticated loopback route", async () => {
+    const settings = new MemorySettings();
+    settings.values.set(CAPTURE_TOKEN_KEY, "secret-token");
+    settings.values.set(CAPTURE_ALLOWED_ORIGIN_KEY, EXTENSION_ORIGIN);
+    const { openSource } = await start(settings);
+
+    const response = await route({
+      method: "POST",
+      path: "/open-source",
+      headers: {
+        Authorization: "Bearer secret-token",
+        "Content-Type": "application/json",
+        Origin: EXTENSION_ORIGIN,
+      },
+      body: JSON.stringify({ id: "source-1" }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe(EXTENSION_ORIGIN);
+    expect(response.json()).toEqual({ ok: true, id: "source-1", activated: true });
+    expect(openSource).toHaveBeenCalledWith({ id: "source-1", activate: true });
+  });
+
+  it("serves open-source preflight for the paired extension origin", async () => {
+    const settings = new MemorySettings();
+    settings.values.set(CAPTURE_TOKEN_KEY, "secret-token");
+    settings.values.set(CAPTURE_ALLOWED_ORIGIN_KEY, EXTENSION_ORIGIN);
+    await start(settings);
+
+    const response = await route({
+      method: "OPTIONS",
+      path: "/open-source",
+      headers: { Origin: EXTENSION_ORIGIN },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe(EXTENSION_ORIGIN);
+    expect(response.headers.get("access-control-allow-methods")).toBe("POST, OPTIONS");
+    expect(response.headers.get("access-control-allow-headers")).toBe(
+      "Authorization, Content-Type",
+    );
+  });
+
+  it("propagates activate=false to the desktop opener", async () => {
+    const settings = new MemorySettings();
+    settings.values.set(CAPTURE_TOKEN_KEY, "secret-token");
+    settings.values.set(CAPTURE_ALLOWED_ORIGIN_KEY, EXTENSION_ORIGIN);
+    const { openSource } = await start(settings);
+
+    const response = await route({
+      method: "POST",
+      path: "/open-source",
+      headers: {
+        Authorization: "Bearer secret-token",
+        "Content-Type": "application/json",
+        Origin: EXTENSION_ORIGIN,
+      },
+      body: JSON.stringify({ id: "source-1", activate: false }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, id: "source-1", activated: true });
+    expect(openSource).toHaveBeenCalledWith({ id: "source-1", activate: false });
+  });
+
+  it("rejects open-source requests with the same pairing guards as capture", async () => {
+    const settings = new MemorySettings();
+    settings.values.set(CAPTURE_TOKEN_KEY, "secret-token");
+    settings.values.set(CAPTURE_ALLOWED_ORIGIN_KEY, EXTENSION_ORIGIN);
+    const { openSource } = await start(settings);
+
+    const response = await route({
+      method: "POST",
+      path: "/open-source",
+      headers: {
+        Authorization: "Bearer wrong",
+        "Content-Type": "application/json",
+        Origin: EXTENSION_ORIGIN,
+      },
+      body: JSON.stringify({ id: "source-1" }),
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({ ok: false, error: "bad_token" });
+    expect(openSource).not.toHaveBeenCalled();
+  });
+
+  it("rejects unpaired, bad-origin, and invalid open-source requests before opening", async () => {
+    const cases = [
+      {
+        name: "unpaired",
+        setup: (_settings: MemorySettings) => undefined,
+        headers: {
+          Authorization: "Bearer secret-token",
+          "Content-Type": "application/json",
+          Origin: EXTENSION_ORIGIN,
+        },
+        body: JSON.stringify({ id: "source-1" }),
+        status: 403,
+        error: "unpaired",
+      },
+      {
+        name: "bad origin",
+        setup: (settings: MemorySettings) => {
+          settings.values.set(CAPTURE_TOKEN_KEY, "secret-token");
+          settings.values.set(CAPTURE_ALLOWED_ORIGIN_KEY, EXTENSION_ORIGIN);
+        },
+        headers: {
+          Authorization: "Bearer secret-token",
+          "Content-Type": "application/json",
+          Origin: "chrome-extension://wrong",
+        },
+        body: JSON.stringify({ id: "source-1" }),
+        status: 403,
+        error: "bad_origin",
+      },
+      {
+        name: "wrong content type",
+        setup: (settings: MemorySettings) => {
+          settings.values.set(CAPTURE_TOKEN_KEY, "secret-token");
+          settings.values.set(CAPTURE_ALLOWED_ORIGIN_KEY, EXTENSION_ORIGIN);
+        },
+        headers: {
+          Authorization: "Bearer secret-token",
+          "Content-Type": "text/plain",
+          Origin: EXTENSION_ORIGIN,
+        },
+        body: JSON.stringify({ id: "source-1" }),
+        status: 400,
+        error: "invalid",
+      },
+      {
+        name: "invalid JSON",
+        setup: (settings: MemorySettings) => {
+          settings.values.set(CAPTURE_TOKEN_KEY, "secret-token");
+          settings.values.set(CAPTURE_ALLOWED_ORIGIN_KEY, EXTENSION_ORIGIN);
+        },
+        headers: {
+          Authorization: "Bearer secret-token",
+          "Content-Type": "application/json",
+          Origin: EXTENSION_ORIGIN,
+        },
+        body: "{",
+        status: 400,
+        error: "invalid",
+      },
+      {
+        name: "invalid schema",
+        setup: (settings: MemorySettings) => {
+          settings.values.set(CAPTURE_TOKEN_KEY, "secret-token");
+          settings.values.set(CAPTURE_ALLOWED_ORIGIN_KEY, EXTENSION_ORIGIN);
+        },
+        headers: {
+          Authorization: "Bearer secret-token",
+          "Content-Type": "application/json",
+          Origin: EXTENSION_ORIGIN,
+        },
+        body: JSON.stringify({ id: "" }),
+        status: 400,
+        error: "invalid",
+      },
+      {
+        name: "too large",
+        setup: (settings: MemorySettings) => {
+          settings.values.set(CAPTURE_TOKEN_KEY, "secret-token");
+          settings.values.set(CAPTURE_ALLOWED_ORIGIN_KEY, EXTENSION_ORIGIN);
+        },
+        headers: {
+          Authorization: "Bearer secret-token",
+          "Content-Type": "application/json",
+          Origin: EXTENSION_ORIGIN,
+        },
+        body: JSON.stringify({ id: "x".repeat(6 * 1024 * 1024) }),
+        status: 413,
+        error: "too_large",
+      },
+    ] as const;
+
+    for (const c of cases) {
+      const settings = new MemorySettings();
+      c.setup(settings);
+      const { openSource } = await start(settings);
+
+      const response = await route({
+        method: "POST",
+        path: "/open-source",
+        headers: c.headers,
+        body: c.body,
+      });
+
+      expect(response.statusCode, c.name).toBe(c.status);
+      expect(response.json(), c.name).toEqual({ ok: false, error: c.error });
+      expect(openSource, c.name).not.toHaveBeenCalled();
+    }
+  });
+
+  it("returns not_found when the desktop cannot open that source id", async () => {
+    const settings = new MemorySettings();
+    settings.values.set(CAPTURE_TOKEN_KEY, "secret-token");
+    settings.values.set(CAPTURE_ALLOWED_ORIGIN_KEY, EXTENSION_ORIGIN);
+    await start(
+      settings,
+      fakeImportService(),
+      vi.fn(async () => ({ status: "not_found" as const })),
+    );
+
+    const response = await route({
+      method: "POST",
+      path: "/open-source",
+      headers: {
+        Authorization: "Bearer secret-token",
+        "Content-Type": "application/json",
+        Origin: EXTENSION_ORIGIN,
+      },
+      body: JSON.stringify({ id: "missing" }),
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ ok: false, error: "not_found" });
+  });
+
+  it("maps desktop opener failures to the open-source error contract", async () => {
+    const settings = new MemorySettings();
+    settings.values.set(CAPTURE_TOKEN_KEY, "secret-token");
+    settings.values.set(CAPTURE_ALLOWED_ORIGIN_KEY, EXTENSION_ORIGIN);
+    await start(
+      settings,
+      fakeImportService(),
+      vi.fn(async () => {
+        throw new Error("window failed");
+      }),
+    );
+
+    const response = await route({
+      method: "POST",
+      path: "/open-source",
+      headers: {
+        Authorization: "Bearer secret-token",
+        "Content-Type": "application/json",
+        Origin: EXTENSION_ORIGIN,
+      },
+      body: JSON.stringify({ id: "source-1" }),
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ ok: false, error: "open_failed" });
   });
 });

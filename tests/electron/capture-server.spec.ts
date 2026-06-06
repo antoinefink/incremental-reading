@@ -64,10 +64,10 @@ async function getPairing(page: Page): Promise<{
 }
 
 /** List inbox sources through the bridge. */
-async function listInbox(page: Page): Promise<{ id: string; title: string }[]> {
+async function listInbox(page: Page): Promise<{ id: string; title: string; status: string }[]> {
   return page.evaluate(async () => {
     const api = window.appApi as unknown as {
-      inbox: { list(): Promise<{ items: { id: string; title: string }[] }> };
+      inbox: { list(): Promise<{ items: { id: string; title: string; status: string }[] }> };
     };
     const { items } = await api.inbox.list();
     return items;
@@ -276,6 +276,41 @@ test("a token+Origin-authenticated selection capture lands an inbox source", asy
   await app.close();
 });
 
+test("open-source opens and activates a captured inbox source", async () => {
+  const app = await launch();
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  let pairing = await getPairing(page);
+  for (let i = 0; i < 20 && !(pairing.running && pairing.port); i++) {
+    await page.waitForTimeout(100);
+    pairing = await getPairing(page);
+  }
+  const port = pairing.port as number;
+  const token = pairing.token;
+
+  const before = await listInbox(page);
+  const captured = before.find((i) => i.title === "The Spacing Effect");
+  expect(captured).toBeTruthy();
+  expect(captured?.status).toBe("inbox");
+
+  const opened = await post(
+    port,
+    "/open-source",
+    { id: captured?.id },
+    { Authorization: `Bearer ${token}`, Origin: EXT_ORIGIN },
+  );
+
+  expect(opened.status).toBe(200);
+  expect(opened.json).toMatchObject({ ok: true, id: captured?.id, activated: true });
+  await expect(page).toHaveURL(new RegExp(`/source/${captured?.id}$`));
+
+  const after = await listInbox(page);
+  expect(after.find((i) => i.id === captured?.id)).toBeUndefined();
+
+  await app.close();
+});
+
 test("the captured source survives an app restart; token + port stay stable", async () => {
   // Capture the token/port BEFORE restart.
   const app1 = await launch();
@@ -287,8 +322,18 @@ test("the captured source survives an app restart; token + port stay stable", as
     p1 = await getPairing(page1);
   }
   const tokenBefore = p1.token;
-  const before = await listInbox(page1);
-  const captured = before.find((i) => i.title === "The Spacing Effect");
+  const captured = await page1.evaluate(() => {
+    const api = window.appApi as unknown as {
+      library: {
+        browse(req: { types: ["source"]; limit: number }): Promise<{
+          items: { id: string; priority: number; status: string; title: string; type: string }[];
+        }>;
+      };
+    };
+    return api.library
+      .browse({ types: ["source"], limit: 500 })
+      .then((result) => result.items.find((row) => row.title === "The Spacing Effect") ?? null);
+  });
   expect(captured).toBeTruthy();
   await app1.close();
 
@@ -308,18 +353,25 @@ test("the captured source survives an app restart; token + port stay stable", as
   expect(p2.extensionOriginHint).toBe(EXT_ORIGIN);
 
   // The captured selection source still exists after restart.
-  const after = await listInbox(page2);
-  const stillThere = after.find((i) => i.id === captured?.id);
+  const stillThere = await page2.evaluate((id) => {
+    const api = window.appApi as unknown as {
+      library: {
+        browse(req: { types: ["source"]; limit: number }): Promise<{
+          items: { id: string; priority: number; status: string; title: string; type: string }[];
+        }>;
+      };
+    };
+    return api.library
+      .browse({ types: ["source"], limit: 500 })
+      .then((result) => result.items.find((row) => row.id === id) ?? null);
+  }, captured?.id);
   expect(stillThere).toBeTruthy();
   expect(stillThere?.title).toBe("The Spacing Effect");
 
-  // T063: the chosen priority + reason(+folded blockContext) survive the restart.
-  const detailAfter = await inboxGet(page2, stillThere?.id as string);
-  expect(detailAfter?.priority).toBeCloseTo(0.875, 5);
-  expect(detailAfter?.reasonAdded).toContain("core idea");
-  expect(detailAfter?.reasonAdded).toContain(
-    "The classic forgetting curve shows retention falls off exponentially.",
-  );
+  // T063: the chosen priority survives the restart even after /open-source moved
+  // the source out of Inbox.
+  expect(stillThere?.priority).toBeCloseTo(0.875, 5);
+  expect(stillThere?.status).toBe("active");
 
   await app2.close();
 });

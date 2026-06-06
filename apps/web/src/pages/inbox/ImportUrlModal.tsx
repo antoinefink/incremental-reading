@@ -53,10 +53,10 @@ export type ImportUrlModalProps = {
   /** Called with the new source id after a successful import. */
   onImported: (id: string) => void;
   /**
-   * Called with an EXISTING source id when the user chooses "Open existing" on a
-   * duplicate. Defaults to {@link onImported} (both select the row in the inbox).
+   * Called with an EXISTING source when the user chooses "Open existing" on a
+   * duplicate. Defaults to {@link onImported} with the element id.
    */
-  onOpenExisting?: (id: string) => void;
+  onOpenExisting?: (match: SourceDuplicateSummary) => void;
 };
 
 export function ImportUrlModal({ open, onClose, onImported, onOpenExisting }: ImportUrlModalProps) {
@@ -123,10 +123,11 @@ export function ImportUrlModal({ open, onClose, onImported, onOpenExisting }: Im
 
   const submit = useCallback(() => runImport(false), [runImport]);
 
-  // "Open existing" on a duplicate — select that source in the inbox + close.
+  // "Open existing" on a duplicate — select/open that source via the parent.
   const openExisting = useCallback(
-    (id: string) => {
-      (onOpenExisting ?? onImported)(id);
+    (match: SourceDuplicateSummary) => {
+      if (onOpenExisting) onOpenExisting(match);
+      else onImported(match.elementId);
     },
     [onOpenExisting, onImported],
   );
@@ -286,7 +287,7 @@ export function ImportUrlModal({ open, onClose, onImported, onOpenExisting }: Im
                       <button
                         type="button"
                         data-testid="import-url-open-existing"
-                        onClick={() => openExisting(dup.elementId)}
+                        onClick={() => openExisting(dup)}
                         className="shrink-0 rounded-md border border-border bg-surface px-2.5 py-1 font-medium text-text-2 text-xs hover:text-text"
                       >
                         Open existing

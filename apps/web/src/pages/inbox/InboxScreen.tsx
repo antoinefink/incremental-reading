@@ -33,6 +33,7 @@ import {
   type InboxItemSummary,
   isDesktop,
   type PriorityLabelInput,
+  type SourceDuplicateSummary,
 } from "../../lib/appApi";
 import { Kbd } from "../../shell/Kbd";
 import { NEW_SOURCE_EVENT } from "../../shell/nav";
@@ -555,6 +556,35 @@ export function InboxScreen() {
     }
   }, [selId, busy, navigate, refresh]);
 
+  const onOpenExistingDuplicate = useCallback(
+    async (match: SourceDuplicateSummary) => {
+      if (busy) return;
+      setUrlModalOpen(false);
+      if (match.status === "inbox") {
+        setBusy(true);
+        try {
+          const result = await appApi.triageInboxItem({
+            id: match.elementId,
+            action: { kind: "accept" },
+          });
+          if (!result.item || result.deleted) {
+            await refresh(null);
+            setError("Inbox item is no longer available.");
+            return;
+          }
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e));
+          return;
+        } finally {
+          setBusy(false);
+        }
+      }
+      setError(null);
+      void navigate({ to: "/source/$id", params: { id: match.elementId } });
+    },
+    [busy, navigate, refresh],
+  );
+
   const onTriage = useCallback(
     async (kind: "keepForLater" | "delete") => {
       if (!selId || busy) return;
@@ -792,6 +822,7 @@ export function InboxScreen() {
           setUrlModalOpen(false);
           void refresh(id);
         }}
+        onOpenExisting={onOpenExistingDuplicate}
       />
 
       <ImportFileModal

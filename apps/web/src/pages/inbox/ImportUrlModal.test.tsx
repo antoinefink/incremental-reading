@@ -56,6 +56,7 @@ describe("ImportUrlModal", () => {
         {
           elementId: "existing-1",
           title: "Existing article",
+          status: "active",
           accessedAt: "2026-06-01T00:00:00.000Z",
           matchedBy: "canonicalUrl",
         },
@@ -78,7 +79,13 @@ describe("ImportUrlModal", () => {
     expect(await findByTestId("import-url-duplicate")).toHaveTextContent("Existing article");
 
     fireEvent.click(getByTestId("import-url-open-existing"));
-    expect(onOpenExisting).toHaveBeenCalledWith("existing-1");
+    expect(onOpenExisting).toHaveBeenCalledWith({
+      elementId: "existing-1",
+      title: "Existing article",
+      status: "active",
+      accessedAt: "2026-06-01T00:00:00.000Z",
+      matchedBy: "canonicalUrl",
+    });
 
     fireEvent.click(getByTestId("import-url-new-version"));
     await waitFor(() =>

@@ -1,8 +1,9 @@
 /**
  * Loopback capture server (T062) — the ONLY new local network surface.
  *
- * A minimal Node `http` server (no Express — two routes) mounted in the Electron
- * MAIN at `app.whenReady`, through which the browser extension delivers captures.
+ * A minimal Node `http` server (no Express) mounted in the Electron MAIN at
+ * `app.whenReady`, through which the browser extension delivers captures and asks
+ * the desktop app to open captured sources.
  * It is the seam between an untrusted browser extension and the trusted M12 import
  * service; everything that makes it safe is the threat model below.
  *
@@ -10,10 +11,13 @@
  *   - **Bind `127.0.0.1` ONLY** (never `0.0.0.0`) so no other machine on the LAN
  *     can reach it; additionally reject any request whose socket `remoteAddress`
  *     is not loopback (defense in depth).
- *   - **Per-install token** (constant-time compare) on every `/capture` request.
+ *   - **Per-install token** (constant-time compare) on every `/capture` and
+ *     `/open-source` request.
  *   - **Exact-Origin CORS**, locked to the paired extension origin learned via the
  *     pairing handshake (`POST /pair`); never `*`.
- *   - **POST-only** narrow `/capture` + **GET-only** `/ping`; everything else 405.
+ *   - **GET-only** `/ping`, **POST-only** `/pair`, `/capture`, and `/open-source`;
+ *     everything else 405. `/capture` imports, `/open-source` can only name a
+ *     source id to focus in the app.
  *   - **Zod-validated** payloads (in the pure `capture-handler`).
  *   - **Hard body-size cap** — the read aborts past the cap (no unbounded buffer).
  *   - **Off until paired** — `bootstrap()` only starts it when `capture.enabled`.
@@ -27,8 +31,17 @@
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { CaptureRequest, PairingPingResponse } from "@interleave/capture-contract";
-import { CaptureRequestSchema, timingSafeTokenEqual } from "@interleave/capture-contract";
+import type {
+  CaptureRequest,
+  OpenSourceErrorCode,
+  OpenSourceRequest,
+  PairingPingResponse,
+} from "@interleave/capture-contract";
+import {
+  CaptureRequestSchema,
+  OpenSourceRequestSchema,
+  timingSafeTokenEqual,
+} from "@interleave/capture-contract";
 import type { PriorityLabel } from "@interleave/core";
 import type { SettingsRepository } from "@interleave/local-db";
 import {
@@ -71,12 +84,23 @@ export interface CaptureServerImportService extends CaptureImportService {
   }): Promise<CaptureImportResult>;
 }
 
+export type CaptureOpenSourceResult =
+  | { readonly status: "opened"; readonly activated: boolean }
+  | { readonly status: "not_found" };
+
+export interface CaptureOpenSourceInput {
+  readonly id: string;
+  readonly activate: boolean;
+}
+
 /** Options for {@link startCaptureServer}. */
 export interface StartCaptureServerOptions {
   /** The raw settings repository (the `capture.*` key/value path). */
   readonly settings: SettingsRepository;
   /** The single shared M12 import service instance (page + selection). */
   readonly importService: CaptureServerImportService;
+  /** Open a captured source in the desktop app. Injected so the server stays testable. */
+  readonly openSource: (input: CaptureOpenSourceInput) => Promise<CaptureOpenSourceResult>;
   /** The app version, surfaced in the unauthenticated `/ping` body. */
   readonly appVersion: string;
 }
@@ -136,6 +160,14 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
+function sendOpenSourceError(
+  res: ServerResponse,
+  status: number,
+  error: OpenSourceErrorCode,
+): void {
+  sendJson(res, status, { ok: false, error });
+}
+
 /** Apply the exact-Origin CORS headers (echo only the paired origin, never `*`). */
 function applyCors(
   res: ServerResponse,
@@ -159,14 +191,18 @@ function applyCors(
 export async function startCaptureServer(
   opts: StartCaptureServerOptions,
 ): Promise<CaptureServerHandle> {
-  const { settings, importService, appVersion } = opts;
+  const { settings, importService, openSource, appVersion } = opts;
   let running = false;
 
   const server = createServer((req, res) => {
     void handleRequest(req, res).catch((error) => {
       console.error("[capture] request handler error:", error);
       try {
-        if (!res.headersSent) sendJson(res, 500, { ok: false, error: "import_failed" });
+        if (!res.headersSent) {
+          const path = (req.url ?? "/").split("?")[0];
+          if (path === "/open-source") sendOpenSourceError(res, 500, "open_failed");
+          else sendJson(res, 500, { ok: false, error: "import_failed" });
+        }
       } catch {
         // ignore — the socket may already be gone.
       }
@@ -225,6 +261,22 @@ export async function startCaptureServer(
         return;
       }
       await handleCaptureRoute(req, res, requestOrigin, allowedOrigin);
+      return;
+    }
+
+    // POST /open-source — narrow command for the paired extension to open the
+    // source id it just captured. This is not a generic renderer command surface.
+    if (path === "/open-source") {
+      if (method === "OPTIONS") {
+        applyCors(res, allowedOrigin, requestOrigin);
+        res.writeHead(204).end();
+        return;
+      }
+      if (method !== "POST") {
+        res.writeHead(405).end();
+        return;
+      }
+      await handleOpenSourceRoute(req, res, requestOrigin, allowedOrigin);
       return;
     }
 
@@ -298,6 +350,74 @@ export async function startCaptureServer(
       },
     );
     sendJson(res, result.status, result.body);
+  }
+
+  async function handleOpenSourceRoute(
+    req: IncomingMessage,
+    res: ServerResponse,
+    requestOrigin: string | null,
+    allowedOrigin: string | null,
+  ): Promise<void> {
+    applyCors(res, allowedOrigin, requestOrigin);
+    if (!authorizeRequest(req, res, requestOrigin, allowedOrigin)) return;
+
+    const { body, tooLarge } = await readBody(req);
+    if (tooLarge) {
+      sendOpenSourceError(res, 413, "too_large");
+      return;
+    }
+
+    const mime = (headerValue(req, "content-type") ?? "").split(";")[0]?.trim().toLowerCase();
+    if (mime !== "application/json") {
+      sendOpenSourceError(res, 400, "invalid");
+      return;
+    }
+
+    let parsed: OpenSourceRequest;
+    try {
+      parsed = OpenSourceRequestSchema.parse(JSON.parse(body) as unknown);
+    } catch {
+      sendOpenSourceError(res, 400, "invalid");
+      return;
+    }
+
+    let result: CaptureOpenSourceResult;
+    try {
+      result = await openSource({ id: parsed.id, activate: parsed.activate });
+    } catch {
+      sendOpenSourceError(res, 500, "open_failed");
+      return;
+    }
+
+    if (result.status === "not_found") {
+      sendOpenSourceError(res, 404, "not_found");
+      return;
+    }
+
+    sendJson(res, 200, { ok: true, id: parsed.id, activated: result.activated });
+  }
+
+  function authorizeRequest(
+    req: IncomingMessage,
+    res: ServerResponse,
+    requestOrigin: string | null,
+    allowedOrigin: string | null,
+  ): boolean {
+    const token = settings.get<string>("capture.token");
+    if (!token || !allowedOrigin) {
+      sendOpenSourceError(res, 403, "unpaired");
+      return false;
+    }
+    if (!requestOrigin || requestOrigin !== allowedOrigin) {
+      sendOpenSourceError(res, 403, "bad_origin");
+      return false;
+    }
+    const bearer = parseBearer(headerValue(req, "authorization"));
+    if (!bearer || !timingSafeTokenEqual(bearer, token)) {
+      sendOpenSourceError(res, 401, "bad_token");
+      return false;
+    }
+    return true;
   }
 
   // --- bind 127.0.0.1, scanning a small fallback range ----------------------

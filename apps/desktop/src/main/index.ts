@@ -14,10 +14,13 @@
  */
 
 import path from "node:path";
+import type { ElementId } from "@interleave/core";
 import { app, BrowserWindow } from "electron";
+import { IPC_CHANNELS } from "../shared/channels";
 import { AutomaticBackupService } from "./automatic-backup-service";
 import { CaptureController } from "./capture-controller";
 import { setCaptureEnabled } from "./capture-pairing";
+import type { CaptureOpenSourceInput, CaptureOpenSourceResult } from "./capture-server";
 import { DbService } from "./db-service";
 import { embedJobSecrets } from "./embedding-service";
 import { registerIpcHandlers } from "./ipc";
@@ -28,7 +31,11 @@ import { installApplicationMenu } from "./menu";
 import { resolveMigrationsDir } from "./migrations";
 import { resolveNativeBinding } from "./native-binding";
 import { initAppPaths } from "./paths";
-import { registerRendererProtocol, registerRendererSchemePrivileges } from "./renderer-protocol";
+import {
+  RENDERER_URL,
+  registerRendererProtocol,
+  registerRendererSchemePrivileges,
+} from "./renderer-protocol";
 import { resolveSqliteVecBinary } from "./sqlite-vec-binding";
 import { createMainWindow } from "./window";
 
@@ -57,6 +64,52 @@ const rendererDir = app.isPackaged
  * dev/test (`electron .` / the Playwright harness) still drive it via the env var.
  */
 const devServerUrl = app.isPackaged ? undefined : process.env.VITE_DEV_SERVER_URL || undefined;
+
+function rendererRouteUrl(routePath: string): string {
+  const base = (devServerUrl ?? RENDERER_URL).replace(/\/+$/, "");
+  const pathPart = routePath.replace(/^\/+/, "");
+  return `${base}/${pathPart}`;
+}
+
+function focusWindow(win: BrowserWindow): void {
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+async function openSourceReader(sourceId: string): Promise<void> {
+  const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
+  if (win) {
+    focusWindow(win);
+    if (!win.webContents.isLoadingMainFrame()) {
+      win.webContents.send(IPC_CHANNELS.sourcesOpenReader, sourceId);
+      return;
+    }
+    await win.loadURL(rendererRouteUrl(`/source/${encodeURIComponent(sourceId)}`));
+    return;
+  }
+
+  const created = createMainWindow({ distDir, devServerUrl });
+  focusWindow(created);
+  await created.loadURL(rendererRouteUrl(`/source/${encodeURIComponent(sourceId)}`));
+}
+
+async function openCapturedSource(input: CaptureOpenSourceInput): Promise<CaptureOpenSourceResult> {
+  const id = input.id as ElementId;
+  const element = dbService.repos.elements.findById(id);
+  if (!element || element.deletedAt || element.type !== "source") {
+    return { status: "not_found" };
+  }
+
+  let activated = false;
+  if (input.activate && element.status === "inbox") {
+    dbService.triageInboxItem({ id, action: { kind: "accept" } });
+    activated = true;
+  }
+
+  await openSourceReader(input.id);
+  return { status: "opened", activated };
+}
 
 function bootstrap(): void {
   // 1) App data dir + vault skeleton (idempotent).
@@ -164,6 +217,7 @@ function bootstrap(): void {
     // The SAME shared M12 import service the renderer IPC importUrl path uses, so
     // a live-started capture server and the renderer converge on one instance.
     getImportService: () => dbService.urlImportService,
+    openSource: openCapturedSource,
     appVersion: app.getVersion(),
   });
 

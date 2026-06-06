@@ -21,6 +21,8 @@ import {
   setCaptureEnabled,
 } from "./capture-pairing";
 import {
+  type CaptureOpenSourceInput,
+  type CaptureOpenSourceResult,
   type CaptureServerHandle,
   type CaptureServerImportService,
   startCaptureServer,
@@ -39,6 +41,8 @@ export interface CaptureControllerDeps {
   readonly settings: SettingsRepository;
   /** A getter for the single shared M12 import service (built lazily on first start). */
   getImportService(): CaptureServerImportService;
+  /** Focus/open a captured source in the desktop app. */
+  openSource(input: CaptureOpenSourceInput): Promise<CaptureOpenSourceResult>;
   readonly appVersion: string;
 }
 
@@ -60,6 +64,7 @@ export class CaptureController {
     this.handle = await startCaptureServer({
       settings: this.deps.settings,
       importService: this.deps.getImportService(),
+      openSource: this.deps.openSource,
       appVersion: this.deps.appVersion,
     });
   }

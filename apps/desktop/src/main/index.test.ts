@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { IPC_CHANNELS } from "../shared/channels";
 
 interface IndexHarness {
   app: {
@@ -14,6 +15,8 @@ interface IndexHarness {
   captureController: Record<string, ReturnType<typeof vi.fn>>;
   jobRunner: Record<string, ReturnType<typeof vi.fn>>;
   automaticBackupService: Record<string, ReturnType<typeof vi.fn>>;
+  browserWindow: { getAllWindows: ReturnType<typeof vi.fn> };
+  captureControllerConstructor: ReturnType<typeof vi.fn>;
   registerIpcHandlers: ReturnType<typeof vi.fn>;
   disposeIpc: ReturnType<typeof vi.fn>;
   registerRendererProtocol: ReturnType<typeof vi.fn>;
@@ -49,6 +52,9 @@ async function loadIndex(options: {
   const BrowserWindow = {
     getAllWindows: vi.fn(() => []),
   };
+  const elementRepo = {
+    findById: vi.fn(),
+  };
 
   const dbService = {
     open: vi.fn(),
@@ -58,10 +64,12 @@ async function loadIndex(options: {
     updateSetting: vi.fn(),
     close: vi.fn(),
     setRunner: vi.fn(),
+    triageInboxItem: vi.fn(() => ({ item: null, deleted: false })),
     repos: {
       settings: {
         getAppSettings: vi.fn(() => ({ aiEnabled: false, aiProviderKind: "local" })),
       },
+      elements: elementRepo,
       jobs: {},
     },
     urlImportService: {},
@@ -91,6 +99,9 @@ async function loadIndex(options: {
   const installApplicationMenu = vi.fn();
   const createMainWindow = vi.fn();
   const setCaptureEnabled = vi.fn();
+  const captureControllerConstructor = vi.fn(function CaptureController() {
+    return captureController;
+  });
 
   vi.doMock("electron", () => ({ app, BrowserWindow }));
   vi.doMock("./db-service", () => ({
@@ -99,9 +110,7 @@ async function loadIndex(options: {
     }),
   }));
   vi.doMock("./capture-controller", () => ({
-    CaptureController: vi.fn(function CaptureController() {
-      return captureController;
-    }),
+    CaptureController: captureControllerConstructor,
   }));
   vi.doMock("./job-runner", () => ({
     JobRunner: vi.fn(function JobRunner() {
@@ -133,6 +142,7 @@ async function loadIndex(options: {
     })),
   }));
   vi.doMock("./renderer-protocol", () => ({
+    RENDERER_URL: "app://bundle/",
     registerRendererProtocol,
     registerRendererSchemePrivileges,
   }));
@@ -149,6 +159,8 @@ async function loadIndex(options: {
     callbacks,
     dbService,
     captureController,
+    browserWindow: BrowserWindow,
+    captureControllerConstructor,
     jobRunner,
     automaticBackupService,
     registerIpcHandlers,
@@ -170,6 +182,29 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
 });
+
+function fakeWindow(options: { readonly loading?: boolean } = {}) {
+  return {
+    isDestroyed: vi.fn(() => false),
+    isMinimized: vi.fn(() => false),
+    restore: vi.fn(),
+    show: vi.fn(),
+    focus: vi.fn(),
+    loadURL: vi.fn(async () => undefined),
+    webContents: {
+      isLoadingMainFrame: vi.fn(() => options.loading ?? false),
+      send: vi.fn(),
+    },
+  };
+}
+
+function firstCallOrder(fn: {
+  readonly mock: { readonly invocationCallOrder: readonly number[] };
+}) {
+  const [order] = fn.mock.invocationCallOrder;
+  if (order === undefined) throw new Error("Expected a recorded call order");
+  return order;
+}
 
 describe("main entrypoint", () => {
   it("quits immediately when another instance already owns the SQLite lock", async () => {
@@ -246,5 +281,153 @@ describe("main entrypoint", () => {
     expect(harness.createMainWindow).toHaveBeenCalledWith(
       expect.objectContaining({ devServerUrl: undefined }),
     );
+  });
+
+  it("opens captured sources in an existing window without hard-reloading it", async () => {
+    const harness = await loadIndex({ gotLock: true });
+    const win = fakeWindow();
+    harness.browserWindow.getAllWindows.mockReturnValue([win]);
+    const deps = harness.captureControllerConstructor.mock.calls[0]?.[0] as {
+      openSource(input: { id: string; activate: boolean }): Promise<unknown>;
+    };
+    const repos = harness.dbService.repos as {
+      elements: { findById: ReturnType<typeof vi.fn> };
+    };
+    const triageInboxItem = harness.dbService.triageInboxItem as ReturnType<typeof vi.fn>;
+    repos.elements.findById.mockReturnValue({
+      id: "source-1",
+      type: "source",
+      status: "inbox",
+      deletedAt: null,
+    });
+
+    await expect(deps.openSource({ id: "source-1", activate: true })).resolves.toEqual({
+      status: "opened",
+      activated: true,
+    });
+
+    expect(win.show).toHaveBeenCalledOnce();
+    expect(win.focus).toHaveBeenCalledOnce();
+    expect(win.loadURL).not.toHaveBeenCalled();
+    expect(win.webContents.send).toHaveBeenCalledWith(IPC_CHANNELS.sourcesOpenReader, "source-1");
+    expect(triageInboxItem).toHaveBeenCalledWith({
+      id: "source-1",
+      action: { kind: "accept" },
+    });
+    expect(firstCallOrder(triageInboxItem)).toBeLessThan(firstCallOrder(win.webContents.send));
+  });
+
+  it("does not navigate when inbox activation fails", async () => {
+    const harness = await loadIndex({ gotLock: true });
+    const win = fakeWindow();
+    harness.browserWindow.getAllWindows.mockReturnValue([win]);
+    const triageInboxItem = harness.dbService.triageInboxItem as ReturnType<typeof vi.fn>;
+    triageInboxItem.mockImplementationOnce(() => {
+      throw new Error("activation failed");
+    });
+    const deps = harness.captureControllerConstructor.mock.calls[0]?.[0] as {
+      openSource(input: { id: string; activate: boolean }): Promise<unknown>;
+    };
+    const repos = harness.dbService.repos as {
+      elements: { findById: ReturnType<typeof vi.fn> };
+    };
+    repos.elements.findById.mockReturnValue({
+      id: "source-1",
+      type: "source",
+      status: "inbox",
+      deletedAt: null,
+    });
+
+    await expect(deps.openSource({ id: "source-1", activate: true })).rejects.toThrow(
+      "activation failed",
+    );
+
+    expect(win.webContents.send).not.toHaveBeenCalled();
+    expect(win.loadURL).not.toHaveBeenCalled();
+  });
+
+  it("loads the encoded reader route for an existing window whose renderer is still loading", async () => {
+    const harness = await loadIndex({ gotLock: true });
+    const win = fakeWindow({ loading: true });
+    harness.browserWindow.getAllWindows.mockReturnValue([win]);
+    const deps = harness.captureControllerConstructor.mock.calls[0]?.[0] as {
+      openSource(input: { id: string; activate: boolean }): Promise<unknown>;
+    };
+    const repos = harness.dbService.repos as {
+      elements: { findById: ReturnType<typeof vi.fn> };
+    };
+    const triageInboxItem = harness.dbService.triageInboxItem as ReturnType<typeof vi.fn>;
+    repos.elements.findById.mockReturnValue({
+      id: "source/with space",
+      type: "source",
+      status: "inbox",
+      deletedAt: null,
+    });
+
+    await expect(deps.openSource({ id: "source/with space", activate: true })).resolves.toEqual({
+      status: "opened",
+      activated: true,
+    });
+
+    expect(win.webContents.send).not.toHaveBeenCalled();
+    expect(win.loadURL).toHaveBeenCalledWith("app://bundle/source/source%2Fwith%20space");
+    expect(firstCallOrder(triageInboxItem)).toBeLessThan(firstCallOrder(win.loadURL));
+  });
+
+  it("loads the encoded reader route for a newly created window", async () => {
+    const harness = await loadIndex({ gotLock: true });
+    const win = fakeWindow();
+    harness.browserWindow.getAllWindows.mockReturnValue([]);
+    harness.createMainWindow.mockClear();
+    harness.createMainWindow.mockReturnValue(win);
+    const deps = harness.captureControllerConstructor.mock.calls[0]?.[0] as {
+      openSource(input: { id: string; activate: boolean }): Promise<unknown>;
+    };
+    const repos = harness.dbService.repos as {
+      elements: { findById: ReturnType<typeof vi.fn> };
+    };
+    repos.elements.findById.mockReturnValue({
+      id: "source/with space",
+      type: "source",
+      status: "active",
+      deletedAt: null,
+    });
+
+    await expect(deps.openSource({ id: "source/with space", activate: true })).resolves.toEqual({
+      status: "opened",
+      activated: false,
+    });
+
+    expect(harness.createMainWindow).toHaveBeenCalledWith(
+      expect.objectContaining({ devServerUrl: undefined }),
+    );
+    expect(win.loadURL).toHaveBeenCalledWith("app://bundle/source/source%2Fwith%20space");
+    expect(harness.dbService.triageInboxItem).not.toHaveBeenCalled();
+  });
+
+  it("does not mutate or navigate deleted, missing, or non-source elements", async () => {
+    const harness = await loadIndex({ gotLock: true });
+    const win = fakeWindow();
+    harness.browserWindow.getAllWindows.mockReturnValue([win]);
+    const deps = harness.captureControllerConstructor.mock.calls[0]?.[0] as {
+      openSource(input: { id: string; activate: boolean }): Promise<unknown>;
+    };
+    const repos = harness.dbService.repos as {
+      elements: { findById: ReturnType<typeof vi.fn> };
+    };
+
+    for (const element of [
+      null,
+      { id: "deleted", type: "source", status: "inbox", deletedAt: "2026-06-06T00:00:00.000Z" },
+      { id: "card-1", type: "card", status: "active", deletedAt: null },
+    ]) {
+      repos.elements.findById.mockReturnValueOnce(element);
+      await expect(deps.openSource({ id: "source-1", activate: true })).resolves.toEqual({
+        status: "not_found",
+      });
+    }
+
+    expect(harness.dbService.triageInboxItem).not.toHaveBeenCalled();
+    expect(win.webContents.send).not.toHaveBeenCalled();
   });
 });

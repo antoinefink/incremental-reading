@@ -12,6 +12,10 @@
 import {
   type CaptureRequest,
   type CaptureResponse,
+  type OpenSourceErrorCode,
+  OpenSourceErrorResponseSchema,
+  type OpenSourceRequestInput,
+  OpenSourceResponseSchema,
   type ShapeCaptureInput,
   shapeCapture,
 } from "@interleave/capture-contract";
@@ -39,6 +43,18 @@ export type CaptureOutcome =
   | { readonly kind: "not-running" }
   | { readonly kind: "bad-token" }
   | { readonly kind: "error"; readonly message: string };
+
+/** A normalized outcome for opening a captured source in the desktop app. */
+export type OpenSourceOutcome =
+  | { readonly kind: "ok"; readonly sourceId: string }
+  | { readonly kind: "not-paired" }
+  | { readonly kind: "not-running" }
+  | { readonly kind: "bad-token" }
+  | { readonly kind: "error"; readonly message: string };
+
+export interface OpenCapturedSourceOptions {
+  readonly activate?: boolean;
+}
 
 /** This extension's own origin (`chrome-extension://<id>`), the pairing identity. */
 export function extensionOrigin(): string {
@@ -150,6 +166,80 @@ export async function sendCapture(input: ShapeCaptureInput): Promise<CaptureOutc
     kind: "error",
     message: "error" in body && body.error ? String(body.error) : `Capture failed (${res.status})`,
   };
+}
+
+/**
+ * POST a narrow open-source command to the paired loopback server. This stays on
+ * the extension side of the boundary: no renderer/Electron/local-db imports, just
+ * the bearer token + source id command shape the desktop validates.
+ */
+export async function openCapturedSource(
+  sourceId: string,
+  options: OpenCapturedSourceOptions = {},
+): Promise<OpenSourceOutcome> {
+  const cleanSourceId = sourceId.trim();
+  if (!cleanSourceId) return { kind: "error", message: "Missing source id" };
+
+  const { token, port } = await readPairedConfig();
+  if (!token) return { kind: "not-paired" };
+
+  const request: OpenSourceRequestInput = {
+    id: cleanSourceId,
+    activate: options.activate ?? true,
+  };
+
+  let res: Response;
+  try {
+    res = await fetch(`${loopbackBase(port)}/open-source`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request),
+    });
+  } catch {
+    return { kind: "not-running" };
+  }
+
+  if (res.status === 401) return { kind: "bad-token" };
+  if (res.status === 403) return { kind: "not-paired" };
+
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return { kind: "error", message: `Unexpected response (${res.status})` };
+  }
+
+  const ok = OpenSourceResponseSchema.safeParse(body);
+  if (ok.success) {
+    if (res.ok) return { kind: "ok", sourceId: ok.data.id };
+    return { kind: "error", message: `Open failed (${res.status})` };
+  }
+
+  const error = OpenSourceErrorResponseSchema.safeParse(body);
+  if (error.success) {
+    return { kind: "error", message: openSourceErrorMessage(error.data.error, res.status) };
+  }
+
+  return { kind: "error", message: `Unexpected response (${res.status})` };
+}
+
+function openSourceErrorMessage(error: OpenSourceErrorCode | undefined, status: number): string {
+  switch (error) {
+    case "not_found":
+      return "Source not found";
+    case "invalid":
+      return "Could not open source";
+    case "bad_token":
+      return "Bad token — re-pair in Options";
+    case "bad_origin":
+    case "unpaired":
+      return "Not paired — open Options";
+    default:
+      return error ? String(error) : `Open failed (${status})`;
+  }
 }
 
 /** One recent capture row (kept in chrome.storage for the side panel — T063). */

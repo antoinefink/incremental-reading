@@ -11,6 +11,9 @@ import {
   CaptureRequestSchema,
   CaptureResponseSchema,
   DEFAULT_CAPTURE_PRIORITY,
+  OpenSourceErrorResponseSchema,
+  OpenSourceRequestSchema,
+  OpenSourceResponseSchema,
   PairingPingResponseSchema,
   shapeCapture,
   timingSafeTokenEqual,
@@ -111,6 +114,50 @@ describe("CaptureResponseSchema / PairingPingResponseSchema", () => {
     expect(() =>
       PairingPingResponseSchema.parse({ ok: true, app: "other", version: "1" }),
     ).toThrow();
+  });
+});
+
+describe("OpenSourceRequestSchema / OpenSourceResponseSchema", () => {
+  it("accepts a source id and defaults activation on", () => {
+    const parsed = OpenSourceRequestSchema.parse({ id: "src_123" });
+    expect(parsed).toEqual({ id: "src_123", activate: true });
+  });
+
+  it("allows activation to be disabled explicitly", () => {
+    expect(OpenSourceRequestSchema.parse({ id: "src_123", activate: false })).toEqual({
+      id: "src_123",
+      activate: false,
+    });
+  });
+
+  it("rejects empty or oversized ids", () => {
+    expect(() => OpenSourceRequestSchema.parse({ id: "   " })).toThrow();
+    expect(() => OpenSourceRequestSchema.parse({ id: "x".repeat(129) })).toThrow();
+  });
+
+  it("round-trips an open-source success body", () => {
+    const body = OpenSourceResponseSchema.parse({ ok: true, id: "src_123", activated: true });
+    expect(body.activated).toBe(true);
+  });
+
+  it("accepts only documented open-source error bodies", () => {
+    for (const error of [
+      "unpaired",
+      "bad_token",
+      "bad_origin",
+      "too_large",
+      "invalid",
+      "not_found",
+      "open_failed",
+    ]) {
+      expect(OpenSourceErrorResponseSchema.parse({ ok: false, error })).toEqual({
+        ok: false,
+        error,
+      });
+    }
+
+    expect(() => OpenSourceErrorResponseSchema.parse({ ok: false, error: "sql_error" })).toThrow();
+    expect(() => OpenSourceErrorResponseSchema.parse({ ok: false, error: "deleted" })).toThrow();
   });
 });
 

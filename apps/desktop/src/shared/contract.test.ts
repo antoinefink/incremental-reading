@@ -185,6 +185,7 @@ describe("IPC channels", () => {
         "sources:extractRegion",
         "sources:getRegionImage",
         "sources:extractClip",
+        "sources:openReader",
         "sources:runOcr",
         "sources:getOcr",
         "sources:acceptOcr",

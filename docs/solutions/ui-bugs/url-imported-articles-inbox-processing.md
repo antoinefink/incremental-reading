@@ -1,45 +1,52 @@
 ---
-title: "URL-imported articles should render as internal readable sources"
+title: "URL and browser-captured articles should open as internal readable sources"
 date: "2026-06-06"
+last_updated: "2026-06-06"
 category: "docs/solutions/ui-bugs/"
-module: "import-inbox"
+module: "import-inbox-and-browser-capture"
 problem_type: "ui_bug"
 component: "service_object"
 severity: "medium"
 symptoms:
   - "URL/blog imports appeared as Manual note in inbox source-type labels."
   - "Inbox selected preview flattened and truncated persisted article content instead of rendering the full formatted body."
-  - "The inbox preview rail exposed external links but had no internal Read now action to activate and process the source."
+  - "Browser extension captures could save or dedupe articles but offered no direct Open in Interleave action."
+  - "Recent browser captures in the side panel were visible but not actionable."
+  - "Duplicate URL Open existing paths could lose the source status needed to activate inbox matches before reader navigation."
 root_cause: "logic_error"
 resolution_type: "code_fix"
 related_components:
   - "database"
   - "frontend_stimulus"
+  - "authentication"
   - "testing_framework"
 tags:
   - "inbox"
   - "url-import"
-  - "source-provenance"
-  - "prosemirror"
-  - "electron-ipc"
-  - "read-now"
+  - "browser-capture"
+  - "loopback"
+  - "open-source"
+  - "source-activation"
   - "source-reader"
   - "typed-contract"
 ---
 
-# URL-imported articles should render as internal readable sources
+# URL and browser-captured articles should open as internal readable sources
 
 ## Problem
 
 The inbox treated URL-imported articles like manual notes: the type label was misleading, the selected preview used a truncated plain-text slice instead of the persisted formatted document, and the right rail had external provenance links but no internal action that opened the source for processing.
 
-This made a successful URL import look like an inert note instead of a source ready for incremental reading.
+The browser extension had the same workflow gap from the other side: capture responses returned the saved source id, but the popup, side panel, and recent-capture rows offered no way to open the local source reader and start working on it.
 
 ## Symptoms
 
 - URL and blog imports appeared as `Manual note` in the inbox source-type label.
 - The selected inbox preview flattened formatting and could omit the tail of a long article.
 - The user could open the canonical web URL but not the local source reader from the inbox.
+- Browser captures reported `Saved` or `Already saved`, but did not offer `Open in Interleave`.
+- Recent captures in the browser side panel were static history rows.
+- Duplicate URL imports reduced the duplicate match to an id, losing the source status needed to decide whether an inbox match should be accepted before navigation.
 - Malformed persisted document JSON could be passed directly to the editor preview.
 - Stale inbox triage calls could mutate sources that had already left the inbox.
 
@@ -49,6 +56,10 @@ This made a successful URL import look like an inert note instead of a source re
 - Keeping `srcType` as an M2 placeholder made all source summaries say `Manual note`, even when provenance contained URL, media, snapshot, or source-type data.
 - Handling `Read now` purely in the renderer would not protect against stale IPC calls from another window or a delayed duplicate click.
 - Refreshing the full inbox detail after a priority-only change needlessly re-sent full article bodies over IPC.
+- Treating `/capture` success as enough was insufficient. The extension already had the saved source id, but no authenticated desktop command consumed it.
+- Exposing a generic route or renderer command to the extension would have widened the loopback attack surface.
+- Hard-loading an already open renderer window would risk losing pending renderer state. Loaded windows need an in-app event and router navigation.
+- Passing only a duplicate source id to `Open existing` was too thin because behavior depends on whether the existing source is still in `inbox`.
 
 ## Solution
 
@@ -105,6 +116,36 @@ function validBodyDoc(value: unknown): unknown | null {
 
 Replace the old primary `Activate` action with `Read now`: accept the inbox item, then navigate to `/source/$id`. Keep external URL links visually and semantically separate from the internal processing action.
 
+Apply the same internal-processing rule to browser captures. Add a narrow open command to the capture contract instead of a generic command channel:
+
+```ts
+export const OpenSourceRequestSchema = z.object({
+  id: z.string().trim().min(1).max(ELEMENT_ID_MAX),
+  activate: z.boolean().optional().default(true),
+});
+```
+
+Handle `POST /open-source` in the desktop loopback server with the same paired-origin CORS, bearer token, JSON content type, body cap, and Zod validation posture as `/capture`. The route calls an injected opener and returns only typed non-leaky outcomes such as `not_found` or `open_failed`.
+
+Keep source validation, activation, and window focus in Electron main:
+
+```ts
+const element = dbService.repos.elements.findById(id);
+if (!element || element.deletedAt || element.type !== "source") {
+  return { status: "not_found" };
+}
+
+if (input.activate && element.status === "inbox") {
+  dbService.triageInboxItem({ id, action: { kind: "accept" } });
+}
+```
+
+For an already loaded desktop window, send a receive-only `sources:openReader` event through preload and let the renderer navigate to `/source/$id`. For a loading or newly created window, load the encoded source route directly.
+
+In the extension, centralize `openCapturedSource()` in shared browser-only code. The popup success and deduped states render `Open in Interleave`, and the side panel renders the same action for both the current capture status and recent-capture rows.
+
+For duplicate URL imports inside the app, pass the full `SourceDuplicateSummary` through `Open existing`. If the match is still an inbox source, accept it first, then navigate to `/source/$id`; active matches navigate directly.
+
 Finally, make inbox triage conditional in Electron main before mutating:
 
 ```ts
@@ -124,6 +165,10 @@ Source labels now reflect provenance rather than import modality assumptions. A 
 
 The internal processing action is explicit and local: `Read now` changes lifecycle state and opens the local reader, while canonical URL links remain external provenance links.
 
+The browser extension remains untrusted. It can only POST a paired, token-authenticated `{ id, activate }` request to the loopback server. Electron main still owns the database lookup, lifecycle transition, window focus, and route choice.
+
+Activating before navigation means a just-captured inbox source becomes work-ready before the source reader opens. Using a main-to-renderer open event for already loaded windows avoids hard reloads and preserves renderer state.
+
 The stale triage guard belongs in Electron main because it protects all callers, not just the current React window. It prevents a second accept/delete request from reviving or mutating an item that is no longer a live inbox source.
 
 ## Prevention
@@ -132,6 +177,9 @@ The stale triage guard belongs in Electron main because it protects all callers,
 - Validate opaque persisted document JSON before handing it to editor components.
 - For summary-only mutations, use the mutation response to patch summary state instead of re-fetching full detail.
 - Guard command-shaped inbox mutations at the main-process/service boundary with live element preconditions.
+- Give each future browser-extension desktop action its own narrow capture contract and loopback route; do not add a generic command endpoint.
+- Keep lifecycle mutations main-side. The extension may request an open action, but it should not decide database state directly.
+- Preserve full duplicate match objects through UI callbacks when open behavior depends on status or metadata.
 - Test both the legacy fallback path and the formatted path:
   - provenance labels for URL imports, manual notes, snapshots, and media
   - full `bodyDoc` and untruncated `bodyText`
@@ -139,7 +187,12 @@ The stale triage guard belongs in Electron main because it protects all callers,
   - malformed formatted JSON falling back to full text
   - `Read now` activation and navigation failure handling
   - stale duplicate accept/delete requests that must not mutate deleted or non-inbox rows
+  - `/open-source` auth, CORS, body-size, schema, not-found, and open-failed cases
+  - activation before source-reader navigation
+  - existing-window event navigation versus loading/new-window route loading
+  - extension success, dedupe, recent-open, bad-token, and not-running states
 
 ## Related Issues
 
+- [Active card rows should open a protected card detail surface](./active-card-rows-open-card-detail-surface.md) - adjacent routing precedent for opening the specific work surface for an object instead of a generic or inert destination.
 - [Electron main rolling backups pattern](../architecture-patterns/electron-main-rolling-backups-over-renderer-reminders.md) — low overlap; reinforces keeping trusted state transitions in Electron main.

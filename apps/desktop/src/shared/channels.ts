@@ -58,6 +58,10 @@ export const IPC_CHANNELS = {
   captureGetPairing: "capture:getPairing",
   captureRegenerateToken: "capture:regenerateToken",
   captureSetEnabled: "capture:setEnabled",
+  // One-way main → renderer event: the paired browser extension asked the app to
+  // open a captured source in the reader. The payload is only the source id; the
+  // renderer does ordinary TanStack navigation to `/source/$id`.
+  sourcesOpenReader: "sources:openReader",
   inboxList: "inbox:list",
   inboxGet: "inbox:get",
   inboxTriage: "inbox:triage",

@@ -8,7 +8,8 @@
  * the side panel (T063).
  */
 
-import type { CaptureOutcome } from "./shared";
+import type { CaptureOutcome, OpenSourceOutcome } from "./shared";
+import { openCapturedSource } from "./shared";
 
 const titleEl = document.getElementById("page-title") as HTMLParagraphElement;
 const resultEl = document.getElementById("result") as HTMLDivElement;
@@ -27,7 +28,9 @@ function render(outcome: CaptureOutcome): void {
       el.textContent = outcome.response.deduped
         ? `Already saved: ${outcome.response.title}`
         : `Saved: ${outcome.response.title}`;
-      break;
+      resultEl.appendChild(el);
+      resultEl.appendChild(openButton(outcome.response.id));
+      return;
     case "not-paired":
       el.className = "status warn";
       el.textContent = "Not paired — open Options";
@@ -45,6 +48,57 @@ function render(outcome: CaptureOutcome): void {
       el.textContent = outcome.message;
   }
   resultEl.appendChild(el);
+}
+
+function openButton(sourceId: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "status-action";
+  button.textContent = "Open in Interleave";
+  button.addEventListener("click", () => {
+    void openSourceFromButton(sourceId, button);
+  });
+  return button;
+}
+
+async function openSourceFromButton(sourceId: string, button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  button.textContent = "Opening…";
+  const outcome = await openCapturedSource(sourceId, { activate: true });
+  renderOpenOutcome(outcome, button);
+}
+
+function renderOpenOutcome(outcome: OpenSourceOutcome, button: HTMLButtonElement): void {
+  if (outcome.kind === "ok") {
+    button.textContent = "Opened in Interleave";
+    return;
+  }
+  button.disabled = false;
+  button.textContent = "Open in Interleave";
+
+  let status = resultEl.querySelector<HTMLSpanElement>(".open-status");
+  if (!status) {
+    status = document.createElement("span");
+    resultEl.appendChild(status);
+  }
+
+  switch (outcome.kind) {
+    case "not-paired":
+      status.className = "status warn open-status";
+      status.textContent = "Not paired — open Options";
+      break;
+    case "bad-token":
+      status.className = "status warn open-status";
+      status.textContent = "Bad token — re-pair in Options";
+      break;
+    case "not-running":
+      status.className = "status err open-status";
+      status.textContent = "App not running";
+      break;
+    default:
+      status.className = "status err open-status";
+      status.textContent = outcome.message;
+  }
 }
 
 function send(type: "save-page" | "save-selection"): void {

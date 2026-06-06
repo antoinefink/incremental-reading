@@ -3445,6 +3445,7 @@ export interface AppApi {
     getOcr(request: SourcesGetOcrRequest): Promise<SourcesGetOcrResult>;
     acceptOcr(request: SourcesAcceptOcrRequest): Promise<SourcesAcceptOcrResult>;
     dismissOcr(request: SourcesAcceptOcrRequest): Promise<{ dismissed: boolean }>;
+    onOpenReader(callback: (sourceId: string) => void): () => void;
   };
   readonly ai: {
     run(request: AiRunRequest): Promise<AiRunResult>;
@@ -3933,6 +3934,15 @@ export const appApi = {
   /** Dismiss a page's OCR suggestion (T066) — sets `dismissed`. */
   dismissOcr(request: SourcesAcceptOcrRequest): Promise<{ dismissed: boolean }> {
     return requireAppApi().sources.dismissOcr(request);
+  },
+  /**
+   * Subscribe to main-process requests to open a source reader. Used by browser
+   * capture so an existing renderer window navigates in-app instead of being
+   * hard-reloaded. No-op outside Electron.
+   */
+  onSourceOpenReader(callback: (sourceId: string) => void): () => void {
+    if (!isDesktop() || !window.appApi?.sources) return () => {};
+    return window.appApi.sources.onOpenReader(callback);
   },
   /**
    * Run an AI formulation action over a selected span (T093) — enqueues an `ai` job on

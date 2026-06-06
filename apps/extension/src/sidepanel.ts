@@ -19,8 +19,8 @@
  * loopback endpoint; a live inbox-read endpoint is intentionally out of scope).
  */
 
-import type { CaptureOutcome } from "./shared";
-import { type RecentCapture, STORAGE_KEYS } from "./shared";
+import type { CaptureOutcome, OpenSourceOutcome } from "./shared";
+import { openCapturedSource, type RecentCapture, STORAGE_KEYS } from "./shared";
 
 type Priority = "A" | "B" | "C" | "D";
 
@@ -117,20 +117,22 @@ function setSelection(text: string): void {
 
 // --- save flows (through the SAME background-worker POST path as the popup) --
 
-function setStatus(outcome: CaptureOutcome | { kind: "pending" }): void {
+function setStatus(outcome: CaptureOutcome | { kind: "pending"; message?: string }): void {
   statusEl.hidden = false;
   statusEl.className = "status";
   let text: string;
   switch (outcome.kind) {
     case "pending":
-      text = "Capturing…";
+      text = outcome.message ?? "Capturing…";
       break;
     case "ok":
       statusEl.classList.add("ok");
       text = outcome.response.deduped
         ? `Already saved: ${outcome.response.title}`
         : `Saved: ${outcome.response.title}`;
-      break;
+      statusEl.textContent = text;
+      statusEl.appendChild(openButton(outcome.response.id, "status-action"));
+      return;
     case "not-paired":
       statusEl.classList.add("warn");
       text = "Not paired — open Options and paste the token.";
@@ -148,6 +150,50 @@ function setStatus(outcome: CaptureOutcome | { kind: "pending" }): void {
       text = outcome.message;
   }
   statusEl.textContent = text;
+}
+
+function openButton(sourceId: string, className: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.textContent = className === "recent-open" ? "Open" : "Open in Interleave";
+  button.title = "Open in Interleave";
+  button.addEventListener("click", () => {
+    void openSource(sourceId);
+  });
+  return button;
+}
+
+async function openSource(sourceId: string): Promise<void> {
+  setStatus({ kind: "pending", message: "Opening…" });
+  const outcome = await openCapturedSource(sourceId, { activate: true });
+  setOpenStatus(outcome);
+}
+
+function setOpenStatus(outcome: OpenSourceOutcome): void {
+  statusEl.hidden = false;
+  statusEl.className = "status";
+  switch (outcome.kind) {
+    case "ok":
+      statusEl.classList.add("ok");
+      statusEl.textContent = "Opened in Interleave";
+      break;
+    case "not-paired":
+      statusEl.classList.add("warn");
+      statusEl.textContent = "Not paired — open Options and paste the token.";
+      break;
+    case "bad-token":
+      statusEl.classList.add("warn");
+      statusEl.textContent = "Bad token — re-pair in Options.";
+      break;
+    case "not-running":
+      statusEl.classList.add("err");
+      statusEl.textContent = "Interleave app is not running / capture disabled.";
+      break;
+    default:
+      statusEl.classList.add("err");
+      statusEl.textContent = outcome.message;
+  }
 }
 
 /** Build a save message + dispatch it to the background worker; render outcome. */
@@ -202,7 +248,10 @@ function renderRecent(list: readonly RecentCapture[]): void {
     when.className = "recent-when";
     when.textContent = relativeTime(entry.timestamp);
 
-    row.append(kind, title, when);
+    const open = openButton(entry.id, "recent-open");
+    open.setAttribute("aria-label", `Open in Interleave: ${entry.title || "untitled capture"}`);
+
+    row.append(kind, title, when, open);
     recentEl.appendChild(row);
   }
 }

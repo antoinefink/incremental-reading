@@ -5446,6 +5446,13 @@ export interface AppApi {
     acceptOcr(request: SourcesAcceptOcrRequest): Promise<SourcesAcceptOcrResult>;
     /** Dismiss a page's OCR suggestion (T066) — sets `dismissed`. */
     dismissOcr(request: SourcesAcceptOcrRequest): Promise<{ dismissed: boolean }>;
+    /**
+     * Receive a narrow main → renderer source-open request. The paired browser
+     * extension can ask main to focus a captured source; the renderer receives only
+     * the source id and performs normal `/source/$id` navigation. No generic route
+     * listener or raw IPC event is exposed.
+     */
+    onOpenReader(callback: (sourceId: string) => void): () => void;
   };
   readonly ai: {
     /**

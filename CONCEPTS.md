@@ -16,6 +16,10 @@ A source that has been captured but not yet accepted into the user's active know
 
 The origin and reliability context attached to a source, including where it came from and how the app should describe that origin to the user.
 
+### Browser capture
+
+A browser-extension initiated import flow that turns the current page or selected browser content into a Source while leaving validation, activation, and local reader navigation inside the desktop app.
+
 ### Read now
 
 The inbox action that accepts a source into active processing and immediately opens the local reader for that source.

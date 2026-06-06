@@ -136,6 +136,51 @@ export const CaptureErrorResponseSchema = z.object({
 });
 export type CaptureErrorResponse = z.infer<typeof CaptureErrorResponseSchema>;
 
+// ---------------------------------------------------------------------------
+// Open captured source command.
+// ---------------------------------------------------------------------------
+
+const ELEMENT_ID_MAX = 128;
+
+/**
+ * Ask the desktop app to focus and open a captured source. This is deliberately
+ * NOT a generic command channel: the extension may only name the source id it just
+ * received from `/capture` or recent-capture storage.
+ */
+export const OpenSourceRequestSchema = z.object({
+  id: z.string().trim().min(1).max(ELEMENT_ID_MAX),
+  /** When true, an inbox source is activated before opening the reader. */
+  activate: z.boolean().optional().default(true),
+});
+export type OpenSourceRequestInput = z.input<typeof OpenSourceRequestSchema>;
+export type OpenSourceRequest = z.output<typeof OpenSourceRequestSchema>;
+
+/** The desktop accepted the open request and focused/routed the source reader. */
+export const OpenSourceResponseSchema = z.object({
+  ok: z.literal(true),
+  id: z.string(),
+  activated: z.boolean(),
+});
+export type OpenSourceResponse = z.infer<typeof OpenSourceResponseSchema>;
+
+export const OpenSourceErrorCodeSchema = z.enum([
+  "unpaired",
+  "bad_token",
+  "bad_origin",
+  "too_large",
+  "invalid",
+  "not_found",
+  "open_failed",
+]);
+export type OpenSourceErrorCode = z.infer<typeof OpenSourceErrorCodeSchema>;
+
+/** Failed open-source command; never leaks DB/window internals. */
+export const OpenSourceErrorResponseSchema = z.object({
+  ok: z.literal(false),
+  error: OpenSourceErrorCodeSchema,
+});
+export type OpenSourceErrorResponse = z.infer<typeof OpenSourceErrorResponseSchema>;
+
 /** The unauthenticated `GET /ping` body — reveals only the app name + version. */
 export const PairingPingResponseSchema = z.object({
   ok: z.literal(true),

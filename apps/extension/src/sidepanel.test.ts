@@ -1,9 +1,25 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { STORAGE_KEYS } from "./shared";
+import { type OpenSourceOutcome, STORAGE_KEYS } from "./shared";
 
 const sendMessage = vi.fn();
+type OpenCapturedSource = (
+  sourceId: string,
+  options?: { readonly activate?: boolean },
+) => Promise<OpenSourceOutcome>;
+const h = vi.hoisted(() => ({
+  openCapturedSource: vi.fn<OpenCapturedSource>(),
+}));
+
+vi.mock("./shared", async () => {
+  const actual = await vi.importActual<typeof import("./shared")>("./shared");
+  return {
+    ...actual,
+    openCapturedSource: h.openCapturedSource,
+  };
+});
+
 let storageListener:
   | ((changes: Record<string, { newValue?: unknown }>, area: "local" | "sync") => void)
   | undefined;
@@ -68,8 +84,18 @@ beforeEach(() => {
   vi.clearAllMocks();
   installDom();
   installChromeMock();
+  h.openCapturedSource.mockResolvedValue({ kind: "ok", sourceId: "src-panel" });
   sendMessage.mockImplementation((_message, cb) => {
-    cb({ kind: "ok", response: { title: "Saved from panel", deduped: false } });
+    cb({
+      kind: "ok",
+      response: {
+        ok: true,
+        id: "src-panel",
+        kind: "selection",
+        title: "Saved from panel",
+        deduped: false,
+      },
+    });
   });
 });
 
@@ -115,6 +141,59 @@ describe("extension side panel", () => {
     expect(document.getElementById("status")?.className).toBe("status ok");
   });
 
+  it("renders an open action in successful capture status and opens that source", async () => {
+    await import("./sidepanel");
+    await vi.waitFor(() =>
+      expect(document.getElementById("selection-text")?.textContent).toContain("Selected text"),
+    );
+
+    (document.getElementById("save-selection") as HTMLButtonElement).click();
+    const open = await vi.waitFor(() => {
+      const button = document.querySelector<HTMLButtonElement>("#status button.status-action");
+      expect(button).toBeTruthy();
+      return button as HTMLButtonElement;
+    });
+
+    open.click();
+
+    await vi.waitFor(() =>
+      expect(h.openCapturedSource).toHaveBeenCalledWith("src-panel", { activate: true }),
+    );
+    await vi.waitFor(() =>
+      expect(document.getElementById("status")?.textContent).toContain("Opened in Interleave"),
+    );
+    expect(document.getElementById("status")?.className).toBe("status ok");
+  });
+
+  it("opens the existing id returned by a deduped capture", async () => {
+    sendMessage.mockImplementation((_message, cb) => {
+      cb({
+        kind: "ok",
+        response: {
+          ok: true,
+          id: "existing-panel",
+          kind: "page",
+          title: "Saved from panel",
+          deduped: true,
+        },
+      });
+    });
+    await import("./sidepanel");
+
+    (document.getElementById("save-page") as HTMLButtonElement).click();
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("status")?.textContent).toContain("Already saved"),
+    );
+    const open = document.querySelector<HTMLButtonElement>("#status button.status-action");
+    expect(open).toBeTruthy();
+    open?.click();
+
+    await vi.waitFor(() =>
+      expect(h.openCapturedSource).toHaveBeenCalledWith("existing-panel", { activate: true }),
+    );
+  });
+
   it("live-updates recent captures from storage changes", async () => {
     await import("./sidepanel");
     await vi.waitFor(() => expect(storageListener).toBeTypeOf("function"));
@@ -131,5 +210,25 @@ describe("extension side panel", () => {
     );
 
     expect(document.getElementById("recent-list")?.textContent).toContain("New capture");
+  });
+
+  it("opens recent capture rows and renders existing not-running error state", async () => {
+    h.openCapturedSource.mockResolvedValueOnce({ kind: "not-running" });
+    await import("./sidepanel");
+
+    const open = await vi.waitFor(() => {
+      const button = document.querySelector<HTMLButtonElement>("#recent-list .recent-open");
+      expect(button).toBeTruthy();
+      return button as HTMLButtonElement;
+    });
+    open.click();
+
+    await vi.waitFor(() =>
+      expect(h.openCapturedSource).toHaveBeenCalledWith("old-1", { activate: true }),
+    );
+    await vi.waitFor(() =>
+      expect(document.getElementById("status")?.textContent).toContain("not running"),
+    );
+    expect(document.getElementById("status")?.className).toBe("status err");
   });
 });

@@ -488,6 +488,15 @@ function ShellInner() {
     return appApi.onMenuCreateBackup(() => createBackupRef.current());
   }, []);
 
+  // Browser capture can ask an already-open desktop window to show a captured
+  // source. Navigate in-app so pending editor state is not lost to a hard reload.
+  useEffect(() => {
+    if (!isDesktop()) return;
+    return appApi.onSourceOpenReader((sourceId) => {
+      void navigate({ to: "/source/$id", params: { id: sourceId } });
+    });
+  }, [navigate]);
+
   // ---- Onboarding + contextual-help wiring (design handoff) ----
 
   // Load the persisted flags once: tips toggle, the once-only "seen" coachmark set,
