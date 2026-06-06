@@ -112,6 +112,17 @@ export function ReviewRepairBar({
   const [cloze, setCloze] = useState("");
   const editTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedEdit = useRef("");
+  const latestEdit = useRef<{
+    editing: boolean;
+    cardId: string;
+    patch: Record<string, string>;
+    fingerprint: string;
+  }>({
+    editing: false,
+    cardId: card.id,
+    patch: reviewEditPatch(card.kind, { prompt: "", answer: "", cloze: "" }),
+    fingerprint: "",
+  });
 
   const openEditor = useCallback(() => {
     const nextPrompt = card.prompt ?? "";
@@ -135,6 +146,29 @@ export function ReviewRepairBar({
     () => reviewEditPatch(card.kind, { prompt, answer, cloze }),
     [card.kind, answer, cloze, prompt],
   );
+  const liveEditPatch = currentEditPatch();
+  latestEdit.current = {
+    editing,
+    cardId: card.id,
+    patch: liveEditPatch,
+    fingerprint: editFingerprint(liveEditPatch),
+  };
+
+  const flushPendingEditOnUnmount = useCallback(() => {
+    const latest = latestEdit.current;
+    if (
+      !latest.editing ||
+      latest.fingerprint === lastSavedEdit.current ||
+      !editPatchReady(latest.patch)
+    ) {
+      return;
+    }
+    if (editTimer.current) {
+      clearTimeout(editTimer.current);
+      editTimer.current = null;
+    }
+    void appApi.updateCard({ cardId: latest.cardId, ...latest.patch }).catch(() => {});
+  }, []);
 
   const persistEdit = useCallback(
     async (requireReady = false) => {
@@ -188,6 +222,10 @@ export function ReviewRepairBar({
       }
     };
   }, [editing, currentEditPatch, persistEdit]);
+
+  useEffect(() => {
+    return () => flushPendingEditOnUnmount();
+  }, [flushPendingEditOnUnmount]);
 
   const closeEditor = useCallback(async () => {
     const saved = await persistEdit(true);

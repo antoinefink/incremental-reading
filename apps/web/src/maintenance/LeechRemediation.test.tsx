@@ -185,6 +185,28 @@ describe("LeechRemediation", () => {
     );
   });
 
+  it("flushes a pending leech rewrite when the editor unmounts before debounce", async () => {
+    const view = render(<LeechRemediation />);
+    await screen.findByTestId("leech-card");
+    fireEvent.click(screen.getByTestId("leech-rewrite"));
+    fireEvent.change(await screen.findByTestId("leech-edit-prompt"), {
+      target: { value: "Unmount prompt?" },
+    });
+    fireEvent.change(screen.getByTestId("leech-edit-answer"), {
+      target: { value: "Unmount answer." },
+    });
+
+    view.unmount();
+
+    await waitFor(() =>
+      expect(h.updateCard).toHaveBeenCalledWith({
+        cardId: "card-leech",
+        prompt: "Unmount prompt?",
+        answer: "Unmount answer.",
+      }),
+    );
+  });
+
   it("splits a leech via splitCard with the authored parts and refreshes", async () => {
     render(<LeechRemediation />);
     await screen.findByTestId("leech-card");

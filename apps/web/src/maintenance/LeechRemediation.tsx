@@ -94,11 +94,36 @@ function RewriteEditor({
       }),
     ),
   );
+  const latestEdit = useRef<{
+    cardId: string;
+    patch: Record<string, string>;
+    fingerprint: string;
+  }>({
+    cardId: card.id,
+    patch: leechRewritePatch(isCloze, { prompt: "", answer: "", cloze: "" }),
+    fingerprint: "",
+  });
 
   const currentPatch = useCallback(
     () => leechRewritePatch(isCloze, { prompt, answer, cloze }),
     [isCloze, cloze, prompt, answer],
   );
+  const livePatch = currentPatch();
+  latestEdit.current = {
+    cardId: card.id,
+    patch: livePatch,
+    fingerprint: cardEditFingerprint(livePatch),
+  };
+
+  const flushPendingRewriteOnUnmount = useCallback(() => {
+    const latest = latestEdit.current;
+    if (latest.fingerprint === lastSavedEdit.current || !cardEditReady(latest.patch)) return;
+    if (editTimer.current) {
+      clearTimeout(editTimer.current);
+      editTimer.current = null;
+    }
+    void appApi.updateCard({ cardId: latest.cardId, ...latest.patch }).catch(() => {});
+  }, []);
 
   const persistRewrite = useCallback(
     async (requireReady = false) => {
@@ -147,6 +172,10 @@ function RewriteEditor({
       }
     };
   }, [currentPatch, persistRewrite]);
+
+  useEffect(() => {
+    return () => flushPendingRewriteOnUnmount();
+  }, [flushPendingRewriteOnUnmount]);
 
   const resolve = useCallback(async () => {
     const saved = await persistRewrite(true);

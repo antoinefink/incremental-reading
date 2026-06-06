@@ -195,6 +195,24 @@ describe("ReviewRepairBar", () => {
     );
   });
 
+  it("flushes pending card edits when the editor unmounts before the debounce fires", async () => {
+    const view = renderBar();
+
+    fireEvent.click(screen.getByTestId("review-repair-edit"));
+    const prompt = await screen.findByTestId("review-edit-prompt");
+    fireEvent.change(prompt, { target: { value: "Unmount-saved prompt?" } });
+
+    view.unmount();
+
+    await waitFor(() =>
+      expect(h.updateCard).toHaveBeenCalledWith({
+        cardId: "card-qa",
+        prompt: "Unmount-saved prompt?",
+        answer: "As skill-acquisition efficiency.",
+      }),
+    );
+  });
+
   it("edits cloze cards through the cloze field (not prompt/answer)", async () => {
     const clozeCard: ReviewCardView = {
       ...QA_CARD,

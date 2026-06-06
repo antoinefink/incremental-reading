@@ -153,7 +153,9 @@ test("the shell renders in both light and dark themes", async ({ page }) => {
 
   // The theme toggle lives in the user-chip menu.
   await page.getByTestId("user-chip").click();
-  await page.getByRole("menuitem", { name: /mode/i }).click();
+  await page
+    .getByRole("menuitemradio", { name: before === "light" ? /Dark mode/ : /Light mode/ })
+    .click();
 
   const after = await html.getAttribute("data-theme");
   expect(after).not.toBe(before);
