@@ -2794,7 +2794,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
   "search-vs-library": [
     {
       type: "p",
-      text: "Interleave has two separate ways to find things: <strong>Search</strong> (<code>/search</code>) and <strong>Library</strong> (<code>/library</code>). They answer different questions and cover different sets of items.",
+      text: "Collection Explorer has two modes for finding things: <strong>Search</strong> (<code>/search</code>) and <strong>Browse</strong> through the Library entry (<code>/library</code>). They answer different questions and cover different sets of items.",
     },
     {
       type: "h2",
@@ -2818,7 +2818,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "The <code>Filter by title…</code> box at the top of Library is a client-side substring narrower over the already-fetched list. It does not query the FTS index and does not affect facet counts.",
+      text: "The <code>Filter visible titles</code> box in the Library filter rail is a client-side substring narrower over the already-fetched list. It does not query the FTS index and does not affect facet counts.",
     },
     {
       type: "p",
@@ -2895,7 +2895,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "Search is keyword-first by design. An empty query returns an empty result list — that is Library's job. The prompt text reads: <em>Find any source, extract, or card by title, body, prompt, answer, or tag.</em> Concept chips in the filterbar still show their global member counts so you can pick a concept and then type a keyword to narrow into it.",
+      text: "Search is keyword-first by design. An empty query returns an empty result list — that is Library's job. The prompt text reads: <em>Find any source, extract, or card by title, body, prompt, answer, or tag.</em> Type, Concept, and Priority chips can be selected before you type; they show pending constraints and apply once a keyword is entered.",
     },
     {
       type: "callout",
@@ -2917,10 +2917,10 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
       items: [
         "<strong>Sources</strong> — open in the Source Reader.",
         "<strong>Extracts</strong> — open in the extract distillation view.",
-        "<strong>Cards</strong> — navigate to the review session.",
-        "<strong>Topics</strong> — open in the Source Reader.",
+        "<strong>Cards</strong> — open the card detail surface.",
+        "<strong>Topics</strong> — enter the process loop with the topic selected.",
         "<strong>Synthesis notes</strong> — open in the synthesis writing surface.",
-        "<strong>Tasks</strong> — open the owning source when one is known.",
+        "<strong>Tasks</strong> — open their protected target when linked, or enter the process loop when standalone.",
       ],
     },
     {
@@ -2941,7 +2941,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "The <code>Filter by title…</code> box at the top narrows the already-fetched list client-side by substring match on the element title. It is not a keyword search against the FTS index, does not query SQLite, and does not affect the facet counts.",
+      text: "The <code>Filter visible titles</code> box in the filter rail narrows the already-fetched list client-side by substring match on the element title. It is not a keyword search against the FTS index, does not query SQLite, and does not affect the facet counts.",
     },
     {
       type: "h2",
@@ -3200,7 +3200,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "On <code>/search</code>, concept chips always show counts. With <strong>no query typed</strong>, they show each concept's global member count — so the filterbar is useful even before you type anything. Once you type a keyword, the concept chip counts switch to drill-down counts: how many items in the current keyword result set belong to each concept. This is the same drill-down rule applied to the search result instead of the full collection.",
+      text: "On <code>/search</code>, concept chips always show counts for the indexed Search universe: sources, extracts, and cards. With <strong>no query typed</strong>, selecting a concept marks it as a pending constraint without browsing rows. Once you type a keyword, the concept chip counts switch to drill-down counts: how many items in the current keyword result set belong to each concept.",
     },
     {
       type: "callout",
@@ -4193,7 +4193,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "Synthesis notes appear in Library under the <code>Synthesis notes</code> type filter. You can also use the search screen (<code>/search</code>) to find a note by title.",
+      text: "Synthesis notes appear in Library under the <code>Synthesis notes</code> type filter. Use Library facets or the visible-title filter to find them; keyword Search indexes sources, extracts, and cards only.",
     },
     {
       type: "callout",

@@ -137,7 +137,7 @@ test("typing a seeded term returns the source, extract, and card grouped + highl
   await app.close();
 });
 
-test("empty-query facets show counters and browse the matching collection rows", async () => {
+test("empty-query facets show counters as pending filters without browsing rows", async () => {
   const app = await launchApp(dataDir);
   const page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");
@@ -155,6 +155,11 @@ test("empty-query facets show counters and browse the matching collection rows",
             byConcept: Record<string, number>;
             byPriority: Record<string, number>;
           };
+        }>;
+      };
+      search: {
+        query(r: { q: string; conceptId?: string }): Promise<{
+          results: { id: string; type: string }[];
         }>;
       };
       concepts: {
@@ -187,14 +192,12 @@ test("empty-query facets show counters and browse the matching collection rows",
   ).toHaveText(String(seedFacetState.base.counts.byType.card));
 
   await page.getByTestId("library-filter-type-source").click();
-  await expect(page.getByTestId("library-prompt")).toHaveCount(0);
-  await expect(page.getByTestId("library-group-source")).toBeVisible();
-  await expect(
-    page.locator('[data-testid="library-result"][data-result-type="source"]').first(),
-  ).toBeVisible();
-  await expect(page.locator('[data-testid="library-result"][data-result-type="card"]')).toHaveCount(
-    0,
+  await expect(page.getByTestId("library-prompt")).toBeVisible();
+  await expect(page.getByTestId("library-filter-type-source")).toHaveClass(/filter-opt--pending/);
+  await expect(page.getByTestId("library-pending-filters")).toContainText(
+    "Pending constraints: Sources",
   );
+  await expect(page.getByTestId("library-result")).toHaveCount(0);
 
   await page.getByTestId("library-filter-type-source").click();
   await expect(page.getByTestId("library-prompt")).toBeVisible();
@@ -202,8 +205,36 @@ test("empty-query facets show counters and browse the matching collection rows",
   const intelligence = seedFacetState.intelligence;
   if (!intelligence) throw new Error("Seeded Intelligence concept was not found");
   await page.getByTestId(`library-filter-concept-${intelligence.id}`).click();
-  await expect(page.getByTestId("library-prompt")).toHaveCount(0);
+  await expect(page.getByTestId("library-prompt")).toBeVisible();
+  await expect(page.getByTestId(`library-filter-concept-${intelligence.id}`)).toHaveClass(
+    /filter-opt--pending/,
+  );
+  await expect(page.getByTestId("library-pending-filters")).toContainText("Intelligence");
+  await expect(page.getByTestId("library-result")).toHaveCount(0);
+
+  const expectedFilteredIds = await page.evaluate(
+    async ({ term, conceptId }) => {
+      const api = window.appApi as unknown as {
+        search: {
+          query(r: { q: string; conceptId?: string }): Promise<{
+            results: { id: string; type: string }[];
+          }>;
+        };
+      };
+      return (await api.search.query({ q: term, conceptId })).results.map((result) => result.id);
+    },
+    { term: TERM, conceptId: intelligence.id },
+  );
+  expect(expectedFilteredIds.length).toBeGreaterThan(0);
+
+  await page.getByTestId("library-search-input").fill(TERM);
   await expect(page.getByTestId("library-result").first()).toBeVisible();
+  const renderedIdAttrs = await page
+    .getByTestId("library-result")
+    .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-result-id")));
+  const renderedIds = renderedIdAttrs.filter((id): id is string => id !== null);
+  expect(renderedIds).toHaveLength(renderedIdAttrs.length);
+  expect([...renderedIds].sort()).toEqual([...expectedFilteredIds].sort());
   const renderedTypes = await page
     .getByTestId("library-result")
     .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-result-type")));

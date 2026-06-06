@@ -7,6 +7,12 @@ date: 2026-06-06
 
 # Fix Search Empty Facet Browse
 
+## Superseded Product Decision
+
+This completed plan documents the earlier implementation and remains useful for the count, typed-bridge, and stale-response lessons it captured. Its core product decision is superseded by `docs/brainstorms/2026-06-06-collection-explorer-requirements.md` and `docs/plans/2026-06-06-collection-explorer.md`.
+
+Current direction: empty `/search` should show the search prompt and pending filters, not browse matching rows. Browse-first collection navigation belongs in Collection Explorer.
+
 ## Summary
 
 The `/search` page should be useful before a keyword is typed. Type, Concept, and Priority facets need visible counters on the empty screen, and selecting a facet such as `Sources` or `Intelligence` must show the matching collection rows instead of staying on the prompt.
@@ -62,13 +68,13 @@ The prior `docs/plans/2026-06-06-search-filterbar-counts.md` fixed keyword-searc
 
 - Do not change FTS ranking, search syntax, semantic embedding, or database migrations.
 - Do not add status facets to `/search`; the broader `/library` route already owns all-type/status browsing.
-- Do not turn `/search` into unfiltered browse-all; with no keyword and no selected facet it should still show the search prompt while rendering facet counters.
+- Superseded: do not turn `/search` into browse rows at all when the query is empty. Empty Search should show the prompt and pending filters; Collection Explorer owns browsing rows by facet.
 - Do not expose raw DB or filesystem access to the renderer.
 
 ## Risks & Dependencies
 
 - The empty-query browse response can include non-searchable types if called without a Type filter. The `/search` renderer must request only the three searchable types unless a single searchable type is selected.
-- `/search` and `/library` now share browse semantics for empty-query facets, so tests should keep their expected UI roles distinct: `/search` remains keyword-first, while `/library` remains browse-first.
+- Historical risk: `/search` and `/library` shared browse semantics for empty-query facets. The superseding Collection Explorer plan separates those roles again: `/search` remains keyword-first, while Collection Explorer is browse-first.
 
 ## Sources
 

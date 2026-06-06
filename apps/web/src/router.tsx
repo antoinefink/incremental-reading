@@ -219,10 +219,10 @@ const stagnantExtractsRoute = createRoute({
 });
 
 /**
- * Library & Search (T042) — local FTS5 full-text search over source title/body +
- * extract body + card prompt/answer + tags, ranked best-first, with the
- * filterbar (type/concept/priority) + grouped/highlighted results + the read-only
- * concept Map tab. All search runs in SQLite FTS5 behind the typed
+ * Collection Explorer Search mode (T042) — local FTS5 full-text search over source
+ * title/body + extract body + card prompt/answer + tags, ranked best-first, with
+ * pending type/concept/priority filters + grouped/highlighted results + the
+ * read-only concept Map tab. All search runs in SQLite FTS5 behind the typed
  * `window.appApi.search.query`; the renderer holds no SQL or ranking logic.
  */
 const searchRoute = createRoute({

@@ -1,5 +1,6 @@
 /**
- * Library & Search screen (T042) — local full-text search + a read-only concept map.
+ * Collection Explorer Search mode (T042) — local full-text search + a read-only
+ * concept map.
  *
  * Rebuilt from the design kit (`design/kit/app/screen-library.jsx`) for the React
  * 19 renderer: a search input, Results/Map segmented tabs, the left `filterbar`
@@ -8,13 +9,12 @@
  * and open-in-context, and the read-only `ConceptGraph` map tab.
  *
  * Architecture (non-negotiable): UI only. Keyword search runs in SQLite FTS5
- * behind the typed `window.appApi.search.query` command; empty-query facet
- * counters/browsing use the typed `window.appApi.library.browse` command. The
- * renderer holds no SQL, no ranking, and no index logic. Typing debounces the
- * query; an empty no-facet search defaults to browsing Sources while loading counters.
+ * behind the typed `window.appApi.search.query` command; empty-query facet counters
+ * use the typed `window.appApi.library.browse` command without rendering browse
+ * rows. The renderer holds no SQL, no ranking, and no index logic.
  */
 
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConceptGraph } from "../components/ConceptGraph";
 import { Icon } from "../components/Icon";
@@ -27,6 +27,7 @@ import {
 } from "../components/inspector/primitives";
 import { RefBlock } from "../components/RefBlock";
 import { AutoVirtualList } from "../components/VirtualList";
+import { CollectionExplorerModeSwitch } from "./CollectionExplorerModeSwitch";
 import "../components/inspector/inspector.css";
 import {
   appApi,
@@ -34,7 +35,6 @@ import {
   isDesktop,
   type LibraryBrowseRequest,
   type LibraryBrowseResult,
-  type LibraryItem,
   type SearchableType,
   type SearchCounts,
   type SearchResult,
@@ -42,6 +42,15 @@ import {
 } from "../lib/appApi";
 import { ReviewModeButton } from "../review/ReviewModeButton";
 import "../review/review.css";
+import {
+  explorerSearchParams,
+  PRIORITIES,
+  type PriorityLetter,
+  parsePriority,
+  parseSearchableType,
+  parseStringParam,
+  SEARCHABLE_TYPES,
+} from "./collectionExplorerState";
 import "./library.css";
 
 type Tab = "results" | "map";
@@ -59,11 +68,6 @@ const TYPE_GROUPS: readonly { type: SearchableType; title: string }[] = [
   { type: "extract", title: "Extracts" },
   { type: "card", title: "Cards" },
 ];
-const SEARCHABLE_TYPES = TYPE_GROUPS.map((g) => g.type);
-const DEFAULT_TYPE_FILTER: SearchableType = "source";
-
-const PRIORITIES = ["A", "B", "C", "D"] as const;
-type PriorityLetter = (typeof PRIORITIES)[number];
 
 const EMPTY_SEARCH_COUNTS: SearchCounts = {
   byType: { source: 0, extract: 0, card: 0 },
@@ -85,31 +89,6 @@ function searchCountsFromBrowse(counts: LibraryBrowseResult["counts"]): SearchCo
       C: counts.byPriority.C ?? 0,
       D: counts.byPriority.D ?? 0,
     },
-  };
-}
-
-function isSearchableLibraryItem(
-  item: LibraryItem,
-): item is LibraryItem & { readonly type: SearchableType } {
-  return item.type === "source" || item.type === "extract" || item.type === "card";
-}
-
-function libraryItemToRow(item: LibraryItem & { readonly type: SearchableType }): LibraryRow {
-  return {
-    id: item.id,
-    type: item.type,
-    title: item.title,
-    snippet: "",
-    score: 0,
-    priority: item.priority,
-    priorityLabel: item.priorityLabel,
-    concept: item.concept,
-    sourceTitle: item.sourceTitle,
-    sourceLocationLabel: item.sourceLocationLabel,
-    dueAt: item.dueAt,
-    scheduler: item.scheduler,
-    due: item.due,
-    dueLabel: item.dueLabel,
   };
 }
 
@@ -158,13 +137,18 @@ function highlight(text: string, q: string): React.ReactNode {
 export function LibraryScreen() {
   const desktop = isDesktop();
   const navigate = useNavigate();
+  const routeSearch = useSearch({ strict: false }) as Record<string, unknown>;
+  const routeQuery = parseStringParam(routeSearch.q) ?? "";
+  const routeType = parseSearchableType(routeSearch.type);
+  const routeConceptId = parseStringParam(routeSearch.conceptId);
+  const routePriority = parsePriority(routeSearch.priority);
 
   const [tab, setTab] = useState<Tab>("results");
-  const [rawQuery, setRawQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [typeFilter, setTypeFilter] = useState<SearchableType | null>(DEFAULT_TYPE_FILTER);
-  const [conceptFilter, setConceptFilter] = useState<string | null>(null);
-  const [priorityFilter, setPriorityFilter] = useState<PriorityLetter | null>(null);
+  const [rawQuery, setRawQuery] = useState(() => routeQuery);
+  const [debouncedQuery, setDebouncedQuery] = useState(() => routeQuery);
+  const [typeFilter, setTypeFilter] = useState<SearchableType | null>(() => routeType);
+  const [conceptFilter, setConceptFilter] = useState<string | null>(() => routeConceptId);
+  const [priorityFilter, setPriorityFilter] = useState<PriorityLetter | null>(() => routePriority);
 
   const [results, setResults] = useState<readonly LibraryRow[]>([]);
   // DRILL-DOWN filterbar counts scoped to the active retrieval mode. Keyword and
@@ -183,13 +167,55 @@ export function LibraryScreen() {
   // "Build index" affordance, per the T087 spec) + an in-flight reindex guard.
   const [semanticIndex, setSemanticIndex] = useState({ embedded: 0, total: 0 });
   const [reindexing, setReindexing] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const debouncedTerm = debouncedQuery.trim();
   const hasQuery = debouncedTerm.length > 0;
   const hasActiveFacet = typeFilter !== null || conceptFilter !== null || priorityFilter !== null;
-  const hasEmptyFacetBrowse = !hasQuery && hasActiveFacet;
   const showSemanticBuildIndex =
     !hasQuery && semanticEnabled && semanticIndex.embedded < semanticIndex.total;
+  const pendingFilterLabels = useMemo(() => {
+    const labels: string[] = [];
+    if (typeFilter) {
+      labels.push(
+        TYPE_GROUPS.find((group) => group.type === typeFilter)?.title ?? typeLabel(typeFilter),
+      );
+    }
+    if (conceptFilter) {
+      labels.push(
+        concepts.find((concept) => concept.id === conceptFilter)?.name ?? "Selected concept",
+      );
+    }
+    if (priorityFilter) labels.push(`Priority ${priorityFilter}`);
+    return labels;
+  }, [typeFilter, conceptFilter, priorityFilter, concepts]);
+  const pendingFilterSummary = pendingFilterLabels.join(", ");
+  const filterOptionClass = useCallback(
+    (active: boolean) =>
+      `filter-opt${active ? ` filter-opt--on${!hasQuery ? " filter-opt--pending" : ""}` : ""}`,
+    [hasQuery],
+  );
+
+  const openBrowseMode = useCallback(() => {
+    void navigate({
+      to: "/library",
+      search: explorerSearchParams("browse", {
+        type: typeFilter,
+        conceptId: conceptFilter,
+        priority: priorityFilter,
+      }),
+    });
+  }, [navigate, typeFilter, conceptFilter, priorityFilter]);
+
+  useEffect(() => {
+    setRawQuery(routeQuery);
+    setDebouncedQuery(routeQuery);
+    setTypeFilter(routeType);
+    setConceptFilter(routeConceptId);
+    setPriorityFilter(routePriority);
+    setSelId(null);
+    searchInputRef.current?.focus();
+  }, [routeQuery, routeType, routeConceptId, routePriority]);
 
   // Debounce the raw input into the query that actually hits the bridge.
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -277,11 +303,7 @@ export function LibraryScreen() {
         .then((res) => {
           if (cancelled) return;
           setSearchCounts(searchCountsFromBrowse(res.counts));
-          setResults(
-            hasEmptyFacetBrowse
-              ? res.items.filter(isSearchableLibraryItem).map(libraryItemToRow)
-              : [],
-          );
+          setResults([]);
           setSearchMode(semanticEnabled ? "fts" : "disabled");
           setError(null);
         })
@@ -351,14 +373,7 @@ export function LibraryScreen() {
     return () => {
       cancelled = true;
     };
-  }, [
-    debouncedTerm,
-    typeFilter,
-    conceptFilter,
-    priorityFilter,
-    semanticEnabled,
-    hasEmptyFacetBrowse,
-  ]);
+  }, [debouncedTerm, typeFilter, conceptFilter, priorityFilter, semanticEnabled]);
 
   // The result list IS the backend-narrowed set. The Priority facet is now applied
   // MAIN-side (threaded as `priorityLabel` into the FTS query), so the drill-down
@@ -444,7 +459,7 @@ export function LibraryScreen() {
           <div className="lib-empty__icon">
             <Icon name="library" size={26} />
           </div>
-          <h1 className="lib-empty__title">Library & Search</h1>
+          <h1 className="lib-empty__title">Collection Explorer Search</h1>
           <p className="lib-empty__body">
             Open the Electron app to search across your whole collection.
           </p>
@@ -456,9 +471,15 @@ export function LibraryScreen() {
   return (
     <div className="lib-shell" data-testid="route-search">
       <div className="lib-topbar">
+        <CollectionExplorerModeSwitch
+          mode="search"
+          onBrowse={openBrowseMode}
+          onSearch={() => undefined}
+        />
         <div className="lib-searchbar">
           <Icon name="search" size={15} />
           <input
+            ref={searchInputRef}
             type="search"
             data-testid="library-search-input"
             value={rawQuery}
@@ -503,7 +524,7 @@ export function LibraryScreen() {
               <button
                 key={g.type}
                 type="button"
-                className={`filter-opt${typeFilter === g.type ? " filter-opt--on" : ""}`}
+                className={filterOptionClass(typeFilter === g.type)}
                 data-testid={`library-filter-type-${g.type}`}
                 onClick={() => setTypeFilter((cur) => (cur === g.type ? null : g.type))}
               >
@@ -521,7 +542,7 @@ export function LibraryScreen() {
                 <button
                   key={c.id}
                   type="button"
-                  className={`filter-opt${conceptFilter === c.id ? " filter-opt--on" : ""}`}
+                  className={filterOptionClass(conceptFilter === c.id)}
                   data-testid={`library-filter-concept-${c.id}`}
                   onClick={() => setConceptFilter((cur) => (cur === c.id ? null : c.id))}
                 >
@@ -541,7 +562,7 @@ export function LibraryScreen() {
               <button
                 key={p}
                 type="button"
-                className={`filter-opt${priorityFilter === p ? " filter-opt--on" : ""}`}
+                className={filterOptionClass(priorityFilter === p)}
                 data-testid={`library-filter-prio-${p}`}
                 onClick={() => setPriorityFilter((cur) => (cur === p ? null : p))}
               >
@@ -630,15 +651,25 @@ export function LibraryScreen() {
                       : `Build index (${semanticIndex.embedded} of ${semanticIndex.total} embedded)`}
                   </button>
                 ) : null}
-                {!hasQuery && !hasEmptyFacetBrowse ? (
+                {!hasQuery ? (
                   <div className="lib-empty" data-testid="library-prompt">
                     <div className="lib-empty__icon">
                       <Icon name="search" size={26} />
                     </div>
                     <h2 className="lib-empty__title">Search your collection</h2>
                     <p className="lib-empty__body">
-                      Find any source, extract, or card by title, body, prompt, answer, or tag.
+                      {hasActiveFacet
+                        ? `Type to search within ${pendingFilterSummary}.`
+                        : "Find any source, extract, or card by title, body, prompt, answer, or tag."}
                     </p>
+                    {hasActiveFacet ? (
+                      <div className="lib-pending" data-testid="library-pending-filters">
+                        <Icon name="filter" size={14} />
+                        <span>
+                          Pending constraints: {pendingFilterSummary}. They apply when you type.
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
                 ) : loading && visible.length === 0 ? (
                   <p className="lib-loading" data-testid="library-loading">

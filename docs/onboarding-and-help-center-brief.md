@@ -625,9 +625,9 @@ Each category page opens with a 2–3 sentence orientation, then its ordered art
 #### 7. Organizing & Finding
 
 **7.1 Finding things: Search vs Library** · slug `search-vs-library` · New
-- `/search` = keyword FTS5 over source title+body, extract body, card prompt+answer, tag names; empty query returns nothing; only sources/extracts/cards.
-- `/library` = browse ALL live elements by Type/Concept/Priority/Status facets, no keyword, covers topics/synthesis notes/tasks too.
-- The "Filter by title" box in Library is client-side, not a search; when to use which; how to reach each (`/`, `g l`, `⌘K`).
+- `/search` = Collection Explorer Search mode: keyword FTS5 over source title+body, extract body, card prompt+answer, tag names; empty query shows a prompt/pending filters, not rows; only sources/extracts/cards.
+- `/library` = Collection Explorer Browse mode: browse ALL live elements by Type/Concept/Priority/Status facets, no keyword, covers topics/synthesis notes/tasks too.
+- The "Filter visible titles" box in Library is client-side, not a search; when to use which; how to reach each (`/`, `g l`, `⌘K`).
 
 **7.2 Using keyword search** · slug `keyword-search` · New
 - What gets indexed and what doesn't (topics/synthesis notes/tasks are not searchable).
@@ -654,7 +654,7 @@ Each category page opens with a 2–3 sentence orientation, then its ordered art
 - How to set/reset on `/concepts`; the "Review N cards in this concept" button.
 
 **7.8 How facet counts work (drill-down)** · slug `facet-counts` · Intermediate
-- A chip's number is what you'd see given your other active filters, not a global total; counts update as you change filters; the `/search` empty-query exception (concept chips show global reach).
+- A chip's number is what you'd see given your other active filters, not a global total; counts update as you change filters; `/search` empty-query facet selections are pending constraints until the user types.
 
 #### 8. Maintenance & Safety
 
@@ -1495,4 +1495,3 @@ This brief was assembled from a structured investigation of the shipped codebase
 - **1 adversarial review** stress-tested the drafts for coverage gaps, inaccuracies, missing user journeys, and IA problems; its findings are resolved in **§0.4**.
 
 Two facts to keep front-of-mind while designing: (1) there is **no onboarding today** beyond a single first-run welcome modal (`Onboarding.tsx`) and **no help center / contextual help at all** — you are defining these patterns, not restyling them; (2) the in-app `?` cheat sheet and `⌘K` palette are already generated from a **single shortcut registry** (`shortcuts.ts`) — the keyboard-reference article and every inline keycap in the docs should be generated from that same source so they can never drift.
-

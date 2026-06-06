@@ -83,10 +83,10 @@ const TILES: readonly {
     testId: "home-tile-review",
   },
   {
-    to: "/search",
+    to: "/library",
     icon: "library",
     label: "Library",
-    sub: "Search & browse",
+    sub: "Browse your collection",
     testId: "home-tile-library",
   },
   {

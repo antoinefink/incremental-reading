@@ -396,6 +396,18 @@ describe("HomeScreen", () => {
     expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/queue" });
   });
 
+  it("the Library quick tile uses collection browse copy and navigates to /library", async () => {
+    render(<HomeScreen />);
+    const tile = await screen.findByTestId("home-tile-library");
+
+    expect(tile.textContent).toContain("Library");
+    expect(tile.textContent).toContain("Browse your collection");
+    expect(tile.textContent).not.toContain("Search");
+
+    fireEvent.click(tile);
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/library" });
+  });
+
   it("the leech maintenance nudge navigates to /maintenance/leeches", async () => {
     render(<HomeScreen />);
     const banner = await screen.findByTestId("home-banner-leeches");

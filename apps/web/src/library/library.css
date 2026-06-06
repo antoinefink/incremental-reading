@@ -1,5 +1,5 @@
 /*
- * Library & Search screen styles (T042).
+ * Collection Explorer Browse/Search screen styles (T042).
  *
  * Ported pixel-for-pixel from the design kit (`design/kit/styles/app.css`:
  * `.filterbar`, `.filter-group`, `.filter-opt`, `.checkbox`, `.result`,
@@ -48,6 +48,49 @@
 }
 .lib-grow {
   flex: 1;
+}
+
+.lib-mode {
+  display: inline-flex;
+  flex: none;
+  gap: var(--s-1);
+  min-inline-size: 0;
+  margin: 0;
+  padding: var(--s-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.lib-mode__legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+.lib-mode__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: var(--s-9);
+  padding: var(--s-1) var(--s-4);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.lib-mode__btn:hover {
+  color: var(--text);
+}
+.lib-mode__btn--on {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
 }
 
 /* calm "N elements" count summary in the browse top bar */
@@ -139,11 +182,20 @@
   color: var(--text);
   font-weight: 500;
 }
+.filter-opt--pending {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  outline: 1px dashed var(--accent-soft-bd);
+  outline-offset: -1px;
+}
 .filter-opt__count {
   margin-left: auto;
   font-family: var(--font-mono);
   font-size: var(--t-2xs);
   color: var(--text-3);
+}
+.filter-opt--pending .filter-opt__count {
+  color: var(--accent-text);
 }
 .filter-opt--disabled {
   opacity: 0.5;
@@ -154,10 +206,32 @@
   color: var(--text-2);
 }
 
+.lib-mini-input {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: var(--s-9);
+  padding: var(--s-1) var(--s-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.lib-mini-input input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--t-sm);
+}
+
 .prio-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
+  width: var(--s-2);
+  height: var(--s-2);
+  border-radius: var(--r-xs);
   flex: none;
 }
 .prio-dot--a {
@@ -455,6 +529,20 @@
   padding: 8px;
   color: var(--danger);
   font-size: var(--t-sm);
+}
+
+.lib-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-4);
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--accent-soft-bd);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Semantic-search mode hint (T087) — calm, secondary, above the result groups. */

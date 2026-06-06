@@ -144,6 +144,7 @@ const h = vi.hoisted(() => {
     concept,
     counts,
     navigateSpy: vi.fn(),
+    routeSearch: {} as Record<string, unknown>,
     selectSpy: vi.fn(),
     libraryBrowse: vi.fn(),
     listConcepts: vi.fn(),
@@ -152,6 +153,7 @@ const h = vi.hoisted(() => {
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => h.navigateSpy,
+  useSearch: () => h.routeSearch,
 }));
 
 vi.mock("../shell/selection", () => ({
@@ -174,6 +176,7 @@ import { BrowseScreen } from "./BrowseScreen";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  h.routeSearch = {};
   h.libraryBrowse.mockResolvedValue({
     items: [h.sourceRow, h.topicRow, h.cardRow],
     counts: h.counts,
@@ -193,6 +196,60 @@ describe("BrowseScreen", () => {
     expect(screen.getByTestId("library-count").textContent).toContain("3 elements");
     // The very first call carried no facet filters.
     expect(h.libraryBrowse).toHaveBeenCalledWith({});
+  });
+
+  it("hydrates Browse facets and the visible-title filter from route params", async () => {
+    h.routeSearch = {
+      type: "card",
+      conceptId: "concept-1",
+      priority: "A",
+      status: "scheduled",
+      q: "Chollet",
+    };
+
+    render(<BrowseScreen />);
+
+    await waitFor(() =>
+      expect(h.libraryBrowse).toHaveBeenCalledWith({
+        types: ["card"],
+        conceptId: "concept-1",
+        priorityLabel: "A",
+        statuses: ["scheduled"],
+      }),
+    );
+    expect((screen.getByTestId("library-title-filter") as HTMLInputElement).value).toBe("Chollet");
+    expect(screen.getByTestId("library-filter-type-card").className).toContain("filter-opt--on");
+    expect(screen.getByTestId("library-filter-prio-A").className).toContain("filter-opt--on");
+    expect(screen.getByTestId("library-filter-status-scheduled").className).toContain(
+      "filter-opt--on",
+    );
+    expect((await screen.findByTestId("library-filter-concept-concept-1")).className).toContain(
+      "filter-opt--on",
+    );
+  });
+
+  it("resets Browse filters when the same Library route clears URL params", async () => {
+    h.routeSearch = { type: "topic", status: "scheduled", q: "machine" };
+    const { rerender } = render(<BrowseScreen />);
+    await waitFor(() =>
+      expect(h.libraryBrowse).toHaveBeenCalledWith({
+        types: ["topic"],
+        statuses: ["scheduled"],
+      }),
+    );
+
+    h.libraryBrowse.mockClear();
+    h.routeSearch = {};
+    rerender(<BrowseScreen />);
+
+    await waitFor(() => expect(h.libraryBrowse).toHaveBeenCalledWith({}));
+    expect((screen.getByTestId("library-title-filter") as HTMLInputElement).value).toBe("");
+    expect(screen.getByTestId("library-filter-type-topic").className).not.toContain(
+      "filter-opt--on",
+    );
+    expect(screen.getByTestId("library-filter-status-scheduled").className).not.toContain(
+      "filter-opt--on",
+    );
   });
 
   it("re-calls libraryBrowse with a type filter when a Type facet is toggled", async () => {
@@ -257,6 +314,41 @@ describe("BrowseScreen", () => {
     expect(screen.getByTestId("library-group-topic")).toBeTruthy();
     // The title filter is client-side only — it does NOT re-hit the bridge.
     expect(h.libraryBrowse).not.toHaveBeenCalled();
+  });
+
+  it("typing in the shared query switches to Search with compatible filters", async () => {
+    render(<BrowseScreen />);
+    await waitFor(() => expect(h.libraryBrowse).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId("library-filter-type-card"));
+    fireEvent.click(screen.getByTestId("library-filter-prio-A"));
+    fireEvent.change(screen.getByTestId("collection-query-input"), {
+      target: { value: "intelligence" },
+    });
+
+    await waitFor(() =>
+      expect(h.navigateSpy).toHaveBeenCalledWith({
+        to: "/search",
+        search: { q: "intelligence", type: "card", priority: "A" },
+      }),
+    );
+  });
+
+  it("drops non-searchable Browse types when typing into the shared query", async () => {
+    render(<BrowseScreen />);
+    await waitFor(() => expect(h.libraryBrowse).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId("library-filter-type-topic"));
+    fireEvent.change(screen.getByTestId("collection-query-input"), {
+      target: { value: "memory" },
+    });
+
+    await waitFor(() =>
+      expect(h.navigateSpy).toHaveBeenCalledWith({
+        to: "/search",
+        search: { q: "memory" },
+      }),
+    );
   });
 
   it("top count agrees with the visible sections while a title filter is active", async () => {

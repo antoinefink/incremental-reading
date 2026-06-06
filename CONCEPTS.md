@@ -30,6 +30,12 @@ The local reading surface for processing a source inside the app, distinct from 
 
 ## Discovery
 
+### Collection Explorer
+
+The shared discovery surface that presents the user's collection through explicit Browse and Search modes.
+
+Browse mode is inventory-first: it lists live browsable elements by facets. Search mode is retrieval-first: it finds indexed source, extract, and card content by keyword or semantic match.
+
 ### Search result
 
 A source, extract, or card returned from a user's library search, enriched enough for the user to inspect its priority, concept context, scheduling state, and source lineage before opening it.

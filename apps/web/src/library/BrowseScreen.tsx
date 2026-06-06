@@ -18,7 +18,7 @@
  * already-fetched payload client-side (never a second FTS call).
  */
 
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConceptGraph } from "../components/ConceptGraph";
 import { Icon } from "../components/Icon";
@@ -30,6 +30,7 @@ import {
   typeLabel,
 } from "../components/inspector/primitives";
 import { RefBlock } from "../components/RefBlock";
+import { CollectionExplorerModeSwitch } from "./CollectionExplorerModeSwitch";
 import "../components/inspector/inspector.css";
 import {
   appApi,
@@ -41,6 +42,14 @@ import {
 } from "../lib/appApi";
 import { openQueueItem } from "../pages/queue/openQueueItem";
 import { useSelection } from "../shell/selection";
+import {
+  explorerSearchParams,
+  PRIORITIES,
+  type PriorityLetter,
+  parseBrowseType,
+  parsePriority,
+  parseStringParam,
+} from "./collectionExplorerState";
 import "./library.css";
 
 type Tab = "results" | "map";
@@ -55,9 +64,6 @@ const TYPE_GROUPS: readonly { type: LibraryBrowseType; title: string }[] = [
   { type: "task", title: "Tasks" },
 ];
 
-const PRIORITIES = ["A", "B", "C", "D"] as const;
-type PriorityLetter = (typeof PRIORITIES)[number];
-
 /** The status facets, in display order (matching the kit's lifecycle order). */
 const STATUSES: readonly { value: string; label: string }[] = [
   { value: "active", label: "Active" },
@@ -67,6 +73,11 @@ const STATUSES: readonly { value: string; label: string }[] = [
   { value: "done", label: "Done" },
   { value: "suspended", label: "Suspended" },
 ];
+
+function parseStatus(value: unknown): string | null {
+  const parsed = parseStringParam(value);
+  return parsed && STATUSES.some((status) => status.value === parsed) ? parsed : null;
+}
 
 /** A due-state badge (overdue / today / soon) — matches the queue's `DueBadge`. */
 function DueBadge({ item }: { item: LibraryItem }) {
@@ -82,17 +93,25 @@ function DueBadge({ item }: { item: LibraryItem }) {
 export function BrowseScreen() {
   const desktop = isDesktop();
   const navigate = useNavigate();
+  const routeSearch = useSearch({ strict: false }) as Record<string, unknown>;
   const { select } = useSelection();
+  const routeType = parseBrowseType(routeSearch.type);
+  const routeConceptId = parseStringParam(routeSearch.conceptId);
+  const routePriority = parsePriority(routeSearch.priority);
+  const routeStatus = parseStatus(routeSearch.status);
+  const routeTitleFilter = parseStringParam(routeSearch.q) ?? "";
 
   const [tab, setTab] = useState<Tab>("results");
   // Facet state — each drives a query param and re-runs the browse read.
-  const [typeFilter, setTypeFilter] = useState<LibraryBrowseType | null>(null);
-  const [conceptFilter, setConceptFilter] = useState<string | null>(null);
-  const [priorityFilter, setPriorityFilter] = useState<PriorityLetter | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<LibraryBrowseType | null>(() => routeType);
+  const [conceptFilter, setConceptFilter] = useState<string | null>(() => routeConceptId);
+  const [priorityFilter, setPriorityFilter] = useState<PriorityLetter | null>(() => routePriority);
+  const [statusFilter, setStatusFilter] = useState<string | null>(() => routeStatus);
   // An OPTIONAL inline "filter by title" box — narrows the already-fetched payload
   // client-side (never an FTS call; Library browses, it does not keyword-search).
-  const [titleFilter, setTitleFilter] = useState("");
+  const [titleFilter, setTitleFilter] = useState(() => routeTitleFilter);
+  const [searchDraft, setSearchDraft] = useState("");
+  const [searchComposing, setSearchComposing] = useState(false);
 
   const [items, setItems] = useState<readonly LibraryItem[]>([]);
   const [counts, setCounts] = useState<{
@@ -163,6 +182,38 @@ export function BrowseScreen() {
   // remediation copy all agree about WHY the visible set is what it is.
   const titleActive = titleFilter.trim().length > 0;
 
+  const openSearchMode = useCallback(
+    (query?: string) => {
+      void navigate({
+        to: "/search",
+        search: explorerSearchParams("search", {
+          query,
+          type: typeFilter,
+          conceptId: conceptFilter,
+          priority: priorityFilter,
+        }),
+      });
+    },
+    [navigate, typeFilter, conceptFilter, priorityFilter],
+  );
+
+  useEffect(() => {
+    setTypeFilter(routeType);
+    setConceptFilter(routeConceptId);
+    setPriorityFilter(routePriority);
+    setStatusFilter(routeStatus);
+    setTitleFilter(routeTitleFilter);
+    setSearchDraft("");
+    setSelId(null);
+  }, [routeType, routeConceptId, routePriority, routeStatus, routeTitleFilter]);
+
+  useEffect(() => {
+    const query = searchDraft.trim();
+    if (query.length === 0 || searchComposing) return;
+    const timeout = window.setTimeout(() => openSearchMode(searchDraft), 150);
+    return () => window.clearTimeout(timeout);
+  }, [searchDraft, searchComposing, openSearchMode]);
+
   // Keep a valid selection as the list changes.
   useEffect(() => {
     if (selId && !visible.some((r) => r.id === selId)) setSelId(null);
@@ -197,16 +248,29 @@ export function BrowseScreen() {
   return (
     <div className="lib-shell" data-testid="route-library">
       <div className="lib-topbar">
-        {/* Browse-first: a calm count summary + an optional title narrow, NOT the
-            prominent free-text FTS input that /search leads with. */}
+        <CollectionExplorerModeSwitch
+          mode="browse"
+          onBrowse={() => undefined}
+          onSearch={() => openSearchMode()}
+        />
+        {/* Browse-first: a calm count summary + a restrained Search handoff.
+            The deeper title-only narrowing lives in the filter rail below. */}
         <div className="lib-searchbar">
-          <Icon name="filter" size={15} />
+          <Icon name="search" size={15} />
           <input
             type="search"
-            data-testid="library-title-filter"
-            value={titleFilter}
-            onChange={(e) => setTitleFilter(e.target.value)}
-            placeholder="Filter by title…"
+            data-testid="collection-query-input"
+            value={searchDraft}
+            onChange={(e) => {
+              const next = e.target.value;
+              setSearchDraft(next);
+            }}
+            onCompositionStart={() => setSearchComposing(true)}
+            onCompositionEnd={(e) => {
+              setSearchComposing(false);
+              setSearchDraft(e.currentTarget.value);
+            }}
+            placeholder="Search sources, extracts, cards…"
           />
         </div>
         <span className="lib-count" data-testid="library-count">
@@ -253,6 +317,20 @@ export function BrowseScreen() {
 
       <div className="lib-body">
         <div className="filterbar" data-testid="library-filterbar">
+          <div className="filter-group">
+            <div className="filter-group__title">Visible titles</div>
+            <label className="lib-mini-input">
+              <Icon name="filter" size={14} />
+              <input
+                type="search"
+                data-testid="library-title-filter"
+                value={titleFilter}
+                onChange={(e) => setTitleFilter(e.target.value)}
+                placeholder="Filter visible titles"
+              />
+            </label>
+          </div>
+
           <div className="filter-group">
             <div className="filter-group__title">Type</div>
             {TYPE_GROUPS.map((g) => (

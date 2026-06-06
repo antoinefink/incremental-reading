@@ -103,11 +103,11 @@ test("toggling a Type facet narrows the list to that type", async () => {
   await expect(page.getByTestId("library-group-source")).toHaveCount(0);
   await expect(page.getByTestId("library-group-extract")).toHaveCount(0);
 
-  // Opening the selected card row navigates to the review session.
+  // Opening the selected card row navigates to card detail.
   const cardRow = page.getByTestId("library-group-card").getByTestId("library-result").first();
   await cardRow.click();
   await page.getByTestId("library-detail-open").click();
-  await expect(page).toHaveURL(/\/review$/);
+  await expect(page).toHaveURL(/\/card\//);
 
   await app.close();
 });
@@ -149,7 +149,7 @@ test("the library.browse bridge returns ALL live elements with no facets (incl. 
   await app.close();
 });
 
-test("Open task from Library jumps to the protected card review surface", async () => {
+test("Open task from Library jumps to the protected card detail surface", async () => {
   const app = await launchApp(dataDir);
   const page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");
@@ -178,6 +178,8 @@ test("Open task from Library jumps to the protected card review surface", async 
     );
   }, CARD_TITLE);
   expect(linkedTask).toBeTruthy();
+  const linkedCardId = linkedTask?.linkedElementId;
+  if (!linkedCardId) throw new Error("seeded protected task is missing its linked card");
 
   await openLibrary(page);
   await page.getByTestId("library-filter-type-task").click();
@@ -193,8 +195,9 @@ test("Open task from Library jumps to the protected card review surface", async 
 
   await page.getByTestId("library-detail-open").click();
 
-  await expect(page).toHaveURL(/\/review$/);
-  await expect(page.getByTestId("inspector-title")).toHaveText(CARD_TITLE);
+  await expect(page).toHaveURL(new RegExp(`/card/${linkedCardId}`));
+  await expect(page.getByTestId("route-card")).toBeVisible();
+  await expect(page.getByTestId("card-detail")).toHaveAttribute("data-card-id", linkedCardId);
 
   await app.close();
 });

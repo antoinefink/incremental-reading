@@ -27,6 +27,12 @@ tags:
 
 # Search empty-query facets should browse matching rows
 
+## Superseded Product Decision
+
+This solution is historically useful for its count semantics, typed-bridge boundary, and stale-response handling, but its product decision has been superseded. The Collection Explorer requirements now make browse-first collection navigation the responsibility of the Collection Explorer, not empty-query Search.
+
+Current direction: empty `/search` should show the search prompt and any pending filters, without browsing rows. See `docs/brainstorms/2026-06-06-collection-explorer-requirements.md` and `docs/plans/2026-06-06-collection-explorer.md`.
+
 ## Problem
 
 `/search` treated an empty query as "show prompt and clear results" even when facets were selected. That left the empty search screen without Type/Priority counters, and facet clicks such as `Sources` or `Intelligence` did not browse the matching collection rows.
@@ -103,19 +109,20 @@ The renderer still owns only UI state. SQL, count semantics, ordering, and row e
 
 ## Prevention
 
-- Treat empty-query `/search` as a separate browse-backed mode, not as keyword search.
-- Keep empty-query `/search` browse requests bounded to `source`, `extract`, and `card`, including concept-only and priority-only clicks.
+- Do not reintroduce empty-query row browsing on `/search`; Collection Explorer owns browse-first collection navigation.
+- Empty-query `/search` should show a prompt plus pending filters, not result rows.
+- If old empty-query browse code is referenced, preserve the useful parts only: main-side count semantics, typed bridge boundaries, stale-response guards, and clearing stale rows/selection during pending requests.
 - Never use global `ConceptNode.memberCount` for `/search` filterbar chips; reserve it for Map concept volume.
-- Test the three retrieval states independently:
+- Historically, this bug fix tested the three retrieval states independently:
 
 ```ts
 empty query + no facet -> prompt + counters + no rows
-empty query + facet -> libraryBrowse({ types: ["source", "extract", "card"], ...facet })
+empty query + facet -> prompt + pending filters + no rows
 non-empty query -> searchQuery or semanticSearch
 ```
 
-- Keep renderer tests for Type, Concept, Priority, bounded non-searchable rows, stale browse responses, pending/failed facet switches, and clearing the final facet.
-- Keep Electron E2E coverage for opening `/search`, verifying empty Type counters, clicking `Sources`, and clicking a seeded concept such as `Intelligence`.
+- Keep renderer tests for Type, Concept, Priority counters, stale response handling, pending/failed facet switches, and clearing the final facet.
+- Move row-browsing E2E expectations for Sources, concepts such as `Intelligence`, and priority filters to Collection Explorer coverage.
 
 ## Related Issues
 

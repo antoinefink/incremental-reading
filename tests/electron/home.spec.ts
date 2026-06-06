@@ -136,6 +136,21 @@ test("Start session navigates to the /process loop", async () => {
   await app.close();
 });
 
+test("Library quick tile opens the Collection Explorer Browse mode", async () => {
+  const app = await launchApp(dataDir, { seedOnEmpty: true });
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  await openHome(page);
+  await page.getByTestId("home-tile-library").click();
+  await expect(page).toHaveURL(/\/library/);
+  await expect(page.getByTestId("route-library")).toBeVisible();
+  await expect(page.getByTestId("nav-library")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByTestId("nav-search")).not.toHaveAttribute("aria-current", "page");
+
+  await app.close();
+});
+
 test("NAV-EXCLUSIVITY — on `/` exactly one nav item is current, and it is nav-home", async () => {
   const app = await launchApp(dataDir, { seedOnEmpty: true });
   const page = await app.firstWindow();
