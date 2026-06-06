@@ -28,7 +28,12 @@ documented plan in [`docs/`](./docs/). Before starting any work:
    [`docs/architecture.md`](./docs/architecture.md), [`docs/domain-model.md`](./docs/domain-model.md),
    [`docs/scheduling-and-priority.md`](./docs/scheduling-and-priority.md),
    [`docs/design-system.md`](./docs/design-system.md) (for any UI task).
-5. After finishing: check the box in `roadmap.md`, record the commit, note anything that
+5. Documented solution learnings live in [`docs/solutions/`](./docs/solutions/), organized by
+   category with YAML frontmatter (`module`, `problem_type`, `tags`) so agents can search past
+   bugs, architecture patterns, workflow issues, and tooling decisions.
+6. Shared domain vocabulary lives in [`CONCEPTS.md`](./CONCEPTS.md): project-specific entities,
+   processes, and status concepts relevant when orienting to domain behavior.
+7. After finishing: check the box in `roadmap.md`, record the commit, note anything that
    changes downstream tasks, and commit as a single coherent change referencing the task ID.
 
 ## Runtime & tooling (native pnpm is canonical)
