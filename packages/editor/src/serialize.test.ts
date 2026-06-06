@@ -38,7 +38,7 @@ describe("toPlainText", () => {
     expect(toPlainText(doc)).toBe("Title\nFirst para.\nSecond para.");
   });
 
-  it("flattens marks to their text (bold/italic/link/code)", () => {
+  it("flattens marks to their text (bold/italic/underline/link/code)", () => {
     const doc = {
       type: "doc",
       content: [
@@ -47,12 +47,13 @@ describe("toPlainText", () => {
           content: [
             { type: "text", text: "a", marks: [{ type: "bold" }] },
             { type: "text", text: "b", marks: [{ type: "italic" }] },
-            { type: "text", text: "c", marks: [{ type: "code" }] },
+            { type: "text", text: "c", marks: [{ type: "underline" }] },
+            { type: "text", text: "d", marks: [{ type: "code" }] },
           ],
         },
       ],
     };
-    expect(toPlainText(doc)).toBe("abc");
+    expect(toPlainText(doc)).toBe("abcd");
   });
 
   it("emits one line per list item", () => {

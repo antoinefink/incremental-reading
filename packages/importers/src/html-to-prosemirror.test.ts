@@ -94,14 +94,14 @@ describe("htmlToProseMirrorDoc", () => {
     ]);
   });
 
-  it("maps strong/em/a/code to bold/italic/link/code marks", () => {
+  it("maps strong/em/u/a/code to bold/italic/underline/link/code marks", () => {
     const html = sanitizeArticleHtml(
-      `<p><strong>b</strong> <em>i</em> <code>c</code> <a href="https://x.test/y">L</a></p>`,
+      `<p><strong>b</strong> <em>i</em> <u>u</u> <code>c</code> <a href="https://x.test/y">L</a></p>`,
     );
     const { doc } = htmlToProseMirrorDoc(html, counterMinter());
     const pm = buildSchema().nodeFromJSON(doc) as unknown as BuiltNode;
     const { marks } = collectNames(pm);
-    expect(marks).toEqual(new Set(["bold", "italic", "code", "link"]));
+    expect(marks).toEqual(new Set(["bold", "italic", "underline", "code", "link"]));
   });
 
   it("places exactly one stable block id per row, on the outermost block", () => {

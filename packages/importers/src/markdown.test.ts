@@ -99,7 +99,7 @@ describe("markdownToProseMirrorDoc", () => {
     expect(code?.content?.[0]?.text).toContain("    return schedule(card)"); // indentation kept
   });
 
-  it("preserves bold/italic/link/code inline marks", () => {
+  it("preserves bold/italic/underline/link/code inline marks", () => {
     const flatMarks = new Set<string>();
     const walk = (node: Record<string, unknown>): void => {
       for (const m of (node.marks ?? []) as { type: string }[]) flatMarks.add(m.type);
@@ -108,6 +108,7 @@ describe("markdownToProseMirrorDoc", () => {
     walk(conversion.doc as unknown as Record<string, unknown>);
     expect(flatMarks.has("bold")).toBe(true);
     expect(flatMarks.has("italic")).toBe(true);
+    expect(flatMarks.has("underline")).toBe(true);
     expect(flatMarks.has("link")).toBe(true);
     expect(flatMarks.has("code")).toBe(true);
   });
@@ -132,11 +133,11 @@ describe("markdownToProseMirrorDoc", () => {
 describe("proseMirrorDocToMarkdown", () => {
   it("produces deterministic Markdown for a known doc", () => {
     const conversion = markdownToProseMirrorDoc(
-      "# Title\n\nA **bold** word.\n\n- one\n- two\n",
+      "# Title\n\nA **bold** and ++underlined++ word.\n\n- one\n- two\n",
       counterMint(),
     );
     const out = proseMirrorDocToMarkdown(conversion.doc);
-    expect(out).toBe("# Title\n\nA **bold** word.\n\n- one\n- two\n");
+    expect(out).toBe("# Title\n\nA **bold** and ++underlined++ word.\n\n- one\n- two\n");
   });
 
   it("escapes inline-significant characters + a leading block marker in plain text", () => {
@@ -237,14 +238,17 @@ describe("htmlFileToProseMirrorDoc (HTML import path â€” reused sanitize + HTMLâ
 
   it("keeps the link href + drops the image (alt text retained per the schema)", () => {
     const links: string[] = [];
+    const marks = new Set<string>();
     const walk = (node: Record<string, unknown>): void => {
       for (const m of (node.marks ?? []) as { type: string; attrs?: { href?: string } }[]) {
+        marks.add(m.type);
         if (m.type === "link" && m.attrs?.href) links.push(m.attrs.href);
       }
       for (const c of (node.content ?? []) as Record<string, unknown>[]) walk(c);
     };
     walk(conversion.doc as unknown as Record<string, unknown>);
     expect(links).toContain("https://example.com/page");
+    expect(marks.has("underline")).toBe(true);
     expect(conversion.plainText).not.toContain("figure.png");
   });
 });

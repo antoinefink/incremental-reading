@@ -63,13 +63,14 @@ describe("sanitizeArticleHtml", () => {
 
   it("keeps only allowlisted tags (unknown tags drop, text stays)", () => {
     const clean = sanitizeArticleHtml(
-      `<section><h2>H</h2><table><tr><td>cell</td></tr></table><p><strong>B</strong></p></section>`,
+      `<section><h2>H</h2><table><tr><td>cell</td></tr></table><p><strong>B</strong> <u>U</u></p></section>`,
     );
     expect(clean).not.toMatch(/<section/i);
     expect(clean).not.toMatch(/<table/i);
     expect(clean).not.toMatch(/<td/i);
     expect(clean).toContain("<h2>H</h2>");
     expect(clean).toContain("<strong>B</strong>");
+    expect(clean).toContain("<u>U</u>");
     expect(clean).toContain("cell");
   });
 

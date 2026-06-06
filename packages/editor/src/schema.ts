@@ -12,12 +12,11 @@
  * The allowed set (per the M3 spec):
  *   Nodes  — Document, Paragraph, Text, Heading, Blockquote, BulletList,
  *            OrderedList, ListItem, CodeBlock, HorizontalRule, HardBreak
- *   Marks  — Bold, Italic, Link, Code
+ *   Marks  — Bold, Italic, Underline, Link, Code
  *   Util   — History (undo/redo), Dropcursor, Gapcursor, ListKeymap
  *
- * Everything else StarterKit v3 ships by default — notably the `Strike` and
- * `Underline` marks (both included in StarterKit v3) — is **disabled** so it can
- * never enter a stored document.
+ * Everything else StarterKit v3 ships by default — notably the `Strike` mark — is
+ * **disabled** so it can never enter a stored document.
  *
  * This module is framework-agnostic on purpose: it imports `@tiptap/core` and
  * `@tiptap/starter-kit` (which run under ProseMirror, usable headless in Node)
@@ -42,7 +41,7 @@ export const ALLOWED_HEADING_LEVELS = [1, 2, 3] as const;
  * The marks the constrained schema permits, by ProseMirror mark name. Used by
  * tests + future validation to assert the schema does not silently grow.
  */
-export const ALLOWED_MARK_NAMES = ["bold", "italic", "link", "code"] as const;
+export const ALLOWED_MARK_NAMES = ["bold", "italic", "underline", "link", "code"] as const;
 
 /**
  * The block/leaf node types the constrained schema permits, by ProseMirror node
@@ -74,7 +73,7 @@ export const ALLOWED_NODE_NAMES = [
  * {@link buildExtensions} so the schema cannot accept them on paste / import /
  * round-trip.
  */
-export const DISABLED_STARTER_KIT_MARKS = ["strike", "underline"] as const;
+export const DISABLED_STARTER_KIT_MARKS = ["strike"] as const;
 
 /** Options for {@link buildExtensions}. */
 export interface BuildExtensionsOptions {
@@ -130,7 +129,6 @@ export function buildExtensions(options: BuildExtensionsOptions = {}): Extension
       heading: { levels: [...ALLOWED_HEADING_LEVELS] },
       // Disable the StarterKit marks that are outside the constrained set.
       strike: false,
-      underline: false,
       // T072: StarterKit's `codeBlock` is disabled in favour of the constrained
       // `CodeBlockWithLanguage` (same node name + the `language` attr), added below.
       codeBlock: false,

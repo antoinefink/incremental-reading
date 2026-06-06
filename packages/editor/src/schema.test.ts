@@ -5,11 +5,13 @@
  * accident: an over-broad schema would make the block-ID (T016) + mark +
  * extraction (M4) logic brittle. These tests compile the constrained schema
  * headlessly (no DOM) and assert it ACCEPTS every allowed node/mark and
- * STRIPS/REJECTS disallowed ones (`strike`, `underline`, raw `<script>` HTML)
+ * STRIPS/REJECTS disallowed ones (`strike`, raw `<script>` HTML)
  * across a JSON round-trip.
  */
 
+import { toggleMark } from "@tiptap/pm/commands";
 import { Node as PmNode } from "@tiptap/pm/model";
+import { EditorState, TextSelection } from "@tiptap/pm/state";
 import { describe, expect, it } from "vitest";
 import { ALLOWED_MARK_NAMES, ALLOWED_NODE_NAMES, buildSchema } from "./schema";
 
@@ -52,9 +54,8 @@ describe("constrained schema — allowed set", () => {
     }
   });
 
-  it("does NOT register disallowed marks (strike, underline)", () => {
+  it("does NOT register disallowed marks (strike)", () => {
     expect(schema.marks.strike).toBeUndefined();
-    expect(schema.marks.underline).toBeUndefined();
   });
 
   it("does NOT register disallowed nodes (table, image)", () => {
@@ -147,6 +148,8 @@ describe("constrained schema — allowed set", () => {
             { type: "text", text: " and " },
             { type: "text", text: "italic", marks: [{ type: "italic" }] },
             { type: "text", text: " and " },
+            { type: "text", text: "underline", marks: [{ type: "underline" }] },
+            { type: "text", text: " and " },
             { type: "text", text: "code", marks: [{ type: "code" }] },
             { type: "text", text: " and " },
             {
@@ -189,7 +192,7 @@ describe("constrained schema — allowed set", () => {
 
     const result = roundTrip(doc);
     const marks = markNames(result);
-    expect(marks).toEqual(new Set(["bold", "italic", "code", "link"]));
+    expect(marks).toEqual(new Set(["bold", "italic", "underline", "code", "link"]));
 
     const nodes = nodeNames(result);
     expect(nodes.has("heading")).toBe(true);
@@ -199,6 +202,30 @@ describe("constrained schema — allowed set", () => {
     expect(nodes.has("listItem")).toBe(true);
     expect(nodes.has("codeBlock")).toBe(true);
     expect(nodes.has("horizontalRule")).toBe(true);
+  });
+
+  it("toggles underline over a text selection (the Mod-u command target)", () => {
+    const markType = schema.marks.underline;
+    expect(markType, "underline mark should exist").toBeDefined();
+    if (!markType) throw new Error("underline mark missing from schema");
+    const doc = PmNode.fromJSON(schema, {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "under" }],
+        },
+      ],
+    });
+    let state = EditorState.create({ schema, doc });
+    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 1, 6)));
+
+    const toggled = toggleMark(markType)(state, (tr) => {
+      state = state.apply(tr);
+    });
+
+    expect(toggled).toBe(true);
+    expect(state.doc.rangeHasMark(1, 6, markType)).toBe(true);
   });
 });
 
@@ -217,19 +244,6 @@ describe("constrained schema — rejects disallowed content", () => {
     // round-trip: ProseMirror throws rather than silently keeping it.
     expect(() => PmNode.fromJSON(schema, doc)).toThrow(/no mark type strike/);
     expect(schema.marks.strike).toBeUndefined();
-  });
-
-  it("rejects a disallowed `underline` mark (mark type unknown to schema)", () => {
-    const doc = {
-      type: "doc",
-      content: [
-        {
-          type: "paragraph",
-          content: [{ type: "text", text: "u", marks: [{ type: "underline" }] }],
-        },
-      ],
-    };
-    expect(() => PmNode.fromJSON(schema, doc)).toThrow(/no mark type underline/);
   });
 
   it("throws when a disallowed NODE type is present (e.g. an image)", () => {

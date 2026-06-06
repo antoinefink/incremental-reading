@@ -9,7 +9,7 @@
  * downstream HTML→ProseMirror step only ever sees representable tags.
  *
  * Allowed tags: `h1`–`h6`, `p`, `blockquote`, `ul`, `ol`, `li`, `pre`, `code`,
- * `hr`, `br`, `a` (href only, `http(s)`/`mailto`), `strong`/`b`, `em`/`i`.
+ * `hr`, `br`, `a` (href only, `http(s)`/`mailto`), `strong`/`b`, `em`/`i`, `u`.
  * Everything else is dropped (its inner text kept), and `script`/`style`/
  * `iframe`/`img`/`svg`/`form` are removed ENTIRELY (text and all). Pure +
  * idempotent: sanitizing already-sanitized HTML returns the same string.
@@ -39,6 +39,7 @@ const ALLOWED_TAGS = [
   "b",
   "em",
   "i",
+  "u",
 ] as const;
 
 /**

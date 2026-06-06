@@ -108,6 +108,10 @@ function collectInline(node: MinimalNode, marks: MarkSet, out: ProseMirrorInline
       collectInline(child, withMark(marks, { type: "italic" }), out);
       continue;
     }
+    if (tag === "u") {
+      collectInline(child, withMark(marks, { type: "underline" }), out);
+      continue;
+    }
     if (tag === "code") {
       collectInline(child, withMark(marks, { type: "code" }), out);
       continue;
@@ -283,7 +287,7 @@ function buildInnerBlocks(el: MinimalNode, acc: Acc): ProseMirrorBlockNode[] {
       }
       continue;
     }
-    // Inline element (strong/em/a/code/br) directly inside the wrapper.
+    // Inline element (strong/em/u/a/code/br) directly inside the wrapper.
     collectInline(child, [], directInline);
   }
   flushInline();

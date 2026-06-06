@@ -1,6 +1,6 @@
 # The Spacing Effect
 
-Spaced repetition is **far** more effective than *cramming*. See the
+Spaced repetition is **far** more effective than *cramming* and ++review timing++ matters. See the
 [original study](https://example.com/ebbinghaus) for details.
 
 ## Why it works

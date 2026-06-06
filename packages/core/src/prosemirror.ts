@@ -28,7 +28,7 @@ import type { BlockId } from "./ids";
  * `@interleave/editor`'s `ALLOWED_MARK_NAMES`). Kept as plain string literals so
  * `@interleave/core` stays editor-free.
  */
-export type ProseMirrorMarkType = "bold" | "italic" | "link" | "code";
+export type ProseMirrorMarkType = "bold" | "italic" | "underline" | "link" | "code";
 
 /** A single inline mark on a text node (e.g. `{ type: "link", attrs: { href } }`). */
 export interface ProseMirrorMark {
@@ -43,7 +43,7 @@ export type ProseMirrorHeadingLevel = 1 | 2 | 3;
 export interface ProseMirrorTextNode {
   readonly type: "text";
   readonly text: string;
-  /** Inline marks (bold/italic/link/code); omitted when the run is unmarked. */
+  /** Inline marks (bold/italic/underline/link/code); omitted when the run is unmarked. */
   readonly marks?: readonly ProseMirrorMark[];
 }
 

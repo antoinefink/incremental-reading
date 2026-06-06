@@ -25,7 +25,7 @@
  * ## Why a HAND-WRITTEN serializer for export (decision, documented here)
  *
  * Markdown EXPORT needs NO new dependency. The constrained schema is tiny (≤8
- * block types, 4 marks), so a small hand-written serializer that walks the
+ * block types, 5 marks), so a small hand-written serializer that walks the
  * `ProseMirrorBlockNode` union is simpler, dependency-free, and gives us EXACT
  * control over the round-trip normalization than pulling `prosemirror-markdown`
  * (which assumes the full prosemirror-schema-basic schema + real prosemirror `Node`
@@ -119,6 +119,40 @@ function withMark(marks: MarkSet, mark: ProseMirrorMark): MarkSet {
 }
 
 /**
+ * Walk a markdown-it text token, recognizing the app's exported underline syntax
+ * (`++underlined++`, matching Tiptap's underline markdown renderer). markdown-it's
+ * CommonMark preset leaves `++` as plain text, so this tiny pass is the only custom
+ * inline syntax we support for underline round-trips.
+ */
+function pushTextWithUnderline(text: string, marks: MarkSet, out: ProseMirrorInlineNode[]): void {
+  const underline = /\+\+([\s\S]+?)\+\+/g;
+  let last = 0;
+  for (const match of text.matchAll(underline)) {
+    const start = match.index ?? 0;
+    if (start > last) {
+      out.push(
+        marks.length > 0
+          ? { type: "text", text: text.slice(last, start), marks: [...marks] }
+          : { type: "text", text: text.slice(last, start) },
+      );
+    }
+    const underlined = match[1] ?? "";
+    if (underlined.length > 0) {
+      const underlineMarks = withMark(marks, { type: "underline" });
+      out.push({ type: "text", text: underlined, marks: [...underlineMarks] });
+    }
+    last = start + match[0].length;
+  }
+  if (last < text.length) {
+    out.push(
+      marks.length > 0
+        ? { type: "text", text: text.slice(last), marks: [...marks] }
+        : { type: "text", text: text.slice(last) },
+    );
+  }
+}
+
+/**
  * Walk an `inline` token's children (markdown-it's flat inline token list) into
  * ProseMirror inline nodes (text runs with marks + hard breaks). Image tokens are
  * flattened to their alt text (the constrained schema has no image node); raw
@@ -131,11 +165,7 @@ function collectInline(children: readonly Token[]): ProseMirrorInlineNode[] {
     switch (tok.type) {
       case "text": {
         if (tok.content.length === 0) break;
-        const run: ProseMirrorTextNode =
-          marks.length > 0
-            ? { type: "text", text: tok.content, marks: [...marks] }
-            : { type: "text", text: tok.content };
-        out.push(run);
+        pushTextWithUnderline(tok.content, marks, out);
         break;
       }
       case "softbreak":
@@ -534,8 +564,9 @@ function serializeInline(nodes: readonly ProseMirrorInlineNode[]): string {
       piece = escapeText(text);
     }
     // Apply the remaining marks from innermost to outermost. Order is fixed for
-    // determinism: code (handled above) → italic → bold → link.
+    // determinism: code (handled above) → italic → underline → bold → link.
     if (marks.some((m) => m.type === "italic")) piece = `*${piece}*`;
+    if (marks.some((m) => m.type === "underline")) piece = `++${piece}++`;
     if (marks.some((m) => m.type === "bold")) piece = `**${piece}**`;
     const link = marks.find((m) => m.type === "link");
     if (link) {
