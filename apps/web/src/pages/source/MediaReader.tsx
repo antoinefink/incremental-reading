@@ -424,7 +424,7 @@ export function MediaReader({
               disabled={clipBusy || !clipAnchor}
               onClick={() => void createClip()}
             >
-              {clipBusy ? "Saving…" : "Clip this segment as a topic"}
+              {clipBusy ? "Creating topic…" : "Clip this segment as a topic"}
             </button>
             <button
               type="button"

@@ -638,7 +638,6 @@ export function Settings() {
   const desktop = isDesktop();
   const [settings, setSettings] = useState<RendererSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [savedAt, setSavedAt] = useState<string | null>(null);
   const [backingUp, setBackingUp] = useState(false);
   const [backup, setBackup] = useState<BackupsCreateResult | null>(null);
   const [backupError, setBackupError] = useState<string | null>(null);
@@ -778,7 +777,6 @@ export function Settings() {
       const { settings: confirmed } = await appApi.updateAppSettings({ patch: next });
       setSettings(confirmed);
       applyTheme(confirmed.theme);
-      setSavedAt(new Date().toISOString());
       setError(null);
       // Tell settings-reading shell chrome (the sidebar identity chip) to re-read
       // the change live — no remount required.
@@ -799,7 +797,6 @@ export function Settings() {
       await appApi.setRetentionBandEnabled({ enabled });
       const { settings: confirmed } = await appApi.getAppSettings();
       setSettings(confirmed);
-      setSavedAt(new Date().toISOString());
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -832,7 +829,6 @@ export function Settings() {
               }
             : prev,
         );
-        setSavedAt(new Date().toISOString());
         setError(null);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -872,20 +868,11 @@ export function Settings() {
       className="mx-auto h-full w-full max-w-3xl overflow-auto px-7 py-8"
       data-testid="route-settings"
     >
-      <header className="mb-6 flex items-start justify-between gap-4">
+      <header className="mb-6">
         <div>
           <h1 className="font-semibold text-2xl text-text tracking-tight">Settings</h1>
           <p className="mt-1 text-sm text-text-2">Local-first · everything stays on this device</p>
         </div>
-        {savedAt ? (
-          <span
-            data-testid="settings-saved"
-            className="inline-flex items-center gap-1.5 rounded-md bg-ok-soft px-2.5 py-1 text-ok text-xs"
-          >
-            <Icon name="check" size={13} />
-            Saved
-          </span>
-        ) : null}
       </header>
 
       <SectionPanel title="Review & scheduling">

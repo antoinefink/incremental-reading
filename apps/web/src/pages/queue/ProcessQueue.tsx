@@ -1393,7 +1393,6 @@ function ProcessSourceWorkbench({
         )}
         <div className="pq-extract__meta">
           <span>{wordCount(doc.plainText)} words</span>
-          {doc.saving ? <span>saving…</span> : null}
         </div>
       </div>
 
@@ -1546,7 +1545,6 @@ function ProcessExtractWorkbench({
         )}
         <div className="pq-extract__meta">
           <span>{wordCount(plainText)} words</span>
-          {doc.saving ? <span>saving…</span> : null}
         </div>
       </div>
 

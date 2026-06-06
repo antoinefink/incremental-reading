@@ -138,7 +138,7 @@ describe("Settings", () => {
   });
 
   it("loads settings and persists setting changes through the bridge", async () => {
-    const { getByTestId, findByTestId } = render(<Settings />);
+    const { getByTestId, findByTestId, queryByTestId } = render(<Settings />);
 
     expect(await findByTestId("setting-budget-value")).toHaveTextContent("60/day");
     fireEvent.change(getByTestId("setting-budget"), { target: { value: "75" } });
@@ -146,7 +146,8 @@ describe("Settings", () => {
     await waitFor(() =>
       expect(h.updateAppSettings).toHaveBeenCalledWith({ patch: { dailyReviewBudget: 75 } }),
     );
-    expect(await findByTestId("settings-saved")).toBeInTheDocument();
+    expect(queryByTestId("settings-saved")).not.toBeInTheDocument();
+    expect(getByTestId("setting-budget-value")).toHaveTextContent("75/day");
   });
 
   it("persists the system theme preference from the theme segmented control", async () => {

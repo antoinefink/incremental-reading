@@ -152,7 +152,7 @@ test("the sidebar user chip reflects the display-name setting + survives restart
   await gotoSettings(firstPage);
   await firstPage.getByTestId("setting-display-name").fill("Ada Lovelace");
   await firstPage.getByTestId("setting-display-name").blur();
-  await expect(firstPage.getByTestId("settings-saved")).toBeVisible();
+  await expect(firstPage.getByTestId("settings-saved")).toHaveCount(0);
 
   // The sidebar chip now shows the set name + derived avatar initials.
   await expect(firstPage.getByTestId("user-chip-name")).toHaveText("Ada Lovelace");
@@ -184,7 +184,7 @@ test("the theme setting is SQLite-backed and applied on boot after restart", asy
   const html = firstPage.locator("html");
   await firstPage.getByTestId("setting-theme-option-light").click();
   await expect(html).toHaveAttribute("data-theme", "light");
-  await expect(firstPage.getByTestId("settings-saved")).toBeVisible();
+  await expect(firstPage.getByTestId("settings-saved")).toHaveCount(0);
 
   await first.close();
 

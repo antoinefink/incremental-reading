@@ -31,6 +31,8 @@ latest text landed in the local SQLite document or card tables.
 - R4. Card text edits that were previously confirmed through Save must have an explicit autosave
   trigger that persists the latest prompt, answer, cloze, or context body before the editor closes.
 - R5. Help copy and tests must stop teaching users that manual Save is required for extract editing.
+- R6. Autosave should not add visible "Saving..." / "Saved" chips; autosave is the baseline
+  behavior, not a separate UI state.
 
 ## Key Technical Decisions
 
@@ -86,6 +88,7 @@ In scope:
 - Text/body editing surfaces used during incremental reading and review.
 - Tests that prove autosave/no-Save behavior for those surfaces.
 - Help copy that directly describes the removed buttons.
+- Autosave/saved status chips on text-editing and settings surfaces.
 
 Out of scope:
 
@@ -106,8 +109,11 @@ Completed:
 - `pnpm test`
 - `pnpm lint` (passes with existing non-null assertion warnings outside this change)
 - `git diff --check`
+- Follow-up removal of autosave status chips committed separately after the initial edit-surface
+  Save-button removal.
 
 Blocked:
 
 - Relevant Electron E2E was attempted, but the sandbox rejected the local dev server port bind
-  escalation needed for `pnpm e2e`.
+  escalation needed for `pnpm e2e`. The rejected follow-up suite covered process queue, extract
+  review, source reader, review edit, settings, synthesis notes, and media clip.

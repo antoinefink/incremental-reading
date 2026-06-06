@@ -2132,7 +2132,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "Press <kbd>E</kbd> or click <b>Edit</b> to open an inline editor for the prompt and answer (or cloze text, or the reveal label on an occlusion card). Saving the edit patches the card in place. The FSRS schedule is <em>not</em> changed — the next due date stays the same. Use this for typos, clarity rewrites, and adding a missing subject.",
+      text: "Press <kbd>E</kbd> or click <b>Edit</b> to open an inline editor for the prompt and answer (or cloze text, or the reveal label on an occlusion card). Edits autosave and <b>Done</b> flushes the latest text before closing. The FSRS schedule is <em>not</em> changed — the next due date stays the same. Use this for typos, clarity rewrites, and adding a missing subject.",
     },
     {
       type: "h2",
@@ -3373,7 +3373,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     {
       type: "ul",
       items: [
-        "<strong>Rewrite</strong> — edit the prompt, answer, or cloze text inline. Saving a rewrite automatically clears the leech flag, so the card leaves the list. Use this when the card asks two things, is ambiguous, or has a vague pronoun.",
+        "<strong>Rewrite</strong> — edit the prompt, answer, or cloze text inline. The rewrite autosaves; <strong>Resolve</strong> flushes the latest text and clears the leech flag so the card leaves the list. Use this when the card asks two things, is ambiguous, or has a vague pronoun.",
         "<strong>Split</strong> — author two atomic cards from the original (one fact each). The original is moved to Trash (recoverable). Both new cards inherit the source lineage. Use this when the card covers multiple facts.",
         "<strong>Add context</strong> — append a clarifying note that appears below the prompt during review, making the answer more retrievable without changing the question. Useful when the card is correct but needs a memory hook.",
         "<strong>Open source</strong> — jump to the exact source paragraph the card came from. Available when the card has a source location. Use this to re-read the original and understand why you kept failing.",
@@ -3829,7 +3829,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
   "review-scheduling-settings": [
     {
       type: "p",
-      text: "All review and scheduling controls live in <b>Settings</b> (<kbd>g</kbd> <kbd>s</kbd>) under the <b>Review & scheduling</b> section. Every change saves instantly — a green <code>Saved</code> chip appears in the header. There is no Save button.",
+      text: "All review and scheduling controls live in <b>Settings</b> (<kbd>g</kbd> <kbd>s</kbd>) under the <b>Review & scheduling</b> section. Every change saves instantly without a Save button or separate saved-status chip.",
     },
     {
       type: "h2",
@@ -4178,7 +4178,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "The center column is a full rich-text editor. Write freely — prose, headings, lists, code. Every change is autosaved after a short debounce; the label in the column header shows <code>saving…</code> while a save is in flight and returns to <code>incremental writing</code> when complete. There is no manual Save button and no risk of losing a change by navigating away.",
+      text: "The center column is a full rich-text editor. Write freely — prose, headings, lists, code. Every change is autosaved after a short debounce, with no manual Save button and no separate saving-status chip.",
     },
     {
       type: "h2",

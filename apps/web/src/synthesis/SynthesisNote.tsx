@@ -72,7 +72,6 @@ export function SynthesisNote() {
     desktop ? "loading" : "no-desktop",
   );
   const [busy, setBusy] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
   const [picker, setPicker] = useState(false);
 
@@ -127,7 +126,6 @@ export function SynthesisNote() {
       if (!desktop || !id) return;
       const editor = editorRef.current;
       const blocks = editor ? toBlockInputs(editor.getJSON()) : undefined;
-      setSaving(true);
       void appApi
         .editSynthesisBody({
           noteId: id,
@@ -137,8 +135,7 @@ export function SynthesisNote() {
         })
         .catch(() => {
           /* non-fatal: the next edit re-attempts the save */
-        })
-        .finally(() => setSaving(false));
+        });
     },
     [desktop, id],
   );
@@ -297,7 +294,7 @@ export function SynthesisNote() {
         <section className="synthesis-editor-col" data-testid="synthesis-editor-col">
           <div className="synthesis-editor-col__head">
             <span className="synthesis-editor-col__title">Write &amp; refine</span>
-            <span className="reader-meta">{saving ? "saving…" : "incremental writing"}</span>
+            <span className="reader-meta">incremental writing</span>
           </div>
           <div className="synthesis-editor" data-testid="synthesis-editor">
             {status === "loading" ? (

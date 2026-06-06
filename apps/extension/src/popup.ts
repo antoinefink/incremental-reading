@@ -48,7 +48,7 @@ function render(outcome: CaptureOutcome): void {
 }
 
 function send(type: "save-page" | "save-selection"): void {
-  resultEl.textContent = "Saving…";
+  resultEl.textContent = "Capturing…";
   chrome.runtime.sendMessage({ type }, (outcome: CaptureOutcome) => {
     if (chrome.runtime.lastError) {
       render({ kind: "error", message: chrome.runtime.lastError.message ?? "Failed" });

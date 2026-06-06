@@ -123,7 +123,7 @@ function setStatus(outcome: CaptureOutcome | { kind: "pending" }): void {
   let text: string;
   switch (outcome.kind) {
     case "pending":
-      text = "Saving…";
+      text = "Capturing…";
       break;
     case "ok":
       statusEl.classList.add("ok");

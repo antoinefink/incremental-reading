@@ -761,7 +761,6 @@ export function ExtractView() {
             <div className="extract-editor__meta">
               <span className="reader-meta reader-meta--mono">
                 {doc.plainText.trim() ? `${doc.plainText.trim().split(/\s+/).length} words` : "—"}
-                {doc.saving ? " · saving…" : ""}
               </span>
               <span className="reader-meta">aim for a single, self-contained idea</span>
             </div>
