@@ -4795,6 +4795,10 @@ export interface LibraryItem {
   readonly due: QueueDueState;
   /** A short human due label ("Overdue", "Due today", "in 3d", "Scheduled"). */
   readonly dueLabel: string;
+  /** The element a `task` row protects, or `null` for non-task/unlinked rows. */
+  readonly linkedElementId: string | null;
+  /** The protected element's type, paired with `linkedElementId` for task routing. */
+  readonly linkedElementType: string | null;
 }
 
 /**

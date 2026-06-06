@@ -3131,6 +3131,10 @@ export interface LibraryItem {
   readonly scheduler: SchedulerSignals;
   readonly due: QueueDueState;
   readonly dueLabel: string;
+  /** The element a `task` row protects, or `null` for non-task/unlinked rows. */
+  readonly linkedElementId: string | null;
+  /** The protected element's type, paired with `linkedElementId` for task routing. */
+  readonly linkedElementType: string | null;
 }
 
 /**

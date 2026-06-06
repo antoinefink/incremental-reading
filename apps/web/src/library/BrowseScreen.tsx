@@ -39,6 +39,8 @@ import {
   type LibraryBrowseType,
   type LibraryItem,
 } from "../lib/appApi";
+import { openQueueItem } from "../pages/queue/openQueueItem";
+import { useSelection } from "../shell/selection";
 import "./library.css";
 
 type Tab = "results" | "map";
@@ -80,6 +82,7 @@ function DueBadge({ item }: { item: LibraryItem }) {
 export function BrowseScreen() {
   const desktop = isDesktop();
   const navigate = useNavigate();
+  const { select } = useSelection();
 
   const [tab, setTab] = useState<Tab>("results");
   // Facet state — each drives a query param and re-runs the browse read.
@@ -167,25 +170,14 @@ export function BrowseScreen() {
 
   const open = useCallback(
     (r: LibraryItem) => {
-      // Open each type in its inspector/reader target. Sources/topics open the
-      // source reader; extracts open the extract view; everything that lives under
-      // review (cards) opens the review session; synthesis notes (T095) open their
-      // dedicated incremental-writing surface. Tasks (no MVP dedicated reader yet)
-      // open their owning source when one exists, else stay put.
-      if (r.type === "source" || r.type === "topic") {
-        void navigate({ to: "/source/$id", params: { id: r.id } });
-      } else if (r.type === "extract") {
-        void navigate({ to: "/extract/$id", params: { id: r.id } });
-      } else if (r.type === "card") {
-        void navigate({ to: "/review" });
-      } else if (r.type === "synthesis_note") {
+      if (r.type === "synthesis_note") {
+        select(r.id);
         void navigate({ to: "/synthesis/$id", params: { id: r.id } });
-      } else if (r.sourceTitle) {
-        // task with a known source — open the reader on its lineage root.
-        void navigate({ to: "/source/$id", params: { id: r.id } });
+      } else {
+        openQueueItem({ item: r, navigate, select });
       }
     },
-    [navigate],
+    [navigate, select],
   );
 
   if (!desktop) {

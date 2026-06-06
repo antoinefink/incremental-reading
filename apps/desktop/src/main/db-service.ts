@@ -4599,6 +4599,10 @@ export class DbService {
       // "Scheduled" default rather than dropping out of the browse.
       const inspectorData = this.inspectorQuery.get(element.id);
       const summary = this.queueQuery.summaryFor(element.id);
+      const linked =
+        element.type === "task"
+          ? (this.repos.tasks.findTask(element.id)?.linkedElement ?? null)
+          : null;
       const scheduler = inspectorData?.scheduler ?? {
         kind: "attention" as const,
         retrievability: null,
@@ -4627,6 +4631,8 @@ export class DbService {
         scheduler,
         due: summary?.due ?? "soon",
         dueLabel: summary?.dueLabel ?? "Scheduled",
+        linkedElementId: linked?.id ?? null,
+        linkedElementType: linked?.type ?? null,
       });
     }
     return { items, counts };

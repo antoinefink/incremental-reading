@@ -1,8 +1,14 @@
 import type { NavigateFn } from "@tanstack/react-router";
-import type { QueueItemSummary } from "../../lib/appApi";
+
+export interface OpenableItem {
+  readonly id: string;
+  readonly type: string | null;
+  readonly linkedElementId?: string | null;
+  readonly linkedElementType?: string | null;
+}
 
 interface OpenQueueItemOptions {
-  readonly item: QueueItemSummary;
+  readonly item: OpenableItem;
   readonly navigate: NavigateFn;
   readonly select: (id: string) => void;
   readonly asOf?: string | undefined;
@@ -42,13 +48,13 @@ function routeToElement(
 }
 
 /**
- * Open a due queue item in its work surface. Linked verification tasks open the element
+ * Open an element row in its work surface. Linked verification tasks open the element
  * they protect, while unlinked tasks stay in the process loop.
  */
 export function openQueueItem({ item, navigate, select, asOf }: OpenQueueItemOptions): void {
   if (item.type === "task" && item.linkedElementId) {
     select(item.linkedElementId);
-    routeToElement(item.linkedElementType, item.linkedElementId, navigate, asOf, {
+    routeToElement(item.linkedElementType ?? null, item.linkedElementId, navigate, asOf, {
       linkedTaskTarget: true,
     });
     return;

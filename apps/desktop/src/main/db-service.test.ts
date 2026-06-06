@@ -2204,6 +2204,27 @@ describe("DbService — review session (T037)", () => {
     expect(extract?.sourceTitle).toBe("On the Measure of Intelligence");
   });
 
+  it("library.browse carries linked-element routing fields for verification tasks", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    const card = svc.libraryBrowse({ types: ["card"] }).items[0];
+    expect(card).toBeDefined();
+    const task = svc.createTask({
+      taskType: "find_better_source",
+      title: "Find better source: this item",
+      linkedElementId: card?.id as never,
+      dueChoice: { kind: "tomorrow" },
+    }).task;
+
+    const row = svc.libraryBrowse({ types: ["task"] }).items.find((item) => item.id === task.id);
+    expect(row?.linkedElementId).toBe(card?.id);
+    expect(row?.linkedElementType).toBe("card");
+
+    svc.close();
+  });
+
   it("library.browse Zod-validates the payload and narrows by type / status / priority / concept", () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });

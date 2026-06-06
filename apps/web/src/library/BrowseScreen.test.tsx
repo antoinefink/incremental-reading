@@ -59,6 +59,8 @@ const h = vi.hoisted(() => {
     scheduler: attentionScheduler,
     due: "soon",
     dueLabel: "Scheduled",
+    linkedElementId: null,
+    linkedElementType: null,
   };
   const topicRow: LibraryItem = {
     id: "topic-1",
@@ -75,6 +77,8 @@ const h = vi.hoisted(() => {
     scheduler: attentionScheduler,
     due: "soon",
     dueLabel: "Scheduled",
+    linkedElementId: null,
+    linkedElementType: null,
   };
   const cardRow: LibraryItem = {
     id: "card-1",
@@ -91,6 +95,26 @@ const h = vi.hoisted(() => {
     scheduler: fsrsScheduler,
     due: "today",
     dueLabel: "Due today",
+    linkedElementId: null,
+    linkedElementType: null,
+  };
+  const taskRow: LibraryItem = {
+    id: "task-1",
+    type: "task",
+    title: "Verify claim: this item",
+    priority: 0.9,
+    priorityLabel: "A",
+    status: "pending",
+    stage: "rough_topic",
+    concept: "Intelligence",
+    sourceTitle: "On the Measure of Intelligence",
+    sourceLocationLabel: "Definition · ¶1",
+    dueAt: "2026-06-02T00:00:00.000Z",
+    scheduler: attentionScheduler,
+    due: "soon",
+    dueLabel: "in 1d",
+    linkedElementId: "card-1",
+    linkedElementType: "card",
   };
   const concept: ConceptNode = {
     id: "concept-1",
@@ -116,9 +140,11 @@ const h = vi.hoisted(() => {
     sourceRow,
     topicRow,
     cardRow,
+    taskRow,
     concept,
     counts,
     navigateSpy: vi.fn(),
+    selectSpy: vi.fn(),
     libraryBrowse: vi.fn(),
     listConcepts: vi.fn(),
   };
@@ -126,6 +152,10 @@ const h = vi.hoisted(() => {
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => h.navigateSpy,
+}));
+
+vi.mock("../shell/selection", () => ({
+  useSelection: () => ({ selectedId: null, select: h.selectSpy }),
 }));
 
 vi.mock("../lib/appApi", async () => {
@@ -315,6 +345,60 @@ describe("BrowseScreen", () => {
     fireEvent.click(within(cardGroup).getByTestId("library-result"));
     fireEvent.click(await screen.findByTestId("library-detail-open"));
     expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/review" });
+  });
+
+  it("Open task jumps to the protected card review surface, not the task row itself", async () => {
+    h.libraryBrowse.mockResolvedValue({
+      items: [h.taskRow],
+      counts: {
+        all: 1,
+        byType: { source: 0, extract: 0, card: 0, topic: 0, synthesis_note: 0, task: 1 },
+        byConcept: { "concept-1": 1 },
+        byPriority: { A: 1, B: 0, C: 0, D: 0 },
+        byStatus: { active: 0, scheduled: 0, inbox: 0, pending: 1, done: 0, suspended: 0 },
+      },
+    });
+    render(<BrowseScreen />);
+    const taskGroup = await screen.findByTestId("library-group-task");
+    fireEvent.click(within(taskGroup).getByTestId("library-result"));
+    fireEvent.click(await screen.findByTestId("library-detail-open"));
+
+    expect(h.selectSpy).toHaveBeenCalledWith("card-1");
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/review" });
+    expect(h.navigateSpy).not.toHaveBeenCalledWith({
+      to: "/source/$id",
+      params: { id: "task-1" },
+    });
+  });
+
+  it("Open unlinked task enters the process loop instead of doing nothing", async () => {
+    h.libraryBrowse.mockResolvedValue({
+      items: [
+        {
+          ...h.taskRow,
+          id: "task-unlinked",
+          title: "Custom task: sweep loose notes",
+          sourceTitle: null,
+          sourceLocationLabel: null,
+          linkedElementId: null,
+          linkedElementType: null,
+        },
+      ],
+      counts: {
+        all: 1,
+        byType: { source: 0, extract: 0, card: 0, topic: 0, synthesis_note: 0, task: 1 },
+        byConcept: {},
+        byPriority: { A: 1, B: 0, C: 0, D: 0 },
+        byStatus: { active: 0, scheduled: 0, inbox: 0, pending: 1, done: 0, suspended: 0 },
+      },
+    });
+    render(<BrowseScreen />);
+    const taskGroup = await screen.findByTestId("library-group-task");
+    fireEvent.click(within(taskGroup).getByTestId("library-result"));
+    fireEvent.click(await screen.findByTestId("library-detail-open"));
+
+    expect(h.selectSpy).toHaveBeenCalledWith("task-unlinked");
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/process", search: {} });
   });
 
   it("the filterbar concept chip shows the DRILL-DOWN byConcept count, not the global memberCount", async () => {

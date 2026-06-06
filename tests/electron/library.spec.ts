@@ -28,6 +28,7 @@ let dataDir: string;
 let baseUrl: string;
 
 const SOURCE_TITLE = "On the Measure of Intelligence";
+const CARD_TITLE = "Chollet's definition of intelligence";
 
 test.beforeAll(() => {
   ensureBuilt();
@@ -144,6 +145,56 @@ test("the library.browse bridge returns ALL live elements with no facets (incl. 
   expect(res.inbox).toBeGreaterThan(0);
   expect(res.cardsOnly).toBe(true);
   expect(res.cardCount).toBeGreaterThan(0);
+
+  await app.close();
+});
+
+test("Open task from Library jumps to the protected card review surface", async () => {
+  const app = await launchApp(dataDir);
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  const linkedTask = await page.evaluate(async (title) => {
+    const api = window.appApi as unknown as {
+      library: {
+        browse(r: { types?: string[] }): Promise<{
+          items: {
+            id: string;
+            type: string;
+            title: string;
+            linkedElementId: string | null;
+            linkedElementType: string | null;
+          }[];
+        }>;
+      };
+      inspector: { list(): Promise<{ elements: { id: string; type: string; title: string }[] }> };
+    };
+    const { elements } = await api.inspector.list();
+    const card = elements.find((e) => e.type === "card" && e.title === title);
+    if (!card) throw new Error("seeded protected card not found");
+    const tasks = await api.library.browse({ types: ["task"] });
+    return tasks.items.find(
+      (item) => item.linkedElementId === card.id && item.linkedElementType === "card",
+    );
+  }, CARD_TITLE);
+  expect(linkedTask).toBeTruthy();
+
+  await openLibrary(page);
+  await page.getByTestId("library-filter-type-task").click();
+  const taskRow = page
+    .getByTestId("library-group-task")
+    .getByTestId("library-result")
+    .filter({ hasText: linkedTask?.title ?? "Verify claim" })
+    .first();
+  await expect(taskRow).toBeVisible();
+  await taskRow.click();
+  await expect(page.getByTestId("library-detail")).toBeVisible();
+  await expect(page.getByTestId("library-detail-open")).toHaveText(/Open task/i);
+
+  await page.getByTestId("library-detail-open").click();
+
+  await expect(page).toHaveURL(/\/review$/);
+  await expect(page.getByTestId("inspector-title")).toHaveText(CARD_TITLE);
 
   await app.close();
 });
