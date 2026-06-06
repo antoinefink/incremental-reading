@@ -32,6 +32,13 @@ afterEach(() => {
   handle.sqlite.close();
 });
 
+function expectDefined<T>(value: T | undefined, label: string): T {
+  if (value === undefined) {
+    throw new Error(`${label} was not found`);
+  }
+  return value;
+}
+
 /** A live source + an extract anchored at a source location. */
 function seedSourceWithExtract() {
   const src = repos.sources.create({
@@ -124,9 +131,10 @@ describe("LineageGapQuery.cardsWithoutSources", () => {
     });
     const rows = gaps.cardsWithoutSources();
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.card.id).toBe(card.element.id);
-    expect(rows[0]!.hasSourceLocation).toBe(false);
-    expect(rows[0]!.hasSourceAncestor).toBe(false);
+    const row = expectDefined(rows[0], "sourceless card row");
+    expect(row.card.id).toBe(card.element.id);
+    expect(row.hasSourceLocation).toBe(false);
+    expect(row.hasSourceAncestor).toBe(false);
   });
 
   it("a card whose source_id points at a SOFT-DELETED source IS a gap", () => {
@@ -160,26 +168,35 @@ describe("LineageGapQuery.brokenSourceCandidates", () => {
       size: 100,
     });
     const candidates = gaps.brokenSourceCandidates();
-    const row = candidates.find((c) => c.source.id === sourceId);
-    expect(row).toBeDefined();
-    expect(row!.hasSnapshotRow).toBe(true);
-    expect(row!.snapshotAssets.map((a) => a.assetId)).toContain(asset.id);
-    expect(row!.snapshotAssets[0]!.relativePath).toBe(`sources/${sourceId}/cleaned.html`);
+    const row = expectDefined(
+      candidates.find((c) => c.source.id === sourceId),
+      "broken source candidate",
+    );
+    expect(row.hasSnapshotRow).toBe(true);
+    expect(row.snapshotAssets.map((a) => a.assetId)).toContain(asset.id);
+    const snapshotAsset = expectDefined(row.snapshotAssets[0], "snapshot asset");
+    expect(snapshotAsset.relativePath).toBe(`sources/${sourceId}/cleaned.html`);
   });
 
   it("a source with NO snapshot row reports hasSnapshotRow: false", () => {
     const { sourceId } = seedSourceWithExtract();
     const candidates = gaps.brokenSourceCandidates();
-    const row = candidates.find((c) => c.source.id === sourceId);
-    expect(row!.hasSnapshotRow).toBe(false);
-    expect(row!.snapshotAssets).toEqual([]);
+    const row = expectDefined(
+      candidates.find((c) => c.source.id === sourceId),
+      "source candidate",
+    );
+    expect(row.hasSnapshotRow).toBe(false);
+    expect(row.snapshotAssets).toEqual([]);
   });
 
   it("a manual source (no snapshot_key) is NOT a noSnapshot candidate (expectsSnapshot: false)", () => {
     // `seedSourceWithExtract` creates a source with no `snapshot_key` — the manual case.
     const { sourceId } = seedSourceWithExtract();
-    const row = gaps.brokenSourceCandidates().find((c) => c.source.id === sourceId);
-    expect(row!.expectsSnapshot).toBe(false);
+    const row = expectDefined(
+      gaps.brokenSourceCandidates().find((c) => c.source.id === sourceId),
+      "manual source candidate",
+    );
+    expect(row.expectsSnapshot).toBe(false);
   });
 
   it("a source that RECORDED a snapshot (snapshot_key set) reports expectsSnapshot: true", () => {
@@ -190,9 +207,12 @@ describe("LineageGapQuery.brokenSourceCandidates", () => {
       stage: "raw_source",
       snapshotKey: "sources/recorded/cleaned.html",
     });
-    const row = gaps.brokenSourceCandidates().find((c) => c.source.id === src.element.id);
-    expect(row!.expectsSnapshot).toBe(true);
-    expect(row!.hasSnapshotRow).toBe(false);
+    const row = expectDefined(
+      gaps.brokenSourceCandidates().find((c) => c.source.id === src.element.id),
+      "recorded snapshot source candidate",
+    );
+    expect(row.expectsSnapshot).toBe(true);
+    expect(row.hasSnapshotRow).toBe(false);
   });
 });
 

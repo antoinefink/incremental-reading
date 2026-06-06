@@ -73,6 +73,13 @@ async function duplicates(page: Page) {
   });
 }
 
+function expectDefined<T>(value: T | undefined, label: string): T {
+  if (value === undefined) {
+    throw new Error(`${label} was not found`);
+  }
+  return value;
+}
+
 test("the seeded collection surfaces non-zero report counts + an orphan file", async () => {
   // Plant a stray orphan file under the vault (no asset row references it).
   const orphanRel = "media/orphan-fixture/original.bin";
@@ -105,10 +112,10 @@ test("dedup cleanup trashes the redundant copy (canonical stays); undo brings it
   await page.waitForLoadState("domcontentloaded");
 
   const before = await duplicates(page);
-  const cluster = before.sourceClusters[0];
-  expect(cluster).toBeTruthy();
-  const keeperId = cluster!.canonical.id;
-  const redundantId = cluster!.duplicates[0]!.id;
+  const cluster = expectDefined(before.sourceClusters[0], "duplicate source cluster");
+  const redundant = expectDefined(cluster.duplicates[0], "redundant duplicate");
+  const keeperId = cluster.canonical.id;
+  const redundantId = redundant.id;
 
   // Run dedup cleanup through the bridge (the same command the UI button calls).
   const result = await page.evaluate(
@@ -268,8 +275,9 @@ test("the integrity check reports DB ok + the broken source's missing snapshot",
   });
   // Exactly the one genuinely-broken fixture source — no manual-source false positives.
   expect(broken.rows).toHaveLength(1);
-  expect(broken.rows[0]!.reason).toBe("missingFile");
-  expect(broken.rows[0]!.source.title).toBe("Broken source (snapshot file removed)");
+  const brokenRow = expectDefined(broken.rows[0], "broken source row");
+  expect(brokenRow.reason).toBe("missingFile");
+  expect(brokenRow.source.title).toBe("Broken source (snapshot file removed)");
   // No `noSnapshot` over-report for the healthy manual / duplicate-pair sources.
   expect(broken.rows.some((r) => r.reason === "noSnapshot")).toBe(false);
 

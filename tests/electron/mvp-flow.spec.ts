@@ -728,18 +728,20 @@ test("12. render-loop continuity: review resume is preserved across relaunch", a
   await pageA.waitForLoadState("domcontentloaded");
   await expect(pageA.getByTestId("route-review")).toBeVisible();
 
-  const firstReview = await pageA.evaluate(async (cardId, clock) => {
-    const api = window.appApi as unknown as {
-      review: {
-        preview(req: { cardId: string; asOf?: string }): Promise<{
-          intervals:
-            | Record<"again" | "hard" | "good" | "easy", { scheduledDays: number }>
-            | null;
-        }>;
+  const firstReview = await pageA.evaluate(
+    async (cardId, clock) => {
+      const api = window.appApi as unknown as {
+        review: {
+          preview(req: { cardId: string; asOf?: string }): Promise<{
+            intervals: Record<"again" | "hard" | "good" | "easy", { scheduledDays: number }> | null;
+          }>;
+        };
       };
-    };
-    return api.review.preview({ cardId, asOf: clock });
-  }, qaCardId, renderClock);
+      return api.review.preview({ cardId, asOf: clock });
+    },
+    qaCardId,
+    renderClock,
+  );
   expect(firstReview.intervals).toBeTruthy();
   await appA.close();
 
@@ -753,18 +755,20 @@ test("12. render-loop continuity: review resume is preserved across relaunch", a
   await pageB.waitForLoadState("domcontentloaded");
   await expect(pageB.getByTestId("route-review")).toBeVisible();
 
-  const secondReview = await pageB.evaluate(async (cardId, clock) => {
-    const api = window.appApi as unknown as {
-      review: {
-        preview(req: { cardId: string; asOf?: string }): Promise<{
-          intervals:
-            | Record<"again" | "hard" | "good" | "easy", { scheduledDays: number }>
-            | null;
-        }>;
+  const secondReview = await pageB.evaluate(
+    async (cardId, clock) => {
+      const api = window.appApi as unknown as {
+        review: {
+          preview(req: { cardId: string; asOf?: string }): Promise<{
+            intervals: Record<"again" | "hard" | "good" | "easy", { scheduledDays: number }> | null;
+          }>;
+        };
       };
-    };
-    return api.review.preview({ cardId, asOf: clock });
-  }, qaCardId, renderClock);
+      return api.review.preview({ cardId, asOf: clock });
+    },
+    qaCardId,
+    renderClock,
+  );
   expect(secondReview.intervals).toEqual(firstReview.intervals);
 
   await appB.close();

@@ -37,6 +37,13 @@ function openDb(): DbService {
   return svc;
 }
 
+function expectDefined<T>(value: T | undefined, label: string): T {
+  if (value === undefined) {
+    throw new Error(`${label} was not found`);
+  }
+  return value;
+}
+
 /** Create a live `source` element. */
 function makeSource(svc: DbService, title = "Source"): ElementId {
   return svc.repos.elements.create({
@@ -64,10 +71,12 @@ describe("MaintenanceService.brokenSources (T099)", () => {
     fs.rmSync(path.join(assetsDir, ...asset.location.vaultPath.relativePath.split("/")));
 
     const { rows } = await svc.getMaintenanceBrokenSources();
-    const row = rows.find((r) => r.source.id === owner);
-    expect(row).toBeDefined();
-    expect(row!.reason).toBe("missingFile");
-    expect(row!.missingAssetIds).toContain(asset.id);
+    const row = expectDefined(
+      rows.find((r) => r.source.id === owner),
+      "broken source row",
+    );
+    expect(row.reason).toBe("missingFile");
+    expect(row.missingAssetIds).toContain(asset.id);
     svc.close();
   });
 
@@ -85,10 +94,12 @@ describe("MaintenanceService.brokenSources (T099)", () => {
       snapshotKey: "sources/recorded/cleaned.html",
     }).element.id;
     const { rows } = await svc.getMaintenanceBrokenSources();
-    const row = rows.find((r) => r.source.id === owner);
-    expect(row).toBeDefined();
-    expect(row!.reason).toBe("noSnapshot");
-    expect(row!.missingAssetIds).toEqual([]);
+    const row = expectDefined(
+      rows.find((r) => r.source.id === owner),
+      "no-snapshot source row",
+    );
+    expect(row.reason).toBe("noSnapshot");
+    expect(row.missingAssetIds).toEqual([]);
     svc.close();
   });
 
@@ -198,8 +209,10 @@ describe("MaintenanceService.dedupeCleanup (T099)", () => {
       accessedAt: "2026-05-10T00:00:00.000Z",
     }).element.id;
     const dup = svc.getMaintenanceDuplicates();
-    const keeper = dup.sourceClusters[0]!.canonical.id;
-    const removable = dup.sourceClusters[0]!.duplicates[0]!.id;
+    const cluster = expectDefined(dup.sourceClusters[0], "duplicate source cluster");
+    const removableDuplicate = expectDefined(cluster.duplicates[0], "removable duplicate");
+    const keeper = cluster.canonical.id;
+    const removable = removableDuplicate.id;
     expect(keeper).toBe(b); // b is newer
 
     // Passing the KEEPER id is rejected (re-validation skips it).

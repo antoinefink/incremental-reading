@@ -28,6 +28,13 @@ afterEach(() => {
   handle.sqlite.close();
 });
 
+function expectDefined<T>(value: T | undefined, label: string): T {
+  if (value === undefined) {
+    throw new Error(`${label} was not found`);
+  }
+  return value;
+}
+
 /** Create a live source with the given canonical URL + accessed timestamp. */
 function makeSource(
   canonicalUrl: string | null,
@@ -66,7 +73,7 @@ describe("DedupReportQuery.duplicateSources — canonical URL", () => {
 
     const clusters = dedup.duplicateSources();
     expect(clusters).toHaveLength(1);
-    const c = clusters[0]!;
+    const c = expectDefined(clusters[0], "canonical URL duplicate cluster");
     expect(c.matchedBy).toBe("canonicalUrl");
     expect(c.key).toBe(url);
     expect(c.canonical.id).toBe(newer);
@@ -80,9 +87,10 @@ describe("DedupReportQuery.duplicateSources — canonical URL", () => {
 
     const clusters = dedup.duplicateSources();
     expect(clusters).toHaveLength(1);
+    const c = expectDefined(clusters[0], "canonical URL duplicate cluster");
     // The real timestamp wins even though it is OLDER than "now" — NULL sorts last.
-    expect(clusters[0]!.canonical.id).toBe(real);
-    expect(clusters[0]!.duplicates.map((d) => d.id)).toEqual([nullAccessed]);
+    expect(c.canonical.id).toBe(real);
+    expect(c.duplicates.map((d) => d.id)).toEqual([nullAccessed]);
   });
 
   it("excludes soft-deleted sources and ignores singletons", () => {
@@ -109,7 +117,7 @@ describe("DedupReportQuery.duplicateSources — content-hash backstop", () => {
 
     const clusters = dedup.duplicateSources();
     expect(clusters).toHaveLength(1);
-    const c = clusters[0]!;
+    const c = expectDefined(clusters[0], "content-hash duplicate cluster");
     expect(c.matchedBy).toBe("contentHash");
     expect(c.key).toBe("sharedhash");
     // The SAME keeper rule: newest accessed_at (b is newer).
@@ -126,7 +134,8 @@ describe("DedupReportQuery.duplicateSources — content-hash backstop", () => {
 
     const clusters = dedup.duplicateSources();
     expect(clusters).toHaveLength(1);
-    expect(clusters[0]!.matchedBy).toBe("canonicalUrl");
+    const c = expectDefined(clusters[0], "canonical URL duplicate cluster");
+    expect(c.matchedBy).toBe("canonicalUrl");
   });
 
   it("NULL accessed_at never wins in the content-hash path either", () => {
@@ -136,7 +145,8 @@ describe("DedupReportQuery.duplicateSources — content-hash backstop", () => {
     addCleanedSnapshot(b, "h2");
 
     const clusters = dedup.duplicateSources();
-    expect(clusters[0]!.canonical.id).toBe(b);
+    const c = expectDefined(clusters[0], "content-hash duplicate cluster");
+    expect(c.canonical.id).toBe(b);
   });
 });
 
@@ -190,7 +200,7 @@ describe("DedupReportQuery.duplicateCards / duplicateExtracts", () => {
 
     const clusters = dedup.duplicateCards();
     expect(clusters).toHaveLength(1);
-    const c = clusters[0]!;
+    const c = expectDefined(clusters[0], "card duplicate cluster");
     // Keeper prefers the better-lineaged (has source_location_id) copy = first.
     expect(c.canonical.id).toBe(first.element.id);
     expect(c.duplicates.map((d) => d.id)).toEqual([second.element.id]);
@@ -240,7 +250,8 @@ describe("DedupReportQuery.report", () => {
 
     const report = dedup.report();
     expect(report.sourceClusters).toHaveLength(1);
-    expect(report.sourceClusters[0]!.duplicates).toHaveLength(2);
+    const cluster = expectDefined(report.sourceClusters[0], "source duplicate cluster");
+    expect(cluster.duplicates).toHaveLength(2);
     expect(report.totalDuplicates).toBe(2);
 
     // The cap bounds the cluster count.
