@@ -296,6 +296,56 @@
 .shell-usermenu__item .shell-grow {
   flex: 1;
 }
+.shell-usermenu__theme {
+  display: flex;
+  gap: 2px;
+  width: 100%;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.shell-usermenu__theme-option {
+  display: inline-flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--s-2);
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  line-height: 1;
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.shell-usermenu__theme-option:hover {
+  color: var(--text);
+}
+.shell-usermenu__theme-option--on {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  box-shadow: var(--shadow-sm);
+}
+.shell-usermenu__theme-option--on:hover {
+  color: var(--text-on-accent);
+}
+.shell-usermenu__theme-option:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.shell-usermenu__theme-option--on:focus-visible {
+  box-shadow: var(--shadow-sm), var(--focus-ring);
+}
 .shell-usermenu__sep {
   height: 1px;
   background: var(--border);

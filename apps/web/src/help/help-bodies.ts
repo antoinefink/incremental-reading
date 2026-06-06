@@ -3952,7 +3952,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "The theme segmented control switches between <b>System</b>, <b>Light</b>, and <b>Dark</b> mode. The same choices are accessible from the user chip menu in the bottom-left sidebar (click your initials → choose <b>System theme</b>, <b>Light mode</b>, or <b>Dark mode</b>). The choice persists to both <code>localStorage</code> and your local SQLite settings table and survives restart. When System is selected, the renderer follows the operating system color-scheme preference while still writing a resolved light/dark <code>[data-theme]</code> attribute for the design tokens. The default is dark.",
+      text: "The theme segmented control switches between <b>System</b>, <b>Light</b>, and <b>Dark</b> mode. The same compact switch is accessible from the user chip menu in the bottom-left sidebar. The choice persists to both <code>localStorage</code> and your local SQLite settings table and survives restart. When System is selected, the renderer follows the operating system color-scheme preference while still writing a resolved light/dark <code>[data-theme]</code> attribute for the design tokens. The default is dark.",
     },
     {
       type: "h2",

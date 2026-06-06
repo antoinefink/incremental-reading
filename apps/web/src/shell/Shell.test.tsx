@@ -185,29 +185,25 @@ describe("Shell", () => {
     render(<Shell />);
 
     fireEvent.click(screen.getByTestId("user-chip"));
-    fireEvent.click(screen.getByText("System theme"));
+    fireEvent.click(screen.getByTestId("shell-theme-option-system"));
 
     expect(h.applyTheme).toHaveBeenCalledWith("system");
     expect(h.updateAppSettings).toHaveBeenCalledWith({ patch: { theme: "system" } });
+    expect(screen.getByTestId("shell-theme-option-system")).toHaveAttribute("aria-checked", "true");
   });
 
-  it("renders all sidebar theme choices with the current preference checked", () => {
+  it("renders the compact sidebar theme switch with the current preference checked", () => {
     render(<Shell />);
 
     fireEvent.click(screen.getByTestId("user-chip"));
 
-    expect(screen.getByRole("menuitemradio", { name: /System theme/ })).toHaveAttribute(
+    expect(screen.getByTestId("shell-theme-segmented")).toHaveTextContent("SystemLightDark");
+    expect(screen.getByTestId("shell-theme-option-system")).toHaveAttribute(
       "aria-checked",
       "false",
     );
-    expect(screen.getByRole("menuitemradio", { name: /Light mode/ })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
-    expect(screen.getByRole("menuitemradio", { name: /Dark mode/ })).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
+    expect(screen.getByTestId("shell-theme-option-light")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("shell-theme-option-dark")).toHaveAttribute("aria-checked", "false");
   });
 
   it("separates theme actions, help actions, and vault status in the user menu", () => {
@@ -216,7 +212,7 @@ describe("Shell", () => {
     fireEvent.click(screen.getByTestId("user-chip"));
 
     const themeSep = screen.getByTestId("shell-usermenu-theme-sep");
-    expect(themeSep.previousElementSibling).toHaveTextContent("Dark mode");
+    expect(themeSep.previousElementSibling).toHaveAttribute("data-testid", "shell-theme-segmented");
     expect(themeSep.nextElementSibling).toHaveTextContent("Settings");
     const vaultSep = screen.getByTestId("shell-usermenu-vault-sep");
     expect(vaultSep.previousElementSibling).toHaveTextContent("Help & docs");

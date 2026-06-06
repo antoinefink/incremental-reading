@@ -25,7 +25,7 @@
 import type { LocalVaultPath, VaultRoot } from "@interleave/core";
 import { Link, Outlet, useLinkProps, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Icon, type IconName } from "../components/Icon";
+import { Icon } from "../components/Icon";
 import { Inspector } from "../components/inspector/Inspector";
 import { Snackbar } from "../components/Snackbar";
 import { HelpCenter } from "../help/HelpCenter";
@@ -66,10 +66,10 @@ function runBackup() {
 }
 
 const THEME_MENU_ITEMS = [
-  { theme: "system", label: "System theme", icon: "system" },
-  { theme: "light", label: "Light mode", icon: "sun" },
-  { theme: "dark", label: "Dark mode", icon: "moon" },
-] as const satisfies ReadonlyArray<{ theme: Theme; label: string; icon: IconName }>;
+  { theme: "system", label: "System" },
+  { theme: "light", label: "Light" },
+  { theme: "dark", label: "Dark" },
+] as const satisfies ReadonlyArray<{ theme: Theme; label: string }>;
 
 function NavButton({
   item,
@@ -231,23 +231,32 @@ function Sidebar({
           </button>
           {menuOpen && (
             <div className="shell-usermenu" role="menu">
-              {THEME_MENU_ITEMS.map((item) => (
-                <button
-                  type="button"
-                  className="shell-usermenu__item"
-                  role="menuitemradio"
-                  aria-checked={theme === item.theme}
-                  key={item.theme}
-                  onClick={() => {
-                    onPickTheme(item.theme);
-                    setMenuOpen(false);
-                  }}
-                >
-                  <Icon name={item.icon} size={14} />
-                  <span className="shell-grow">{item.label}</span>
-                  {theme === item.theme ? <Icon name="check" size={13} aria-hidden="true" /> : null}
-                </button>
-              ))}
+              <fieldset
+                className="shell-usermenu__theme"
+                aria-label="Theme"
+                data-testid="shell-theme-segmented"
+              >
+                {THEME_MENU_ITEMS.map((item) => {
+                  const active = theme === item.theme;
+                  return (
+                    <button
+                      type="button"
+                      className={
+                        active
+                          ? "shell-usermenu__theme-option shell-usermenu__theme-option--on"
+                          : "shell-usermenu__theme-option"
+                      }
+                      role="menuitemradio"
+                      aria-checked={active}
+                      data-testid={`shell-theme-option-${item.theme}`}
+                      key={item.theme}
+                      onClick={() => onPickTheme(item.theme)}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </fieldset>
               <hr className="shell-usermenu__sep" data-testid="shell-usermenu-theme-sep" />
               <Link
                 to="/settings"
