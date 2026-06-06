@@ -140,8 +140,8 @@ function InboxRow({
       onClick={onSelect}
       className={
         active
-          ? "flex w-full items-start gap-2.5 rounded-md border border-accent-soft-bd bg-accent-soft px-3.5 py-3 text-left"
-          : "flex w-full items-start gap-2.5 rounded-md border border-transparent px-3.5 py-3 text-left hover:bg-surface-2"
+          ? "flex w-full cursor-pointer items-start gap-2.5 rounded-md border border-accent-soft-bd bg-accent-soft px-3.5 py-3 text-left"
+          : "flex w-full cursor-pointer items-start gap-2.5 rounded-md border border-transparent px-3.5 py-3 text-left hover:bg-surface-2"
       }
     >
       <TypeIcon type={item.type} />

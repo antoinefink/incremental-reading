@@ -236,6 +236,8 @@ describe("InboxScreen", () => {
 
     expect(await findByTestId("inbox-list")).toBeInTheDocument();
     expect(getAllByTestId("inbox-row")).toHaveLength(2);
+    expect(getAllByTestId("inbox-row")[0]).toHaveClass("cursor-pointer");
+    expect(getAllByTestId("inbox-row")[1]).toHaveClass("cursor-pointer");
     await waitFor(() => expect(h.getInboxItem).toHaveBeenCalledWith({ id: "src-1" }));
     expect(h.select).toHaveBeenCalledWith("src-1");
     expect(getByTestId("inbox-preview-title")).toHaveTextContent("Inbox source");
