@@ -1290,7 +1290,6 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
         "<b>Manual rewrites</b> — edit the body directly; changes save automatically without advancing the stage.",
         "<b>Trim</b> — runs a whitespace and filler-word cleanup on the body, then saves the cleaned result.",
         "<b>Split</b> — requires a live text selection in the extract body; lifts the selection into a new sibling extract with the same source lineage. The original is not deleted.",
-        "<b>Sub-extract</b> — the same gesture as Split; both buttons act on the live selection and behave identically.",
         "<b>Convert to card</b> — opens the card builder as a third column. The extract is not consumed; the card inherits its lineage.",
       ],
     },
@@ -1334,7 +1333,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
       items: [
         "<b>Manual rewrites</b> — edit the body directly; changes save automatically without changing the stage.",
         "<b>Trim</b> — automatic whitespace and filler cleanup, saved immediately.",
-        "<b>Split / Sub-extract</b> — select text in the body, then click either button to lift that selection into a new child extract. Both require a live selection.",
+        "<b>Split</b> — select text in the body, then click Split to lift that selection into a new child extract. It requires a live selection.",
         "<b>Convert to card</b> — opens the card builder column. The extract is unchanged and continues to be scheduled.",
         "<b>Postpone</b> — reschedules this extract on the attention scheduler using the heuristic interval.",
         "<b>Mark done</b> — transitions the extract to done status; it leaves the active queue.",
@@ -1374,12 +1373,12 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "Open any extract in the distillation workspace (<code>/extract/$id</code>). Select a portion of the extract body text. Then either press <kbd>E</kbd> (the same key as extracting from a source) or click the <strong>Sub-extract</strong> button (or <strong>Split</strong> — both act identically on the live selection). A new extract element is created from the selected fragment.",
+      text: "Open any extract in the distillation workspace (<code>/extract/$id</code>). Select a portion of the extract body text. Then either press <kbd>E</kbd>, click <strong>Sub-extract</strong> in the selection toolbar, or click <strong>Split</strong> in the action bar. A new extract element is created from the selected fragment.",
     },
     {
       type: "callout",
       icon: "warn",
-      text: "Both <strong>Split</strong> and <strong>Sub-extract</strong> require a live text selection in the editor body. Without a selection, the buttons are inert.",
+      text: "Sub-extract creation requires a live text selection in the editor body. Without a selection, the action is inert.",
     },
     {
       type: "h2",

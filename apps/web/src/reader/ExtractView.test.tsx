@@ -230,8 +230,9 @@ vi.mock("@interleave/editor", () => ({
 }));
 
 // Stub the selection hook so the test can drive the "live selection" directly:
-// `position` stays null (no toolbar rendered in jsdom), and `location` reflects the
-// hoisted `selectionLocation.current` so Split/Sub-extract have something to act on.
+// `position` reflects the hoisted `selectionPosition.current`, and `location`
+// reflects `selectionLocation.current` so Split / the selection toolbar have
+// something to act on.
 vi.mock("./useTextSelection", () => ({
   useTextSelection: () => ({
     position: h.selectionPosition.current,
@@ -413,6 +414,13 @@ describe("ExtractView — actions", () => {
     fireEvent.click(screen.getByTestId("extract-delete"));
     await waitFor(() => expect(h.deleteExtract).toHaveBeenCalledWith({ id: "ex_1" }));
   });
+
+  it("does not render a redundant static Sub-extract action button", async () => {
+    render(<ExtractView />);
+    await screen.findByTestId("extract-split");
+
+    expect(screen.queryByTestId("extract-subextract")).not.toBeInTheDocument();
+  });
 });
 
 describe("ExtractView — sub-extract (T025)", () => {
@@ -420,7 +428,7 @@ describe("ExtractView — sub-extract (T025)", () => {
     h.selectionLocation.current = null;
   });
 
-  it("Sub-extract with a live selection calls extractions.create with parentId = this extract and sourceElementId = the source root", async () => {
+  it("selection-toolbar Sub-extract calls extractions.create with parentId = this extract and sourceElementId = the source root", async () => {
     // Simulate text selected inside the extract body.
     h.selectionLocation.current = {
       selectedText: "definition paragraph two.",
@@ -428,8 +436,9 @@ describe("ExtractView — sub-extract (T025)", () => {
       startOffset: 4,
       endOffset: 29,
     };
+    h.selectionPosition.current = { top: 120, left: 240 };
     render(<ExtractView />);
-    fireEvent.click(await screen.findByTestId("extract-subextract"));
+    fireEvent.click(await screen.findByTestId("sel-tool-extract"));
     await waitFor(() => expect(h.createExtraction).toHaveBeenCalledTimes(1));
     // Reuses the T021 command verbatim — only the ids differ: parent = THIS extract,
     // source root = the original source (so the sub-extract's source_id stays the root).
@@ -512,10 +521,10 @@ describe("ExtractView — sub-extract (T025)", () => {
     );
   });
 
-  it("Sub-extract with no live selection does not call extractions.create", async () => {
+  it("Split with no live selection does not call extractions.create", async () => {
     h.selectionLocation.current = null;
     render(<ExtractView />);
-    fireEvent.click(await screen.findByTestId("extract-subextract"));
+    fireEvent.click(await screen.findByTestId("extract-split"));
     // Give any (incorrect) async path a tick — it must NOT fire the command.
     await new Promise((r) => setTimeout(r, 10));
     expect(h.createExtraction).not.toHaveBeenCalled();

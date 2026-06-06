@@ -10,8 +10,7 @@
  *  - CENTER — distill: the `Stage`/`SchedulerChip` chips, the `Advance stage`
  *    action + a clickable stage stepper (`raw_extract → clean_extract →
  *    atomic_statement`), the autosaved editable extract body, and the action bar
- *    — Trim, Split (T025), Sub-extract (T025), Convert to card (T033), Postpone,
- *    Mark done, Delete.
+ *    — Trim, Split (T025), Convert to card (T033), Postpone, Mark done, Delete.
  *  - RIGHT — the {@link CardBuilder} (T033/T034), mounted as the third `split3`
  *    column when "Convert to card" (or the Cloze selection-toolbar action) opens
  *    it; it authors a Q&A / cloze card from THIS extract via `cards.create`.
@@ -25,8 +24,8 @@
  *
  * Sub-extracts (T025): the same {@link SelectionToolbar} + {@link useTextSelection}
  * seam the source reader uses (T019) is reused INSIDE the extract body. Selecting a
- * fragment and pressing Extract/Sub-extract (or the Split/Sub-extract action-bar
- * buttons) calls the very same `extractions.create` command as T021 — only with
+ * fragment and pressing Extract/Sub-extract (or the Split action-bar button) calls
+ * the very same `extractions.create` command as T021 — only with
  * `parentId` = THIS extract and `sourceElementId` = the original source root. That
  * reuse is what guarantees the sub-extract gets identical lineage/scheduling/logging
  * (its own body, a `source_locations` anchor INTO this extract, a `derived_from`
@@ -424,9 +423,9 @@ export function ExtractView() {
     [selection, onSubExtract, onHighlightSelection, toast],
   );
 
-  // The action-bar Split / Sub-extract buttons act on the live selection. When there
-  // is a selection they create a sub-extract; otherwise they prompt the user to select
-  // text first (the toolbar is the primary entry point, the buttons are the fallback).
+  // The action-bar Split button acts on the live selection. When there is a
+  // selection it creates a sub-extract; otherwise it prompts the user to select text
+  // first (the toolbar is the primary entry point, this button is the fallback).
   const onSplit = useCallback(() => {
     if (selection.location) {
       void onSubExtract();
@@ -785,15 +784,6 @@ export function ExtractView() {
               onClick={onSplit}
             >
               <Icon name="split" size={14} /> Split
-            </button>
-            <button
-              type="button"
-              className="reader-btn"
-              data-testid="extract-subextract"
-              disabled={busy}
-              onClick={onSplit}
-            >
-              <Icon name="plus" size={14} /> Sub-extract
             </button>
             <button
               type="button"
