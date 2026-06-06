@@ -98,7 +98,7 @@ export function useShellShortcuts(handlersIn: ShellShortcutHandlers): void {
 
       // ⌘B / Ctrl+B → create a backup now (T050). Outside text entry (so it never
       // hijacks an editor's bold chord), no Shift/Alt. Routes through the SAME
-      // typed `appApi.createBackup()` the prompt button + native menu call.
+      // typed `appApi.createBackup()` the command palette + native menu call.
       if (
         (e.metaKey || e.ctrlKey) &&
         !e.shiftKey &&

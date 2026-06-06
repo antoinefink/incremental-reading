@@ -13,6 +13,7 @@ interface IndexHarness {
   dbService: Record<string, ReturnType<typeof vi.fn> | Record<string, unknown>>;
   captureController: Record<string, ReturnType<typeof vi.fn>>;
   jobRunner: Record<string, ReturnType<typeof vi.fn>>;
+  automaticBackupService: Record<string, ReturnType<typeof vi.fn>>;
   registerIpcHandlers: ReturnType<typeof vi.fn>;
   disposeIpc: ReturnType<typeof vi.fn>;
   registerRendererProtocol: ReturnType<typeof vi.fn>;
@@ -77,6 +78,10 @@ async function loadIndex(options: {
     start: vi.fn(),
     stop: vi.fn(),
   };
+  const automaticBackupService = {
+    start: vi.fn(),
+    stop: vi.fn(async () => {}),
+  };
   const disposeIpc = vi.fn();
   const registerIpcHandlers = vi.fn(() => disposeIpc);
   const registerRendererProtocol = vi.fn();
@@ -101,6 +106,11 @@ async function loadIndex(options: {
   vi.doMock("./job-runner", () => ({
     JobRunner: vi.fn(function JobRunner() {
       return jobRunner;
+    }),
+  }));
+  vi.doMock("./automatic-backup-service", () => ({
+    AutomaticBackupService: vi.fn(function AutomaticBackupService() {
+      return automaticBackupService;
     }),
   }));
   vi.doMock("./ipc", () => ({ registerIpcHandlers }));
@@ -140,6 +150,7 @@ async function loadIndex(options: {
     dbService,
     captureController,
     jobRunner,
+    automaticBackupService,
     registerIpcHandlers,
     disposeIpc,
     registerRendererProtocol,
@@ -213,10 +224,13 @@ describe("main entrypoint", () => {
       expect.objectContaining({ devServerUrl: undefined }),
     );
 
-    harness.callbacks.get("will-quit")?.();
+    expect(harness.automaticBackupService.start).toHaveBeenCalledOnce();
+
+    await harness.callbacks.get("will-quit")?.();
 
     expect(harness.captureController.stop).toHaveBeenCalledOnce();
     expect(harness.jobRunner.stop).toHaveBeenCalledOnce();
+    expect(harness.automaticBackupService.stop).toHaveBeenCalledOnce();
     expect(harness.disposeIpc).toHaveBeenCalledOnce();
     expect(harness.dbService.close).toHaveBeenCalledOnce();
   });

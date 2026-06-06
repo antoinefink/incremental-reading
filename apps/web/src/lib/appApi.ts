@@ -4643,7 +4643,7 @@ export const appApi = {
   /**
    * Subscribe to the native File → "Back up…" (⌘B) menu item (T050). The shell
    * calls this to run a backup from the menu bar — the SAME `createBackup()`
-   * command the prompt button and ⌘K command use. Returns an unsubscribe fn; a
+   * command the command palette and keyboard shortcut use. Returns an unsubscribe fn; a
    * no-op outside the desktop shell.
    */
   onMenuCreateBackup(callback: () => void): () => void {

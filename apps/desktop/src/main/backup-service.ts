@@ -83,6 +83,18 @@ export interface BackupServiceDeps {
   readonly appVersion: string;
 }
 
+/** Backup filename prefixes controlled by the main process. */
+export type BackupNamePrefix = "auto-";
+
+/** Options for creating a backup archive. */
+export interface CreateBackupOptions {
+  /**
+   * Optional trusted filename prefix. Used by the automatic rolling-backup
+   * scheduler so retention can prune only automatic artifacts.
+   */
+  readonly namePrefix?: BackupNamePrefix;
+}
+
 /**
  * Make a filesystem-safe, sortable timestamp for the backup directory/archive
  * name, e.g. `2026-05-30T12-30-00-000Z` (ISO with `:`/`.` replaced by `-`).
@@ -118,6 +130,8 @@ export function listFilesRelative(dir: string): string[] {
 }
 
 export class BackupService {
+  private static queue: Promise<void> = Promise.resolve();
+
   constructor(private readonly deps: BackupServiceDeps) {}
 
   /**
@@ -125,12 +139,47 @@ export class BackupService {
    * Synchronous-by-design until the zip step (better-sqlite3 + fs are sync); the
    * final zip is awaited. Throws if the DB is not open.
    */
-  async createBackup(now: Date = new Date()): Promise<BackupResult> {
+  async createBackup(
+    now: Date = new Date(),
+    options: CreateBackupOptions = {},
+  ): Promise<BackupResult> {
+    return BackupService.runSerialized(() => this.createBackupNow(now, options));
+  }
+
+  /**
+   * Serialize backup-adjacent work with manual backup creation. The automatic
+   * scheduler uses this to re-check freshness after waiting behind a manual
+   * backup, avoiding duplicate full archives.
+   */
+  static runSerialized<T>(task: () => Promise<T>): Promise<T> {
+    const queued = BackupService.queue.then(task);
+    BackupService.queue = queued.then(
+      () => undefined,
+      () => undefined,
+    );
+    return queued;
+  }
+
+  async createBackupWhen(
+    getCreationDate: () => Date | null,
+    options: CreateBackupOptions = {},
+  ): Promise<BackupResult | null> {
+    return BackupService.runSerialized(async () => {
+      const creationDate = getCreationDate();
+      if (!creationDate) return null;
+      return this.createBackupNow(creationDate, options);
+    });
+  }
+
+  private async createBackupNow(
+    now: Date = new Date(),
+    options: CreateBackupOptions = {},
+  ): Promise<BackupResult> {
     const { paths } = this.deps;
     // A unique, filesystem-safe timestamp directory. If two backups land in the
     // same millisecond, disambiguate with a numeric suffix so `VACUUM INTO` (which
     // requires a non-existent target) never collides.
-    const baseTimestamp = backupTimestamp(now);
+    const baseTimestamp = `${options.namePrefix ?? ""}${backupTimestamp(now)}`;
     let timestamp = baseTimestamp;
     let suffix = 1;
     while (
@@ -141,66 +190,73 @@ export class BackupService {
       suffix += 1;
     }
     const backupDir = path.join(paths.backupsDir, timestamp);
-    fs.mkdirSync(backupDir, { recursive: true });
-
-    // 1) Consistent SQLite snapshot via `VACUUM INTO` (includes un-checkpointed WAL).
-    const snapshotDbPath = path.join(backupDir, "app.sqlite");
-    this.deps.dbService.backupDatabaseTo(snapshotDbPath);
-
-    // 2) Copy the asset vault recursively into <timestamp>/assets/.
-    const ASSET_VAULT_ROOT = "assets";
-    const destAssetsDir = path.join(backupDir, ASSET_VAULT_ROOT);
-    const assetRelPaths = listFilesRelative(paths.assetsDir);
-    for (const rel of assetRelPaths) {
-      const from = path.join(paths.assetsDir, ...rel.split("/"));
-      const to = path.join(destAssetsDir, ...rel.split("/"));
-      fs.mkdirSync(path.dirname(to), { recursive: true });
-      fs.copyFileSync(from, to);
-    }
-
-    // 3) Hash every captured file (app.sqlite + each asset) for the manifest.
-    //    Hashes are recomputed from the COPIED bytes on disk (authoritative for
-    //    integrity), not read from `assets.contentHash` — a copy could differ from
-    //    the recorded metadata, and the manifest must describe the archive itself.
-    const files: ManifestFileEntry[] = [];
-    const dbStat = fs.statSync(snapshotDbPath);
-    files.push({ path: "app.sqlite", sha256: sha256File(snapshotDbPath), size: dbStat.size });
-    for (const rel of assetRelPaths) {
-      const abs = path.join(destAssetsDir, ...rel.split("/"));
-      const stat = fs.statSync(abs);
-      files.push({
-        path: `${ASSET_VAULT_ROOT}/${rel}`,
-        sha256: sha256File(abs),
-        size: stat.size,
-      });
-    }
-
-    // 4) Write manifest.json — the restore contract (version + hashes + counts).
-    const manifest: BackupManifest = buildBackupManifest({
-      schemaVersion: this.deps.dbService.getSchemaVersion(this.deps.migrationsDir),
-      appVersion: this.deps.appVersion,
-      createdAt: now.toISOString(),
-      files,
-      counts: this.deps.dbService.getBackupCounts(),
-      assetVaultRoot: ASSET_VAULT_ROOT,
-    });
-    const manifestPath = path.join(backupDir, "manifest.json");
-    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-
-    // 5) Zip the <timestamp>/ directory into <timestamp>.zip. The manifest is added
-    //    first, then app.sqlite, then the assets in deterministic order, so the
-    //    archive is reproducible.
     const zipPath = path.join(paths.backupsDir, `${timestamp}.zip`);
-    await zipDirectory(backupDir, zipPath, manifest);
-    const zipStat = fs.statSync(zipPath);
 
-    return {
-      path: zipPath,
-      timestamp,
-      sizeBytes: zipStat.size,
-      fileCount: files.length,
-      schemaVersion: manifest.schemaVersion,
-    };
+    try {
+      fs.mkdirSync(backupDir, { recursive: true });
+
+      // 1) Consistent SQLite snapshot via `VACUUM INTO` (includes un-checkpointed WAL).
+      const snapshotDbPath = path.join(backupDir, "app.sqlite");
+      this.deps.dbService.backupDatabaseTo(snapshotDbPath);
+
+      // 2) Copy the asset vault recursively into <timestamp>/assets/.
+      const ASSET_VAULT_ROOT = "assets";
+      const destAssetsDir = path.join(backupDir, ASSET_VAULT_ROOT);
+      const assetRelPaths = listFilesRelative(paths.assetsDir);
+      for (const rel of assetRelPaths) {
+        const from = path.join(paths.assetsDir, ...rel.split("/"));
+        const to = path.join(destAssetsDir, ...rel.split("/"));
+        fs.mkdirSync(path.dirname(to), { recursive: true });
+        fs.copyFileSync(from, to);
+      }
+
+      // 3) Hash every captured file (app.sqlite + each asset) for the manifest.
+      //    Hashes are recomputed from the COPIED bytes on disk (authoritative for
+      //    integrity), not read from `assets.contentHash` — a copy could differ from
+      //    the recorded metadata, and the manifest must describe the archive itself.
+      const files: ManifestFileEntry[] = [];
+      const dbStat = fs.statSync(snapshotDbPath);
+      files.push({ path: "app.sqlite", sha256: sha256File(snapshotDbPath), size: dbStat.size });
+      for (const rel of assetRelPaths) {
+        const abs = path.join(destAssetsDir, ...rel.split("/"));
+        const stat = fs.statSync(abs);
+        files.push({
+          path: `${ASSET_VAULT_ROOT}/${rel}`,
+          sha256: sha256File(abs),
+          size: stat.size,
+        });
+      }
+
+      // 4) Write manifest.json — the restore contract (version + hashes + counts).
+      const manifest: BackupManifest = buildBackupManifest({
+        schemaVersion: this.deps.dbService.getSchemaVersion(this.deps.migrationsDir),
+        appVersion: this.deps.appVersion,
+        createdAt: now.toISOString(),
+        files,
+        counts: this.deps.dbService.getBackupCounts(),
+        assetVaultRoot: ASSET_VAULT_ROOT,
+      });
+      const manifestPath = path.join(backupDir, "manifest.json");
+      fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+      // 5) Zip the <timestamp>/ directory into <timestamp>.zip. The manifest is added
+      //    first, then app.sqlite, then the assets in deterministic order, so the
+      //    archive is reproducible.
+      await zipDirectory(backupDir, zipPath, manifest);
+      const zipStat = fs.statSync(zipPath);
+
+      return {
+        path: zipPath,
+        timestamp,
+        sizeBytes: zipStat.size,
+        fileCount: files.length,
+        schemaVersion: manifest.schemaVersion,
+      };
+    } catch (error) {
+      fs.rmSync(zipPath, { force: true });
+      fs.rmSync(backupDir, { recursive: true, force: true });
+      throw error;
+    }
   }
 }
 

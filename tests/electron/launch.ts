@@ -189,6 +189,12 @@ export interface LaunchOptions {
    * only in the unpackaged build by the worker's provider factory). Defaults off.
    */
   readonly aiFake?: boolean;
+  /**
+   * Allow automatic rolling backups during this spec. Defaults off for E2E so
+   * unrelated fresh launches do not spend I/O creating backup archives; backup
+   * specs opt in to exercise the production-default behavior.
+   */
+  readonly automaticBackups?: boolean;
 }
 
 /**
@@ -230,6 +236,7 @@ export async function launchApp(
       // exercises the full flow with NO live model / network. Honored only in the
       // unpackaged build by the worker's provider factory.
       ...(options.aiFake ? { INTERLEAVE_AI_FAKE: "1" } : {}),
+      ...(options.automaticBackups ? {} : { INTERLEAVE_DISABLE_AUTOMATIC_BACKUPS: "1" }),
       // Suppress the first-run onboarding overlay unless a spec opts in, so it
       // never covers the UI in the feature specs (all start empty). See main/index.ts.
       ...(options.showOnboarding ? {} : { INTERLEAVE_SUPPRESS_ONBOARDING: "1" }),

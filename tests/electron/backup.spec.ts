@@ -103,6 +103,48 @@ test("the backups surface exists through window.appApi (no generic db.query)", a
   await app.close();
 });
 
+test("startup creates a quiet automatic rolling backup", async () => {
+  const app = await launchApp(dataDir, { seedOnEmpty: true, automaticBackups: true });
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  await expect(page.getByTestId("backup-reminder")).toHaveCount(0);
+  const backupsDir = path.join(dataDir, "backups");
+  await expect
+    .poll(() =>
+      fs.existsSync(backupsDir)
+        ? fs.readdirSync(backupsDir).filter((file) => /^auto-.*\.zip$/.test(file)).length
+        : 0,
+    )
+    .toBeGreaterThan(0);
+  const autoZip = fs.readdirSync(backupsDir).find((file) => /^auto-.*\.zip$/.test(file));
+  expect(autoZip).toBeTruthy();
+  if (!autoZip) throw new Error("automatic backup zip missing after poll");
+  const autoZipPath = path.join(backupsDir, autoZip);
+  expect(fs.existsSync(path.join(backupsDir, autoZip.slice(0, -".zip".length)))).toBe(true);
+
+  const unzipDir = fs.mkdtempSync(path.join(dataDir, "unzip-auto-"));
+  execFileSync("unzip", ["-q", autoZipPath, "-d", unzipDir]);
+  expect(fs.existsSync(path.join(unzipDir, "app.sqlite"))).toBe(true);
+  expect(fs.existsSync(path.join(unzipDir, "manifest.json"))).toBe(true);
+  expect(fs.existsSync(path.join(unzipDir, "assets", "sources", "e2e-seed", "snapshot.json"))).toBe(
+    true,
+  );
+
+  const manifest = JSON.parse(fs.readFileSync(path.join(unzipDir, "manifest.json"), "utf8"));
+  expect(manifest.formatVersion).toBe(1);
+  expect(manifest.schemaVersion).toBe(latestMigrationTag());
+  expect(manifest.files[0].path).toBe("app.sqlite");
+  for (const entry of manifest.files as { path: string; sha256: string; size: number }[]) {
+    const bytes = fs.readFileSync(path.join(unzipDir, ...entry.path.split("/")));
+    const recomputed = crypto.createHash("sha256").update(bytes).digest("hex");
+    expect(entry.sha256).toBe(recomputed);
+    expect(entry.size).toBe(bytes.length);
+  }
+
+  await app.close();
+});
+
 test('/settings → "Back up now" produces a valid, hashed zip on disk', async () => {
   const app = await launchApp(dataDir, { seedOnEmpty: true });
   const page = await app.firstWindow();
@@ -121,6 +163,7 @@ test('/settings → "Back up now" produces a valid, hashed zip on disk', async (
   })) as BackupResult;
 
   expect(result.path.endsWith(".zip")).toBe(true);
+  expect(path.basename(result.path).startsWith("auto-")).toBe(false);
   expect(result.sizeBytes).toBeGreaterThan(0);
   expect(result.fileCount).toBeGreaterThanOrEqual(2); // app.sqlite + ≥1 asset
   // The captured schema version is the live latest Drizzle migration tag. Assert it

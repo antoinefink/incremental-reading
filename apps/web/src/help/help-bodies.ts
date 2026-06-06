@@ -3621,7 +3621,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
   "where-your-data-lives": [
     {
       type: "p",
-      text: "Interleave stores everything on your own machine. There is no account, no cloud copy, and nothing is uploaded automatically. If this device is lost or its disk fails, your data goes with it — which is why <b>you are responsible for making backups</b>.",
+      text: "Interleave stores everything on your own machine. There is no account, no cloud copy, and nothing is uploaded automatically. If this device is lost or its disk fails, your data goes with it — which is why <b>you are responsible for keeping an off-device backup copy</b>.",
     },
     {
       type: "h2",
@@ -3637,7 +3637,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
         "<code>app.sqlite</code> — the database: every source, extract, card, review log, concept, schedule, and setting.",
         "<code>assets/</code> — the asset vault: original PDFs, HTML snapshots, images, and media files.",
         "<code>exports/</code> — files written by <b>Export to Markdown</b> and <b>Export to Anki</b>.",
-        "<code>backups/</code> — ZIP files written by <b>Back up now</b> / <kbd>⌘B</kbd>.",
+        "<code>backups/</code> — local backup ZIPs, including quiet automatic rolling backups and manual backups from <b>Back up now</b> / <kbd>⌘B</kbd>.",
       ],
     },
     {
@@ -3660,7 +3660,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     {
       type: "callout",
       icon: "info",
-      text: "An encrypted server backup tier is in development but not yet shipped. Until it arrives, manual local backups are your only off-device copy. See <b>Backing up your vault</b> for the full procedure.",
+      text: "An encrypted server backup tier is in development but not yet shipped. Local automatic backups still live on this disk, so copy recent backup ZIPs to external storage or a cloud folder for off-device protection. See <b>Backing up your vault</b> for the full procedure.",
     },
   ],
   "backing-up": [
@@ -3670,11 +3670,19 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "h2",
-      text: "How to create a backup",
+      text: "Automatic local backups",
     },
     {
       type: "p",
-      text: "All of the following trigger the same backup command — use whichever is most convenient:",
+      text: "Interleave creates local rolling backups quietly from the desktop main process. The cadence is dense for recent work, then thins out over time: hourly for the first 48 hours, every 6 hours through 7 days, daily through 30 days, and weekly through 12 weeks. Older automatic archives are pruned without deleting manual backups.",
+    },
+    {
+      type: "h2",
+      text: "Manual backup options",
+    },
+    {
+      type: "p",
+      text: "You can also create a manual backup any time. All of the following trigger the same backup command — use whichever is most convenient:",
     },
     {
       type: "ul",
@@ -3682,13 +3690,12 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
         "Press <kbd>⌘B</kbd> (works from any screen).",
         "Open the command palette (<kbd>⌘K</kbd>) and run <code>Create a backup</code>.",
         "Go to <b>Settings</b> → <b>Data & backup</b> → <b>Back up now</b>.",
-        "Click <b>Create a backup now</b> in the reminder banner (appears when no backup in the last 7 days).",
         "Use the native menu: <b>File → Back up…</b>",
       ],
     },
     {
       type: "p",
-      text: "In Settings, a confirmation row appears showing the ZIP size, file count, and schema version once the backup completes. The 7-day reminder resets.",
+      text: "In Settings, a confirmation row appears showing the ZIP size, file count, and schema version once the manual backup completes.",
     },
     {
       type: "h2",
@@ -3696,7 +3703,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "The file lands in <code>backups/<timestamp>.zip</code> inside your app data folder (<code>~/Library/Application Support/Interleave/backups/</code> on macOS). There is currently no <em>Reveal in Finder</em> button in the app — navigate there manually to copy the file off-device.",
+      text: "Backup files land inside <code>backups/</code> in your app data folder (<code>~/Library/Application Support/Interleave/backups/</code> on macOS). Manual backups use timestamped ZIP names; automatic backups use an <code>auto-</code> prefix. There is currently no <em>Reveal in Finder</em> button in the app — navigate there manually to copy files off-device.",
     },
     {
       type: "h2",
@@ -3713,7 +3720,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     {
       type: "callout",
       icon: "warn",
-      text: "<b>In-app restore and automatic/scheduled backups are not yet available [PLANNED].</b> The ZIP is structured so a future version of Interleave can import it into a fresh install, but there is currently no button to load a backup back into the running app. Make manual backups periodically and copy them somewhere safe.",
+      text: "<b>In-app restore is not yet available [PLANNED].</b> Each ZIP is structured so a future version of Interleave can import it into a fresh install, but there is currently no button to load a backup back into the running app. Automatic backups reduce local rollback risk; they do not replace an off-device copy.",
     },
     {
       type: "h2",
@@ -3721,7 +3728,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "Back up before any major triage session, before emptying Trash permanently, and before the integrity check flags issues. Copy at least one recent ZIP to an external disk or cloud folder — a backup on the same disk as your data does not protect against disk failure.",
+      text: "Create a manual backup before any major triage session, before emptying Trash permanently, and before acting on integrity-check issues. Copy at least one recent ZIP to an external disk or cloud folder — a backup on the same disk as your data does not protect against disk failure.",
     },
   ],
   "backup-vs-export": [
@@ -3735,11 +3742,11 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "A backup (<kbd>⌘B</kbd> / <b>Back up now</b>) produces a ZIP containing the entire database plus every file in the asset vault. It preserves everything: sources, extracts, cards, schedules, review logs, lineage, concepts, tags, settings, PDFs, images, and media. Its purpose is recovery — moving to a new machine, recovering from a disk failure, or rolling back a mistake.",
+      text: "Automatic rolling backups and manual backups (<kbd>⌘B</kbd> / <b>Back up now</b>) produce ZIPs containing the entire database plus every file in the asset vault. They preserve everything: sources, extracts, cards, schedules, review logs, lineage, concepts, tags, settings, PDFs, images, and media. Their purpose is recovery — moving to a new machine, recovering from a disk failure, or rolling back a mistake.",
     },
     {
       type: "p",
-      text: "Files land in <code>backups/<timestamp>.zip</code>. Note: in-app restore of a backup ZIP is not yet available [PLANNED]. The ZIP is forward-compatible so a future version can import it, but today you cannot load one back into the running app.",
+      text: "Files land in <code>backups/</code>; automatic archives use an <code>auto-</code> prefix and manual archives use timestamped names. Note: in-app restore of a backup ZIP is not yet available [PLANNED]. The ZIP is forward-compatible so a future version can import it, but today you cannot load one back into the running app.",
     },
     {
       type: "h2",
@@ -3768,7 +3775,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     {
       type: "ul",
       items: [
-        "Protect your entire collection → <b>Back up now</b> (<kbd>⌘B</kbd>). Files go to <code>backups/</code>.",
+        "Protect your entire collection → automatic rolling backups plus <b>Back up now</b> (<kbd>⌘B</kbd>) before risky work. Files go to <code>backups/</code>.",
         "Move cards to Anki → <b>Export to Anki</b> in the Inspector. Files go to <code>exports/</code>.",
         "Move notes to Obsidian or another Markdown tool → <b>Export to Markdown</b> in the Inspector. Files go to <code>exports/</code>.",
       ],
@@ -4077,7 +4084,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     {
       type: "callout",
       icon: "warn",
-      text: "<b>This feature is not yet available [PLANNED].</b> The encrypted server backup tier is on the roadmap but has not shipped. The description below explains what is being built and why. Until it ships, use manual local backups (<kbd>⌘B</kbd>) and copy the ZIPs off-device yourself.",
+      text: "<b>This feature is not yet available [PLANNED].</b> The encrypted server backup tier is on the roadmap but has not shipped. The description below explains what is being built and why. Until it ships, local backup ZIPs remain same-disk protection, so copy recent ZIPs off-device yourself.",
     },
     {
       type: "h2",
@@ -4093,7 +4100,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
         "<b>Client-side encryption.</b> Your data is encrypted before it leaves your machine. The server stores only ciphertext and never holds your plaintext knowledge base.",
         "<b>Recovery keys.</b> A recovery key generated on your device is the only way to decrypt. Losing it means the server copy is unreadable.",
         "<b>Restore onto a fresh install.</b> The goal is to let you install Interleave on a new machine and pull down your encrypted backup to restore your vault — something not yet possible today.",
-        "<b>Automatic / scheduled backups.</b> The plan includes a configurable backup schedule so you do not have to remember to press <kbd>⌘B</kbd>.",
+        "<b>Encrypted off-device backups.</b> Local automatic backups already protect against recent local mistakes; the server tier is for encrypted copies away from this machine.",
         "<b>Backup retention.</b> The server will keep a rolling window of backups, not just the latest.",
       ],
     },
@@ -4117,9 +4124,9 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     {
       type: "ul",
       items: [
-        "Press <kbd>⌘B</kbd> regularly to create a local backup ZIP.",
+        "Use <kbd>⌘B</kbd> before risky work to create an extra manual local backup ZIP.",
         "Copy recent backup ZIPs to an external drive or a cloud folder of your choice.",
-        "There is no automatic backup today — you must do this manually.",
+        "Automatic local backups stay in the same <code>backups/</code> folder, so they still need an off-device copy.",
         "In-app restore of a backup ZIP is also not yet available. Keep your backups somewhere safe and accessible.",
       ],
     },

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
@@ -14,6 +14,22 @@ const h = vi.hoisted(() => ({
     lowerPriority: vi.fn(),
     search: vi.fn(),
   },
+  backupResult: {
+    path: "/vault/backups/2026-06-06T12-00-00.000Z.zip",
+    timestamp: "2026-06-06T12-00-00.000Z",
+    sizeBytes: 1024,
+    fileCount: 4,
+    schemaVersion: "0002_search_fts5",
+  },
+  createBackup: vi.fn(),
+  updateSetting: vi.fn(),
+  menu: {
+    createBackupCallback: undefined as (() => void) | undefined,
+  },
+  onMenuCreateBackup: vi.fn((callback: () => void) => {
+    h.menu.createBackupCallback = callback;
+    return vi.fn();
+  }),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -27,11 +43,6 @@ vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => h.navigate,
   useRouterState: ({ select }: { select: (state: { location: { pathname: string } }) => string }) =>
     select({ location: { pathname: h.pathname } }),
-}));
-
-vi.mock("../components/BackupPrompt", () => ({
-  BackupPrompt: () => <div data-testid="backup-prompt" />,
-  runBackup: vi.fn(),
 }));
 
 vi.mock("../components/Icon", () => ({
@@ -55,12 +66,13 @@ vi.mock("../lib/appApi", async () => {
     isDesktop: () => true,
     appApi: {
       onMenuShowShortcuts: vi.fn(() => vi.fn()),
-      onMenuCreateBackup: vi.fn(() => vi.fn()),
+      onMenuCreateBackup: h.onMenuCreateBackup,
       updateAppSettings: h.updateAppSettings,
       // The onboarding-flag load: report the welcome as already seen so the
       // first-run modal stays closed in these chrome tests.
       getSettings: vi.fn(() => Promise.resolve({ settings: { "ui.seenOnboarding": true } })),
-      updateSetting: vi.fn(() => Promise.resolve({})),
+      updateSetting: h.updateSetting,
+      createBackup: h.createBackup,
       undoLast: vi.fn(),
     },
   };
@@ -85,7 +97,7 @@ vi.mock("./CommandPalette", () => ({
   }: {
     open: boolean;
     hasSelection: boolean;
-    onAction: (id: "cheat-sheet") => void;
+    onAction: (id: "cheat-sheet" | "create-backup") => void;
   }) => (
     <div
       data-testid="command-palette"
@@ -94,6 +106,9 @@ vi.mock("./CommandPalette", () => ({
     >
       <button type="button" data-testid="command-cheat" onClick={() => onAction("cheat-sheet")}>
         Cheat
+      </button>
+      <button type="button" data-testid="command-backup" onClick={() => onAction("create-backup")}>
+        Backup
       </button>
     </div>
   ),
@@ -126,6 +141,12 @@ beforeEach(() => {
   h.applyTheme.mockClear();
   h.updateAppSettings.mockReset();
   h.updateAppSettings.mockResolvedValue({});
+  h.createBackup.mockReset();
+  h.createBackup.mockResolvedValue(h.backupResult);
+  h.updateSetting.mockReset();
+  h.updateSetting.mockResolvedValue({});
+  h.menu.createBackupCallback = undefined;
+  h.onMenuCreateBackup.mockClear();
   h.useShellShortcuts.mockReset();
   Object.values(h.globalActions).forEach((fn) => {
     fn.mockReset();
@@ -145,6 +166,8 @@ describe("Shell", () => {
     expect(screen.getByTestId("status-bar").querySelector("[data-vault-root='assets']")).not.toBe(
       null,
     );
+    expect(screen.queryByTestId("backup-prompt")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("backup-reminder")).not.toBeInTheDocument();
   });
 
   it("opens the command palette and routes palette actions to the cheat sheet", () => {
@@ -200,5 +223,44 @@ describe("Shell", () => {
     expect(vaultSep.nextElementSibling).toHaveTextContent("Local vault · offline-first");
     expect(screen.getByTestId("shell-vault-status").nextElementSibling).toBeNull();
     expect(document.querySelectorAll(".shell-usermenu__sep")).toHaveLength(2);
+  });
+
+  it("routes the command palette backup action through the manual backup command", async () => {
+    render(<Shell />);
+
+    fireEvent.click(screen.getByTestId("command-backup"));
+
+    expect(screen.getByTestId("shell-backup-snackbar")).toHaveTextContent("Creating backup…");
+    await waitFor(() => expect(h.createBackup).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByTestId("shell-backup-snackbar")).toHaveTextContent(
+        "Backup created · 4 files",
+      ),
+    );
+    expect(h.updateSetting).not.toHaveBeenCalledWith(
+      expect.objectContaining({ key: "ui.lastBackupAt" }),
+    );
+  });
+
+  it("routes shortcut and native-menu backup actions through the same manual command", async () => {
+    render(<Shell />);
+
+    const handlers = h.useShellShortcuts.mock.calls[0]?.[0] as
+      | { onCreateBackup: () => void }
+      | undefined;
+    expect(handlers).toBeTruthy();
+
+    await act(async () => {
+      handlers?.onCreateBackup();
+    });
+
+    await waitFor(() => expect(h.createBackup).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(h.onMenuCreateBackup).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      h.menu.createBackupCallback?.();
+    });
+
+    await waitFor(() => expect(h.createBackup).toHaveBeenCalledTimes(2));
   });
 });

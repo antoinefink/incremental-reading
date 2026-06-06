@@ -25,7 +25,6 @@
 import type { LocalVaultPath, VaultRoot } from "@interleave/core";
 import { Link, Outlet, useLinkProps, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BackupPrompt, runBackup } from "../components/BackupPrompt";
 import { Icon, type IconName } from "../components/Icon";
 import { Inspector } from "../components/inspector/Inspector";
 import { Snackbar } from "../components/Snackbar";
@@ -61,6 +60,10 @@ import { useShellShortcuts } from "./useShellShortcuts";
 const SEEN_ONBOARDING_KEY = "ui.seenOnboarding";
 const TIPS_ENABLED_KEY = "ui.tipsEnabled";
 const COACH_SEEN_KEY = "ui.coachSeen";
+
+function runBackup() {
+  return appApi.createBackup();
+}
 
 const THEME_MENU_ITEMS = [
   { theme: "system", label: "System theme", icon: "system" },
@@ -390,10 +393,9 @@ function ShellInner() {
   /**
    * Create a backup now (T050) — the single handler the ⌘B shortcut, the ⌘K
    * "Create a backup" command, and the native File → "Back up…" menu all route
-   * through. It calls the SAME `appApi.createBackup()` the BackupPrompt button
-   * calls (via the shared `runBackup` helper, which also records the timestamp in
-   * settings so the reminder resets and survives restart) — no second path. No
-   * domain logic here; the backup bundle is produced entirely in the main process.
+   * through. It calls `appApi.createBackup()` directly — no second path, no
+   * renderer-side reminder freshness state. The backup bundle is produced entirely
+   * in the main process.
    */
   const onCreateBackup = () => {
     if (!isDesktop()) return;
@@ -639,9 +641,6 @@ function ShellInner() {
         <div className="shell-main">
           <Topbar onOpenCommand={() => setCommandOpen(true)} />
           <main className="shell-page">
-            {/* Gentle, app-wide "no backup in N days" reminder + "create a backup
-              now" affordance (T050). Renders null until due / outside desktop. */}
-            <BackupPrompt />
             <Outlet />
           </main>
           <StatusBar />

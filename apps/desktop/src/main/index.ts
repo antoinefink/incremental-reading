@@ -15,6 +15,7 @@
 
 import path from "node:path";
 import { app, BrowserWindow } from "electron";
+import { AutomaticBackupService } from "./automatic-backup-service";
 import { CaptureController } from "./capture-controller";
 import { setCaptureEnabled } from "./capture-pairing";
 import { DbService } from "./db-service";
@@ -38,6 +39,8 @@ let disposeIpc: (() => void) | null = null;
 let captureController: CaptureController | null = null;
 /** The on-device background job runner (T058), held for the will-quit stop. */
 let jobRunner: JobRunner | null = null;
+/** The main-side rolling backup scheduler, held for the will-quit stop. */
+let automaticBackupService: AutomaticBackupService | null = null;
 
 /** The compiled-main directory (preload sits alongside the entry). */
 const distDir = __dirname;
@@ -226,6 +229,21 @@ function bootstrap(): void {
     runner: jobRunner,
   });
 
+  // 3c) Automatic local rolling backups. This is a main-process lifecycle service:
+  // it owns the timer, calls the canonical BackupService, and prunes ONLY
+  // automatic artifacts under backups/. E2E can disable it for unrelated specs so
+  // a fresh launch does not spend I/O on backup archives unless the spec opts in.
+  if (process.env.INTERLEAVE_DISABLE_AUTOMATIC_BACKUPS !== "1") {
+    automaticBackupService = new AutomaticBackupService({
+      dbService,
+      paths,
+      migrationsDir,
+      appVersion: app.getVersion(),
+      logger: console,
+    });
+    automaticBackupService.start();
+  }
+
   // Start the capture server ONLY if `capture.enabled` (default off). Bind the
   // socket FIRST, then persist the port, then mark running (all inside the
   // controller). Fire-and-forget — a bind failure must not crash bootstrap.
@@ -293,7 +311,7 @@ if (!gotLock) {
     }
   });
 
-  app.on("will-quit", () => {
+  app.on("will-quit", async () => {
     // Stop the loopback capture server (T062) before closing the DB. Fire-and-
     // forget the async close — the process is exiting and the socket is local.
     void captureController?.stop();
@@ -301,6 +319,7 @@ if (!gotLock) {
     // writes to a closed connection. The persisted queue is left intact — pending
     // jobs resume on the next launch. Mirrors the capture-controller stop ordering.
     jobRunner?.stop();
+    await automaticBackupService?.stop();
     disposeIpc?.();
     dbService.close();
   });

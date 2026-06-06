@@ -210,4 +210,66 @@ describe("BackupService.createBackup (T047)", () => {
     expect(fs.existsSync(first.path)).toBe(true);
     expect(fs.existsSync(second.path)).toBe(true);
   });
+
+  it("can create automatic backups with a distinct trusted prefix", async () => {
+    const { service } = openSeeded();
+    const manual = await service.createBackup(new Date("2026-05-30T10:00:00.000Z"));
+    const automatic = await service.createBackup(new Date("2026-05-30T10:00:00.000Z"), {
+      namePrefix: "auto-",
+    });
+
+    expect(manual.timestamp).toBe("2026-05-30T10-00-00-000Z");
+    expect(automatic.timestamp).toBe("auto-2026-05-30T10-00-00-000Z");
+    expect(path.basename(automatic.path)).toBe("auto-2026-05-30T10-00-00-000Z.zip");
+    expect(fs.existsSync(automatic.path)).toBe(true);
+  });
+
+  it("same-millisecond automatic backups produce distinct auto-prefixed archives", async () => {
+    const { paths, service } = openSeeded();
+    const now = new Date("2026-05-30T10:00:00.000Z");
+
+    const [first, second] = await Promise.all([
+      service.createBackup(now, { namePrefix: "auto-" }),
+      service.createBackup(now, { namePrefix: "auto-" }),
+    ]);
+
+    expect(first.timestamp).toBe("auto-2026-05-30T10-00-00-000Z");
+    expect(second.timestamp).toBe("auto-2026-05-30T10-00-00-000Z-1");
+    expect(first.timestamp).not.toBe(second.timestamp);
+    expect(path.basename(first.path)).toBe("auto-2026-05-30T10-00-00-000Z.zip");
+    expect(path.basename(second.path)).toBe("auto-2026-05-30T10-00-00-000Z-1.zip");
+    expect(fs.existsSync(path.join(paths.backupsDir, first.timestamp))).toBe(true);
+    expect(fs.existsSync(path.join(paths.backupsDir, second.timestamp))).toBe(true);
+    expect(fs.existsSync(first.path)).toBe(true);
+    expect(fs.existsSync(second.path)).toBe(true);
+  });
+
+  it("cleans up partial automatic backup artifacts after a packaging failure", async () => {
+    const paths = ensureVaultSkeleton(computeAppPaths(dataDir));
+    const service = new BackupService({
+      dbService: {
+        backupDatabaseTo(dbPath: string) {
+          fs.writeFileSync(dbPath, "partial-db");
+        },
+        getSchemaVersion() {
+          throw new Error("schema unavailable");
+        },
+        getBackupCounts() {
+          return { elements: 0, sources: 0, extracts: 0, cards: 0, assets: 0 };
+        },
+      } as unknown as DbService,
+      paths,
+      migrationsDir: "migrations",
+      appVersion: "9.9.9",
+    });
+    const now = new Date("2026-05-30T10:00:00.000Z");
+
+    await expect(service.createBackup(now, { namePrefix: "auto-" })).rejects.toThrow(
+      "schema unavailable",
+    );
+
+    const timestamp = "auto-2026-05-30T10-00-00-000Z";
+    expect(fs.existsSync(path.join(paths.backupsDir, timestamp))).toBe(false);
+    expect(fs.existsSync(path.join(paths.backupsDir, `${timestamp}.zip`))).toBe(false);
+  });
 });
