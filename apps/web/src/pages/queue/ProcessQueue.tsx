@@ -773,6 +773,7 @@ export function ProcessQueue() {
     } finally {
       setBusy(false);
       sourceSelection.dismiss();
+      clearConsumedEditorSelection(sourceEditor);
     }
   }, [
     current,
@@ -804,8 +805,9 @@ export function ProcessQueue() {
     } finally {
       setBusy(false);
       sourceSelection.dismiss();
+      clearConsumedEditorSelection(sourceEditor);
     }
-  }, [current, busy, clearUndo, sourceSelection, sourceHighlights, toast]);
+  }, [current, busy, clearUndo, sourceSelection, sourceHighlights, sourceEditor, toast]);
 
   const onSourceSelectionAction = useCallback(
     (action: SelectionToolbarAction) => {
@@ -892,8 +894,19 @@ export function ProcessQueue() {
     } finally {
       setBusy(false);
       extractSelection.dismiss();
+      clearConsumedEditorSelection(extractEditor);
     }
-  }, [current, busy, clearUndo, inspector, extractSelection, doc, reloadInspector, toast]);
+  }, [
+    current,
+    busy,
+    clearUndo,
+    inspector,
+    extractSelection,
+    extractEditor,
+    doc,
+    reloadInspector,
+    toast,
+  ]);
 
   const highlightProcessExtractSelection = useCallback(async () => {
     const loc = extractSelection.location;
@@ -913,8 +926,9 @@ export function ProcessQueue() {
     } finally {
       setBusy(false);
       extractSelection.dismiss();
+      clearConsumedEditorSelection(extractEditor);
     }
-  }, [current, busy, clearUndo, extractSelection, extractHighlights, toast]);
+  }, [current, busy, clearUndo, extractSelection, extractHighlights, extractEditor, toast]);
 
   const onExtractSelectionAction = useCallback(
     (action: SelectionToolbarAction) => {
@@ -1268,6 +1282,15 @@ function visibleEditorPlainText(editor: Editor | null): string | null {
     ) as HTMLElement | null);
   if (!dom) return null;
   return normalizePlainText(dom.innerText ?? dom.textContent ?? "");
+}
+
+function clearConsumedEditorSelection(editor: Editor | null): void {
+  const selection = editor?.state?.selection;
+  if (editor && selection) {
+    editor.commands.setTextSelection(selection.to);
+    editor.commands.blur();
+  }
+  if (typeof window !== "undefined") window.getSelection()?.removeAllRanges();
 }
 
 function plainTextToSimpleDoc(plainText: string, previousDoc: unknown): unknown {

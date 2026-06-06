@@ -83,7 +83,6 @@ function RewriteEditor({
   const [prompt, setPrompt] = useState(card.prompt ?? "");
   const [answer, setAnswer] = useState(card.answer ?? "");
   const [cloze, setCloze] = useState(card.cloze ?? "");
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const editTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedEdit = useRef(
@@ -114,7 +113,6 @@ function RewriteEditor({
         clearTimeout(editTimer.current);
         editTimer.current = null;
       }
-      setSaving(true);
       setError(null);
       try {
         await appApi.updateCard({
@@ -126,8 +124,6 @@ function RewriteEditor({
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         return false;
-      } finally {
-        setSaving(false);
       }
     },
     [card.id, currentPatch],
@@ -153,25 +149,21 @@ function RewriteEditor({
   }, [currentPatch, persistRewrite]);
 
   const resolve = useCallback(async () => {
-    if (saving) return;
     const saved = await persistRewrite(true);
     if (!saved) return;
-    setSaving(true);
     setError(null);
     try {
       await appApi.markLeechCard({ cardId: card.id, leech: false });
       await onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setSaving(false);
     }
-  }, [saving, persistRewrite, card.id, onSaved]);
+  }, [persistRewrite, card.id, onSaved]);
 
   const close = useCallback(async () => {
-    if (saving) return;
     const saved = await persistRewrite(true);
     if (saved) onCancel();
-  }, [saving, persistRewrite, onCancel]);
+  }, [persistRewrite, onCancel]);
 
   return (
     <div className="rv-edit lc-edit" data-testid={`leech-edit-${card.id}`}>
@@ -224,7 +216,6 @@ function RewriteEditor({
           className="rv-btn"
           data-testid="leech-edit-close"
           onClick={() => void close()}
-          disabled={saving}
         >
           Close
         </button>
@@ -233,7 +224,6 @@ function RewriteEditor({
           className="rv-btn rv-btn--primary"
           data-testid="leech-edit-resolve"
           onClick={() => void resolve()}
-          disabled={saving}
         >
           <Icon name="check" size={14} />
           Resolve

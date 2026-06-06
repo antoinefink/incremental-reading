@@ -354,7 +354,6 @@ export function ReviewRepairBar({
               className="rv-btn"
               data-testid="review-edit-done"
               onClick={() => void closeEditor()}
-              disabled={saving}
             >
               Done
             </button>
