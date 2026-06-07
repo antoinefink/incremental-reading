@@ -127,6 +127,15 @@ test("the balance banner appears on the inbox when imports outpace processing", 
   await expect(page.getByTestId("balance-cards")).toHaveText("0");
   await expect(page.getByTestId("balance-reviews")).toHaveText(/\d+/);
 
+  const bannerBox = await banner.boundingBox();
+  const rowBox = await page.getByTestId("inbox-row").first().boundingBox();
+  const routeBox = await page.getByTestId("route-inbox").boundingBox();
+  if (!bannerBox || !rowBox || !routeBox) throw new Error("Could not measure inbox geometry");
+  expect(Math.abs(bannerBox.x - rowBox.x)).toBeLessThanOrEqual(1);
+  const bannerLeftGutter = bannerBox.x - routeBox.x;
+  const bannerRightGutter = routeBox.x + routeBox.width - (bannerBox.x + bannerBox.width);
+  expect(Math.abs(bannerLeftGutter - bannerRightGutter)).toBeLessThanOrEqual(1);
+
   await app.close();
 });
 

@@ -762,7 +762,7 @@ export function InboxScreen() {
       </div>
 
       {/* Import/process balance warning (T046) — advisory; hidden when balanced. */}
-      <div className="px-6 pt-4 empty:hidden">
+      <div className="px-2 pt-4 empty:hidden">
         <BalanceBanner refreshKey={balanceRefresh} />
       </div>
 

@@ -314,6 +314,8 @@ describe("InboxScreen", () => {
     expect(getByTestId("mock-source-editor")).toHaveClass("inbox-preview-reader");
     expect(getByTestId("mock-source-editor")).toHaveAttribute("data-editable", "false");
     expect(getByTestId("inbox-count")).toHaveTextContent("2 items awaiting triage");
+    expect(getByTestId("mock-balance-banner").parentElement).toHaveClass("px-2");
+    expect(getByTestId("mock-balance-banner").parentElement).not.toHaveClass("px-6");
   });
 
   it("reads now by activating the selected item and navigating to the source reader", async () => {
