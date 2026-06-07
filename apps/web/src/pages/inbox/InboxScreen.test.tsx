@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({
   importPdfSource: vi.fn(),
   pickImportFile: vi.fn(),
   importMediaSource: vi.fn(),
+  getAppSettings: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -62,15 +63,17 @@ vi.mock("../../shell/selection", () => ({
 vi.mock("./NewSourceModal", () => ({
   NewSourceModal: ({
     open,
+    defaultPriority,
     onCreated,
     onClose,
   }: {
     open: boolean;
+    defaultPriority?: string;
     onCreated: (id: string) => void;
     onClose: () => void;
   }) =>
     open ? (
-      <div data-testid="mock-new-source-modal">
+      <div data-default-priority={defaultPriority} data-testid="mock-new-source-modal">
         <button
           type="button"
           data-testid="mock-new-source-create"
@@ -88,10 +91,12 @@ vi.mock("./NewSourceModal", () => ({
 vi.mock("./ImportUrlModal", () => ({
   ImportUrlModal: ({
     open,
+    defaultPriority,
     onImported,
     onOpenExisting,
   }: {
     open: boolean;
+    defaultPriority?: string;
     onImported: (id: string) => void;
     onOpenExisting?: (match: {
       elementId: string;
@@ -102,7 +107,7 @@ vi.mock("./ImportUrlModal", () => ({
     }) => void;
   }) =>
     open ? (
-      <div data-testid="mock-url-import-modal">
+      <div data-default-priority={defaultPriority} data-testid="mock-url-import-modal">
         <button type="button" data-testid="mock-url-import" onClick={() => onImported("url-1")}>
           URL import
         </button>
@@ -147,15 +152,17 @@ vi.mock("./ImportUrlModal", () => ({
 vi.mock("./ImportFileModal", () => ({
   ImportFileModal: ({
     open,
+    defaultPriority,
     onImported,
     onHighlightsImported,
   }: {
     open: boolean;
+    defaultPriority?: string;
     onImported: (id: string) => void;
     onHighlightsImported: (id: string) => void;
   }) =>
     open ? (
-      <div data-testid="mock-file-modal">
+      <div data-default-priority={defaultPriority} data-testid="mock-file-modal">
         <button type="button" data-testid="mock-file-import" onClick={() => onImported("file-1")}>
           File import
         </button>
@@ -182,6 +189,7 @@ vi.mock("../../lib/appApi", async () => {
       importPdfSource: h.importPdfSource,
       pickImportFile: h.pickImportFile,
       importMediaSource: h.importMediaSource,
+      getAppSettings: h.getAppSettings,
     },
   };
 });
@@ -261,10 +269,12 @@ beforeEach(() => {
   h.importPdfSource.mockReset();
   h.pickImportFile.mockReset();
   h.importMediaSource.mockReset();
+  h.getAppSettings.mockReset();
   h.listInbox.mockResolvedValue({ items });
   h.getInboxItem.mockImplementation(({ id }) => Promise.resolve({ detail: detail(id) }));
   h.triageInboxItem.mockResolvedValue({ item: items[0], deleted: false });
   h.importPdfSource.mockResolvedValue({ status: "imported", id: "pdf-1" });
+  h.getAppSettings.mockResolvedValue({ settings: { defaultSourcePriority: 0.875 } });
   h.pickImportFile
     .mockResolvedValueOnce({ paths: ["/vault/video.mp4"] })
     .mockResolvedValueOnce({ cancelled: true });
@@ -409,14 +419,23 @@ describe("InboxScreen", () => {
 
     await findByTestId("inbox-import-paste-text");
     fireEvent.click(getByTestId("inbox-import-paste-text"));
+    await waitFor(() =>
+      expect(getByTestId("mock-new-source-modal")).toHaveAttribute("data-default-priority", "A"),
+    );
     fireEvent.click(await findByTestId("mock-new-source-create"));
     await waitFor(() => expect(h.listInbox).toHaveBeenLastCalledWith());
 
     fireEvent.click(getByTestId("inbox-import-paste-url"));
+    await waitFor(() =>
+      expect(getByTestId("mock-url-import-modal")).toHaveAttribute("data-default-priority", "A"),
+    );
     fireEvent.click(await findByTestId("mock-url-import"));
     await waitFor(() => expect(h.listInbox).toHaveBeenCalledTimes(3));
 
     fireEvent.click(getByTestId("inbox-import-import-file"));
+    await waitFor(() =>
+      expect(getByTestId("mock-file-modal")).toHaveAttribute("data-default-priority", "A"),
+    );
     fireEvent.click(await findByTestId("mock-highlights-import"));
     await waitFor(() => expect(h.listInbox).toHaveBeenCalledTimes(4));
   });
@@ -481,14 +500,21 @@ describe("InboxScreen", () => {
     const { getByTestId, findByTestId } = render(<InboxScreen />);
 
     await findByTestId("inbox-import-import-pdf");
+    fireEvent.click(getByTestId("inbox-import-paste-text"));
+    await waitFor(() =>
+      expect(getByTestId("mock-new-source-modal")).toHaveAttribute("data-default-priority", "A"),
+    );
+    fireEvent.click(getByTestId("mock-new-source-close"));
+
     fireEvent.click(getByTestId("inbox-import-import-pdf"));
-    await waitFor(() => expect(h.importPdfSource).toHaveBeenCalledWith({}));
+    await waitFor(() => expect(h.importPdfSource).toHaveBeenCalledWith({ priority: "A" }));
 
     fireEvent.click(getByTestId("inbox-import-import-media"));
     await waitFor(() =>
       expect(h.importMediaSource).toHaveBeenCalledWith({
         path: "/vault/video.mp4",
         subtitlesPath: null,
+        priority: "A",
       }),
     );
 

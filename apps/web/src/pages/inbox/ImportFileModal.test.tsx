@@ -85,9 +85,16 @@ describe("ImportFileModal", () => {
     h.pickImportFile.mockResolvedValue({ paths: ["/vault/note.md"] });
     const onImported = vi.fn();
     const { getByTestId, queryByTestId, findByTestId } = render(
-      <ImportFileModal open initialKind="epub" onClose={vi.fn()} onImported={onImported} />,
+      <ImportFileModal
+        open
+        initialKind="epub"
+        defaultPriority="B"
+        onClose={vi.fn()}
+        onImported={onImported}
+      />,
     );
 
+    expect(getByTestId("import-file-priority-B")).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(getByTestId("import-file-choose"));
     expect(await findByTestId("import-file-chosen")).toHaveTextContent("note.md");
     fireEvent.click(getByTestId("import-file-kind-markdown"));
@@ -101,7 +108,7 @@ describe("ImportFileModal", () => {
       expect(h.importDocumentSource).toHaveBeenCalledWith({
         path: "/vault/note.md",
         format: "markdown",
-        priority: "C",
+        priority: "B",
       }),
     );
     expect(onImported).toHaveBeenCalledWith("doc-1");

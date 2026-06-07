@@ -940,6 +940,11 @@ export class DbService {
     return { settings: projectToRendererSettings(this.repos.settings.getAppSettings()) };
   }
 
+  /** Resolve omitted source-import priority through the user's configured default. */
+  resolveSourcePriorityLabel(priority?: PriorityLabel): PriorityLabel {
+    return priority ?? priorityToLabel(this.repos.settings.getAppSettings().defaultSourcePriority);
+  }
+
   /**
    * Apply a validated partial {@link AppSettings} patch (T011). The repository
    * coerces/clamps and persists in one transaction, then returns the full
@@ -1271,8 +1276,8 @@ export class DbService {
    * `update_document` together — a source never persists without its body. The
    * raw pasted `body` is converted main-side to plain text + ProseMirror JSON
    * (the renderer never builds the doc). The A/B/C/D label maps to a numeric
-   * priority via `priorityFromLabel` (default `C`, so new material never dominates
-   * older high-value material).
+   * priority via `priorityFromLabel` (or the configured default source priority when
+   * omitted, so new material follows the user's import policy).
    *
    * Provenance derivation (T014, NO remote fetching): the entered `url` is
    * preserved verbatim as `originalUrl`, and a conservative `canonicalUrl` is
@@ -1284,7 +1289,7 @@ export class DbService {
    * Returns the new id + its inbox summary.
    */
   importManualSource(request: SourcesImportManualRequest): SourcesImportManualResult {
-    const label: PriorityLabel = request.priority ?? "C";
+    const label = this.resolveSourcePriorityLabel(request.priority);
     const url = request.url ?? null;
     const canonicalUrl = request.canonicalUrl ?? canonicalizeUrl(url);
     const originalUrl = request.originalUrl ?? url;
@@ -1373,6 +1378,7 @@ export class DbService {
       db: this.require().db,
       repositories,
       assetsDir: this.assetsDir,
+      getDefaultPriority: () => this.resolveSourcePriorityLabel(),
       allowLoopback: this.allowLoopbackImport,
     });
     return this.urlImport;
@@ -1533,7 +1539,10 @@ export class DbService {
     priority?: PriorityLabel;
     reasonAdded?: string | null;
   }): Promise<SourcesImportPdfResult> {
-    const { id, item } = await this.pdfImportService.importFromFile(input);
+    const { id, item } = await this.pdfImportService.importFromFile({
+      ...input,
+      priority: this.resolveSourcePriorityLabel(input.priority),
+    });
     return { status: "imported", id, item };
   }
 
@@ -1569,7 +1578,10 @@ export class DbService {
     priority?: PriorityLabel;
     reasonAdded?: string | null;
   }): Promise<SourcesImportEpubResult> {
-    return await this.epubImportService.importFromFile(input);
+    return await this.epubImportService.importFromFile({
+      ...input,
+      priority: this.resolveSourcePriorityLabel(input.priority),
+    });
   }
 
   /**
@@ -1612,7 +1624,7 @@ export class DbService {
     const result = await this.mediaImportService.importFromFile({
       filePath: input.path,
       ...(input.subtitlesPath !== undefined ? { subtitlesPath: input.subtitlesPath } : {}),
-      ...(input.priority ? { priority: input.priority } : {}),
+      priority: this.resolveSourcePriorityLabel(input.priority),
       ...(input.reasonAdded !== undefined ? { reasonAdded: input.reasonAdded } : {}),
     });
     return {
@@ -1635,7 +1647,10 @@ export class DbService {
     priority?: PriorityLabel;
     reasonAdded?: string | null;
   }): Promise<SourcesImportMediaResult> {
-    const result = await this.mediaImportService.importFromYouTube(input);
+    const result = await this.mediaImportService.importFromYouTube({
+      ...input,
+      priority: this.resolveSourcePriorityLabel(input.priority),
+    });
     return {
       status: "imported",
       id: result.id,
@@ -1724,7 +1739,10 @@ export class DbService {
     priority?: PriorityLabel;
     reasonAdded?: string | null;
   }): Promise<DocumentImportResult> {
-    return await this.documentImportService.importFromFile(input);
+    return await this.documentImportService.importFromFile({
+      ...input,
+      priority: this.resolveSourcePriorityLabel(input.priority),
+    });
   }
 
   /** Import pasted Markdown (T068) — the paste path, no file read. */
@@ -1734,7 +1752,10 @@ export class DbService {
     priority?: PriorityLabel;
     reasonAdded?: string | null;
   }): Promise<DocumentImportResult> {
-    return await this.documentImportService.importFromText(input);
+    return await this.documentImportService.importFromText({
+      ...input,
+      priority: this.resolveSourcePriorityLabel(input.priority),
+    });
   }
 
   /**
@@ -1768,7 +1789,10 @@ export class DbService {
     format?: "readwise_csv" | "readwise_json" | "kindle_clippings";
     priority?: PriorityLabel;
   }): Promise<HighlightImportResult> {
-    return await this.highlightImportService.importFromFile(input);
+    return await this.highlightImportService.importFromFile({
+      ...input,
+      priority: this.resolveSourcePriorityLabel(input.priority),
+    });
   }
 
   /**
@@ -1803,7 +1827,10 @@ export class DbService {
     absPath: string;
     priority?: PriorityLabel;
   }): Promise<AnkiImportResult> {
-    return await this.ankiImportService.importFromFile(input);
+    return await this.ankiImportService.importFromFile({
+      ...input,
+      priority: this.resolveSourcePriorityLabel(input.priority),
+    });
   }
 
   /**

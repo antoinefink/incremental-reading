@@ -64,10 +64,30 @@ describe("NewSourceModal", () => {
     expect(onCreated).toHaveBeenCalledWith("source-1");
   });
 
+  it("uses the configured default priority when the user leaves priority unchanged", async () => {
+    const onCreated = vi.fn();
+    const { getByTestId } = render(
+      <NewSourceModal open defaultPriority="B" onClose={vi.fn()} onCreated={onCreated} />,
+    );
+
+    expect(getByTestId("new-source-priority-B")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.change(getByTestId("new-source-title"), { target: { value: "Defaulted" } });
+    fireEvent.change(getByTestId("new-source-accessed"), { target: { value: "" } });
+    fireEvent.click(getByTestId("new-source-submit"));
+
+    await waitFor(() =>
+      expect(h.importManualSource).toHaveBeenCalledWith({
+        title: "Defaulted",
+        priority: "B",
+      }),
+    );
+    expect(onCreated).toHaveBeenCalledWith("source-1");
+  });
+
   it("routes Markdown bodies through the Markdown importer and validates empty bodies", async () => {
     const onCreated = vi.fn();
     const { getByTestId, findByTestId } = render(
-      <NewSourceModal open onClose={vi.fn()} onCreated={onCreated} />,
+      <NewSourceModal open defaultPriority="B" onClose={vi.fn()} onCreated={onCreated} />,
     );
 
     fireEvent.change(getByTestId("new-source-title"), { target: { value: "Markdown" } });
@@ -81,7 +101,7 @@ describe("NewSourceModal", () => {
       expect(h.importMarkdownText).toHaveBeenCalledWith({
         text: "# Heading",
         title: "Markdown",
-        priority: "C",
+        priority: "B",
       }),
     );
     expect(onCreated).toHaveBeenCalledWith("md-1");

@@ -424,6 +424,7 @@ export function InboxScreen() {
   const [modalOpen, setModalOpen] = useState(false);
   const [urlModalOpen, setUrlModalOpen] = useState(false);
   const [fileModalOpen, setFileModalOpen] = useState(false);
+  const [defaultSourcePriority, setDefaultSourcePriority] = useState<PriorityLabelInput>("C");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Bumped after any list change (import / triage) so the balance banner re-reads
@@ -452,6 +453,23 @@ export function InboxScreen() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Source-import priority defaults are a user setting, not a hard-coded modal default.
+  useEffect(() => {
+    if (!desktop) return;
+    let cancelled = false;
+    void appApi
+      .getAppSettings()
+      .then(({ settings }) => {
+        if (!cancelled) setDefaultSourcePriority(priorityToLabel(settings.defaultSourcePriority));
+      })
+      .catch(() => {
+        // Keep the built-in "C" fallback; source import remains usable if settings are unavailable.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [desktop]);
 
   // Whenever the selected inbox id changes, fetch its detail + drive the shell
   // inspector selection so it shows the same element.
@@ -485,7 +503,7 @@ export function InboxScreen() {
     if (!isDesktop() || busy) return;
     setBusy(true);
     try {
-      const result = await appApi.importPdfSource({});
+      const result = await appApi.importPdfSource({ priority: defaultSourcePriority });
       if (result.status === "imported") {
         await refresh(result.id);
         setError(null);
@@ -495,7 +513,7 @@ export function InboxScreen() {
     } finally {
       setBusy(false);
     }
-  }, [busy, refresh]);
+  }, [busy, refresh, defaultSourcePriority]);
 
   // Import a local media file (T073) — MAIN opens the native picker (filtered to
   // video/audio), then an OPTIONAL second picker for a sidecar `.vtt`/`.srt`
@@ -525,7 +543,11 @@ export function InboxScreen() {
       } catch {
         subtitlesPath = null;
       }
-      const result = await appApi.importMediaSource({ path: mediaPath, subtitlesPath });
+      const result = await appApi.importMediaSource({
+        path: mediaPath,
+        subtitlesPath,
+        priority: defaultSourcePriority,
+      });
       if (result.status === "imported") {
         await refresh(result.id);
         setError(null);
@@ -535,7 +557,7 @@ export function InboxScreen() {
     } finally {
       setBusy(false);
     }
-  }, [busy, refresh]);
+  }, [busy, refresh, defaultSourcePriority]);
 
   const onReadNow = useCallback(async () => {
     if (!selId || busy) return;
@@ -808,6 +830,7 @@ export function InboxScreen() {
 
       <NewSourceModal
         open={modalOpen}
+        defaultPriority={defaultSourcePriority}
         onClose={() => setModalOpen(false)}
         onCreated={(id) => {
           setModalOpen(false);
@@ -817,6 +840,7 @@ export function InboxScreen() {
 
       <ImportUrlModal
         open={urlModalOpen}
+        defaultPriority={defaultSourcePriority}
         onClose={() => setUrlModalOpen(false)}
         onImported={(id) => {
           setUrlModalOpen(false);
@@ -828,6 +852,7 @@ export function InboxScreen() {
       <ImportFileModal
         open={fileModalOpen}
         initialKind="epub"
+        defaultPriority={defaultSourcePriority}
         onClose={() => setFileModalOpen(false)}
         onImported={(id) => {
           setFileModalOpen(false);

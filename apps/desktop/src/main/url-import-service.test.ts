@@ -142,6 +142,34 @@ describe("UrlImportService.importFromUrl (T060 happy path)", () => {
     expect(ops).toContain("update_document");
   });
 
+  it("uses the injected default priority when the caller omits priority", async () => {
+    const svc = new UrlImportService({
+      db: handle.db,
+      repositories: repos,
+      assetsDir,
+      fetchImpl: htmlFetch(ARTICLE_HTML),
+      getDefaultPriority: () => "A",
+    });
+
+    const defaulted = expectImported(
+      await svc.importFromUrl({ url: "https://example.com/defaulted" }),
+    );
+    const explicit = expectImported(
+      await svc.importFromUrl({
+        url: "https://example.com/explicit",
+        priority: "D",
+        forceNewVersion: true,
+      }),
+    );
+
+    expect(new SourceRepository(handle.db).findById(defaulted.id as never)?.element.priority).toBe(
+      0.875,
+    );
+    expect(new SourceRepository(handle.db).findById(explicit.id as never)?.element.priority).toBe(
+      0.125,
+    );
+  });
+
   it("survives a restart: re-opening the same file finds the source + snapshots", async () => {
     const svc = makeService(htmlFetch(ARTICLE_HTML));
     const { id } = expectImported(await svc.importFromUrl({ url: "https://example.com/spacing" }));

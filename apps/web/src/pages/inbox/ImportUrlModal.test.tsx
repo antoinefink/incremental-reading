@@ -68,12 +68,14 @@ describe("ImportUrlModal", () => {
     const { getByTestId, findByTestId } = render(
       <ImportUrlModal
         open
+        defaultPriority="B"
         onClose={vi.fn()}
         onImported={onImported}
         onOpenExisting={onOpenExisting}
       />,
     );
 
+    expect(getByTestId("import-url-priority-B")).toHaveAttribute("aria-pressed", "true");
     fireEvent.change(getByTestId("import-url-input"), { target: { value: "https://example.com" } });
     fireEvent.click(getByTestId("import-url-submit"));
     expect(await findByTestId("import-url-duplicate")).toHaveTextContent("Existing article");
@@ -91,7 +93,7 @@ describe("ImportUrlModal", () => {
     await waitFor(() =>
       expect(h.importUrlSource).toHaveBeenLastCalledWith({
         url: "https://example.com",
-        priority: "C",
+        priority: "B",
         forceNewVersion: true,
       }),
     );

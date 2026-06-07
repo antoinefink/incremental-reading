@@ -52,6 +52,8 @@ export type ImportUrlModalProps = {
   onClose: () => void;
   /** Called with the new source id after a successful import. */
   onImported: (id: string) => void;
+  /** Priority seeded from Settings for newly imported sources. */
+  defaultPriority?: PriorityLabelInput;
   /**
    * Called with an EXISTING source when the user chooses "Open existing" on a
    * duplicate. Defaults to {@link onImported} with the element id.
@@ -59,30 +61,55 @@ export type ImportUrlModalProps = {
   onOpenExisting?: (match: SourceDuplicateSummary) => void;
 };
 
-export function ImportUrlModal({ open, onClose, onImported, onOpenExisting }: ImportUrlModalProps) {
+export function ImportUrlModal({
+  open,
+  onClose,
+  onImported,
+  defaultPriority = "C",
+  onOpenExisting,
+}: ImportUrlModalProps) {
   const [url, setUrl] = useState("");
   const [reason, setReason] = useState("");
-  const [priority, setPriority] = useState<PriorityLabelInput>("C");
+  const [priority, setPriority] = useState<PriorityLabelInput>(defaultPriority);
+  const [priorityTouched, setPriorityTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // T061: when the main process detects a duplicate, the import creates nothing and
   // returns the existing match(es); the modal shows a reuse-or-new-version choice.
   const [duplicates, setDuplicates] = useState<readonly SourceDuplicateSummary[] | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const openedRef = useRef(false);
 
   // A live read-back of the canonical URL the main process WILL derive — uses the
   // same pure `@interleave/core` normalizer; the renderer never persists it.
   const canonicalPreview = useMemo(() => canonicalizeUrl(url), [url]);
 
-  // Reset + focus when opened.
+  // Reset the form once per open. Keep this guarded so an async Settings load
+  // can update the untouched priority without wiping already-entered content.
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      openedRef.current = false;
+      return;
+    }
+    if (openedRef.current) return;
+    openedRef.current = true;
     setUrl("");
     setReason("");
-    setPriority("C");
+    setPriority(defaultPriority);
+    setPriorityTouched(false);
     setError(null);
     setSubmitting(false);
     setDuplicates(null);
+  }, [open, defaultPriority]);
+
+  useEffect(() => {
+    if (!open || priorityTouched) return;
+    setPriority(defaultPriority);
+  }, [open, defaultPriority, priorityTouched]);
+
+  // Focus when opened.
+  useEffect(() => {
+    if (!open) return;
     const id = window.setTimeout(() => inputRef.current?.focus(), 30);
     return () => window.clearTimeout(id);
   }, [open]);
@@ -244,7 +271,10 @@ export function ImportUrlModal({ open, onClose, onImported, onOpenExisting }: Im
                       type="button"
                       data-testid={`import-url-priority-${p}`}
                       aria-pressed={active}
-                      onClick={() => setPriority(p)}
+                      onClick={() => {
+                        setPriority(p);
+                        setPriorityTouched(true);
+                      }}
                       className={
                         active
                           ? "inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-accent-soft-bd bg-accent-soft px-2 py-1 font-medium text-accent-text text-sm"

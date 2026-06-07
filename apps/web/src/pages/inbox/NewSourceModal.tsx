@@ -33,22 +33,31 @@ export type NewSourceModalProps = {
   onClose: () => void;
   /** Called with the new source id after a successful create. */
   onCreated: (id: string) => void;
+  /** Priority seeded from Settings for newly imported sources. */
+  defaultPriority?: PriorityLabelInput;
 };
 
-export function NewSourceModal({ open, onClose, onCreated }: NewSourceModalProps) {
+export function NewSourceModal({
+  open,
+  onClose,
+  onCreated,
+  defaultPriority = "C",
+}: NewSourceModalProps) {
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [author, setAuthor] = useState("");
   const [publishedAt, setPublishedAt] = useState("");
   const [accessedAt, setAccessedAt] = useState(todayDateInput);
   const [body, setBody] = useState("");
-  const [priority, setPriority] = useState<PriorityLabelInput>("C");
+  const [priority, setPriority] = useState<PriorityLabelInput>(defaultPriority);
+  const [priorityTouched, setPriorityTouched] = useState(false);
   // When on, the body is parsed as Markdown (T068) — routed to `importMarkdownText`
   // so headings/code/links/lists become the structured document body, not flat text.
   const [asMarkdown, setAsMarkdown] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const openedRef = useRef(false);
 
   // A live read-back of the canonical URL the main process WILL derive (T014).
   // Uses the same pure `@interleave/core` normalizer the main process uses, so
@@ -56,19 +65,36 @@ export function NewSourceModal({ open, onClose, onCreated }: NewSourceModalProps
   // sends the raw URL and the main process re-derives + stores it.
   const canonicalPreview = useMemo(() => canonicalizeUrl(url), [url]);
 
-  // Reset + focus when opened.
+  // Reset the form once per open. Keep this guarded so an async Settings load
+  // can update the untouched priority without wiping already-entered content.
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      openedRef.current = false;
+      return;
+    }
+    if (openedRef.current) return;
+    openedRef.current = true;
     setTitle("");
     setUrl("");
     setAuthor("");
     setPublishedAt("");
     setAccessedAt(todayDateInput());
     setBody("");
-    setPriority("C");
+    setPriority(defaultPriority);
+    setPriorityTouched(false);
     setAsMarkdown(false);
     setError(null);
     setSubmitting(false);
+  }, [open, defaultPriority]);
+
+  useEffect(() => {
+    if (!open || priorityTouched) return;
+    setPriority(defaultPriority);
+  }, [open, defaultPriority, priorityTouched]);
+
+  // Focus when opened.
+  useEffect(() => {
+    if (!open) return;
     const id = window.setTimeout(() => inputRef.current?.focus(), 30);
     return () => window.clearTimeout(id);
   }, [open]);
@@ -295,7 +321,10 @@ export function NewSourceModal({ open, onClose, onCreated }: NewSourceModalProps
                       type="button"
                       data-testid={`new-source-priority-${p}`}
                       aria-pressed={active}
-                      onClick={() => setPriority(p)}
+                      onClick={() => {
+                        setPriority(p);
+                        setPriorityTouched(true);
+                      }}
                       className={
                         active
                           ? "inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-accent-soft-bd bg-accent-soft px-2 py-1 font-medium text-accent-text text-sm"

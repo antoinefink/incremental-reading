@@ -13,7 +13,7 @@
  * highlights, Anki) — only EPUB is wired in T067.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { appApi, isDesktop, type PriorityLabelInput } from "../../lib/appApi";
 import { Kbd } from "../../shell/Kbd";
@@ -112,6 +112,8 @@ export type ImportFileModalProps = {
   open: boolean;
   /** The file kind to start on (the user can switch EPUB / Markdown / HTML / highlights). */
   initialKind?: ImportFileKind;
+  /** Priority seeded from Settings for newly imported sources. */
+  defaultPriority?: PriorityLabelInput;
   onClose: () => void;
   /**
    * Called with the new source/book id after a single-source import (EPUB / Markdown /
@@ -130,6 +132,7 @@ export type ImportFileModalProps = {
 export function ImportFileModal({
   open,
   initialKind = "epub",
+  defaultPriority = "C",
   onClose,
   onImported,
   onHighlightsImported,
@@ -137,22 +140,36 @@ export function ImportFileModal({
   const [kind, setKind] = useState<ImportFileKind>(initialKind);
   const config = KIND_CONFIG[kind];
   const [path, setPath] = useState<string | null>(null);
-  const [priority, setPriority] = useState<PriorityLabelInput>("C");
+  const [priority, setPriority] = useState<PriorityLabelInput>(defaultPriority);
+  const [priorityTouched, setPriorityTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // A success summary (highlights import surfaces counts before the modal closes).
   const [success, setSuccess] = useState<string | null>(null);
+  const openedRef = useRef(false);
 
-  // Reset on open (seed the kind from the prop the chip passed).
+  // Reset once per open (seed the kind from the prop the chip passed). Keep this
+  // guarded so an async Settings load can update only untouched priority state.
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      openedRef.current = false;
+      return;
+    }
+    if (openedRef.current) return;
+    openedRef.current = true;
     setKind(initialKind);
     setPath(null);
-    setPriority("C");
+    setPriority(defaultPriority);
+    setPriorityTouched(false);
     setError(null);
     setSuccess(null);
     setSubmitting(false);
-  }, [open, initialKind]);
+  }, [open, initialKind, defaultPriority]);
+
+  useEffect(() => {
+    if (!open || priorityTouched) return;
+    setPriority(defaultPriority);
+  }, [open, defaultPriority, priorityTouched]);
 
   // Open the native picker (main-side) and remember the chosen path.
   const choose = useCallback(async () => {
@@ -337,7 +354,10 @@ export function ImportFileModal({
                       type="button"
                       data-testid={`import-file-priority-${p}`}
                       aria-pressed={active}
-                      onClick={() => setPriority(p)}
+                      onClick={() => {
+                        setPriority(p);
+                        setPriorityTouched(true);
+                      }}
                       className={
                         active
                           ? "inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-accent-soft-bd bg-accent-soft px-2 py-1 font-medium text-accent-text text-sm"

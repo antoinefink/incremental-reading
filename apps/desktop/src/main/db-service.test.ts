@@ -254,6 +254,23 @@ describe("DbService", () => {
     svc.close();
   });
 
+  it("uses the configured default source priority when manual imports omit priority", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    svc.updateAppSettings({ defaultSourcePriority: 0.875 });
+
+    const { id: defaultedId } = svc.importManualSource({ title: "Default priority source" });
+    const { id: explicitId } = svc.importManualSource({
+      title: "Explicit low priority source",
+      priority: "D",
+    });
+
+    expect(svc.getInboxItem(defaultedId).detail?.summary.priority).toBe(0.875);
+    expect(svc.getInboxItem(explicitId).detail?.summary.priority).toBe(0.125);
+
+    svc.close();
+  });
+
   it("surfaces derived provenance through the inbox detail (T014)", () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });

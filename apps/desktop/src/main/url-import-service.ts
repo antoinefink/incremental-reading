@@ -119,6 +119,8 @@ export interface UrlImportServiceDeps {
    * the service test can mock the network without a live server.
    */
   readonly fetchImpl?: typeof fetch;
+  /** Source priority to use when an import caller omits one. */
+  readonly getDefaultPriority?: () => PriorityLabel;
   /**
    * Permit loopback / private hosts (DEV/E2E ONLY). The E2E serves its article
    * fixture from a `127.0.0.1` HTTP server, which the SSRF guard normally blocks;
@@ -202,6 +204,7 @@ export class UrlImportService {
   private readonly inbox: InboxQuery;
   private readonly assetsDir: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly getDefaultPriority: () => PriorityLabel;
   private readonly allowLoopback: boolean;
 
   constructor(deps: UrlImportServiceDeps) {
@@ -212,7 +215,12 @@ export class UrlImportService {
     this.inbox = new InboxQuery(deps.repositories);
     this.assetsDir = deps.assetsDir;
     this.fetchImpl = deps.fetchImpl ?? fetch;
+    this.getDefaultPriority = deps.getDefaultPriority ?? (() => "C");
     this.allowLoopback = deps.allowLoopback ?? false;
+  }
+
+  private resolvePriority(priority?: PriorityLabel): PriorityLabel {
+    return priority ?? this.getDefaultPriority();
   }
 
   /**
@@ -227,7 +235,7 @@ export class UrlImportService {
       html,
       finalUrl,
       originalUrl: entered,
-      priority: input.priority ?? "C",
+      priority: this.resolvePriority(input.priority),
       reasonAdded: input.reasonAdded ?? null,
       forceNewVersion: input.forceNewVersion ?? false,
     });
@@ -249,7 +257,7 @@ export class UrlImportService {
       html: input.html,
       finalUrl,
       originalUrl,
-      priority: input.priority ?? "C",
+      priority: this.resolvePriority(input.priority),
       reasonAdded: input.reasonAdded ?? null,
       titleOverride: input.title ?? null,
       accessedAt: input.accessedAt ?? null,
@@ -291,7 +299,7 @@ export class UrlImportService {
     const accessedAt = input.accessedAt ?? new Date().toISOString();
     const canonicalUrl = canonicalizeUrl(url);
     const reasonAdded = composeSelectionReason(input.reasonAdded, input.blockContext);
-    const priority = input.priority ?? "C";
+    const priority = this.resolvePriority(input.priority);
 
     const detail = this.db.transaction((tx) => {
       this.sources.createWithDocumentWithin(tx, {
