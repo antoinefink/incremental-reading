@@ -107,6 +107,23 @@ export interface ProseMirrorMathNode {
   readonly attrs: { readonly latex: string; readonly display: boolean };
 }
 
+/**
+ * A locally-owned article image (`article-image://<source_id>/<asset_id>`) stored
+ * as a constrained block atom. The renderer never receives raw filesystem paths
+ * or remote URLs; width/height are safe numeric hints and alt/title are plain
+ * descriptive text.
+ */
+export interface ProseMirrorImageNode {
+  readonly type: "image";
+  readonly attrs: Partial<BlockIdAttrs> & {
+    readonly src: string;
+    readonly alt?: string | null;
+    readonly title?: string | null;
+    readonly width?: number | null;
+    readonly height?: number | null;
+  };
+}
+
 /** A horizontal rule — a leaf block. */
 export interface ProseMirrorHorizontalRuleNode {
   readonly type: "horizontalRule";
@@ -152,7 +169,8 @@ export type ProseMirrorBlockNode =
   | ProseMirrorOrderedListNode
   | ProseMirrorListItemNode
   | ProseMirrorCodeBlockNode
-  | ProseMirrorHorizontalRuleNode;
+  | ProseMirrorHorizontalRuleNode
+  | ProseMirrorImageNode;
 
 /**
  * A constrained ProseMirror `doc` node. Admits the full constrained block set
@@ -176,6 +194,7 @@ export type ProseMirrorBlockType =
   | "blockquote"
   | "listItem"
   | "codeBlock"
+  | "image"
   | "horizontalRule";
 
 /** One stable block descriptor mirroring a row-bearing node in the produced doc. */

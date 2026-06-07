@@ -23,6 +23,8 @@ interface IndexHarness {
   registerRendererSchemePrivileges: ReturnType<typeof vi.fn>;
   registerMediaProtocol: ReturnType<typeof vi.fn>;
   registerMediaSchemePrivileges: ReturnType<typeof vi.fn>;
+  registerArticleImageProtocol: ReturnType<typeof vi.fn>;
+  registerArticleImageSchemePrivileges: ReturnType<typeof vi.fn>;
   installApplicationMenu: ReturnType<typeof vi.fn>;
   createMainWindow: ReturnType<typeof vi.fn>;
   setCaptureEnabled: ReturnType<typeof vi.fn>;
@@ -96,6 +98,8 @@ async function loadIndex(options: {
   const registerRendererSchemePrivileges = vi.fn();
   const registerMediaProtocol = vi.fn();
   const registerMediaSchemePrivileges = vi.fn();
+  const registerArticleImageProtocol = vi.fn();
+  const registerArticleImageSchemePrivileges = vi.fn();
   const installApplicationMenu = vi.fn();
   const createMainWindow = vi.fn();
   const setCaptureEnabled = vi.fn();
@@ -126,6 +130,10 @@ async function loadIndex(options: {
   vi.doMock("./job-apply-handlers", () => ({ createJobApplyHandlers: vi.fn(() => ({})) }));
   vi.doMock("./capture-pairing", () => ({ setCaptureEnabled }));
   vi.doMock("./embedding-service", () => ({ embedJobSecrets: vi.fn(() => ({})) }));
+  vi.doMock("./article-image-protocol", () => ({
+    registerArticleImageProtocol,
+    registerArticleImageSchemePrivileges,
+  }));
   vi.doMock("./media-protocol", () => ({ registerMediaProtocol, registerMediaSchemePrivileges }));
   vi.doMock("./menu", () => ({ installApplicationMenu }));
   vi.doMock("./migrations", () => ({ resolveMigrationsDir: vi.fn(() => "/migrations") }));
@@ -169,6 +177,8 @@ async function loadIndex(options: {
     registerRendererSchemePrivileges,
     registerMediaProtocol,
     registerMediaSchemePrivileges,
+    registerArticleImageProtocol,
+    registerArticleImageSchemePrivileges,
     installApplicationMenu,
     createMainWindow,
     setCaptureEnabled,
@@ -214,6 +224,7 @@ describe("main entrypoint", () => {
     expect(harness.app.whenReady).not.toHaveBeenCalled();
     expect(harness.dbService.open).not.toHaveBeenCalled();
     expect(harness.registerMediaSchemePrivileges).toHaveBeenCalledOnce();
+    expect(harness.registerArticleImageSchemePrivileges).toHaveBeenCalledOnce();
   });
 
   it("bootstraps trusted services after ready and tears them down on will-quit", async () => {
@@ -228,6 +239,7 @@ describe("main entrypoint", () => {
 
     expect(harness.registerRendererSchemePrivileges).toHaveBeenCalledOnce();
     expect(harness.registerMediaSchemePrivileges).toHaveBeenCalledOnce();
+    expect(harness.registerArticleImageSchemePrivileges).toHaveBeenCalledOnce();
     expect(harness.dbService.open).toHaveBeenCalledWith("/data/app.sqlite", {
       migrationsDir: "/migrations",
       nativeBinding: "/native/better.node",
@@ -254,6 +266,10 @@ describe("main entrypoint", () => {
     expect(harness.captureController.startIfEnabled).toHaveBeenCalledOnce();
     expect(harness.registerRendererProtocol).toHaveBeenCalledOnce();
     expect(harness.registerMediaProtocol).toHaveBeenCalledWith(harness.dbService, "/data/assets");
+    expect(harness.registerArticleImageProtocol).toHaveBeenCalledWith(
+      harness.dbService,
+      "/data/assets",
+    );
     expect(harness.installApplicationMenu).toHaveBeenCalledOnce();
     expect(harness.createMainWindow).toHaveBeenCalledWith(
       expect.objectContaining({ devServerUrl: undefined }),

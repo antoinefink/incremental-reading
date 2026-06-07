@@ -1,9 +1,10 @@
 /**
  * sanitizeArticleHtml tests (T060) — the load-bearing security boundary.
  *
- * Asserts the allowlist drops scripts / styles / iframes / images / forms /
- * event handlers / `javascript:` URLs and keeps only the constrained tag set,
- * and that sanitizing is idempotent (sanitizing twice == once).
+ * Asserts the allowlist drops scripts / styles / iframes / remote images / forms
+ * / event handlers / `javascript:` URLs and keeps only the constrained tag set,
+ * including already-local `article-image://` refs, and that sanitizing is
+ * idempotent (sanitizing twice == once).
  */
 
 import { readFileSync } from "node:fs";
@@ -16,7 +17,7 @@ const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "__f
 const fixture = (name: string): string => readFileSync(path.join(fixturesDir, name), "utf8");
 
 describe("sanitizeArticleHtml", () => {
-  it("strips scripts, styles, iframes, images, svg, and forms entirely", () => {
+  it("strips scripts, styles, iframes, remote images, svg, and forms entirely", () => {
     const dirty = `
       <h1>Title</h1>
       <script>alert('x')</script>
@@ -36,6 +37,47 @@ describe("sanitizeArticleHtml", () => {
     expect(clean).not.toMatch(/alert\(/);
     expect(clean).toContain("Body text.");
     expect(clean).toContain("Title");
+  });
+
+  it("allows only already-local article-image refs with safe image attrs", () => {
+    const clean = sanitizeArticleHtml(`
+      <p>
+        <img
+          src="article-image://src_1/asset-1"
+          alt=" Figure
+          one "
+          title="  Local figure  "
+          width="640"
+          height="480"
+          srcset="https://remote.test/a.png 2x"
+          loading="eager"
+          onerror="steal()"
+          style="width:100vw"
+        />
+      </p>`);
+
+    expect(clean).toContain("<img");
+    expect(clean).toContain('src="article-image://src_1/asset-1"');
+    expect(clean).toContain('alt="Figure one"');
+    expect(clean).toContain('title="Local figure"');
+    expect(clean).toContain('width="640"');
+    expect(clean).toContain('height="480"');
+    expect(clean).not.toMatch(/srcset|loading|onerror|style=/i);
+  });
+
+  it("drops malformed or non-local image refs", () => {
+    const clean = sanitizeArticleHtml(`
+      <img src="https://remote.test/a.png" alt="remote" />
+      <img src="//remote.test/a.png" alt="protocol relative" />
+      <img src="file:///etc/passwd" alt="file" />
+      <img src="data:image/png;base64,aaa" alt="data" />
+      <img src="article-image://src_1/../asset_1" alt="traversal" />
+      <img src="article-image://src_1/asset%2F1" alt="encoded slash" />
+      <img src="article-image://src_1" alt="missing asset" />
+    `);
+
+    expect(clean).not.toMatch(/<img/i);
+    expect(clean).not.toMatch(/remote\.test|file:\/\/|data:image|article-image:\/\//i);
   });
 
   it("removes inline event handlers and style attributes", () => {

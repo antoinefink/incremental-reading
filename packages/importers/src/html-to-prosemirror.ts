@@ -10,8 +10,9 @@
  *
  * Stable block ids (T016) sit on exactly the OUTERMOST block of each row, obeying
  * `shouldCarryBlockId` / `BLOCK_ID_NODE_TYPES`: the id is on a top-level
- * paragraph/heading/codeBlock/horizontalRule, or on a `listItem`/`blockquote`
- * (NOT its inner paragraph), and NEVER on the `bulletList`/`orderedList`
+ * paragraph/heading/codeBlock/horizontalRule/image, or on a
+ * `listItem`/`blockquote` (NOT its inner paragraph/image), and NEVER on the
+ * `bulletList`/`orderedList`
  * containers. The parallel `blocks` list mirrors those row-bearing nodes so
  * `document_blocks` stays in lock-step with the doc.
  *
@@ -54,6 +55,9 @@ interface MinimalNode {
 
 const ELEMENT_NODE = 1;
 const TEXT_NODE = 3;
+const ARTICLE_IMAGE_SRC_RE = /^article-image:\/\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$/;
+const MAX_IMAGE_DIMENSION = 20_000;
+const MAX_IMAGE_TEXT_ATTR_LENGTH = 500;
 
 /** Map an `h1`–`h6` tag to a clamped 1–3 heading level (per ALLOWED_HEADING_LEVELS). */
 function headingLevel(tag: string): ProseMirrorHeadingLevel {
@@ -66,6 +70,45 @@ function headingLevel(tag: string): ProseMirrorHeadingLevel {
 /** Children of a node as a plain array. */
 function childrenOf(node: MinimalNode): MinimalNode[] {
   return Array.from(node.childNodes);
+}
+
+function hasImageDescendant(node: MinimalNode): boolean {
+  for (const child of childrenOf(node)) {
+    if (child.nodeType !== ELEMENT_NODE) continue;
+    if (child.nodeName.toLowerCase() === "img") return true;
+    if (hasImageDescendant(child)) return true;
+  }
+  return false;
+}
+
+function cleanImageSrc(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const src = value.trim();
+  return ARTICLE_IMAGE_SRC_RE.test(src) ? src : null;
+}
+
+function replaceControlCharacters(value: string): string {
+  return Array.from(value, (char) => {
+    const code = char.charCodeAt(0);
+    return code < 0x20 || code === 0x7f ? " " : char;
+  }).join("");
+}
+
+function cleanImageTextAttr(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const text = replaceControlCharacters(value)
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_IMAGE_TEXT_ATTR_LENGTH);
+  return text.length > 0 ? text : null;
+}
+
+function cleanImageDimension(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const raw = value.trim();
+  if (!/^[1-9]\d{0,4}$/.test(raw)) return null;
+  const dimension = Number.parseInt(raw, 10);
+  return dimension <= MAX_IMAGE_DIMENSION ? dimension : null;
 }
 
 /** The active inline marks while walking inline content. */
@@ -152,6 +195,13 @@ function inlineText(nodes: readonly ProseMirrorInlineNode[]): string {
     .trim();
 }
 
+function imagePlainText(attrs: {
+  readonly alt?: string | null;
+  readonly title?: string | null;
+}): string {
+  return attrs.alt ?? attrs.title ?? "";
+}
+
 /** Accumulator threaded through the walk: the doc blocks + the parallel block list + plainText. */
 interface Acc {
   readonly mint: BlockIdMinter;
@@ -218,6 +268,84 @@ function buildHorizontalRule(acc: Acc): ProseMirrorHorizontalRuleNode {
   return { type: "horizontalRule", attrs: { blockId: id } };
 }
 
+/** Build a constrained article image block from an already-sanitized local img. */
+function buildImage(
+  el: MinimalNode,
+  acc: Acc,
+  options: { readonly recordRow?: boolean } = {},
+): ProseMirrorBlockNode | null {
+  const src = cleanImageSrc(el.getAttribute?.("src"));
+  if (!src) return null;
+  const recordRow = options.recordRow ?? true;
+  const id = recordRow ? acc.mint() : null;
+
+  const attrs = {
+    ...(id ? { blockId: id } : {}),
+    src,
+    alt: cleanImageTextAttr(el.getAttribute?.("alt")),
+    title: cleanImageTextAttr(el.getAttribute?.("title")),
+    width: cleanImageDimension(el.getAttribute?.("width")),
+    height: cleanImageDimension(el.getAttribute?.("height")),
+  };
+  const text = imagePlainText(attrs);
+  if (id) recordBlock(acc, "image", id);
+  if (text.length > 0) acc.plainText.push(text);
+
+  return {
+    type: "image",
+    attrs,
+  } satisfies ProseMirrorBlockNode;
+}
+
+function pushIdlessParagraph(
+  out: ProseMirrorBlockNode[],
+  acc: Acc,
+  inline: ProseMirrorInlineNode[],
+): void {
+  const trimmed = trimInline(inline);
+  if (trimmed.length === 0) return;
+  acc.plainText.push(inlineText(trimmed));
+  out.push({ type: "paragraph", content: trimmed });
+}
+
+function buildInnerParagraphWithImages(
+  el: MinimalNode,
+  acc: Acc,
+  out: ProseMirrorBlockNode[],
+): void {
+  let directInline: ProseMirrorInlineNode[] = [];
+  const flush = (): void => {
+    pushIdlessParagraph(out, acc, directInline);
+    directInline = [];
+  };
+
+  const walkChildren = (nodes: readonly MinimalNode[]): void => {
+    for (const node of nodes) {
+      if (node.nodeType === TEXT_NODE) {
+        const text = (node.textContent ?? "").replace(/\s+/g, " ");
+        if (text.trim().length > 0) directInline.push({ type: "text", text });
+        continue;
+      }
+      if (node.nodeType !== ELEMENT_NODE) continue;
+      const tag = node.nodeName.toLowerCase();
+      if (tag === "img") {
+        flush();
+        const image = buildImage(node, acc, { recordRow: false });
+        if (image) out.push(image);
+        continue;
+      }
+      if (hasImageDescendant(node)) {
+        walkChildren(childrenOf(node));
+        continue;
+      }
+      collectInline(node, [], directInline);
+    }
+  };
+
+  walkChildren(childrenOf(el));
+  flush();
+}
+
 /**
  * Build the inner block children of a blockquote / list item — a wrapper whose id
  * lives on the wrapper, so the inner paragraphs/blocks carry NO id (per
@@ -247,6 +375,10 @@ function buildInnerBlocks(el: MinimalNode, acc: Acc): ProseMirrorBlockNode[] {
     const tag = child.nodeName.toLowerCase();
     if (tag === "p") {
       flushInline();
+      if (hasImageDescendant(child)) {
+        buildInnerParagraphWithImages(child, acc, out);
+        continue;
+      }
       const inner = trimInline(
         ((): ProseMirrorInlineNode[] => {
           const o: ProseMirrorInlineNode[] = [];
@@ -264,6 +396,12 @@ function buildInnerBlocks(el: MinimalNode, acc: Acc): ProseMirrorBlockNode[] {
       flushInline();
       const list = buildList(child, tag, acc);
       if (list) out.push(list);
+      continue;
+    }
+    if (tag === "img") {
+      flushInline();
+      const image = buildImage(child, acc, { recordRow: false });
+      if (image) out.push(image);
       continue;
     }
     if (tag === "blockquote") {
@@ -309,6 +447,7 @@ function buildListItem(el: MinimalNode, acc: Acc): ProseMirrorListItemNode | nul
   recordBlock(acc, "listItem", id);
   const inner = buildInnerBlocks(el, acc);
   const content = inner.length > 0 ? inner : [{ type: "paragraph" as const }];
+  if (content[0]?.type !== "paragraph") content.unshift({ type: "paragraph" });
   return { type: "listItem", attrs: { blockId: id }, content };
 }
 
@@ -340,6 +479,7 @@ function buildTopLevel(el: MinimalNode, acc: Acc): ProseMirrorBlockNode | null {
   if (tag === "ul" || tag === "ol") return buildList(el, tag, acc);
   if (tag === "pre") return buildCodeBlock(el, acc);
   if (tag === "hr") return buildHorizontalRule(acc);
+  if (tag === "img") return buildImage(el, acc);
   // An unknown / wrapper block (div, section, article, code-as-block) ⇒ treat its
   // children as top-level so we never silently lose content. Falls through below.
   return null;
@@ -385,7 +525,7 @@ export function htmlToProseMirrorDoc(
     pendingInline = [];
   };
 
-  const KNOWN_BLOCK = /^(h[1-6]|p|blockquote|ul|ol|pre|hr)$/;
+  const KNOWN_BLOCK = /^(h[1-6]|p|blockquote|ul|ol|pre|hr|img)$/;
   const walk = (nodes: MinimalNode[]): void => {
     for (const node of nodes) {
       if (node.nodeType === TEXT_NODE) {
@@ -395,6 +535,11 @@ export function htmlToProseMirrorDoc(
       }
       if (node.nodeType !== ELEMENT_NODE) continue;
       const tag = node.nodeName.toLowerCase();
+      if (tag === "p" && hasImageDescendant(node)) {
+        flushPendingInline();
+        walk(childrenOf(node));
+        continue;
+      }
       if (KNOWN_BLOCK.test(tag)) {
         flushPendingInline();
         const built = buildTopLevel(node, acc);
@@ -412,9 +557,14 @@ export function htmlToProseMirrorDoc(
         tag === "b" ||
         tag === "em" ||
         tag === "i" ||
+        tag === "u" ||
         tag === "code" ||
         tag === "a"
       ) {
+        if (hasImageDescendant(node)) {
+          walk(childrenOf(node));
+          continue;
+        }
         // Inline element at the top level ⇒ accumulate into a paragraph.
         collectInline(node, [], pendingInline);
         continue;

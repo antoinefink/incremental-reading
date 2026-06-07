@@ -175,6 +175,58 @@ describe("htmlToProseMirrorDoc", () => {
     expect(plainText).toBe("H\n\nFirst.\n\nSecond.");
   });
 
+  it("converts already-local article images into constrained image nodes", () => {
+    const html = sanitizeArticleHtml(`
+      <p>Before.</p>
+      <p><img src="article-image://src_1/asset_1" alt="Architecture diagram" title="Figure title" width="640" height="480" /></p>
+      <p>After.</p>`);
+    const { doc, plainText, blocks } = htmlToProseMirrorDoc(html, counterMinter());
+
+    expect(doc.content.map((n) => n.type)).toEqual(["paragraph", "image", "paragraph"]);
+    const image = doc.content[1];
+    expect(image?.type).toBe("image");
+    if (image?.type === "image") {
+      expect(image.attrs).toEqual({
+        blockId: "blk-1",
+        src: "article-image://src_1/asset_1",
+        alt: "Architecture diagram",
+        title: "Figure title",
+        width: 640,
+        height: 480,
+      });
+    }
+    expect(plainText).toBe("Before.\n\nArchitecture diagram\n\nAfter.");
+    expect(blocks.map((b) => b.blockType)).toEqual(["paragraph", "image", "paragraph"]);
+    expect(blocks.map((b) => b.stableBlockId)).toEqual(["blk-0", "blk-1", "blk-2"]);
+    expect(() => buildSchema().nodeFromJSON(doc)).not.toThrow();
+  });
+
+  it("splits mixed image paragraphs into valid block content", () => {
+    const html = sanitizeArticleHtml(
+      `<p>Before <img src="article-image://src_1/asset_1" alt="Inline figure" /> after.</p>`,
+    );
+    const { doc, plainText, blocks } = htmlToProseMirrorDoc(html, counterMinter());
+
+    expect(doc.content.map((n) => n.type)).toEqual(["paragraph", "image", "paragraph"]);
+    expect(plainText).toBe("Before\n\nInline figure\n\nafter.");
+    expect(blocks.map((b) => b.blockType)).toEqual(["paragraph", "image", "paragraph"]);
+    expect(() => buildSchema().nodeFromJSON(doc)).not.toThrow();
+  });
+
+  it("keeps images nested in list item and blockquote paragraphs", () => {
+    const html = sanitizeArticleHtml(`
+      <ul><li><p>Before <img src="article-image://src_1/asset_1" alt="List figure" /> after.</p></li></ul>
+      <blockquote><p><img src="article-image://src_1/asset_2" alt="Quote figure" /></p></blockquote>`);
+    const { doc, plainText, blocks } = htmlToProseMirrorDoc(html, counterMinter());
+
+    expect(plainText).toContain("List figure");
+    expect(plainText).toContain("Quote figure");
+    expect(blocks.map((b) => b.blockType)).toEqual(["listItem", "blockquote"]);
+    expect(JSON.stringify(doc)).toContain("article-image://src_1/asset_1");
+    expect(JSON.stringify(doc)).toContain("article-image://src_1/asset_2");
+    expect(() => buildSchema().nodeFromJSON(doc)).not.toThrow();
+  });
+
   it("converts the list-and-blockquote-heavy fixture through the full pipeline", () => {
     // The fixture is the spec's "list-and-blockquote-heavy article"; run the real
     // pipeline (Readability → sanitize → convert) the service uses.

@@ -11,7 +11,8 @@
  *
  * The allowed set (per the M3 spec):
  *   Nodes  — Document, Paragraph, Text, Heading, Blockquote, BulletList,
- *            OrderedList, ListItem, CodeBlock, HorizontalRule, HardBreak
+ *            OrderedList, ListItem, CodeBlock, HorizontalRule, HardBreak,
+ *            constrained ArticleImage
  *   Marks  — Bold, Italic, Underline, Link, Code
  *   Util   — History (undo/redo), Dropcursor, Gapcursor, ListKeymap
  *
@@ -31,6 +32,7 @@ import type { Schema } from "@tiptap/pm/model";
 import StarterKit from "@tiptap/starter-kit";
 import { BlockId } from "./block-id";
 import type { BlockIdMinter } from "./block-ids";
+import { ArticleImage } from "./nodes/article-image";
 import { CODE_BLOCK_LANGUAGE_ATTR, CodeBlockLanguage } from "./nodes/code-block-language";
 import { MathNode } from "./nodes/math";
 
@@ -64,6 +66,9 @@ export const ALLOWED_NODE_NAMES = [
   // KaTeX at display time. The stored JSON keeps only the latex string + a
   // `display` flag — never pre-rendered HTML. See `nodes/math.ts`.
   "math",
+  // U1: a block article image that may only render already-local
+  // `article-image://<source_id>/<asset_id>` refs.
+  "image",
 ] as const;
 
 /**
@@ -141,10 +146,12 @@ export function buildExtensions(options: BuildExtensionsOptions = {}): Extension
       },
     }),
     // T072: the LaTeX `math` node + the constrained `codeBlock` (with the `language`
-    // attr). The KaTeX/Shiki render is added via `addNodeView` ONLY when the React
-    // editor passes a renderer; the stored shape is unchanged.
+    // attr), plus U1's constrained article `image` node. The KaTeX/Shiki render is
+    // added via `addNodeView` ONLY when the React editor passes a renderer; the
+    // stored shape is unchanged.
     mathExtension,
     codeBlockExtension,
+    ArticleImage,
     ...(withBlockIds ? [mintBlockId ? BlockId.configure({ mintBlockId }) : BlockId] : []),
     ...extra,
   ];

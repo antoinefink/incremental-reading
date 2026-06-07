@@ -23,6 +23,12 @@ import type { DbClient } from "./types";
 
 /** Metadata for a new asset (the bytes are written to the vault separately). */
 export interface CreateAssetInput {
+  /**
+   * Optional pre-minted asset id. Most callers let the repository mint, but URL
+   * article-image import needs the id before the source transaction so the stored
+   * document can reference `article-image://<source>/<asset>` atomically.
+   */
+  readonly id?: AssetId;
   readonly owningElementId: ElementId;
   readonly kind: AssetKind;
   readonly vaultRoot: VaultRoot;
@@ -57,7 +63,7 @@ export class AssetRepository {
    * {@link SourceRepository.createExtractWithin}: it inserts on the passed `tx`.
    */
   createWithin(tx: DbClient, input: CreateAssetInput): Asset {
-    const id = newAssetId();
+    const id = input.id ?? newAssetId();
     const createdAt = nowIso();
     tx.insert(assets)
       .values({

@@ -17,6 +17,10 @@ import path from "node:path";
 import type { ElementId } from "@interleave/core";
 import { app, BrowserWindow } from "electron";
 import { IPC_CHANNELS } from "../shared/channels";
+import {
+  registerArticleImageProtocol,
+  registerArticleImageSchemePrivileges,
+} from "./article-image-protocol";
 import { AutomaticBackupService } from "./automatic-backup-service";
 import { CaptureController } from "./capture-controller";
 import { setCaptureEnabled } from "./capture-pairing";
@@ -316,6 +320,9 @@ function bootstrap(): void {
   //     vault bytes to the reader's `<video>`/`<audio>` with HTTP Range support, in
   //     BOTH dev and production (a video reader needs it under the Vite dev server too).
   registerMediaProtocol(dbService, paths.assetsDir);
+  // 4c) The privileged `article-image://` protocol (U3) — streams downloaded article
+  //     images by source id + asset id only. The renderer never sees vault paths.
+  registerArticleImageProtocol(dbService, paths.assetsDir);
 
   // 5) Native application menu (T048) — standard macOS menu + Edit clipboard roles
   //    (so the editor chords work) + Help → "Keyboard shortcuts" (⌘/) opening the
@@ -333,6 +340,8 @@ if (!devServerUrl) {
 // The `media://` scheme (T073) must ALSO be registered as privileged before ready —
 // in dev AND production (a video reader streams from it under the Vite dev server too).
 registerMediaSchemePrivileges();
+// Same lifecycle requirement for local article images rendered by imported source documents.
+registerArticleImageSchemePrivileges();
 
 // Enforce a single instance so two processes never open the same SQLite file.
 const gotLock = app.requestSingleInstanceLock();

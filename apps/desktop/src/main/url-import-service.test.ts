@@ -43,6 +43,23 @@ const ARTICLE_HTML = `<!DOCTYPE html>
   </body>
 </html>`;
 
+const ARTICLE_WITH_IMAGE_HTML = `<!DOCTYPE html>
+<html lang="en">
+  <head><title>Illustrated Article</title></head>
+  <body>
+    <article>
+      <h1>Illustrated Article</h1>
+      <p>Before the figure.</p>
+      <p><img src="/media/figure.png" alt="Local figure" width="320" height="180"></p>
+      <p>After the figure.</p>
+    </article>
+  </body>
+</html>`;
+
+const PNG_BYTES = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x6c, 0x6f, 0x63, 0x61, 0x6c,
+]);
+
 let dir: string;
 let dbPath: string;
 let assetsDir: string;
@@ -71,6 +88,26 @@ function htmlFetch(html: string, init?: { status?: number; contentType?: string 
       status: init?.status ?? 200,
       headers: { "content-type": init?.contentType ?? "text/html; charset=utf-8" },
     }) as Response & { url: string };
+  }) as unknown as typeof fetch;
+}
+
+/** A mock `fetch` returning image bodies by absolute URL. */
+function routedImageFetch(
+  routes: Record<string, { body: Buffer; contentType: string }>,
+): typeof fetch {
+  return (async (input: Parameters<typeof fetch>[0]) => {
+    const url = String(input);
+    const route = routes[url];
+    if (!route) throw new Error(`unexpected fetch: ${url}`);
+    const response = new Response(route.body, {
+      status: 200,
+      headers: {
+        "content-type": route.contentType,
+        "content-length": String(route.body.byteLength),
+      },
+    });
+    Object.defineProperty(response, "url", { value: url });
+    return response;
   }) as unknown as typeof fetch;
 }
 
@@ -274,6 +311,31 @@ describe("UrlImportService dedup (T061)", () => {
     expect(inboxSourceCount()).toBe(1);
   });
 
+  it("does not content-hash dedup image-bearing articles whose figures differ", async () => {
+    const svc = makeService(
+      routedImageFetch({
+        "https://example.com/a.png": { body: PNG_BYTES, contentType: "image/png" },
+        "https://mirror.example.net/b.png": {
+          body: Buffer.concat([PNG_BYTES, Buffer.from("different")]),
+          contentType: "image/png",
+        },
+      }),
+    );
+    const firstHtml = `<article><h1>Same words</h1><p>Same text.</p><img src="/a.png"></article>`;
+    const secondHtml = `<article><h1>Same words</h1><p>Same text.</p><img src="/b.png"></article>`;
+
+    expectImported(
+      await svc.importFromHtml({ url: "https://example.com/article", html: firstHtml }),
+    );
+    const second = await svc.importFromHtml({
+      url: "https://mirror.example.net/article",
+      html: secondHtml,
+    });
+
+    expect(second.status).toBe("imported");
+    expect(inboxSourceCount()).toBe(2);
+  });
+
   it("forceNewVersion imports a SECOND source sharing the canonical url", async () => {
     const svc = makeService(htmlFetch(ARTICLE_HTML));
     const first = expectImported(await svc.importFromUrl({ url: "https://example.com/spacing" }));
@@ -445,5 +507,57 @@ describe("UrlImportService.importFromHtml (T060 capture entry point)", () => {
     ).toHaveLength(2);
     const doc = new DocumentRepository(handle.db).findById(id as never);
     expect(doc?.plainText).toContain("Spaced repetition exploits the spacing effect");
+  });
+
+  it("downloads article images into the vault and stores local image document nodes", async () => {
+    const svc = makeService(
+      routedImageFetch({
+        "https://example.com/media/figure.png": {
+          body: PNG_BYTES,
+          contentType: "image/png",
+        },
+      }),
+    );
+
+    const { id } = expectImported(
+      await svc.importFromHtml({
+        url: "https://example.com/illustrated",
+        html: ARTICLE_WITH_IMAGE_HTML,
+      }),
+    );
+
+    const doc = new DocumentRepository(handle.db).findById(id as never);
+    const docJson = doc?.prosemirrorJson as
+      | { content?: Array<{ type?: string; attrs?: Record<string, unknown> }> }
+      | undefined;
+    const imageNodes = docJson?.content?.filter((node) => node.type === "image") ?? [];
+    expect(imageNodes).toHaveLength(1);
+    expect(imageNodes[0]?.attrs).toMatchObject({
+      alt: "Local figure",
+      width: 320,
+      height: 180,
+    });
+
+    const imageAssets = new AssetRepository(handle.db).listForElementByKind(id as never, "image");
+    expect(imageAssets).toHaveLength(1);
+    const imageAsset = imageAssets[0];
+    expect(imageAsset).toBeDefined();
+    const imageSrc = imageNodes[0]?.attrs?.src;
+    expect(imageSrc).toBe(`article-image://${id}/${imageAsset?.id}`);
+    expect(doc?.plainText).toContain("Local figure");
+
+    const imageRel = imageAsset?.location.vaultPath.relativePath ?? "";
+    const imagePath = path.join(assetsDir, ...imageRel.split("/"));
+    expect(fs.existsSync(imagePath)).toBe(true);
+    expect(fs.readFileSync(imagePath)).toEqual(PNG_BYTES);
+    expect(imageAsset?.contentHash).toBe(sha256File(imagePath));
+    expect(imageAsset?.mime).toBe("image/png");
+    expect(imageAsset?.size).toBe(PNG_BYTES.byteLength);
+
+    const cleanedPath = path.join(assetsDir, "sources", id, "cleaned.html");
+    const cleaned = fs.readFileSync(cleanedPath, "utf-8");
+    expect(cleaned).toContain(`article-image://${id}/${imageAsset?.id}`);
+    expect(cleaned).not.toContain("https://example.com/media/figure.png");
+    expect(cleaned).not.toContain("/media/figure.png");
   });
 });

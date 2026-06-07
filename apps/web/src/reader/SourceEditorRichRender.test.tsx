@@ -1,11 +1,12 @@
 /**
- * SourceEditor math + code render test (T072).
+ * SourceEditor rich render test (T072 + U1).
  *
  * The constrained editor (used for SOURCE and, reused, EXTRACT bodies) renders a
  * `math` node via the KaTeX NodeView and a `language`-tagged `codeBlock` via the
  * Shiki NodeView. This asserts that a doc containing a block formula + an inline
- * formula + a code block renders the math (KaTeX) and the code (with the editable
- * text intact) in the editor body — the SAME render path the review face uses.
+ * formula + a code block + a local article image renders the math (KaTeX), the
+ * code (with the editable text intact), and the image without exposing a remote
+ * URL or filesystem path.
  */
 
 import { SourceEditor } from "@interleave/editor";
@@ -33,11 +34,22 @@ const DOC = {
       attrs: { blockId: "blk-code", language: "python" },
       content: [{ type: "text", text: "print('hi')" }],
     },
+    {
+      type: "image",
+      attrs: {
+        blockId: "blk-image",
+        src: "article-image://src_1/asset_1",
+        alt: "Architecture diagram",
+        title: "Figure title",
+        width: 640,
+        height: 480,
+      },
+    },
   ],
 };
 
-describe("SourceEditor rich render (T072)", () => {
-  it("renders math nodes (KaTeX) and a code block in the body", async () => {
+describe("SourceEditor rich render (T072 + U1)", () => {
+  it("renders math nodes, a code block, and a local article image in the body", async () => {
     render(<SourceEditor initialDoc={DOC} editable={false} />);
 
     // The KaTeX math NodeViews render (block + inline).
@@ -57,5 +69,12 @@ describe("SourceEditor rich render (T072)", () => {
     });
     expect(screen.getByTestId("code-node")).toHaveTextContent("print('hi')");
     expect(screen.getByTestId("code-node").getAttribute("data-language")).toBe("python");
+
+    const image = screen.getByRole("img", { name: "Architecture diagram" });
+    expect(image.getAttribute("src")).toBe("article-image://src_1/asset_1");
+    expect(image.getAttribute("title")).toBe("Figure title");
+    expect(image.getAttribute("width")).toBe("640");
+    expect(image.getAttribute("height")).toBe("480");
+    expect(image.getAttribute("src")).not.toMatch(/^(https?:|file:|data:)/);
   });
 });

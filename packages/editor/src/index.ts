@@ -79,6 +79,18 @@ export {
   PROCESSED_MARK_NAME,
   ProcessedSpan,
 } from "./marks/processed";
+// Article images (U1): constrained local `article-image://source/asset` document nodes.
+export {
+  ARTICLE_IMAGE_NODE_NAME,
+  ARTICLE_IMAGE_PROTOCOL,
+  ARTICLE_IMAGE_SRC_PREFIX,
+  ArticleImage,
+  type ArticleImageAttrs,
+  isArticleImageSrc,
+  normalizeArticleImageDimension,
+  normalizeArticleImageSrc,
+  normalizeArticleImageTextAttr,
+} from "./nodes/article-image";
 // codeBlock `language` attr (T072): the extension (the DOM attr is re-exported from schema).
 export { CodeBlockLanguage } from "./nodes/code-block-language";
 // Math (T072): the LaTeX `math` node + its attrs/DOM constants (schema-only, React-free).

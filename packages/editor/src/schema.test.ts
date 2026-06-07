@@ -58,16 +58,17 @@ describe("constrained schema — allowed set", () => {
     expect(schema.marks.strike).toBeUndefined();
   });
 
-  it("does NOT register disallowed nodes (table, image)", () => {
+  it("does NOT register disallowed nodes (table, taskList)", () => {
     expect(schema.nodes.table).toBeUndefined();
-    expect(schema.nodes.image).toBeUndefined();
     expect(schema.nodes.taskList).toBeUndefined();
   });
 
-  // T072: the schema's sanctioned growth — a `math` node + a `codeBlock` language attr.
-  it("registers the math node and a codeBlock language attr (T072)", () => {
+  // T072/U1: sanctioned schema growth — math/code language + constrained images.
+  it("registers the math node, image node, and a codeBlock language attr", () => {
     expect(schema.nodes.math, "math node should exist").toBeDefined();
     expect((ALLOWED_NODE_NAMES as readonly string[]).includes("math")).toBe(true);
+    expect(schema.nodes.image, "image node should exist").toBeDefined();
+    expect((ALLOWED_NODE_NAMES as readonly string[]).includes("image")).toBe(true);
     const codeBlockAttrs = schema.nodes.codeBlock?.spec.attrs ?? {};
     expect(Object.keys(codeBlockAttrs)).toContain("language");
   });
@@ -185,6 +186,17 @@ describe("constrained schema — allowed set", () => {
             },
           ],
         },
+        {
+          type: "image",
+          attrs: {
+            blockId: "blk-image",
+            src: "article-image://src_1/asset_1",
+            alt: "Figure",
+            title: "Figure title",
+            width: 640,
+            height: 480,
+          },
+        },
         { type: "codeBlock", content: [{ type: "text", text: "const x = 1;" }] },
         { type: "horizontalRule" },
       ],
@@ -200,8 +212,45 @@ describe("constrained schema — allowed set", () => {
     expect(nodes.has("bulletList")).toBe(true);
     expect(nodes.has("orderedList")).toBe(true);
     expect(nodes.has("listItem")).toBe(true);
+    expect(nodes.has("image")).toBe(true);
     expect(nodes.has("codeBlock")).toBe(true);
     expect(nodes.has("horizontalRule")).toBe(true);
+  });
+
+  it("round-trips only the constrained article image attrs", () => {
+    const result = roundTrip({
+      type: "doc",
+      content: [
+        {
+          type: "image",
+          attrs: {
+            blockId: "blk-image",
+            src: "article-image://src_1/asset_1",
+            alt: "Figure",
+            title: "Figure title",
+            width: 640,
+            height: 480,
+            onerror: "steal()",
+            srcset: "https://remote.test/a.png 2x",
+          },
+        },
+      ],
+    });
+
+    const json = result.toJSON() as {
+      content: { type: string; attrs?: Record<string, unknown> }[];
+    };
+    expect(json.content[0]).toEqual({
+      type: "image",
+      attrs: {
+        blockId: "blk-image",
+        src: "article-image://src_1/asset_1",
+        alt: "Figure",
+        title: "Figure title",
+        width: 640,
+        height: 480,
+      },
+    });
   });
 
   it("toggles underline over a text selection (the Mod-u command target)", () => {
@@ -246,10 +295,10 @@ describe("constrained schema — rejects disallowed content", () => {
     expect(schema.marks.strike).toBeUndefined();
   });
 
-  it("throws when a disallowed NODE type is present (e.g. an image)", () => {
+  it("throws when a disallowed NODE type is present (e.g. a table)", () => {
     const doc = {
       type: "doc",
-      content: [{ type: "image", attrs: { src: "x.png" } }],
+      content: [{ type: "table", content: [] }],
     };
     expect(() => PmNode.fromJSON(schema, doc)).toThrow();
   });

@@ -43,6 +43,7 @@ import {
   type SourceDuplicateMatch,
   type SourceRepository,
 } from "@interleave/local-db";
+import { importArticleImages } from "./article-image-import";
 import { sha256 } from "./backup-manifest";
 import {
   assertImportableUrl as assertFetchableUrl,
@@ -367,14 +368,16 @@ export class UrlImportService {
    * mint id → Readability → sanitize → HTML→PM → write snapshots + create source
    * in ONE transaction → return the inbox summary.
    */
-  private runPipeline(input: PipelineInput): UrlImportResult {
+  private async runPipeline(input: PipelineInput): Promise<UrlImportResult> {
     // 2. Mint the source id up front so the vault path is known before the row.
     const sourceId = newElementId();
 
-    // 3. Pure transforms (importers package): article → clean HTML → PM doc.
+    // 3. Pure transforms (importers package): article → clean HTML fingerprint.
+    // Image-bearing articles skip content-hash dedup because a text-only hash can
+    // false-match two pages whose words are identical but figures differ.
     const article = extractArticle(input.html, { url: input.finalUrl });
-    const cleanedHtml = sanitizeArticleHtml(article.contentHtml);
-    const conversion: PlainTextConversion = htmlToProseMirrorDoc(cleanedHtml);
+    const fingerprintHtml = sanitizeArticleHtml(article.contentHtml);
+    const hasArticleImageCandidates = /<img\b/i.test(input.html);
 
     // Title fallback chain: explicit override → Readability title → page <title>
     // → the host. Never empty (so the inbox row always has a label).
@@ -386,21 +389,6 @@ export class UrlImportService {
       host ??
       "Untitled web page";
 
-    // When Readability found no body, note it so the user knows to read the
-    // saved original.html snapshot (the capture is never lost). If the user also
-    // supplied a reason, keep their intent first and append the diagnostic note
-    // (rather than dropping it) so the inbox row still signals the empty body.
-    const noBody = conversion.blocks.length === 0;
-    const noBodyNote = "Readability found no article body";
-    const userReason = nonEmpty(input.reasonAdded);
-    const reasonAdded = userReason
-      ? noBody
-        ? `${userReason} — ${noBodyNote}`
-        : userReason
-      : noBody
-        ? noBodyNote
-        : null;
-
     const accessedAt = input.accessedAt ?? new Date().toISOString();
     const canonicalUrl = canonicalizeUrl(input.finalUrl);
 
@@ -408,11 +396,9 @@ export class UrlImportService {
     // cleaned-snapshot hash WITHOUT writing anything (a duplicate writes no files).
     const sourceDir = path.join(this.assetsDir, "sources", sourceId);
     const originalRel = `sources/${sourceId}/original.html`;
-    const cleanedRel = `sources/${sourceId}/cleaned.html`;
     const originalBytes = Buffer.from(input.html, "utf-8");
-    const cleanedBytes = Buffer.from(cleanedHtml, "utf-8");
     const originalHash = sha256(originalBytes);
-    const cleanedHash = sha256(cleanedBytes);
+    const fingerprintHash = sha256(Buffer.from(fingerprintHtml, "utf-8"));
 
     // 3b. Dedup (T061) — BEFORE any vault write or DB row. Unless the user chose
     //     "import new version anyway", a live canonical-URL match OR a live
@@ -421,17 +407,52 @@ export class UrlImportService {
     //     the primary signal; the content hash is the same-article-different-URL
     //     backstop. Only live (non-soft-deleted) sources count.
     if (!input.forceNewVersion) {
-      const duplicates = this.findDuplicates(canonicalUrl, cleanedHash);
+      const duplicates = this.findDuplicates(
+        canonicalUrl,
+        fingerprintHash,
+        !hasArticleImageCandidates,
+      );
       if (duplicates.length > 0) {
         return { status: "duplicate", matches: duplicates.map(toDuplicateMatch) };
       }
     }
 
-    // 4. Write the snapshots to the vault FIRST (outside the tx — bytes on disk).
-    let wroteDir = false;
+    // 4. Write the images/snapshots to the vault FIRST (outside the tx — bytes on
+    // disk), then insert metadata/source rows in one transaction. Any failure
+    // after this point removes the whole source vault dir, including images that
+    // were downloaded before conversion or DB insertion failed.
     try {
+      const localizedImages = await importArticleImages({
+        html: article.contentHtml,
+        articleUrl: input.finalUrl,
+        sourceId: sourceId as ElementId,
+        assetsDir: this.assetsDir,
+        allowLoopback: this.allowLoopback,
+        fetchImpl: this.fetchImpl,
+      });
+      const localizedCleanedHtml = sanitizeArticleHtml(localizedImages.html);
+      const conversion: PlainTextConversion = htmlToProseMirrorDoc(localizedCleanedHtml);
+
+      // When Readability found no body, note it so the user knows to read the
+      // saved original.html snapshot (the capture is never lost). If the user also
+      // supplied a reason, keep their intent first and append the diagnostic note
+      // (rather than dropping it) so the inbox row still signals the empty body.
+      const noBody = conversion.blocks.length === 0;
+      const noBodyNote = "Readability found no article body";
+      const userReason = nonEmpty(input.reasonAdded);
+      const reasonAdded = userReason
+        ? noBody
+          ? `${userReason} — ${noBodyNote}`
+          : userReason
+        : noBody
+          ? noBodyNote
+          : null;
+
+      const cleanedRel = `sources/${sourceId}/cleaned.html`;
+      const cleanedBytes = Buffer.from(localizedCleanedHtml, "utf-8");
+      const cleanedHash = sha256(cleanedBytes);
+
       mkdirSync(sourceDir, { recursive: true });
-      wroteDir = true;
       writeFileSync(path.join(this.assetsDir, originalRel), originalBytes);
       writeFileSync(path.join(this.assetsDir, cleanedRel), cleanedBytes);
 
@@ -473,16 +494,17 @@ export class UrlImportService {
           mime: "text/html",
           size: cleanedBytes.byteLength,
         });
+        for (const asset of localizedImages.assetInputs) {
+          this.assetsRepo.createWithin(tx, { ...asset.input, id: asset.id });
+        }
       });
     } catch (err) {
-      // If the transaction rolled back (or a write failed), best-effort remove the
-      // partial vault dir so no orphan files linger.
-      if (wroteDir) {
-        try {
-          rmSync(sourceDir, { recursive: true, force: true });
-        } catch {
-          // Best-effort cleanup; surface the original error below.
-        }
+      // If conversion, snapshot writes, or the transaction failed, best-effort
+      // remove the partial vault dir so no orphan image/snapshot files linger.
+      try {
+        rmSync(sourceDir, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup; surface the original error below.
       }
       throw err;
     }
@@ -508,9 +530,11 @@ export class UrlImportService {
   private findDuplicates(
     canonicalUrl: string | null,
     cleanedHash: string,
+    includeContentHash: boolean,
   ): readonly SourceDuplicateMatch[] {
     const byUrl = this.dedup.findSourcesByCanonicalUrl(canonicalUrl);
     if (byUrl.length > 0) return byUrl;
+    if (!includeContentHash) return [];
     const byHash = this.dedup.findSourceBySnapshotHash(cleanedHash);
     return byHash ? [byHash] : [];
   }

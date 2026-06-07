@@ -61,6 +61,7 @@ export const BLOCK_ID_NODE_TYPES = [
   "heading",
   "blockquote",
   "codeBlock",
+  "image",
   "horizontalRule",
   "listItem",
 ] as const;

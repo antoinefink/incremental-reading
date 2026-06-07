@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  ARTICLE_IMAGE_NODE_NAME,
   buildSchema,
   EDITOR_PACKAGE,
   flashBlock,
+  isArticleImageSrc,
   jumpToReadPoint,
   jumpToSource,
   newBlockId,
@@ -20,5 +22,7 @@ describe("editor barrel", () => {
     expect(typeof flashBlock).toBe("function");
     expect(typeof toPlainText).toBe("function");
     expect(typeof SourceEditor).toBe("function");
+    expect(ARTICLE_IMAGE_NODE_NAME).toBe("image");
+    expect(isArticleImageSrc("article-image://src_1/asset_1")).toBe(true);
   });
 });

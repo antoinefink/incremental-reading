@@ -141,6 +141,38 @@ describe("toPlainText", () => {
     expect(toPlainText(doc)).toBe("$$E=mc^2$$\nenergy $a^2+b^2$ end\nprint('hi')");
   });
 
+  it("flattens article images to useful alt/title text", () => {
+    const doc = {
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "Before" }] },
+        {
+          type: "image",
+          attrs: {
+            blockId: "blk-image-1",
+            src: "article-image://src_1/asset_1",
+            alt: "Architecture diagram",
+            title: "Figure title",
+            width: 640,
+            height: 480,
+          },
+        },
+        {
+          type: "image",
+          attrs: {
+            blockId: "blk-image-2",
+            src: "article-image://src_1/asset_2",
+            alt: "",
+            title: "Fallback title",
+          },
+        },
+        { type: "paragraph", content: [{ type: "text", text: "After" }] },
+      ],
+    };
+
+    expect(toPlainText(doc)).toBe("Before\nArchitecture diagram\nFallback title\nAfter");
+  });
+
   it("trims trailing empty blocks (no dangling newline)", () => {
     const doc = {
       type: "doc",

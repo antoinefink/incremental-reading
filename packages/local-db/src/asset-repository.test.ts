@@ -13,7 +13,7 @@
  * state to test: the cascade makes it unreachable.
  */
 
-import type { AssetKind, ElementId, VaultRoot } from "@interleave/core";
+import type { AssetId, AssetKind, ElementId, VaultRoot } from "@interleave/core";
 import type { DbHandle } from "@interleave/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AssetRepository } from "./asset-repository";
@@ -119,6 +119,35 @@ describe("AssetRepository — dedup/GC/verify queries (T059)", () => {
     expect(updated.size).toBe(250);
     expect(assets.listForElement(sourceId)).toHaveLength(1);
     expect(assets.findById(found.id)?.contentHash).toBe("hash-v2");
+  });
+
+  it("adopts a pre-minted id when creating asset metadata", () => {
+    const assets = new AssetRepository(handle.db);
+    const elements = new ElementRepository(handle.db);
+    const source = elements.create({
+      type: "source",
+      status: "inbox",
+      stage: "raw_source",
+      priority: 0.375,
+      title: "source for pre-minted image",
+    });
+    const id = "asset-pre-minted" as AssetId;
+
+    const created = assets.create({
+      id,
+      owningElementId: source.id,
+      kind: "image",
+      vaultRoot: "assets",
+      relativePath: "sources/source/images/001-hash.png",
+      contentHash: "hash-image",
+      mime: "image/png",
+      size: 12,
+    });
+
+    expect(created.id).toBe(id);
+    expect(assets.findById(id)?.location.vaultPath.relativePath).toBe(
+      "sources/source/images/001-hash.png",
+    );
   });
 
   it("referencedRelativePaths includes a soft-deleted-but-restorable owner's path (NOT an orphan)", () => {

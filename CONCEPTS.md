@@ -34,6 +34,12 @@ The inbox action that accepts a source into active processing and immediately op
 
 The local reading surface for processing a source inside the app, distinct from opening the source's external canonical URL.
 
+### Article image
+
+An image discovered while importing a web article and copied into the local Asset vault so the source remains readable without hotlinking the original remote image.
+
+Article images render from `article-image://<source_id>/<asset_id>` references in the source document. Electron main resolves those ids to source-owned image assets; the renderer never receives raw filesystem paths or remote image URLs.
+
 ## Public Surfaces
 
 ### Public site

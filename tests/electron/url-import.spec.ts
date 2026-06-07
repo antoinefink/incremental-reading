@@ -10,9 +10,10 @@
  *      (no generic `db.query`);
  *   2. pasting the URL fetches + cleans + snapshots the page MAIN-side and lands
  *      an `inbox` source whose body + provenance (originalUrl / canonicalUrl /
- *      accessedAt / snapshotKey) are stored;
+ *      accessedAt / snapshotKey) are stored, with article images downloaded into
+ *      the local vault and referenced through `article-image://`;
  *   3. after an APP RESTART against the same data dir, the source, its provenance,
- *      its body, and BOTH `original.html` + `cleaned.html` snapshot files survive.
+ *      its body, both snapshots, and its downloaded image files survive.
  *
  * NOTE: the fixture server binds 127.0.0.1, which the SSRF guard normally blocks —
  * the test sets INTERLEAVE_ALLOW_LOOPBACK_IMPORT=1 so the guard permits loopback
@@ -28,7 +29,11 @@ import { ensureBuilt, launchApp, makeDataDir } from "./launch";
 test.describe.configure({ mode: "serial" });
 
 const ARTICLE_PATH = "/spacing";
+const FIGURE_PATH = "/figures/spacing.png";
 const ARTICLE_TITLE = "The Spacing Effect";
+const FIGURE_BYTES = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x73, 0x70, 0x61, 0x63, 0x69, 0x6e, 0x67,
+]);
 const ARTICLE_HTML = `<!DOCTYPE html>
 <html lang="en">
   <head><meta charset="utf-8" /><title>${ARTICLE_TITLE} — A Guide</title></head>
@@ -41,6 +46,7 @@ const ARTICLE_HTML = `<!DOCTYPE html>
          when study sessions are distributed over time rather than crammed into a block.</p>
       <p>After each successful recall the optimal interval lengthens, because the memory
          trace has been reconsolidated and decays more slowly than before.</p>
+      <p><img src="${FIGURE_PATH}" alt="Spacing curve diagram" width="320" height="180" /></p>
       <p>The classic forgetting curve shows retention falls off exponentially without
          reinforcement; reviewing just before forgetting flattens that curve cheaply.</p>
     </article>
@@ -59,6 +65,14 @@ test.beforeAll(async () => {
     if (req.url === ARTICLE_PATH) {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(ARTICLE_HTML);
+      return;
+    }
+    if (req.url === FIGURE_PATH) {
+      res.writeHead(200, {
+        "content-type": "image/png",
+        "content-length": String(FIGURE_BYTES.byteLength),
+      });
+      res.end(FIGURE_BYTES);
       return;
     }
     res.writeHead(404, { "content-type": "text/plain" });
@@ -98,6 +112,39 @@ async function readSource(page: Page, id: string) {
     const { detail } = await api.inbox.get({ id: sourceId });
     return detail;
   }, id);
+}
+
+/** Read one source's persisted document through the bridge. */
+async function readDocument(page: Page, id: string) {
+  return page.evaluate(async (sourceId) => {
+    const api = window.appApi as unknown as {
+      documents: {
+        get(req: { elementId: string }): Promise<{
+          document: { prosemirrorJson: unknown; plainText: string } | null;
+        }>;
+      };
+    };
+    const { document } = await api.documents.get({ elementId: sourceId });
+    return document;
+  }, id);
+}
+
+function imageSrcsFromDoc(doc: unknown): string[] {
+  const out: string[] = [];
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const candidate = node as {
+      type?: unknown;
+      attrs?: { src?: unknown };
+      content?: unknown[];
+    };
+    if (candidate.type === "image" && typeof candidate.attrs?.src === "string") {
+      out.push(candidate.attrs.src);
+    }
+    for (const child of candidate.content ?? []) visit(child);
+  };
+  visit(doc);
+  return out;
 }
 
 test("the inbox exposes sources.importUrl on the bridge (not raw SQL)", async () => {
@@ -155,10 +202,25 @@ test("pasting a URL fetches + cleans + snapshots the page into an inbox source",
   expect(detail?.provenance.accessedAt).not.toBeNull();
   expect(detail?.bodyPreview).toContain("Spaced repetition exploits the spacing effect");
 
-  // The snapshot files exist in the vault (original.html + cleaned.html).
+  const document = await readDocument(page, id);
+  const imageSrcs = imageSrcsFromDoc(document?.prosemirrorJson);
+  expect(imageSrcs).toHaveLength(1);
+  expect(imageSrcs[0]).toMatch(new RegExp(`^article-image://${id}/[A-Za-z0-9_-]+$`));
+  expect(document?.plainText).toContain("Spacing curve diagram");
+
+  // The snapshot files and downloaded image exist in the vault.
   const sourceDir = path.join(dataDir, "assets", "sources", id);
   expect(fs.existsSync(path.join(sourceDir, "original.html"))).toBe(true);
-  expect(fs.existsSync(path.join(sourceDir, "cleaned.html"))).toBe(true);
+  const cleanedPath = path.join(sourceDir, "cleaned.html");
+  expect(fs.existsSync(cleanedPath)).toBe(true);
+  const cleaned = fs.readFileSync(cleanedPath, "utf-8");
+  expect(cleaned).toContain(imageSrcs[0] as string);
+  expect(cleaned).not.toContain(`${baseUrl}${FIGURE_PATH}`);
+  const imageAssetId = imageSrcs[0]?.split("/").at(-1);
+  expect(imageAssetId).toBeTruthy();
+  const imagesDir = path.join(sourceDir, "images");
+  expect(fs.existsSync(imagesDir)).toBe(true);
+  expect(fs.readdirSync(imagesDir).some((name) => name.endsWith(".png"))).toBe(true);
 
   await app.close();
 });
@@ -189,9 +251,17 @@ test("the imported URL source + its snapshots survive an app restart", async () 
   expect(detail?.provenance.originalUrl).toBe(`${baseUrl}${ARTICLE_PATH}`);
   expect(detail?.bodyPreview).toContain("Spaced repetition exploits the spacing effect");
 
+  const document = await readDocument(page, id);
+  const imageSrcs = imageSrcsFromDoc(document?.prosemirrorJson);
+  expect(imageSrcs).toHaveLength(1);
+  expect(document?.plainText).toContain("Spacing curve diagram");
+
   const sourceDir = path.join(dataDir, "assets", "sources", id);
   expect(fs.existsSync(path.join(sourceDir, "original.html"))).toBe(true);
-  expect(fs.existsSync(path.join(sourceDir, "cleaned.html"))).toBe(true);
+  const cleanedPath = path.join(sourceDir, "cleaned.html");
+  expect(fs.existsSync(cleanedPath)).toBe(true);
+  expect(fs.readFileSync(cleanedPath, "utf-8")).toContain(imageSrcs[0] as string);
+  expect(fs.existsSync(path.join(sourceDir, "images"))).toBe(true);
 
   await app.close();
 });

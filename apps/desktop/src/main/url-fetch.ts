@@ -40,6 +40,7 @@ export class UrlFetchError extends Error {
 /** Fetch tuning. Conservative defaults; not configurable at the surface. */
 export const FETCH_TIMEOUT_MS = 15_000;
 export const MAX_BODY_BYTES = 8 * 1024 * 1024; // 8 MB cap on the fetched body.
+export const MAX_IMPORT_REDIRECTS = 5;
 const USER_AGENT = "Interleave/0.1 (+https://interleave.app; desktop import)";
 
 /** Options for {@link fetchImportablePage}. */
@@ -52,6 +53,13 @@ export interface FetchImportablePageOptions {
   readonly allowLoopback?: boolean;
   /** The fetch implementation (defaults to the Node global). Injectable for tests. */
   readonly fetchImpl?: typeof fetch;
+}
+
+export interface FetchImportableResponseOptions {
+  readonly allowLoopback?: boolean;
+  readonly fetchImpl?: typeof fetch;
+  readonly signal?: AbortSignal;
+  readonly headers?: RequestInit["headers"];
 }
 
 /** Parse + validate a URL against the scheme + SSRF guard; throws on rejection. */
@@ -69,6 +77,69 @@ export function assertImportableUrl(raw: string, allowLoopback: boolean): URL {
     throw new UrlFetchError("blocked_host", `Refusing to fetch a private host: ${url.hostname}`);
   }
   return url;
+}
+
+function isRedirectStatus(status: number): boolean {
+  return status >= 300 && status < 400;
+}
+
+function resolveRedirectLocation(
+  response: Response,
+  currentUrl: string,
+  allowLoopback: boolean,
+): string {
+  const location = response.headers.get("location");
+  if (!location) {
+    throw new UrlFetchError("http_error", `Redirect from ${currentUrl} did not include Location`);
+  }
+  let next: string;
+  try {
+    next = new URL(location, currentUrl).href;
+  } catch {
+    throw new UrlFetchError("fetch_failed", `Redirect from ${currentUrl} is not a valid URL`);
+  }
+  return assertImportableUrl(next, allowLoopback).href;
+}
+
+/**
+ * Fetch a URL with bounded manual redirects. Each redirect target is validated
+ * before the next request is issued, so a public URL cannot redirect the importer
+ * into a private host before the SSRF guard runs.
+ */
+export async function fetchImportableResponse(
+  entered: string,
+  options: FetchImportableResponseOptions = {},
+): Promise<{ response: Response; finalUrl: string }> {
+  const allowLoopback = options.allowLoopback ?? false;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  let currentUrl = assertImportableUrl(entered, allowLoopback).href;
+
+  for (let redirects = 0; redirects <= MAX_IMPORT_REDIRECTS; redirects += 1) {
+    let response: Response;
+    try {
+      const init: RequestInit = { redirect: "manual" };
+      if (options.signal) init.signal = options.signal;
+      if (options.headers) init.headers = options.headers;
+      response = await fetchImpl(currentUrl, init);
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new UrlFetchError("timeout", `Timed out fetching ${currentUrl}`);
+      }
+      throw new UrlFetchError("fetch_failed", `Could not reach ${currentUrl}`);
+    }
+
+    if (!isRedirectStatus(response.status)) {
+      const finalUrl = response.url || currentUrl;
+      return { response, finalUrl: assertImportableUrl(finalUrl, allowLoopback).href };
+    }
+
+    if (redirects === MAX_IMPORT_REDIRECTS) {
+      throw new UrlFetchError("http_error", `Too many redirects while fetching ${entered}`);
+    }
+    currentUrl = resolveRedirectLocation(response, currentUrl, allowLoopback);
+  }
+
+  throw new UrlFetchError("http_error", `Too many redirects while fetching ${entered}`);
 }
 
 /** Read a response body, aborting if it exceeds the size cap (streaming-measured). */
@@ -118,30 +189,16 @@ export async function fetchImportablePage(
 ): Promise<{ html: string; finalUrl: string }> {
   const allowLoopback = options.allowLoopback ?? false;
   const fetchImpl = options.fetchImpl ?? fetch;
-  assertImportableUrl(entered, allowLoopback);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  let response: Response;
   try {
-    response = await fetchImpl(entered, {
-      redirect: "follow",
+    const { response, finalUrl } = await fetchImportableResponse(entered, {
+      allowLoopback,
+      fetchImpl,
       signal: controller.signal,
       headers: { "User-Agent": USER_AGENT, Accept: "text/html,application/xhtml+xml" },
     });
-  } catch (err) {
-    clearTimeout(timer);
-    if (err instanceof Error && err.name === "AbortError") {
-      throw new UrlFetchError("timeout", `Timed out fetching ${entered}`);
-    }
-    throw new UrlFetchError("fetch_failed", `Could not reach ${entered}`);
-  }
-
-  try {
-    // Re-check the FINAL (post-redirect) url against the scheme + SSRF guard —
-    // a public URL must not redirect us into a private host.
-    const finalUrl = response.url || entered;
-    assertImportableUrl(finalUrl, allowLoopback);
 
     if (!response.ok) {
       throw new UrlFetchError("http_error", `Server returned ${response.status} for ${entered}`);

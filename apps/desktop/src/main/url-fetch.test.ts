@@ -59,11 +59,33 @@ describe("fetchImportablePage", () => {
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [, init] = fetchImpl.mock.calls[0] ?? [];
-    expect(init?.redirect).toBe("follow");
+    expect(init?.redirect).toBe("manual");
     expect(init?.headers).toMatchObject({
       Accept: "text/html,application/xhtml+xml",
       "User-Agent": expect.stringContaining("Interleave"),
     });
+  });
+
+  it("follows safe redirects manually and returns the last URL", async () => {
+    const fetchImpl = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url === "https://example.com/redirect") {
+        return new Response("", {
+          status: 302,
+          headers: { location: "https://example.com/final" },
+        });
+      }
+      return new Response("<html>final</html>", {
+        headers: { "content-type": "text/html" },
+      });
+    });
+
+    await expect(
+      fetchImportablePage("https://example.com/redirect", {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }),
+    ).resolves.toEqual({ html: "<html>final</html>", finalUrl: "https://example.com/final" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("permits an absent content-type so article extraction can decide later", async () => {
@@ -136,16 +158,14 @@ describe("fetchImportablePage", () => {
     );
   });
 
-  it("re-checks the post-redirect final URL against the SSRF guard", async () => {
-    const response = {
-      ok: true,
-      status: 200,
-      url: "http://127.0.0.1/private",
-      headers: new Headers({ "content-type": "text/html" }),
-      body: null,
-      arrayBuffer: async () => new TextEncoder().encode("<html></html>").buffer,
-    } as unknown as Response;
-    const fetchImpl = vi.fn(async () => response);
+  it("checks redirect targets before issuing the next request", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response("", {
+          status: 302,
+          headers: { location: "http://127.0.0.1/private" },
+        }),
+    );
 
     await expectRejectsCode(
       fetchImportablePage("https://example.com/redirect", {
@@ -153,6 +173,7 @@ describe("fetchImportablePage", () => {
       }),
       "blocked_host",
     );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("maps aborts and network failures to stable error codes", async () => {

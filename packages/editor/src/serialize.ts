@@ -19,8 +19,13 @@ interface PmNode {
   readonly type?: string;
   readonly text?: string;
   readonly content?: readonly PmNode[];
-  /** Node attrs we read for the plain-text mirror (the math node's latex). */
-  readonly attrs?: { readonly latex?: string; readonly display?: boolean };
+  /** Node attrs we read for the plain-text mirror (math latex + image labels). */
+  readonly attrs?: {
+    readonly latex?: string;
+    readonly display?: boolean;
+    readonly alt?: string | null;
+    readonly title?: string | null;
+  };
 }
 
 /**
@@ -33,6 +38,14 @@ function mathText(node: PmNode): string {
   const latex = node.attrs?.latex ?? "";
   if (latex.length === 0) return "";
   return node.attrs?.display ? `$$${latex}$$` : `$${latex}$`;
+}
+
+/** Use image alt text for the plain-text mirror, falling back to title. */
+function imageText(node: PmNode): string {
+  const alt = typeof node.attrs?.alt === "string" ? node.attrs.alt.trim() : "";
+  if (alt.length > 0) return alt;
+  const title = typeof node.attrs?.title === "string" ? node.attrs.title.trim() : "";
+  return title;
 }
 
 /** The canonical empty document: a single empty paragraph. */
@@ -48,6 +61,7 @@ const BLOCK_TYPES = new Set([
   "codeBlock",
   "listItem",
   "horizontalRule",
+  "image",
 ]);
 
 /** Collect the concatenated text of a node's inline content (depth-first). */
@@ -78,6 +92,12 @@ function collectLines(node: PmNode, lines: string[]): void {
 
   if (type === "horizontalRule") {
     lines.push("");
+    return;
+  }
+
+  if (type === "image") {
+    const text = imageText(node);
+    if (text.length > 0) lines.push(text);
     return;
   }
 
