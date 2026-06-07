@@ -1166,6 +1166,9 @@ describe("ProcessQueue", () => {
 
     fireEvent.click(screen.getByTestId("process-extract-make-qa"));
     await screen.findByTestId("process-extract-builder");
+    expect(screen.getByTestId("cb-quality-summary")).toHaveAttribute("data-severity", "block");
+    expect(screen.getByTestId("cb-qc-empty")).toHaveAttribute("data-severity", "block");
+    expect(screen.queryByTestId("cb-quality-passed")).toBeNull();
 
     fireEvent.change(screen.getByTestId("cb-qa-front"), {
       target: { value: "What is skill-acquisition efficiency?" },

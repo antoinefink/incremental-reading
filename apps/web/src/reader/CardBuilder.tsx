@@ -269,6 +269,56 @@ export function CardBuilder({
     interferenceCandidates,
   ]);
 
+  const [showPassedChecks, setShowPassedChecks] = useState(false);
+  const qualityRows = useMemo(() => {
+    const actionable = quality.checks.filter((c) => c.severity !== "ok");
+    const passed = quality.checks.filter((c) => c.severity === "ok");
+    return {
+      actionable,
+      passed,
+      blockerCount: actionable.filter((c) => c.severity === "block").length,
+      warningCount: actionable.filter((c) => c.severity === "warn").length,
+    };
+  }, [quality.checks]);
+
+  const qualitySummary = useMemo(() => {
+    const { blockerCount, warningCount, passed } = qualityRows;
+    if (blockerCount > 0) {
+      return {
+        severity: "block" as const,
+        label: "Blocked",
+        meta:
+          warningCount > 0
+            ? `${blockerCount} blocker${blockerCount === 1 ? "" : "s"} · ${warningCount} warning${warningCount === 1 ? "" : "s"}`
+            : `${blockerCount} blocker${blockerCount === 1 ? "" : "s"}`,
+      };
+    }
+    if (warningCount > 0) {
+      return {
+        severity: "warn" as const,
+        label: "Needs attention",
+        meta: `${warningCount} warning${warningCount === 1 ? "" : "s"} · Create allowed`,
+      };
+    }
+    return {
+      severity: "ok" as const,
+      label: "Ready",
+      meta: `${passed.length} check${passed.length === 1 ? "" : "s"} passed`,
+    };
+  }, [qualityRows]);
+
+  const renderQualityRow = (check: CardQualityCheck) => (
+    <div
+      key={check.id}
+      className={`qc qc--${check.severity}`}
+      data-testid={`cb-qc-${check.id}`}
+      data-severity={check.severity}
+    >
+      <Icon name={check.severity === "ok" ? "checkCircle" : "warning"} size={14} />
+      <span>{check.message}</span>
+    </div>
+  );
+
   // Create is allowed with warnings; only a `block`-severity check (the hollow-card
   // set) disables it. This is the create-time precondition M7's activation reuses.
   const canCreate = !quality.hasBlocker;
@@ -603,22 +653,51 @@ export function CardBuilder({
             `ok` / `warn` / `block` from the pure core heuristic. `block` rows disable
             Create; `warn` rows are advisory. */}
         <div className="insp-sec cb-quality" data-testid="cb-quality">
-          <div className="insp-sec__title">
-            Quality checks <HelpLink slug="quality-checks" />
-          </div>
-          <div className="cb-quality__rows">
-            {quality.checks.map((c) => (
-              <div
-                key={c.id}
-                className={`qc qc--${c.severity}`}
-                data-testid={`cb-qc-${c.id}`}
-                data-severity={c.severity}
+          <div className="cb-quality__head">
+            <div className="insp-sec__title">
+              Quality checks <HelpLink slug="quality-checks" />
+            </div>
+            {qualityRows.passed.length > 0 ? (
+              <button
+                type="button"
+                className="cb-quality__toggle"
+                data-testid="cb-quality-toggle-passed"
+                aria-expanded={showPassedChecks}
+                aria-controls="cb-quality-passed"
+                onClick={() => setShowPassedChecks((show) => !show)}
               >
-                <Icon name={c.severity === "ok" ? "checkCircle" : "warning"} size={14} />
-                {c.message}
-              </div>
-            ))}
+                {showPassedChecks ? "Hide passed" : `Show ${qualityRows.passed.length} passed`}
+              </button>
+            ) : null}
           </div>
+          <div
+            id="cb-quality-summary"
+            className={`cb-quality__summary cb-quality__summary--${qualitySummary.severity}`}
+            data-testid="cb-quality-summary"
+            data-severity={qualitySummary.severity}
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <Icon name={qualitySummary.severity === "ok" ? "checkCircle" : "warning"} size={14} />
+            <span className="cb-quality__summary-main">
+              <span className="cb-quality__summary-label">{qualitySummary.label}</span>
+              <span className="cb-quality__summary-sep"> · </span>
+              <span className="cb-quality__summary-meta">{qualitySummary.meta}</span>
+            </span>
+          </div>
+          {qualityRows.actionable.length > 0 ? (
+            <div className="cb-quality__rows">{qualityRows.actionable.map(renderQualityRow)}</div>
+          ) : null}
+          {showPassedChecks && qualityRows.passed.length > 0 ? (
+            <div
+              id="cb-quality-passed"
+              className="cb-quality__rows cb-quality__rows--passed"
+              data-testid="cb-quality-passed"
+            >
+              {qualityRows.passed.map(renderQualityRow)}
+            </div>
+          ) : null}
         </div>
 
         {/* Priority & schedule — A/B/C/D chips + the FSRS preview chip. */}
@@ -659,6 +738,7 @@ export function CardBuilder({
           type="button"
           className="cb-create"
           data-testid="cb-create"
+          aria-describedby="cb-quality-summary"
           disabled={!canCreate || busy}
           onClick={() => void create()}
         >

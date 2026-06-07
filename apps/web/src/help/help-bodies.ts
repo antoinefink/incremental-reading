@@ -1683,7 +1683,11 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
   "quality-checks": [
     {
       type: "p",
-      text: "The Quality checks panel in the Card Builder runs live as you type. Each row is one heuristic with a severity: <code>ok</code>, <code>warn</code>, or <code>block</code>. Only a <code>block</code> disables the Create button; <code>warn</code> rows are advisory and never prevent you from creating the card.",
+      text: "The Quality checks panel in the Card Builder runs live as you type. Its summary shows whether the draft is ready, has warnings, or is blocked. Blockers and warnings stay visible; passed checks are tucked behind Show passed so they do not crowd the authoring surface.",
+    },
+    {
+      type: "p",
+      text: "Each check still has a severity: <code>ok</code>, <code>warn</code>, or <code>block</code>. Only a <code>block</code> disables the Create button; <code>warn</code> rows are advisory and never prevent you from creating the card.",
     },
     {
       type: "h2",

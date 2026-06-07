@@ -228,21 +228,45 @@ describe("CardBuilder — Cloze tab (T034)", () => {
 });
 
 describe("CardBuilder — quality checks (T035)", () => {
-  it("renders the qc rows and updates them as fields change", () => {
+  it("renders actionable rows by default and hides passed rows until expanded", () => {
     renderBuilder({ hasSource: true, seedBody: "" });
-    // Empty Q&A → a `block` "empty" row; source attached → an `ok` source row.
+    // Empty Q&A → a `block` "empty" row; source attached → an `ok` row hidden by default.
+    expect(screen.getByTestId("cb-quality-summary")).toHaveAttribute("data-severity", "block");
     expect(screen.getByTestId("cb-qc-empty")).toHaveAttribute("data-severity", "block");
+    expect(screen.queryByTestId("cb-qc-missing-source")).toBeNull();
+    expect(screen.queryByTestId("cb-quality-passed")).toBeNull();
+    expect(screen.getByTestId("cb-quality-toggle-passed")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    fireEvent.click(screen.getByTestId("cb-quality-toggle-passed"));
+    expect(screen.getByTestId("cb-quality-toggle-passed")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("cb-quality-passed")).toBeInTheDocument();
     expect(screen.getByTestId("cb-qc-missing-source")).toHaveAttribute("data-severity", "ok");
 
-    // Fill both fields → the empty blocker clears to ok.
+    // Fill both fields → the empty blocker clears to ok inside the passed disclosure.
     fireEvent.change(screen.getByTestId("cb-qa-front"), { target: { value: "What is X?" } });
     fireEvent.change(screen.getByTestId("cb-qa-back"), { target: { value: "A short answer." } });
+    expect(screen.getByTestId("cb-quality-summary")).toHaveAttribute("data-severity", "ok");
     expect(screen.getByTestId("cb-qc-empty")).toHaveAttribute("data-severity", "ok");
   });
 
   it("warns 'missing source' when the extract has no source location", () => {
     renderBuilder({ hasSource: false });
+    fireEvent.change(screen.getByTestId("cb-qa-front"), { target: { value: "What is X?" } });
+    expect(screen.getByTestId("cb-quality-summary")).toHaveAttribute("data-severity", "warn");
     expect(screen.getByTestId("cb-qc-missing-source")).toHaveAttribute("data-severity", "warn");
+  });
+
+  it("summarizes simultaneous blockers and warnings without allowing Create", () => {
+    renderBuilder({ hasSource: false, seedBody: "" });
+    const summary = screen.getByTestId("cb-quality-summary");
+    expect(summary).toHaveAttribute("data-severity", "block");
+    expect(summary).toHaveTextContent("Blocked · 1 blocker · 1 warning");
+    expect(screen.getByTestId("cb-qc-empty")).toHaveAttribute("data-severity", "block");
+    expect(screen.getByTestId("cb-qc-missing-source")).toHaveAttribute("data-severity", "warn");
+    expect(screen.getByTestId("cb-create")).toBeDisabled();
   });
 
   it("warns on an over-long prompt without blocking Create", () => {
@@ -251,6 +275,7 @@ describe("CardBuilder — quality checks (T035)", () => {
       target: { value: "Q?".padEnd(200, "x") },
     });
     fireEvent.change(screen.getByTestId("cb-qa-back"), { target: { value: "A." } });
+    expect(screen.getByTestId("cb-quality-summary").textContent).toContain("warning");
     expect(screen.getByTestId("cb-qc-prompt-too-long")).toHaveAttribute("data-severity", "warn");
     // A warning is advisory — Create stays enabled.
     expect(screen.getByTestId("cb-create")).not.toBeDisabled();
@@ -263,6 +288,8 @@ describe("CardBuilder — quality checks (T035)", () => {
     fireEvent.change(screen.getByTestId("cb-qa-front"), { target: { value: "What is X?" } });
     fireEvent.change(screen.getByTestId("cb-qa-back"), { target: { value: "A short answer." } });
     expect(create).not.toBeDisabled();
+    expect(screen.getByTestId("cb-quality-summary")).toHaveAttribute("data-severity", "ok");
+    expect(screen.queryByTestId("cb-qc-empty")).toBeNull();
   });
 
   it("flags 'multiple clozes' as a warning on the Cloze tab", () => {
@@ -325,6 +352,8 @@ describe("CardBuilder — T086 minimum-information rows", () => {
       target: { value: "What is the current LTS Node version?" },
     });
     fireEvent.change(screen.getByTestId("cb-qa-back"), { target: { value: "Node 20." } });
+    expect(screen.queryByTestId("cb-qc-outdated-source")).toBeNull();
+    fireEvent.click(screen.getByTestId("cb-quality-toggle-passed"));
     expect(screen.getByTestId("cb-qc-outdated-source")).toHaveAttribute("data-severity", "ok");
   });
 
@@ -352,6 +381,8 @@ describe("CardBuilder — T086 minimum-information rows", () => {
     renderBuilder({ hasSource: true, seedBody: "" });
     fireEvent.change(screen.getByTestId("cb-qa-front"), { target: { value: "Q?" } });
     fireEvent.change(screen.getByTestId("cb-qa-back"), { target: { value: "A distinct answer." } });
+    expect(screen.queryByTestId("cb-qc-similar-answer")).toBeNull();
+    fireEvent.click(screen.getByTestId("cb-quality-toggle-passed"));
     expect(screen.queryByTestId("cb-qc-similar-answer")).toBeNull();
   });
 });

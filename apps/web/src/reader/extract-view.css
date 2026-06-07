@@ -479,10 +479,110 @@
   color: var(--text-3);
 }
 
+.cb-quality__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+
+.cb-quality__head .insp-sec__title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cb-quality__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  min-width: 0;
+  padding: 0 0 var(--s-2);
+  border-bottom: 1px solid var(--border-faint, var(--border));
+  color: var(--text);
+}
+
+.cb-quality__summary-main {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.cb-quality__summary svg {
+  width: var(--s-5);
+  height: var(--s-5);
+  flex: none;
+}
+
+.cb-quality__summary--ok {
+  color: var(--ok);
+}
+
+.cb-quality__summary--warn {
+  color: var(--warn);
+}
+
+.cb-quality__summary--block {
+  color: var(--danger);
+}
+
+.cb-quality__summary-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  line-height: var(--lh-snug);
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cb-quality__summary-meta {
+  flex: none;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--t-2xs);
+  line-height: var(--lh-tight);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.cb-quality__toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  min-height: var(--s-8);
+  padding: 0 var(--s-2);
+  border: 1px solid var(--border-faint, var(--border));
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: var(--t-2xs);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+
+.cb-quality__toggle:hover {
+  border-color: var(--border-strong, var(--border));
+  color: var(--text);
+}
+
+.cb-quality__toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .cb-quality__rows {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: var(--s-1);
+}
+
+.cb-quality__rows--passed {
+  padding-top: var(--s-1);
 }
 
 /* Quality-check rows (T035) — `ok` / `warn` / `block`, mirroring the design kit's
@@ -501,6 +601,20 @@
   height: 14px;
   flex: none;
   margin-top: 1px;
+}
+
+.cb-quality .qc {
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  font-size: var(--t-xs);
+  line-height: var(--lh-snug);
+}
+
+.cb-quality .qc svg {
+  width: var(--s-5);
+  height: var(--s-5);
+  margin-top: 0;
 }
 
 .qc--ok {

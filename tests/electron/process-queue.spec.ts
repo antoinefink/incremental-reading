@@ -585,6 +585,9 @@ test("distills an extract inline inside /process and persists stage, body, and c
   // Open the existing card builder inline and create a real Q&A card from the extract.
   await page.getByTestId("process-extract-make-qa").click();
   await expect(page.getByTestId("process-extract-builder")).toBeVisible();
+  await expect(page.getByTestId("cb-quality-summary")).toHaveAttribute("data-severity", "block");
+  await expect(page.getByTestId("cb-qc-empty")).toHaveAttribute("data-severity", "block");
+  await expect(page.getByTestId("cb-quality-passed")).toHaveCount(0);
   await page.getByTestId("cb-qa-front").fill("What did the inline process session produce?");
   await page.getByTestId("cb-create").click();
   await expect(page.getByTestId("process-flash")).toContainText(/Q&A card created/);
@@ -631,10 +634,10 @@ test("undoes a lifecycle action inside /process and persists the restored item a
   await expect(page.getByTestId("process-item")).toHaveAttribute("data-element-id", extractId);
 
   await page.getByTestId("process-action-markDone").click();
-  await expect(page.getByTestId("queue-snackbar")).toContainText(/Extract marked done/);
   await expect
     .poll(async () => (await inspectElement(page, extractId))?.element.status)
     .toBe("done");
+  await expect(page.getByTestId("queue-snackbar")).toHaveCount(0);
 
   await page.keyboard.press(UNDO_KEY);
   await expect

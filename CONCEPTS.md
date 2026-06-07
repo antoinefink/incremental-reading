@@ -64,6 +64,16 @@ An active-recall prompt and answer derived from earlier knowledge-processing wor
 
 A card that has left drafting and participates in active recall review.
 
+### Card builder
+
+The authoring surface that turns selected source or extract material into a draft Q&A or cloze card while keeping recall preview, priority, scheduling, and quality feedback in one flow.
+
+### Card quality check
+
+A live guardrail in the card builder that evaluates whether a draft card is blocked, advisory, or ready without changing card creation semantics.
+
+Blockers prevent creation, warnings remain advisory, and passed checks can be inspected without dominating dense authoring surfaces.
+
 ### Review session
 
 The flow that presents due cards for recall practice and records the user's grading outcome.

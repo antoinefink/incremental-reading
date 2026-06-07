@@ -141,3 +141,4 @@ Busy propagation prevents simultaneous repair/edit and review mutations from rac
 
 - [Active card rows should open a protected card detail surface](./active-card-rows-open-card-detail-surface.md) - direct predecessor for targeted card opening and reveal/source-context safety. This embedded extract flow is a scoped exception to the older "route to `/card/$id`" default.
 - [Test operation-log and IPC invariants for extract->card mutation paths](../architecture-patterns/extract-card-ipc-invariant-test-hardening.md) - adjacent testing guidance for lineage-sensitive card workflows that must stay on typed IPC/domain paths.
+- [Compact card quality check disclosure](../design-patterns/compact-card-quality-check-disclosure.md) - adjacent card-builder guidance for keeping validation feedback compact across standalone and embedded authoring surfaces.

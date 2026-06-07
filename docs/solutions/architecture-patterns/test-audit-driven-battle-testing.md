@@ -75,6 +75,7 @@ Without both, regressions appear in production paths that pass happy-path unit t
 ## Prevention
 
 - Keep `docs/test-battle-audit.md` as the canonical source for prioritized test work.
+- When a dense UI surface changes, update contextual help and test both the standalone surface and any embedded reuse site so display contracts, help text, and tokenized styling do not drift apart.
 - Extend this slice in order:
   - remaining IPC channels and command payload variants,
   - queue catch-up/vacation adversarial edge cases,
