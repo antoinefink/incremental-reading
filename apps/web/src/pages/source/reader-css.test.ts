@@ -32,15 +32,17 @@ describe("source reader CSS", () => {
     const dimmed = cssBlock(".reader .dimmed");
     const marker = cssBlock(".reader p.dimmed::before");
 
-    expect(dimmed).toContain("opacity: 0.58;");
-    expect(marker).toContain("background: var(--border-strong);");
+    expect(dimmed).toContain("color: color-mix(in oklch, var(--text) 45%, var(--text-3));");
+    expect(dimmed).not.toMatch(/\bopacity\s*:/);
+    expect(marker).toContain("background: var(--border);");
   });
 
-  it("renders the processed toggle as an action button, not a checkbox", () => {
+  it("renders the processed toggle as a restrained reader action", () => {
     const button = cssBlock(".readpara__mark");
 
-    expect(button).toContain("border-radius: var(--r-full);");
-    expect(button).toContain("width: 26px;");
-    expect(button).toContain("height: 26px;");
+    expect(button).toContain("border-radius: var(--r-sm);");
+    expect(button).toContain("width: 24px;");
+    expect(button).toContain("height: 24px;");
+    expect(button).not.toMatch(/\bbox-shadow\s*:/);
   });
 });
