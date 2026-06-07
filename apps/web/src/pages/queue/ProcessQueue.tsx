@@ -1196,7 +1196,6 @@ export function ProcessQueue() {
             onExtractEditorReady={onExtractEditorReady}
             onSetExtractStage={setExtractStage}
             onTrimExtract={trimExtract}
-            onCreateSubExtract={() => void createProcessSubExtract()}
             onOpenExtractBuilder={(tab) => setExtractBuilder({ tab })}
             onCloseExtractBuilder={() => setExtractBuilder(null)}
             onExtractCardCreated={onCardCreatedFromExtract}
@@ -1424,7 +1423,6 @@ function ProcessExtractWorkbench({
   onSelectionAction,
   onSetStage,
   onTrim,
-  onCreateSubExtract,
   onOpenBuilder,
   onCloseBuilder,
   onCardCreated,
@@ -1442,7 +1440,6 @@ function ProcessExtractWorkbench({
   onSelectionAction: (action: SelectionToolbarAction) => void;
   onSetStage: (stage?: ExtractStage) => void;
   onTrim: () => void;
-  onCreateSubExtract: () => void;
   onOpenBuilder: (tab: CardKind) => void;
   onCloseBuilder: () => void;
   onCardCreated: () => void;
@@ -1551,16 +1548,6 @@ function ProcessExtractWorkbench({
           <Icon name="trim" size={14} />
           Trim
         </button>
-        <button
-          type="button"
-          className="pq-btn"
-          data-testid="process-extract-subextract"
-          disabled={busy}
-          onClick={onCreateSubExtract}
-        >
-          <Icon name="extract" size={14} />
-          Sub-extract
-        </button>
         <span className="pq-extract__toolspacer" />
         <button
           type="button"
@@ -1641,7 +1628,6 @@ function ProcessCard({
   onExtractEditorReady,
   onSetExtractStage,
   onTrimExtract,
-  onCreateSubExtract,
   onOpenExtractBuilder,
   onCloseExtractBuilder,
   onExtractCardCreated,
@@ -1677,7 +1663,6 @@ function ProcessCard({
   onExtractEditorReady: (editor: Editor | null) => void;
   onSetExtractStage: (stage?: ExtractStage) => void;
   onTrimExtract: () => void;
-  onCreateSubExtract: () => void;
   onOpenExtractBuilder: (tab: CardKind) => void;
   onCloseExtractBuilder: () => void;
   onExtractCardCreated: () => void;
@@ -1822,7 +1807,6 @@ function ProcessCard({
           onSelectionAction={onExtractSelectionAction}
           onSetStage={onSetExtractStage}
           onTrim={onTrimExtract}
-          onCreateSubExtract={onCreateSubExtract}
           onOpenBuilder={onOpenExtractBuilder}
           onCloseBuilder={onCloseExtractBuilder}
           onCardCreated={onExtractCardCreated}

@@ -888,7 +888,7 @@ describe("ProcessQueue", () => {
     expect(screen.getByTestId("process-extract-stage-stepper")).toBeInTheDocument();
     expect(screen.getByTestId("mock-source-editor")).toBeInTheDocument();
     expect(screen.queryByTestId("process-extract-save")).not.toBeInTheDocument();
-    expect(screen.getByTestId("process-extract-subextract")).toBeInTheDocument();
+    expect(screen.queryByTestId("process-extract-subextract")).not.toBeInTheDocument();
     expect(screen.getByTestId("process-extract-make-qa")).toBeInTheDocument();
     expect(h.navigateSpy).not.toHaveBeenCalled();
   });
