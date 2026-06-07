@@ -181,7 +181,6 @@ function Sidebar({
         </span>
         <div className="flex flex-col">
           <span className="shell-brand__name">Interleave</span>
-          <span className="shell-brand__sub">Reading OS</span>
         </div>
       </div>
 
