@@ -82,13 +82,12 @@ export function CommandPalette({
   const showSourceSection = trimmedQuery.length > 0;
 
   const paletteRows = useMemo<readonly PaletteRow[]>(
-    () =>
-      showSourceSection
-        ? [
-            ...sourceResults.map((source) => ({ kind: "source" as const, source })),
-            ...filtered.map((item) => ({ kind: "command" as const, item })),
-          ]
-        : filtered.map((item) => ({ kind: "command" as const, item })),
+    () => [
+      ...filtered.map((item) => ({ kind: "command" as const, item })),
+      ...(showSourceSection
+        ? sourceResults.map((source) => ({ kind: "source" as const, source }))
+        : []),
+    ],
     [filtered, showSourceSection, sourceResults],
   );
 
@@ -285,6 +284,30 @@ export function CommandPalette({
           <Kbd keys="Esc" />
         </div>
         <div className="shell-cmdk__list">
+          {filtered.length === 0 && (
+            <div className="shell-cmdk__group">No commands match “{query}”</div>
+          )}
+          {filtered.map((item, i) => {
+            const showHead = item.group !== lastGroup;
+            lastGroup = item.group;
+            return (
+              <div key={item.label}>
+                {showHead && <div className="shell-cmdk__group">{item.group}</div>}
+                <button
+                  type="button"
+                  className={
+                    selected === i ? "shell-cmdk__item shell-cmdk__item--on" : "shell-cmdk__item"
+                  }
+                  onMouseEnter={() => setSelected(i)}
+                  onClick={() => runItem(item)}
+                >
+                  <Icon name={item.icon} size={16} />
+                  <span className="shell-grow">{item.label}</span>
+                  {item.kbd && <Kbd keys={item.kbd} />}
+                </button>
+              </div>
+            );
+          })}
           {showSourceSection && (
             <div>
               <div className="shell-cmdk__group">Sources</div>
@@ -319,19 +342,20 @@ export function CommandPalette({
                 </div>
               )}
               {sourceResults.map((source, i) => {
+                const sourceIndex = filtered.length + i;
                 const snippet = source.snippet.trim();
                 return (
                   <button
                     type="button"
                     key={source.id}
                     className={
-                      selected === i
+                      selected === sourceIndex
                         ? "shell-cmdk__item shell-cmdk__item--source shell-cmdk__item--on"
                         : "shell-cmdk__item shell-cmdk__item--source"
                     }
                     data-testid="command-palette-source"
                     data-source-id={source.id}
-                    onMouseEnter={() => setSelected(i)}
+                    onMouseEnter={() => setSelected(sourceIndex)}
                     onClick={() => runSource(source)}
                   >
                     <Icon name="source" size={16} />
@@ -352,33 +376,6 @@ export function CommandPalette({
               })}
             </div>
           )}
-          {filtered.length === 0 && (
-            <div className="shell-cmdk__group">No commands match “{query}”</div>
-          )}
-          {filtered.map((item, i) => {
-            const showHead = item.group !== lastGroup;
-            lastGroup = item.group;
-            const rowIndex = showSourceSection ? sourceResults.length + i : i;
-            return (
-              <div key={item.label}>
-                {showHead && <div className="shell-cmdk__group">{item.group}</div>}
-                <button
-                  type="button"
-                  className={
-                    selected === rowIndex
-                      ? "shell-cmdk__item shell-cmdk__item--on"
-                      : "shell-cmdk__item"
-                  }
-                  onMouseEnter={() => setSelected(rowIndex)}
-                  onClick={() => runItem(item)}
-                >
-                  <Icon name={item.icon} size={16} />
-                  <span className="shell-grow">{item.label}</span>
-                  {item.kbd && <Kbd keys={item.kbd} />}
-                </button>
-              </div>
-            );
-          })}
         </div>
       </div>
     </div>
