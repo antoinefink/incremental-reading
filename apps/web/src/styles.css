@@ -155,6 +155,31 @@ body,
   overscroll-behavior: none;
 }
 
+/* Native buttons default to the arrow cursor in Chromium. Keep this baseline
+   low-specificity so intentional component cursors, such as text-like editor
+   controls and modal backdrops, can override it with a single class. */
+@layer base {
+  :where(button:not(:disabled):not([aria-disabled="true"])) {
+    cursor: pointer;
+  }
+
+  :where([role="button"]:not([aria-disabled="true"])) {
+    cursor: pointer;
+  }
+
+  :where(button:disabled) {
+    cursor: not-allowed;
+  }
+
+  :where(button[aria-disabled="true"]) {
+    cursor: not-allowed;
+  }
+
+  :where([role="button"][aria-disabled="true"]) {
+    cursor: not-allowed;
+  }
+}
+
 /* Native date inputs do not always inherit text color for the browser-provided
    calendar button. Keep the field native, but align its internal control with the
    resolved app theme so the icon stays visible on dark surfaces. */
