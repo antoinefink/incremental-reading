@@ -295,16 +295,16 @@ button:disabled {
 
 .popup-page {
   width: 332px;
-  background: transparent;
+  background: var(--surface);
 }
 
 .popup-shell {
-  width: 332px;
+  width: 100%;
   overflow: hidden;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-xl);
+  border: 0;
+  border-radius: 0;
   background: var(--surface);
-  box-shadow: var(--shadow-pop);
+  box-shadow: none;
 }
 
 .popup-head {
