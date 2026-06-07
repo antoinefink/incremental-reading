@@ -87,7 +87,7 @@ describe("FSRS grade path: CardSchedulerService → ReviewRepository.recordRevie
 
     if (!before) throw new Error("review state missing");
     const outcome = scheduler.gradeCard(before, "good", NOW as never, 1500);
-    const log = review.recordReview(cardId, outcome);
+    const log = review.recordReview(cardId, outcome, { promptMs: 725 });
 
     // review_states advanced to the scheduler's outcome.
     const after = review.findReviewState(cardId);
@@ -111,6 +111,22 @@ describe("FSRS grade path: CardSchedulerService → ReviewRepository.recordRevie
     expect(logs[0]?.nextState).toBe(outcome.nextState);
     expect(logs[0]?.nextDueAt).toBe(outcome.nextDueAt);
     expect(logs[0]?.responseMs).toBe(1500);
+    expect(logs[0]?.promptMs).toBe(725);
+    expect(logs[0]?.prevDueAt).toBe(before.dueAt);
+    expect(logs[0]?.prevStability).toBe(before.stability);
+    expect(logs[0]?.prevDifficulty).toBe(before.difficulty);
+    expect(logs[0]?.prevElapsedDays).toBe(before.elapsedDays);
+    expect(logs[0]?.prevScheduledDays).toBe(before.scheduledDays);
+    expect(logs[0]?.prevReps).toBe(before.reps);
+    expect(logs[0]?.prevLapses).toBe(before.lapses);
+    expect(logs[0]?.prevLearningSteps).toBe(before.learningSteps);
+    expect(logs[0]?.prevLastReviewedAt).toBe(before.lastReviewedAt);
+    expect(logs[0]?.nextElapsedDays).toBeCloseTo(outcome.elapsedDays, 6);
+    expect(logs[0]?.nextScheduledDays).toBeCloseTo(outcome.scheduledDays, 6);
+    expect(logs[0]?.nextReps).toBe(outcome.reps);
+    expect(logs[0]?.nextLapses).toBe(outcome.lapses);
+    expect(logs[0]?.nextLearningSteps).toBe(outcome.nextLearningSteps);
+    expect(log.promptMs).toBe(725);
 
     // elements.due_at advanced so the queue re-picks the card.
     const elementRow = handle.db.select().from(elements).where(eq(elements.id, cardId)).get();

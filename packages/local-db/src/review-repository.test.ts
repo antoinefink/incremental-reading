@@ -9,7 +9,8 @@
  */
 
 import type { DbHandle } from "@interleave/db";
-import { cards, reviewLogs, reviewStates } from "@interleave/db";
+import { cards, elements, operationLog, reviewLogs, reviewStates } from "@interleave/db";
+import { CardSchedulerService } from "@interleave/scheduler";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ReviewRepository } from "./review-repository";
@@ -158,5 +159,211 @@ describe("createCardWithin — reviewSeed + sourceUri (T070)", () => {
     expect(state?.dueAt).toBe(at);
     expect(state?.fsrsState).toBe("new"); // first-schedule does NOT run FSRS math.
     expect(element.status).toBe("active");
+  });
+});
+
+describe("recordReview — timing and FSRS transition snapshot", () => {
+  it("persists prompt time plus the full pre/post FSRS transition on the review log", () => {
+    const review = new ReviewRepository(handle.db);
+    const { element } = review.createCard({
+      kind: "qa",
+      title: "Seeded review card",
+      priority: 0.625,
+      prompt: "Q",
+      answer: "A",
+      reviewSeed: {
+        reps: 7,
+        lapses: 2,
+        stability: 9.5,
+        difficulty: 4.25,
+        elapsedDays: 5,
+        scheduledDays: 9,
+        fsrsState: "review",
+        dueAt: "2026-06-10T00:00:00.000Z",
+        lastReviewedAt: "2026-06-01T00:00:00.000Z",
+      },
+    });
+    handle.db
+      .update(reviewStates)
+      .set({ learningSteps: 2 })
+      .where(eq(reviewStates.elementId, element.id))
+      .run();
+
+    const log = review.recordReview(
+      element.id,
+      {
+        rating: "again",
+        reviewedAt: "2026-06-12T00:00:00.000Z",
+        responseMs: 900,
+        prevState: "review",
+        nextState: "relearning",
+        nextStability: 8.25,
+        nextDifficulty: 6.6,
+        nextDueAt: "2026-06-12T00:10:00.000Z",
+        elapsedDays: 11,
+        scheduledDays: 0,
+        reps: 8,
+        lapses: 3,
+        nextLearningSteps: 1,
+      },
+      {
+        promptMs: 1300,
+      },
+    );
+
+    expect(log.promptMs).toBe(1300);
+    expect(log.responseMs).toBe(900);
+    expect(log.prevState).toBe("review");
+    expect(log.prevDueAt).toBe("2026-06-10T00:00:00.000Z");
+    expect(log.prevStability).toBeCloseTo(9.5);
+    expect(log.prevDifficulty).toBeCloseTo(4.25);
+    expect(log.prevElapsedDays).toBe(5);
+    expect(log.prevScheduledDays).toBe(9);
+    expect(log.prevReps).toBe(7);
+    expect(log.prevLapses).toBe(2);
+    expect(log.prevLearningSteps).toBe(2);
+    expect(log.prevLastReviewedAt).toBe("2026-06-01T00:00:00.000Z");
+    expect(log.nextElapsedDays).toBe(11);
+    expect(log.nextScheduledDays).toBe(0);
+    expect(log.nextReps).toBe(8);
+    expect(log.nextLapses).toBe(3);
+    expect(log.nextLearningSteps).toBe(1);
+
+    const rows = handle.db
+      .select()
+      .from(reviewLogs)
+      .where(eq(reviewLogs.elementId, element.id))
+      .all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.promptMs).toBe(1300);
+    expect(rows[0]?.prevReps).toBe(7);
+    expect(rows[0]?.nextReps).toBe(8);
+
+    const ops = handle.db
+      .select()
+      .from(operationLog)
+      .where(eq(operationLog.elementId, element.id))
+      .all();
+    expect(ops.filter((op) => op.opType === "add_review_log")).toHaveLength(1);
+  });
+
+  it("throws and writes no logs or operations when the review state row is missing", () => {
+    const review = new ReviewRepository(handle.db);
+    const { element } = review.createCard({
+      kind: "qa",
+      title: "Broken review card",
+      priority: 0.625,
+      prompt: "Q",
+      answer: "A",
+    });
+    handle.db.delete(reviewStates).where(eq(reviewStates.elementId, element.id)).run();
+    const logsBefore = handle.db
+      .select()
+      .from(reviewLogs)
+      .where(eq(reviewLogs.elementId, element.id))
+      .all().length;
+    const opsBefore = handle.db
+      .select()
+      .from(operationLog)
+      .where(eq(operationLog.elementId, element.id))
+      .all().length;
+
+    expect(() =>
+      review.recordReview(element.id, {
+        rating: "good",
+        reviewedAt: "2026-06-12T00:00:00.000Z",
+        responseMs: 900,
+        prevState: "new",
+        nextState: "review",
+        nextStability: 8.25,
+        nextDifficulty: 6.6,
+        nextDueAt: "2026-06-15T00:00:00.000Z",
+        elapsedDays: 0,
+        scheduledDays: 3,
+        reps: 1,
+        lapses: 0,
+        nextLearningSteps: 0,
+      }),
+    ).toThrow(/review state .* missing/);
+
+    const logsAfter = handle.db
+      .select()
+      .from(reviewLogs)
+      .where(eq(reviewLogs.elementId, element.id))
+      .all().length;
+    const opsAfter = handle.db
+      .select()
+      .from(operationLog)
+      .where(eq(operationLog.elementId, element.id))
+      .all().length;
+    expect(logsAfter).toBe(logsBefore);
+    expect(opsAfter).toBe(opsBefore);
+  });
+
+  it("rejects a same-phase stale scheduler outcome without appending logs or mutating state", () => {
+    const review = new ReviewRepository(handle.db);
+    const scheduler = new CardSchedulerService({ desiredRetention: 0.9, enableFuzz: false });
+    const { element } = review.createCard({
+      kind: "qa",
+      title: "Review-phase card",
+      priority: 0.625,
+      prompt: "Q",
+      answer: "A",
+      reviewSeed: {
+        reps: 8,
+        lapses: 1,
+        stability: 12,
+        difficulty: 5,
+        elapsedDays: 10,
+        scheduledDays: 12,
+        fsrsState: "review",
+        dueAt: "2026-06-10T00:00:00.000Z",
+        lastReviewedAt: "2026-05-31T00:00:00.000Z",
+      },
+    });
+    const before = review.findReviewState(element.id);
+    if (!before) throw new Error("missing review state");
+    const staleOutcome = scheduler.gradeCard(before, "good", "2026-06-12T00:00:00.000Z", 900);
+
+    review.recordReview(element.id, staleOutcome);
+    const stateAfterFirst = review.findReviewState(element.id);
+    expect(staleOutcome.prevState).toBe(stateAfterFirst?.fsrsState);
+    const elementAfterFirst = handle.db
+      .select({ dueAt: elements.dueAt, updatedAt: elements.updatedAt })
+      .from(elements)
+      .where(eq(elements.id, element.id))
+      .get();
+    const logsAfterFirst = handle.db
+      .select()
+      .from(reviewLogs)
+      .where(eq(reviewLogs.elementId, element.id))
+      .all().length;
+    const opsAfterFirst = handle.db
+      .select()
+      .from(operationLog)
+      .where(eq(operationLog.elementId, element.id))
+      .all().length;
+
+    expect(() => review.recordReview(element.id, staleOutcome)).toThrow(/stale review outcome/);
+
+    expect(review.findReviewState(element.id)).toEqual(stateAfterFirst);
+    const elementAfterReject = handle.db
+      .select({ dueAt: elements.dueAt, updatedAt: elements.updatedAt })
+      .from(elements)
+      .where(eq(elements.id, element.id))
+      .get();
+    expect(elementAfterReject).toEqual(elementAfterFirst);
+    const logsAfterReject = handle.db
+      .select()
+      .from(reviewLogs)
+      .where(eq(reviewLogs.elementId, element.id))
+      .all().length;
+    const opsAfterReject = handle.db
+      .select()
+      .from(operationLog)
+      .where(eq(operationLog.elementId, element.id))
+      .all().length;
+    expect(logsAfterReject).toBe(logsAfterFirst);
+    expect(opsAfterReject).toBe(opsAfterFirst);
   });
 });

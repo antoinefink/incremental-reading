@@ -9,10 +9,11 @@
  *
  * Architecture (non-negotiable): the renderer holds ONLY UI/session state — the
  * deck cursor (driven by `review.session.next({ exclude })`), the revealed flag,
- * and the reveal→grade response timer. It performs NO FSRS math and NO SQL: the
- * scheduling + the durable `review_logs` row happen MAIN-side. Every grade calls
- * the typed `appApi.reviewGrade` with the measured `responseMs`; the previews come
- * from `appApi.reviewPreview` (PURE, no mutation). Driving each step through
+ * the card-shown→reveal prompt timer, and the reveal→grade response timer. It
+ * performs NO FSRS math and NO SQL: the scheduling + the durable `review_logs`
+ * row happen MAIN-side. Every grade calls the typed `appApi.reviewGrade` with the
+ * measured `promptMs` + `responseMs`; the previews come from `appApi.reviewPreview`
+ * (PURE, no mutation). Driving each step through
  * `review.session.next({ exclude })` keeps the deck-selection seam main-side so
  * T039 sibling-burying can layer on without reordering in React.
  *
@@ -206,6 +207,10 @@ export function ReviewScreen() {
   // computes sibling relationships; it only carries the previous card's group id
   // forward. The MVP window is the immediately-preceding card.
   const recentSiblingGroupRef = useRef<string | null>(null);
+  // When the current card was shown, for the card-shown→reveal prompt time.
+  const cardShownAtRef = useRef<number | null>(null);
+  // The prompt-side time captured at reveal; carried into the eventual grade.
+  const promptMsRef = useRef(0);
   // When the current card was revealed, for the reveal→grade response time.
   const revealAtRef = useRef<number | null>(null);
   const loadSessionSeqRef = useRef(0);
@@ -290,6 +295,8 @@ export function ReviewScreen() {
         setPreviews(null);
         setContextDrawerOpen(false);
         setRepairBusyNow(false);
+        cardShownAtRef.current = null;
+        promptMsRef.current = 0;
         revealAtRef.current = null;
         const deckSize = modeDeckRef.current?.length ?? 0;
         if (!next) {
@@ -302,6 +309,7 @@ export function ReviewScreen() {
           }
           return true;
         }
+        cardShownAtRef.current = Date.now();
         setCard(next);
         setRemaining(Math.max(0, deckSize - excludeRef.current.length - 1));
         recentSiblingGroupRef.current = next.siblingGroupId;
@@ -322,6 +330,8 @@ export function ReviewScreen() {
       setPreviews(null);
       setContextDrawerOpen(false);
       setRepairBusyNow(false);
+      cardShownAtRef.current = null;
+      promptMsRef.current = 0;
       revealAtRef.current = null;
       if (!res.card) {
         setCard(null);
@@ -336,6 +346,7 @@ export function ReviewScreen() {
         }
         return true;
       }
+      cardShownAtRef.current = Date.now();
       setCard(res.card);
       setRemaining(res.remaining);
       setTotal((t) => (t === 0 ? res.total + excludeRef.current.length : t));
@@ -391,9 +402,12 @@ export function ReviewScreen() {
     if (!card || revealed) return;
     const requestedCardId = card.id;
     const requestSeq = ++previewSeqRef.current;
+    const revealedAt = Date.now();
+    promptMsRef.current =
+      cardShownAtRef.current == null ? 0 : Math.max(0, revealedAt - cardShownAtRef.current);
     setRevealed(true);
     setPreviews(null);
-    revealAtRef.current = Date.now();
+    revealAtRef.current = revealedAt;
     try {
       const res = await appApi.reviewPreview({
         cardId: requestedCardId,
@@ -433,10 +447,12 @@ export function ReviewScreen() {
       invalidateCardSideEffects();
       // Reveal→grade response time; fall back to 0 if the reveal timestamp is lost.
       const responseMs = revealAtRef.current ? Math.max(0, Date.now() - revealAtRef.current) : 0;
+      const promptMs = Math.max(0, promptMsRef.current);
       try {
         await appApi.reviewGrade({
           cardId: card.id,
           rating,
+          promptMs,
           responseMs,
           ...(asOf ? { asOf } : {}),
         });
@@ -462,6 +478,8 @@ export function ReviewScreen() {
         setRevealed(false);
         setPreviews(null);
         setRepairBusyNow(false);
+        cardShownAtRef.current = null;
+        promptMsRef.current = 0;
         revealAtRef.current = null;
       }
       setBusy(false);
@@ -489,6 +507,8 @@ export function ReviewScreen() {
         setRevealed(false);
         setPreviews(null);
         setRepairBusyNow(false);
+        cardShownAtRef.current = null;
+        promptMsRef.current = 0;
         revealAtRef.current = null;
       }
     },

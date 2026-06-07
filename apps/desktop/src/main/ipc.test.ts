@@ -199,6 +199,16 @@ describe("registerIpcHandlers", () => {
         service: "reviewGrade",
       },
       {
+        channel: IPC_CHANNELS.reviewGrade,
+        payload: { cardId: "el_1", rating: "good", promptMs: 1.5, responseMs: 1000 },
+        service: "reviewGrade",
+      },
+      {
+        channel: IPC_CHANNELS.reviewGrade,
+        payload: { cardId: "el_1", rating: "good", promptMs: 86_400_001, responseMs: 1000 },
+        service: "reviewGrade",
+      },
+      {
         channel: IPC_CHANNELS.searchQuery,
         payload: { q: new Array(600).fill("x").join("") },
         service: "search",
@@ -352,6 +362,7 @@ describe("registerIpcHandlers", () => {
     expect(db.reviewGrade).toHaveBeenCalledWith({
       cardId: "el_1",
       rating: "good",
+      promptMs: 0,
       responseMs: 1100,
       asOf: "2027-01-01T00:00:00.000Z",
     });

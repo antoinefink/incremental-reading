@@ -96,7 +96,7 @@ function buildDueSet(): {
     rating: "good",
     reviewedAt: iso("2026-05-26T08:00:00.000Z"),
     responseMs: 3000,
-    prevState: "review",
+    prevState: "new",
     nextState: "review",
     nextStability: 9.4,
     nextDifficulty: 5,
@@ -451,7 +451,7 @@ describe("QueueQuery", () => {
       // ~25.6 days before NOW with stability 2 ⇒ R ≈ 0.50 (the neutral midpoint).
       reviewedAt: iso("2026-05-04T22:24:00.000Z"),
       responseMs: 3000,
-      prevState: "review",
+      prevState: "new",
       nextState: "review",
       nextStability: 2,
       nextDifficulty: 5,

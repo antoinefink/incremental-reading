@@ -104,7 +104,7 @@ function leechOutcome(): ReviewOutcome {
     rating: "again",
     reviewedAt: "2026-05-30T12:00:00.000Z" as IsoTimestamp,
     responseMs: 1500,
-    prevState: "review",
+    prevState: "new",
     nextState: "relearning",
     nextStability: 1.2,
     nextDifficulty: 8.4,

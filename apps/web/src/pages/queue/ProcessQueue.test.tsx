@@ -9,7 +9,7 @@
  *  - reaching the end shows the "Queue clear" done state;
  *  - a CARD reveals its answer INLINE (cloze unmasked / Q&A answer), renders the
  *    four interval previews from `review.preview`, and grading it calls the SAME
- *    `review.grade` the review session uses (with a plausible responseMs + rating)
+ *    `review.grade` the review session uses (with prompt/response timings + rating)
  *    then advances the cursor — NO detour to /review.
  *
  * Collaborators are mocked so the test exercises ONLY this component's wiring:
@@ -262,6 +262,7 @@ const h = vi.hoisted(() => {
         elementId: "card-1",
         rating: "good",
         reviewedAt: "2026-05-30T08:00:05.000Z",
+        promptMs: 0,
         responseMs: 1234,
         nextDueAt: "2026-06-03T08:00:00.000Z",
       },
@@ -764,32 +765,37 @@ describe("ProcessQueue", () => {
     expect(screen.getByTestId("process-card-refblock-citation")).toHaveTextContent("Kevin Simler");
   });
 
-  it("grades a revealed card via review.grade and advances the cursor (no navigation)", async () => {
-    render(<ProcessQueue />);
-    await screen.findByTestId("process-item");
-    expect(currentItemId()).toBe("card-1");
-    await waitFor(() => expect(h.reviewCard).toHaveBeenCalledWith({ cardId: "card-1" }));
+  it("grades a revealed card via review.grade with prompt/response timings and advances the cursor", async () => {
+    let now = 10_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      render(<ProcessQueue />);
+      await screen.findByTestId("process-item");
+      expect(currentItemId()).toBe("card-1");
+      await waitFor(() => expect(h.reviewCard).toHaveBeenCalledWith({ cardId: "card-1" }));
 
-    fireEvent.click(screen.getByTestId("process-card-reveal"));
-    await screen.findByTestId("process-card-answer");
+      now = 14_200;
+      fireEvent.click(screen.getByTestId("process-card-reveal"));
+      await screen.findByTestId("process-card-answer");
 
-    fireEvent.click(screen.getByTestId("process-grade-good"));
+      now = 15_450;
+      fireEvent.click(screen.getByTestId("process-grade-good"));
 
-    await waitFor(() => expect(h.reviewGrade).toHaveBeenCalledTimes(1));
-    const arg = h.reviewGrade.mock.calls[0]?.[0] as {
-      cardId: string;
-      rating: string;
-      responseMs: number;
-    };
-    expect(arg.cardId).toBe("card-1");
-    expect(arg.rating).toBe("good");
-    expect(typeof arg.responseMs).toBe("number");
-    expect(arg.responseMs).toBeGreaterThanOrEqual(0);
-    // The grade does NOT go through the attention queue.act path (FSRS only).
-    expect(h.actOnQueueItem).not.toHaveBeenCalled();
-    // The cursor advanced to the next item; no detour to /review.
-    await waitFor(() => expect(currentItemId()).not.toBe("card-1"));
-    expect(h.navigateSpy).not.toHaveBeenCalled();
+      await waitFor(() => expect(h.reviewGrade).toHaveBeenCalledTimes(1));
+      expect(h.reviewGrade).toHaveBeenCalledWith({
+        cardId: "card-1",
+        rating: "good",
+        promptMs: 4200,
+        responseMs: 1250,
+      });
+      // The grade does NOT go through the attention queue.act path (FSRS only).
+      expect(h.actOnQueueItem).not.toHaveBeenCalled();
+      // The cursor advanced to the next item; no detour to /review.
+      await waitFor(() => expect(currentItemId()).not.toBe("card-1"));
+      expect(h.navigateSpy).not.toHaveBeenCalled();
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it("does NOT offer the attention ScheduleMenu on a card (FSRS only)", async () => {

@@ -200,8 +200,28 @@ export const reviewLogs = sqliteTable(
     reviewedAt: text("reviewed_at").notNull(),
     /** Time-to-answer in milliseconds (reveal → grade). */
     responseMs: integer("response_ms").notNull(),
+    /** Time spent on the prompt before reveal. Total review time = prompt_ms + response_ms. */
+    promptMs: integer("prompt_ms"),
     /** FSRS state captured immediately before this review. */
     prevState: text("prev_state").notNull(),
+    /** Due time before this review, if the card had one. */
+    prevDueAt: text("prev_due_at"),
+    /** Card stability before this review (days). */
+    prevStability: real("prev_stability"),
+    /** Card difficulty before this review. */
+    prevDifficulty: real("prev_difficulty"),
+    /** Days since the previous review before this transition. */
+    prevElapsedDays: real("prev_elapsed_days"),
+    /** Interval (days) scheduled before this transition. */
+    prevScheduledDays: real("prev_scheduled_days"),
+    /** Cumulative repetitions before this review. */
+    prevReps: integer("prev_reps"),
+    /** Cumulative lapses before this review. */
+    prevLapses: integer("prev_lapses"),
+    /** FSRS short-term learning-step cursor before this review. */
+    prevLearningSteps: integer("prev_learning_steps"),
+    /** Last review timestamp before this review; null for a first review. */
+    prevLastReviewedAt: text("prev_last_reviewed_at"),
     /** FSRS state assigned by this review. */
     nextState: text("next_state").notNull(),
     /** Card stability after this review (days). */
@@ -210,6 +230,16 @@ export const reviewLogs = sqliteTable(
     nextDifficulty: real("next_difficulty").notNull(),
     /** Due time scheduled by this review. */
     nextDueAt: text("next_due_at").notNull(),
+    /** Days since the previous review as computed by this transition. */
+    nextElapsedDays: real("next_elapsed_days"),
+    /** Interval (days) scheduled by this transition. */
+    nextScheduledDays: real("next_scheduled_days"),
+    /** Cumulative repetitions after this review. */
+    nextReps: integer("next_reps"),
+    /** Cumulative lapses after this review. */
+    nextLapses: integer("next_lapses"),
+    /** FSRS short-term learning-step cursor after this review. */
+    nextLearningSteps: integer("next_learning_steps"),
   },
   (table) => [
     check("review_logs_rating_check", inList(table.rating, REVIEW_RATINGS)),

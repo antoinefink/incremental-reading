@@ -54,6 +54,15 @@ export interface ReviewOutcome {
   readonly reviewedAt: IsoTimestamp;
   readonly responseMs: number;
   readonly prevState: FsrsState;
+  readonly prevDueAt: IsoTimestamp | null;
+  readonly prevStability: number;
+  readonly prevDifficulty: number;
+  readonly prevElapsedDays: number;
+  readonly prevScheduledDays: number;
+  readonly prevReps: number;
+  readonly prevLapses: number;
+  readonly prevLearningSteps: number;
+  readonly prevLastReviewedAt: IsoTimestamp | null;
   readonly nextState: FsrsState;
   readonly nextStability: number;
   readonly nextDifficulty: number;
@@ -302,6 +311,15 @@ export class CardSchedulerService {
       reviewedAt: now,
       responseMs,
       prevState: state.fsrsState,
+      prevDueAt: state.dueAt,
+      prevStability: state.stability,
+      prevDifficulty: state.difficulty,
+      prevElapsedDays: state.elapsedDays,
+      prevScheduledDays: state.scheduledDays,
+      prevReps: state.reps,
+      prevLapses: state.lapses,
+      prevLearningSteps: state.learningSteps,
+      prevLastReviewedAt: state.lastReviewedAt,
       nextState: fromFsrsStateEnum(next.state),
       nextStability: next.stability,
       nextDifficulty: next.difficulty,

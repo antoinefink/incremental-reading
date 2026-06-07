@@ -112,6 +112,12 @@ Blockers prevent creation, warnings remain advisory, and passed checks can be in
 
 The flow that presents due cards for recall practice and records the user's grading outcome.
 
+### Review log
+
+The durable record of one graded card review, including the grade, review timing, and the scheduling transition produced by that grade.
+
+Review logs are the source of truth for historical review stats. Aggregate reports derive from them later rather than being captured in a separate analytics history.
+
 ### Reveal
 
 The review action that intentionally exposes a card's answer and source context after the user has attempted recall.

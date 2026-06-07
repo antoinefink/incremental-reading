@@ -134,6 +134,7 @@ beforeEach(() => {
       elementId: "card-a",
       rating: "good",
       reviewedAt: "2026-06-01T08:00:00.000Z",
+      promptMs: 0,
       responseMs: 1200,
       nextDueAt: "2099-01-01T00:00:00.000Z",
     },

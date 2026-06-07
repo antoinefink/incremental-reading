@@ -77,6 +77,15 @@ describe("CardSchedulerService.gradeCard — new card", () => {
     expect(outcome.reviewedAt).toBe(NOW);
     expect(outcome.responseMs).toBe(1500);
     expect(outcome.prevState).toBe<FsrsState>("new");
+    expect(outcome.prevDueAt).toBe(fresh.dueAt);
+    expect(outcome.prevStability).toBe(fresh.stability);
+    expect(outcome.prevDifficulty).toBe(fresh.difficulty);
+    expect(outcome.prevElapsedDays).toBe(fresh.elapsedDays);
+    expect(outcome.prevScheduledDays).toBe(fresh.scheduledDays);
+    expect(outcome.prevReps).toBe(fresh.reps);
+    expect(outcome.prevLapses).toBe(fresh.lapses);
+    expect(outcome.prevLearningSteps).toBe(fresh.learningSteps);
+    expect(outcome.prevLastReviewedAt).toBe(fresh.lastReviewedAt);
     // A new card graded Good enters learning (or review) — never stays "new".
     expect(outcome.nextState).not.toBe("new");
     expect(FSRS_STATES).toContain(outcome.nextState);

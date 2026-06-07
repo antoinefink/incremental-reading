@@ -145,6 +145,20 @@ export interface ReviewOutcome {
   readonly reviewedAt: IsoTimestamp;
   readonly responseMs: number;
   readonly prevState: FsrsState;
+  /**
+   * Optional scheduler preimage. Live scheduler outcomes supply these so the
+   * repository can reject a stale transition even when the FSRS phase is unchanged.
+   * Older hand-built test fixtures may omit them and fall back to the phase check.
+   */
+  readonly prevDueAt?: IsoTimestamp | null;
+  readonly prevStability?: number;
+  readonly prevDifficulty?: number;
+  readonly prevElapsedDays?: number;
+  readonly prevScheduledDays?: number;
+  readonly prevReps?: number;
+  readonly prevLapses?: number;
+  readonly prevLearningSteps?: number;
+  readonly prevLastReviewedAt?: IsoTimestamp | null;
   readonly nextState: FsrsState;
   readonly nextStability: number;
   readonly nextDifficulty: number;
@@ -407,18 +421,48 @@ export class ReviewRepository {
   recordReview(
     cardElementId: ElementId,
     outcome: ReviewOutcome,
-    options?: { readonly promoteFromDraft?: boolean },
+    options?: { readonly promoteFromDraft?: boolean; readonly promptMs?: number },
   ): ReviewLog {
     return this.db.transaction((tx) => {
       const id = newReviewLogId();
       // The lapse count BEFORE this review — so we can tell whether THIS grade added
       // a lapse (vs. a passing grade on an already-high-lapse, possibly-un-leeched card).
-      const prevLapses =
-        tx
-          .select({ lapses: reviewStates.lapses })
-          .from(reviewStates)
-          .where(eq(reviewStates.elementId, cardElementId))
-          .get()?.lapses ?? 0;
+      const before = tx
+        .select()
+        .from(reviewStates)
+        .where(eq(reviewStates.elementId, cardElementId))
+        .get();
+      if (!before) {
+        throw new Error(
+          `ReviewRepository.recordReview: review state for card ${cardElementId} missing`,
+        );
+      }
+      const hasPreimage =
+        outcome.prevDueAt !== undefined ||
+        outcome.prevStability !== undefined ||
+        outcome.prevDifficulty !== undefined ||
+        outcome.prevElapsedDays !== undefined ||
+        outcome.prevScheduledDays !== undefined ||
+        outcome.prevReps !== undefined ||
+        outcome.prevLapses !== undefined ||
+        outcome.prevLearningSteps !== undefined ||
+        outcome.prevLastReviewedAt !== undefined;
+      const stalePreimage =
+        hasPreimage &&
+        (outcome.prevDueAt !== before.dueAt ||
+          outcome.prevStability !== before.stability ||
+          outcome.prevDifficulty !== before.difficulty ||
+          outcome.prevElapsedDays !== before.elapsedDays ||
+          outcome.prevScheduledDays !== before.scheduledDays ||
+          outcome.prevReps !== before.reps ||
+          outcome.prevLapses !== before.lapses ||
+          outcome.prevLearningSteps !== before.learningSteps ||
+          outcome.prevLastReviewedAt !== before.lastReviewedAt);
+      if (outcome.prevState !== before.fsrsState || stalePreimage) {
+        throw new Error(
+          `ReviewRepository.recordReview: stale review outcome for card ${cardElementId}`,
+        );
+      }
       tx.insert(reviewLogs)
         .values({
           id,
@@ -426,11 +470,26 @@ export class ReviewRepository {
           rating: outcome.rating,
           reviewedAt: outcome.reviewedAt,
           responseMs: outcome.responseMs,
-          prevState: outcome.prevState,
+          promptMs: options?.promptMs ?? null,
+          prevState: before.fsrsState,
+          prevDueAt: before.dueAt,
+          prevStability: before.stability,
+          prevDifficulty: before.difficulty,
+          prevElapsedDays: before.elapsedDays,
+          prevScheduledDays: before.scheduledDays,
+          prevReps: before.reps,
+          prevLapses: before.lapses,
+          prevLearningSteps: before.learningSteps,
+          prevLastReviewedAt: before.lastReviewedAt,
           nextState: outcome.nextState,
           nextStability: outcome.nextStability,
           nextDifficulty: outcome.nextDifficulty,
           nextDueAt: outcome.nextDueAt,
+          nextElapsedDays: outcome.elapsedDays,
+          nextScheduledDays: outcome.scheduledDays,
+          nextReps: outcome.reps,
+          nextLapses: outcome.lapses,
+          nextLearningSteps: outcome.nextLearningSteps,
         })
         .run();
 
@@ -467,7 +526,7 @@ export class ReviewRepository {
       // review transaction. Gating on "added a lapse" respects a manual un-leech: a
       // remediated card with a high cumulative lapse count is NOT re-flagged on a
       // passing grade, only if it fails again.
-      const addedLapse = outcome.lapses > prevLapses;
+      const addedLapse = outcome.lapses > before.lapses;
       if (addedLapse && isLeech({ lapses: outcome.lapses })) {
         const cardRow = tx
           .select({ isLeech: cards.isLeech })

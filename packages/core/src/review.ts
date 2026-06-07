@@ -65,8 +65,28 @@ export interface ReviewLog {
   readonly reviewedAt: IsoTimestamp;
   /** Time-to-answer in milliseconds (reveal → grade). */
   readonly responseMs: number;
+  /** Time spent on the prompt before reveal. `null` for rows logged before this was captured. */
+  readonly promptMs: number | null;
   /** FSRS state captured immediately before this review. */
   readonly prevState: FsrsState;
+  /** Due time before this review, if the card had one. */
+  readonly prevDueAt: IsoTimestamp | null;
+  /** Card stability before this review (days). */
+  readonly prevStability: number | null;
+  /** Card difficulty before this review. */
+  readonly prevDifficulty: number | null;
+  /** Days since the previous review before this transition. */
+  readonly prevElapsedDays: number | null;
+  /** Interval (days) scheduled before this transition. */
+  readonly prevScheduledDays: number | null;
+  /** Cumulative repetitions before this review. */
+  readonly prevReps: number | null;
+  /** Cumulative lapses before this review. */
+  readonly prevLapses: number | null;
+  /** FSRS short-term learning-step cursor before this review. */
+  readonly prevLearningSteps: number | null;
+  /** Last review timestamp before this review; null for a first review. */
+  readonly prevLastReviewedAt: IsoTimestamp | null;
   /** FSRS state assigned by this review. */
   readonly nextState: FsrsState;
   /** Card stability after this review (days). */
@@ -75,4 +95,14 @@ export interface ReviewLog {
   readonly nextDifficulty: number;
   /** Due time scheduled by this review. */
   readonly nextDueAt: IsoTimestamp;
+  /** Days since the previous review as computed by this transition. */
+  readonly nextElapsedDays: number | null;
+  /** Interval (days) scheduled by this transition. */
+  readonly nextScheduledDays: number | null;
+  /** Cumulative repetitions after this review. */
+  readonly nextReps: number | null;
+  /** Cumulative lapses after this review. */
+  readonly nextLapses: number | null;
+  /** FSRS short-term learning-step cursor after this review. */
+  readonly nextLearningSteps: number | null;
 }

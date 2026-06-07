@@ -7,8 +7,9 @@
  *  - the prompt shows; reveal toggles the answer into view;
  *  - revealing fetches the four interval previews and renders them on the grade
  *    buttons;
- *  - grading calls the typed `appApi.reviewGrade` with the correct rating + a
- *    plausible `responseMs` (reveal → grade), then advances to the next card;
+ *  - grading calls the typed `appApi.reviewGrade` with the correct rating, prompt-side
+ *    `promptMs` (card shown → reveal), and answer-side `responseMs` (reveal → grade),
+ *    then advances to the next card;
  *  - cloze fronts MASK `{{cN::…}}` until reveal, then show the answer;
  *  - the completion summary tallies per-grade counts.
  *
@@ -312,6 +313,7 @@ beforeEach(() => {
       elementId: "card-qa",
       rating: "good",
       reviewedAt: "2026-05-30T08:00:00.000Z",
+      promptMs: 0,
       responseMs: 1200,
       nextDueAt: "2026-06-09T08:00:00.000Z",
     },
@@ -459,32 +461,39 @@ describe("ReviewScreen", () => {
     expect(screen.queryByTestId("review-refblock-reliability")).not.toBeInTheDocument();
   });
 
-  it("grading calls reviewGrade with the rating + a plausible responseMs, then advances", async () => {
-    // First card, then an empty deck (session complete).
-    h.reviewSessionNext
-      .mockResolvedValueOnce(singleDeck(h.qaCard))
-      .mockResolvedValueOnce({ card: null, remaining: 0, total: 0 });
-    render(<ReviewScreen />);
+  it("grading sends promptMs for card-shown→reveal and responseMs for reveal→grade, then advances", async () => {
+    let now = 100_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      // First card, then an empty deck (session complete).
+      h.reviewSessionNext
+        .mockResolvedValueOnce(singleDeck(h.qaCard))
+        .mockResolvedValueOnce({ card: null, remaining: 0, total: 0 });
+      render(<ReviewScreen />);
 
-    await screen.findByTestId("review-card");
-    fireEvent.click(screen.getByTestId("review-reveal"));
-    await screen.findByTestId("review-grades");
+      await screen.findByTestId("review-card");
+      now = 104_200;
+      fireEvent.click(screen.getByTestId("review-reveal"));
+      await screen.findByTestId("review-grades");
 
-    fireEvent.click(screen.getByTestId("review-grade-good"));
+      now = 105_700;
+      fireEvent.click(screen.getByTestId("review-grade-good"));
 
-    await waitFor(() => expect(h.reviewGrade).toHaveBeenCalledTimes(1));
-    expect(h.reviewGrade).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cardId: "card-qa",
-        rating: "good",
-        responseMs: expect.any(Number),
-      }),
-    );
-    const arg = h.reviewGrade.mock.calls[0]?.[0] as { responseMs: number };
-    expect(arg.responseMs).toBeGreaterThanOrEqual(0);
+      await waitFor(() => expect(h.reviewGrade).toHaveBeenCalledTimes(1));
+      expect(h.reviewGrade).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cardId: "card-qa",
+          rating: "good",
+          promptMs: 4200,
+          responseMs: 1500,
+        }),
+      );
 
-    // The deck is now exhausted → the completion summary appears (advanced).
-    await screen.findByTestId("review-summary");
+      // The deck is now exhausted → the completion summary appears (advanced).
+      await screen.findByTestId("review-summary");
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it("masks cloze deletions until reveal, then shows the answer span", async () => {
@@ -678,6 +687,7 @@ describe("ReviewScreen", () => {
         elementId: "x",
         rating: "x",
         reviewedAt: "2026-05-30T08:00:00.000Z",
+        promptMs: 0,
         responseMs: 1,
         nextDueAt: "2026-05-30T08:00:00.000Z",
       },

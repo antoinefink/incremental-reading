@@ -3766,6 +3766,7 @@ export class DbService {
     rating: ReviewRating,
     responseMs: number,
     asOf: IsoTimestamp = new Date().toISOString() as IsoTimestamp,
+    promptMs = 0,
   ): { reviewLog: ReviewLog; reviewState: ReviewState } {
     const card = this.repos.review.findCardById(cardElementId);
     if (card?.element.type !== "card" || card.element.deletedAt) {
@@ -3788,6 +3789,7 @@ export class DbService {
     // creation), but this stays self-healing for any legacy un-activated draft.
     const reviewLog = this.repos.review.recordReview(cardElementId, outcome, {
       promoteFromDraft: card.element.stage === "card_draft",
+      promptMs,
     });
     const reviewState = this.repos.review.findReviewState(cardElementId);
     if (!reviewState) {
@@ -4147,7 +4149,7 @@ export class DbService {
    * `ReviewRepository.recordReview`, appending the immutable `review_logs` row,
    * advancing `review_states` + `elements.due_at`, and logging `add_review_log` in
    * ONE transaction, plus the `card_draft → active_card` first-review promotion).
-   * Records the response time. Cards only.
+   * Records prompt-side and response-side timings. Cards only.
    */
   reviewGrade(request: ReviewGradeRequest): ReviewGradeResult {
     const asOf = (request.asOf ?? new Date().toISOString()) as IsoTimestamp;
@@ -4156,6 +4158,7 @@ export class DbService {
       request.rating as ReviewRating,
       request.responseMs,
       asOf,
+      request.promptMs,
     );
     return {
       reviewLog: {
@@ -4164,6 +4167,7 @@ export class DbService {
         rating: reviewLog.rating,
         reviewedAt: reviewLog.reviewedAt,
         responseMs: reviewLog.responseMs,
+        promptMs: reviewLog.promptMs ?? 0,
         nextDueAt: reviewLog.nextDueAt,
       },
       reviewState: {

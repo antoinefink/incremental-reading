@@ -25,15 +25,31 @@ describe("review model shapes", () => {
       rating: "good",
       reviewedAt: "2026-06-03T00:00:00.000Z",
       responseMs: 1800,
+      promptMs: 700,
       prevState: "learning",
+      prevDueAt: "2026-06-03T00:00:00.000Z",
+      prevStability: 4.2,
+      prevDifficulty: 5.9,
+      prevElapsedDays: 1,
+      prevScheduledDays: 1,
+      prevReps: 7,
+      prevLapses: 1,
+      prevLearningSteps: 1,
+      prevLastReviewedAt: "2026-06-02T00:00:00.000Z",
       nextState: "review",
       nextStability: state.stability,
       nextDifficulty: state.difficulty,
       nextDueAt: state.dueAt,
+      nextElapsedDays: state.elapsedDays,
+      nextScheduledDays: state.scheduledDays,
+      nextReps: state.reps,
+      nextLapses: state.lapses,
+      nextLearningSteps: state.learningSteps,
     } satisfies ReviewLog;
 
     expect(state.fsrsState).toBe("review");
     expect(log.rating).toBe("good");
+    expect(log.promptMs + log.responseMs).toBe(2500);
     expect(log.nextDueAt).toBe(state.dueAt);
   });
 });

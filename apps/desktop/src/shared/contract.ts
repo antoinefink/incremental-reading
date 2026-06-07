@@ -3641,17 +3641,22 @@ export interface ReviewPreviewResult {
   readonly intervals: Record<"again" | "hard" | "good" | "easy", ReviewIntervalPreview> | null;
 }
 
+const ReviewTimingMsSchema = z.number().finite().int().min(0).max(86_400_000);
+
 export const ReviewGradeRequestSchema = z.object({
   /** The card id being graded. */
   cardId: ElementIdSchema,
   /** The grade (`again`/`hard`/`good`/`easy`). */
   rating: ReviewRatingSchema,
   /** The measured reveal→grade response time in ms (persisted on `review_logs`). */
-  responseMs: z.number().int().min(0).max(86_400_000),
+  responseMs: ReviewTimingMsSchema,
+  /** The measured card-shown→reveal prompt time in ms; omitted legacy callers default to 0. */
+  promptMs: ReviewTimingMsSchema.optional().default(0),
   /** "Now" the grade is recorded at (ISO-8601); defaults to the server clock. */
   asOf: IsoTimestampInputSchema.optional(),
 });
-export type ReviewGradeRequest = z.infer<typeof ReviewGradeRequestSchema>;
+export type ReviewGradeRequestInput = z.input<typeof ReviewGradeRequestSchema>;
+export type ReviewGradeRequest = z.output<typeof ReviewGradeRequestSchema>;
 
 /** The durable review-log row written by a grade (append-only). */
 export interface ReviewLogSummary {
@@ -3660,6 +3665,7 @@ export interface ReviewLogSummary {
   readonly rating: string;
   readonly reviewedAt: string;
   readonly responseMs: number;
+  readonly promptMs: number;
   readonly nextDueAt: string;
 }
 
@@ -5747,9 +5753,9 @@ export interface AppApi {
     /**
      * Grade a card (T037) — FSRS reschedule + a durable `review_logs` row, in ONE
      * transaction via `CardSchedulerService.gradeCard` → `ReviewRepository.recordReview`,
-     * logging `add_review_log`. Records the response time. Cards only.
+     * logging `add_review_log`. Records prompt-side and response-side timings. Cards only.
      */
-    grade(request: ReviewGradeRequest): Promise<ReviewGradeResult>;
+    grade(request: ReviewGradeRequestInput): Promise<ReviewGradeResult>;
     /**
      * The leech cleanup view's read (T040) — every card flagged a leech (auto after
      * ≥4 lapses, or manual) with its lapse count + source. Read-only. Remediation

@@ -263,12 +263,15 @@ test("the rescheduling + logs survive an app restart", async () => {
         };
       };
       const { elements } = await api.inspector.list();
+      let best: { id: string; logCount: number } | null = null;
       for (const el of elements) {
         if (el.type !== "card") continue;
         const insp = await api.inspector.get({ id: el.id });
-        if ((insp.data?.review?.logCount ?? 0) > 0) return el.id;
+        const logCount = insp.data?.review?.logCount ?? 0;
+        if (!best || logCount > best.logCount) best = { id: el.id, logCount };
       }
-      throw new Error("no graded card found after restart");
+      if (!best || best.logCount === 0) throw new Error("no graded card found after restart");
+      return best.id;
     });
     persisted = await cardState(page, cardId);
     expect(persisted.logCount).toBeGreaterThanOrEqual(4);

@@ -2348,6 +2348,8 @@ export interface ReviewGradeRequest {
   readonly rating: ReviewRating;
   /** The measured reveal→grade response time (ms), persisted on `review_logs`. */
   readonly responseMs: number;
+  /** The measured card-shown→reveal prompt time (ms); omitted callers default main-side. */
+  readonly promptMs?: number;
   readonly asOf?: string;
 }
 
@@ -2358,6 +2360,7 @@ export interface ReviewLogSummary {
   readonly rating: string;
   readonly reviewedAt: string;
   readonly responseMs: number;
+  readonly promptMs: number;
   readonly nextDueAt: string;
 }
 
@@ -4244,7 +4247,7 @@ export const appApi = {
   },
   /**
    * Grade a card (T037) — FSRS reschedule + a durable `review_logs` row in ONE
-   * transaction (logs `add_review_log`). Records the reveal→grade response time.
+   * transaction (logs `add_review_log`). Records prompt-side and answer-side timings.
    */
   reviewGrade(request: ReviewGradeRequest): Promise<ReviewGradeResult> {
     return requireAppApi().review.grade(request);

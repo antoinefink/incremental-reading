@@ -1367,18 +1367,21 @@ describe("DbService — review session (T037)", () => {
     const result = svc.reviewGrade({
       cardId,
       rating: "good",
+      promptMs: 1400,
       responseMs: 3200,
       asOf: ASOF,
     });
 
-    // The durable review log was written with the response time + rating.
+    // The durable review log was written with the prompt time, response time, and rating.
     expect(result.reviewLog.rating).toBe("good");
+    expect(result.reviewLog.promptMs).toBe(1400);
     expect(result.reviewLog.responseMs).toBe(3200);
     expect(result.reviewLog.elementId).toBe(cardId);
 
     // Exactly one new review_logs row.
-    const afterLogs = svc.repos.review.listReviewLogs(cardId as never).length;
-    expect(afterLogs).toBe(beforeLogs + 1);
+    const afterLogs = svc.repos.review.listReviewLogs(cardId as never);
+    expect(afterLogs).toHaveLength(beforeLogs + 1);
+    expect(afterLogs[0]?.promptMs).toBe(1400);
 
     // review_states advanced: reps incremented, dueAt moved forward, elements.dueAt synced.
     const afterState = svc.repos.review.findReviewState(cardId as never);
@@ -1397,6 +1400,26 @@ describe("DbService — review session (T037)", () => {
     svc.close();
   });
 
+  it("reviewGrade records zero promptMs from a normalized legacy IPC request", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+    const cardId = seededDueCardId(svc);
+
+    const result = svc.reviewGrade({
+      cardId,
+      rating: "good",
+      promptMs: 0,
+      responseMs: 2100,
+      asOf: ASOF,
+    });
+
+    expect(result.reviewLog.promptMs).toBe(0);
+    expect(svc.repos.review.listReviewLogs(cardId as never)[0]?.promptMs).toBe(0);
+
+    svc.close();
+  });
+
   it("grades across all four ratings produce ordered next intervals (again < good < easy)", () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
@@ -1411,7 +1434,7 @@ describe("DbService — review session (T037)", () => {
 
     // Grading 'again' increments lapses (a failed review).
     const lapsesBefore = svc.repos.review.findReviewState(cardId as never)?.lapses ?? 0;
-    svc.reviewGrade({ cardId, rating: "again", responseMs: 8000, asOf: ASOF });
+    svc.reviewGrade({ cardId, rating: "again", promptMs: 0, responseMs: 8000, asOf: ASOF });
     const lapsesAfter = svc.repos.review.findReviewState(cardId as never)?.lapses ?? 0;
     expect(lapsesAfter).toBe(lapsesBefore + 1);
 
@@ -1426,6 +1449,7 @@ describe("DbService — review session (T037)", () => {
     const { reviewState } = first.reviewGrade({
       cardId,
       rating: "good",
+      promptMs: 0,
       responseMs: 2100,
       asOf: ASOF,
     });
@@ -1450,7 +1474,13 @@ describe("DbService — review session (T037)", () => {
       .get() as { id: string } | undefined;
     expect(extract).toBeDefined();
     expect(() =>
-      svc.reviewGrade({ cardId: extract?.id ?? "", rating: "good", responseMs: 100, asOf: ASOF }),
+      svc.reviewGrade({
+        cardId: extract?.id ?? "",
+        rating: "good",
+        promptMs: 0,
+        responseMs: 100,
+        asOf: ASOF,
+      }),
     ).toThrow();
     svc.close();
   });
@@ -1467,7 +1497,9 @@ describe("DbService — review session (T037)", () => {
     // The IPC contract rejects this; the scheduler-side `toClock` guard is the
     // matching defense so even a bypassed call can never write an Invalid Date.
     for (const asOf of ["not-a-date", "", "yesterday"]) {
-      expect(() => svc.reviewGrade({ cardId, rating: "good", responseMs: 100, asOf })).toThrow();
+      expect(() =>
+        svc.reviewGrade({ cardId, rating: "good", promptMs: 0, responseMs: 100, asOf }),
+      ).toThrow();
     }
 
     // Nothing was mutated: no Invalid Date in review_states/elements.due_at, no log row.
@@ -1860,7 +1892,13 @@ describe("DbService — review session (T037)", () => {
     // `review`-state fail), recovering with `good` between fails.
     let at = "2027-05-02T00:00:00.000Z";
     const grade = (rating: "again" | "good" | "easy") => {
-      const { reviewState } = svc.reviewGrade({ cardId, rating, responseMs: 4000, asOf: at });
+      const { reviewState } = svc.reviewGrade({
+        cardId,
+        rating,
+        promptMs: 0,
+        responseMs: 4000,
+        asOf: at,
+      });
       at = reviewState.dueAt
         ? new Date(Date.parse(reviewState.dueAt) + 86_400_000).toISOString()
         : at;
@@ -2586,7 +2624,13 @@ describe("DbService — review modes (T096)", () => {
       .get() as { n: number };
 
     // Grade it through the UNCHANGED review.grade path.
-    const result = svc.reviewGrade({ cardId, rating: "good", responseMs: 1500, asOf: ASOF });
+    const result = svc.reviewGrade({
+      cardId,
+      rating: "good",
+      promptMs: 0,
+      responseMs: 1500,
+      asOf: ASOF,
+    });
 
     // Exactly one new review_logs row + one add_review_log op, FSRS advanced.
     expect(svc.repos.review.listReviewLogs(cardId as never).length).toBe(beforeLogs + 1);
@@ -2664,6 +2708,7 @@ describe("DbService — review modes (T096)", () => {
     const { reviewState } = first.reviewGrade({
       cardId,
       rating: "good",
+      promptMs: 0,
       responseMs: 2100,
       asOf: ASOF,
     });
@@ -2957,7 +3002,7 @@ describe("DbService — analytics (T045)", () => {
 
     const before = first.getAnalytics({ asOf: ASOF });
     // Grade `again` — a failure that drags retention down.
-    first.reviewGrade({ cardId, rating: "again", responseMs: 4000, asOf: ASOF });
+    first.reviewGrade({ cardId, rating: "again", promptMs: 0, responseMs: 4000, asOf: ASOF });
     const after = first.getAnalytics({ asOf: ASOF });
     expect(after.reviewsTotal).toBe(before.reviewsTotal + 1);
     first.close();

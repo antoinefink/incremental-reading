@@ -1398,19 +1398,75 @@ describe("Review session schemas (T037)", () => {
     expect(() => ReviewPreviewRequestSchema.parse({})).toThrow();
   });
 
-  it("grade accepts the four canonical ratings + a non-negative responseMs", () => {
+  it("grade accepts the four canonical ratings + non-negative response/prompt timings", () => {
     for (const rating of ["again", "hard", "good", "easy"] as const) {
-      const parsed = ReviewGradeRequestSchema.parse({ cardId: "el_1", rating, responseMs: 1200 });
+      const parsed = ReviewGradeRequestSchema.parse({
+        cardId: "el_1",
+        rating,
+        promptMs: 800,
+        responseMs: 1200,
+      });
       expect(parsed.rating).toBe(rating);
+      expect(parsed.promptMs).toBe(800);
     }
   });
 
-  it("grade rejects an unknown rating, a negative responseMs, and a missing cardId", () => {
+  it("grade defaults omitted promptMs to 0 for legacy callers", () => {
+    const parsed = ReviewGradeRequestSchema.parse({
+      cardId: "el_1",
+      rating: "good",
+      responseMs: 1200,
+    });
+
+    expect(parsed.promptMs).toBe(0);
+  });
+
+  it("grade rejects an unknown rating, negative timings, non-finite promptMs, and a missing cardId", () => {
     expect(() =>
       ReviewGradeRequestSchema.parse({ cardId: "el_1", rating: "perfect", responseMs: 1 }),
     ).toThrow();
     expect(() =>
       ReviewGradeRequestSchema.parse({ cardId: "el_1", rating: "good", responseMs: -1 }),
+    ).toThrow();
+    expect(() =>
+      ReviewGradeRequestSchema.parse({
+        cardId: "el_1",
+        rating: "good",
+        promptMs: -1,
+        responseMs: 1,
+      }),
+    ).toThrow();
+    expect(() =>
+      ReviewGradeRequestSchema.parse({
+        cardId: "el_1",
+        rating: "good",
+        promptMs: 1.5,
+        responseMs: 1,
+      }),
+    ).toThrow();
+    expect(() =>
+      ReviewGradeRequestSchema.parse({
+        cardId: "el_1",
+        rating: "good",
+        promptMs: 86_400_001,
+        responseMs: 1,
+      }),
+    ).toThrow();
+    expect(() =>
+      ReviewGradeRequestSchema.parse({
+        cardId: "el_1",
+        rating: "good",
+        promptMs: Number.POSITIVE_INFINITY,
+        responseMs: 1,
+      }),
+    ).toThrow();
+    expect(() =>
+      ReviewGradeRequestSchema.parse({
+        cardId: "el_1",
+        rating: "good",
+        promptMs: Number.NaN,
+        responseMs: 1,
+      }),
     ).toThrow();
     expect(() => ReviewGradeRequestSchema.parse({ rating: "good", responseMs: 1 })).toThrow();
   });

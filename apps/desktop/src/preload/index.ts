@@ -92,7 +92,7 @@ import type {
   RetentionSetCardRequest,
   RetentionSetConceptRequest,
   ReviewCardRequest,
-  ReviewGradeRequest,
+  ReviewGradeRequestInput,
   ReviewModeCountRequest,
   ReviewModeDeckRequest,
   ReviewPreviewRequest,
@@ -324,7 +324,8 @@ const appApi: AppApi = {
     card: (request: ReviewCardRequest) => ipcRenderer.invoke(IPC_CHANNELS.reviewCard, request),
     preview: (request: ReviewPreviewRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.reviewPreview, request),
-    grade: (request: ReviewGradeRequest) => ipcRenderer.invoke(IPC_CHANNELS.reviewGrade, request),
+    grade: (request: ReviewGradeRequestInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.reviewGrade, request),
     leeches: () => ipcRenderer.invoke(IPC_CHANNELS.reviewLeeches),
     modeDeck: (request: ReviewModeDeckRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.reviewModeDeck, request),

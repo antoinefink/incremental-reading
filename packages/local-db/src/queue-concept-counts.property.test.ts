@@ -170,7 +170,7 @@ function buildWorld(world: WorldSpec): BuiltWorld {
       rating: "good",
       reviewedAt: "2026-05-20T08:00:00.000Z" as IsoTimestamp,
       responseMs: 1000,
-      prevState: "review",
+      prevState: "new",
       nextState: "review",
       nextStability: 5,
       nextDifficulty: 5,

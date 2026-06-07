@@ -24,7 +24,7 @@
  * (a TARGETED, read-only `review.card` fetch — the loop walks a frozen order, so it
  * cannot use the soonest-due `review.session.next`). The renderer never touches
  * SQLite/Node/fs and never does FSRS math — it only carries opaque ids + measures
- * the reveal→grade response time. Cards stay on FSRS, attention items on the
+ * prompt-side and reveal→grade response timings. Cards stay on FSRS, attention items on the
  * attention scheduler — the chip + scheduling never cross (a card never sees the
  * attention `Postpone` menu). The card grade advances the FROZEN-order cursor (consistent with
  * the other loop actions), it does NOT re-read the review deck.
@@ -241,6 +241,10 @@ export function ProcessQueue() {
   );
   /** When the current card was revealed (for the reveal→grade response time). */
   const revealAtRef = useRef<number | null>(null);
+  /** When the current card became visible (for the card-shown→reveal prompt time). */
+  const cardShownAtRef = useRef<number | null>(null);
+  /** Frozen prompt time captured at reveal, then persisted with the grade. */
+  const promptMsRef = useRef<number>(0);
   /** Card ids already graded this session — the hard guard against a double grade. */
   const gradedRef = useRef<Set<string>>(new Set());
 
@@ -389,6 +393,8 @@ export function ProcessQueue() {
     setRevealed(false);
     setPreviews(null);
     revealAtRef.current = null;
+    cardShownAtRef.current = currentType === "card" ? Date.now() : null;
+    promptMsRef.current = 0;
     setExtractDraft(null);
     sourceJumpedRef.current = null;
     setExtractBuilder(null);
@@ -979,7 +985,7 @@ export function ProcessQueue() {
 
   /**
    * Reveal the current card's answer + lazily fetch the four interval previews
-   * (PURE — no mutation). Captures the reveal timestamp for the response time.
+   * (PURE — no mutation). Captures prompt-side and reveal timestamps for review timing.
    * Mirrors the review session's reveal exactly. Keyed off the cursor's `current.id`
    * (always present for a card) rather than the async-loaded `cardView`, so a fast
    * Space press never no-ops while the full view is still in flight — the answer
@@ -988,7 +994,10 @@ export function ProcessQueue() {
   const reveal = useCallback(async () => {
     if (!isCard || !current || revealed) return;
     setRevealed(true);
-    revealAtRef.current = Date.now();
+    const revealedAt = Date.now();
+    promptMsRef.current =
+      cardShownAtRef.current == null ? 0 : Math.max(0, revealedAt - cardShownAtRef.current);
+    revealAtRef.current = revealedAt;
     try {
       const res = await appApi.reviewPreview({
         cardId: current.id,
@@ -1004,7 +1013,7 @@ export function ProcessQueue() {
   /**
    * Grade the current card INLINE through the SAME `review.grade` the review session
    * uses (FSRS reschedule + a durable `review_logs` row, ALL main-side), measuring
-   * the reveal→grade response time, then ADVANCE the FROZEN-order cursor (consistent
+   * prompt-side and reveal→grade timings, then ADVANCE the FROZEN-order cursor (consistent
    * with `act` — the loop's deck is the queue order, not the review deck). Guards
    * against double-grading the same card. Cards stay FSRS-only.
    */
@@ -1020,6 +1029,7 @@ export function ProcessQueue() {
           cardId: cardView.id,
           rating,
           responseMs,
+          promptMs: promptMsRef.current,
           ...(asOf ? { asOf } : {}),
         });
         requestInspectorRefresh();

@@ -278,16 +278,93 @@ describe("review_logs round-trip", () => {
         rating: "good",
         reviewedAt: now(),
         responseMs: 1820,
+        promptMs: 640,
         prevState: "new",
+        prevDueAt: "2026-05-29T12:00:00.000Z",
+        prevStability: 1.2,
+        prevDifficulty: 6.3,
+        prevElapsedDays: 0,
+        prevScheduledDays: 0,
+        prevReps: 2,
+        prevLapses: 1,
+        prevLearningSteps: 1,
+        prevLastReviewedAt: "2026-05-28T12:00:00.000Z",
         nextState: "learning",
         nextStability: 3.2,
         nextDifficulty: 5.1,
         nextDueAt: now(),
+        nextElapsedDays: 1,
+        nextScheduledDays: 2,
+        nextReps: 3,
+        nextLapses: 1,
+        nextLearningSteps: 2,
       })
       .run();
     const log = db.select().from(reviewLogs).where(eq(reviewLogs.id, logId)).get();
     expect(log?.rating).toBe("good");
+    expect(log?.promptMs).toBe(640);
+    expect(log?.responseMs).toBe(1820);
+    expect(log?.prevDueAt).toBe("2026-05-29T12:00:00.000Z");
+    expect(log?.prevStability).toBeCloseTo(1.2);
+    expect(log?.prevDifficulty).toBeCloseTo(6.3);
+    expect(log?.prevReps).toBe(2);
+    expect(log?.prevLapses).toBe(1);
+    expect(log?.prevLearningSteps).toBe(1);
+    expect(log?.prevLastReviewedAt).toBe("2026-05-28T12:00:00.000Z");
     expect(log?.nextStability).toBeCloseTo(3.2);
+    expect(log?.nextElapsedDays).toBe(1);
+    expect(log?.nextScheduledDays).toBe(2);
+    expect(log?.nextReps).toBe(3);
+    expect(log?.nextLapses).toBe(1);
+    expect(log?.nextLearningSteps).toBe(2);
+  });
+
+  it("allows legacy-style review log inserts to omit newly added timing and transition fields", () => {
+    const { db } = handle;
+    const cardId = id();
+    db.insert(elements)
+      .values({
+        id: cardId,
+        type: "card",
+        status: "active",
+        stage: "active_card",
+        priority: 0.875,
+        title: "card",
+        createdAt: now(),
+        updatedAt: now(),
+      })
+      .run();
+    const logId = id();
+    db.insert(reviewLogs)
+      .values({
+        id: logId,
+        elementId: cardId,
+        rating: "easy",
+        reviewedAt: now(),
+        responseMs: 900,
+        prevState: "new",
+        nextState: "review",
+        nextStability: 4.5,
+        nextDifficulty: 4.2,
+        nextDueAt: now(),
+      })
+      .run();
+    const log = db.select().from(reviewLogs).where(eq(reviewLogs.id, logId)).get();
+    expect(log?.promptMs).toBeNull();
+    expect(log?.prevDueAt).toBeNull();
+    expect(log?.prevStability).toBeNull();
+    expect(log?.prevDifficulty).toBeNull();
+    expect(log?.prevElapsedDays).toBeNull();
+    expect(log?.prevScheduledDays).toBeNull();
+    expect(log?.prevReps).toBeNull();
+    expect(log?.prevLapses).toBeNull();
+    expect(log?.prevLearningSteps).toBeNull();
+    expect(log?.prevLastReviewedAt).toBeNull();
+    expect(log?.nextElapsedDays).toBeNull();
+    expect(log?.nextScheduledDays).toBeNull();
+    expect(log?.nextReps).toBeNull();
+    expect(log?.nextLapses).toBeNull();
+    expect(log?.nextLearningSteps).toBeNull();
   });
 });
 
