@@ -61,6 +61,16 @@ function installAppApi(overrides: Partial<AppApi> = {}): AppApi {
       scheduleReturn: vi.fn(async (request: unknown) => request),
       get: vi.fn(async (request: unknown) => request),
     },
+    backups: {
+      create: vi.fn(async () => ({
+        path: "/tmp/interleave/backups/manual.zip",
+        timestamp: "2026-06-07T10-00-00Z",
+        sizeBytes: 1024,
+        fileCount: 2,
+        schemaVersion: "v1",
+      })),
+      openFolder: vi.fn(async () => ({ ok: true })),
+    },
     ...overrides,
   } as unknown as AppApi;
   window.appApi = fake;
@@ -102,6 +112,15 @@ describe("renderer appApi wrapper", () => {
 
     await appApi.createSynthesisNote({ title: "New note" });
     expect(bridge.synthesis.create).toHaveBeenCalledWith({ title: "New note" });
+  });
+
+  it("forwards the fixed backups folder command without a payload", async () => {
+    const bridge = installAppApi();
+
+    await expect(appApi.openBackupsFolder()).resolves.toEqual({ ok: true });
+
+    expect(bridge.backups.openFolder).toHaveBeenCalledTimes(1);
+    expect(bridge.backups.openFolder).toHaveBeenCalledWith();
   });
 
   it("forwards searchQuery and preserves the full SearchCounts shape", async () => {

@@ -12,6 +12,7 @@ const electron = vi.hoisted(() => {
     }),
     getAllWindows: vi.fn(),
     fromWebContents: vi.fn(() => null),
+    openPath: vi.fn(async () => ""),
   };
 });
 
@@ -23,10 +24,11 @@ vi.mock("electron", () => ({
   },
   dialog: { showOpenDialog: vi.fn() },
   ipcMain: { handle: electron.handle, removeHandler: electron.removeHandler },
+  shell: { openPath: electron.openPath },
 }));
 
 import { IPC_CHANNELS } from "../shared/contract";
-import { registerIpcHandlers } from "./ipc";
+import { type IpcHandlerContext, registerIpcHandlers } from "./ipc";
 
 function fakeDbService() {
   return {
@@ -61,12 +63,28 @@ function fakeDbService() {
   };
 }
 
+function fakeIpcContext(): IpcHandlerContext {
+  return {
+    paths: {
+      dataDir: "/tmp/interleave",
+      dbPath: "/tmp/interleave/app.sqlite",
+      assetsDir: "/tmp/interleave/assets",
+      exportsDir: "/tmp/interleave/exports",
+      backupsDir: "/tmp/interleave/backups",
+      modelsDir: "/tmp/interleave/models",
+    },
+    migrationsDir: "/tmp/interleave/migrations",
+  };
+}
+
 beforeEach(() => {
   electron.handlers.clear();
   electron.handle.mockClear();
   electron.removeHandler.mockClear();
   electron.getAllWindows.mockReset();
   electron.fromWebContents.mockClear();
+  electron.openPath.mockReset();
+  electron.openPath.mockResolvedValue("");
 });
 
 describe("registerIpcHandlers", () => {
@@ -368,6 +386,45 @@ describe("registerIpcHandlers", () => {
     expect(() => electron.handlers.get(IPC_CHANNELS.jobsList)?.({}, {})).toThrow(
       "jobs: handler registered without a background runner",
     );
+  });
+
+  it("opens the managed backups folder through Electron shell.openPath", async () => {
+    registerIpcHandlers(fakeDbService() as never, fakeIpcContext());
+
+    await expect(electron.handlers.get(IPC_CHANNELS.backupsOpenFolder)?.({})).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(electron.openPath).toHaveBeenCalledWith("/tmp/interleave/backups");
+  });
+
+  it("rejects payloads before opening the backups folder", async () => {
+    registerIpcHandlers(fakeDbService() as never, fakeIpcContext());
+
+    await expect(
+      electron.handlers.get(IPC_CHANNELS.backupsOpenFolder)?.({}, { path: "/tmp" }),
+    ).rejects.toThrow();
+
+    expect(electron.openPath).not.toHaveBeenCalled();
+  });
+
+  it("throws clearly when the backups folder handler has no filesystem context", async () => {
+    registerIpcHandlers(fakeDbService() as never);
+
+    await expect(electron.handlers.get(IPC_CHANNELS.backupsOpenFolder)?.({})).rejects.toThrow(
+      "backups.openFolder: handler registered without filesystem context",
+    );
+    expect(electron.openPath).not.toHaveBeenCalled();
+  });
+
+  it("throws when Electron cannot open the backups folder", async () => {
+    electron.openPath.mockResolvedValue("No application could open the folder");
+    registerIpcHandlers(fakeDbService() as never, fakeIpcContext());
+
+    await expect(electron.handlers.get(IPC_CHANNELS.backupsOpenFolder)?.({})).rejects.toThrow(
+      "backups.openFolder: failed to open backups folder",
+    );
+    expect(electron.openPath).toHaveBeenCalledWith("/tmp/interleave/backups");
   });
 
   it("broadcasts runner job updates to live renderer windows and unsubscribes on dispose", () => {

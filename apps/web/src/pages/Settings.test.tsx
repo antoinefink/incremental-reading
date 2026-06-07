@@ -6,6 +6,7 @@ const h = vi.hoisted(() => ({
   getAppSettings: vi.fn(),
   updateAppSettings: vi.fn(),
   createBackup: vi.fn(),
+  openBackupsFolder: vi.fn(),
   getCapturePairing: vi.fn(),
   setCaptureEnabled: vi.fn(),
   regenerateCaptureToken: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock("../lib/appApi", async () => {
       getAppSettings: h.getAppSettings,
       updateAppSettings: h.updateAppSettings,
       createBackup: h.createBackup,
+      openBackupsFolder: h.openBackupsFolder,
       getCapturePairing: h.getCapturePairing,
       setCaptureEnabled: h.setCaptureEnabled,
       regenerateCaptureToken: h.regenerateCaptureToken,
@@ -98,6 +100,7 @@ beforeEach(() => {
     fileCount: 3,
     schemaVersion: "v1",
   });
+  h.openBackupsFolder.mockResolvedValue({ ok: true });
   h.getCapturePairing.mockResolvedValue({
     enabled: false,
     running: false,
@@ -184,6 +187,56 @@ describe("Settings", () => {
     await waitFor(() => expect(h.createBackup).toHaveBeenCalled());
     expect(await findByTestId("settings-backup-result")).toHaveTextContent("2.0 KB");
     expect(getByTestId("settings-backup-result")).toHaveTextContent("3 files");
+  });
+
+  it("opens the backups folder from the secondary data action", async () => {
+    const { getByTestId, findByTestId } = render(<Settings />);
+
+    await findByTestId("settings-open-backups-folder");
+    fireEvent.click(getByTestId("settings-open-backups-folder"));
+
+    await waitFor(() => expect(h.openBackupsFolder).toHaveBeenCalledTimes(1));
+    expect(h.openBackupsFolder).toHaveBeenCalledWith();
+  });
+
+  it("disables the backups-folder button while Finder is opening", async () => {
+    let resolveOpen: (value: { ok: true }) => void = () => {};
+    h.openBackupsFolder.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOpen = resolve;
+        }),
+    );
+    const { findByTestId } = render(<Settings />);
+
+    const button = await findByTestId("settings-open-backups-folder");
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    expect(button).toBeDisabled();
+    expect(button).toHaveTextContent("Opening…");
+    expect(h.openBackupsFolder).toHaveBeenCalledTimes(1);
+
+    resolveOpen({ ok: true });
+    await waitFor(() => expect(button).not.toBeDisabled());
+    expect(button).toHaveTextContent("Open backups folder");
+  });
+
+  it("shows a focused folder-open error without blocking backup creation", async () => {
+    h.openBackupsFolder.mockRejectedValueOnce(new Error("Finder is unavailable"));
+    const { getByTestId, findByTestId } = render(<Settings />);
+
+    await findByTestId("settings-open-backups-folder");
+    fireEvent.click(getByTestId("settings-open-backups-folder"));
+
+    expect(await findByTestId("settings-backup-folder-error")).toHaveTextContent(
+      "Finder is unavailable",
+    );
+    expect(getByTestId("settings-backup-now")).not.toBeDisabled();
+
+    fireEvent.click(getByTestId("settings-backup-now"));
+    await waitFor(() => expect(h.createBackup).toHaveBeenCalledTimes(1));
+    expect(await findByTestId("settings-backup-result")).toHaveTextContent("2.0 KB");
   });
 
   it("keeps the backup explanation aligned inside the data section rhythm", async () => {

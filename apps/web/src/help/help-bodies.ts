@@ -3706,7 +3706,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "Backup files land inside <code>backups/</code> in your app data folder (<code>~/Library/Application Support/Interleave/backups/</code> on macOS). Manual backups use timestamped ZIP names; automatic backups use an <code>auto-</code> prefix. There is currently no <em>Reveal in Finder</em> button in the app — navigate there manually to copy files off-device.",
+      text: "Backup files land inside <code>backups/</code> in your app data folder (<code>~/Library/Application Support/Interleave/backups/</code> on macOS). Manual backups use timestamped ZIP names; automatic backups use an <code>auto-</code> prefix. Use <b>Settings</b> → <b>Data & backup</b> → <b>Open backups folder</b> to open that folder in Finder, then copy recent ZIPs off-device.",
     },
     {
       type: "h2",

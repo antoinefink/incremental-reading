@@ -50,6 +50,9 @@ describe("preload bridge", () => {
     await api().app.health();
     expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.appHealth);
 
+    await api().backups.openFolder();
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.backupsOpenFolder);
+
     await api().sources.importManual({ title: "T", body: "Body", priority: "B" });
     expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.sourcesImportManual, {
       title: "T",

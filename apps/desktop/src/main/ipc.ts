@@ -10,7 +10,7 @@
 
 import type { Job, JobJsonValue } from "@interleave/core";
 import { isYouTubeUrl } from "@interleave/importers";
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import {
   AiApproveRequestSchema,
   AiDismissRequestSchema,
@@ -18,6 +18,7 @@ import {
   AiRunRequestSchema,
   AnalyticsGetRequestSchema,
   BackupsCreateRequestSchema,
+  BackupsOpenFolderRequestSchema,
   BalanceGetRequestSchema,
   CaptureGetPairingRequestSchema,
   CaptureRegenerateTokenRequestSchema,
@@ -1308,6 +1309,18 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
       fileCount: result.fileCount,
       schemaVersion: result.schemaVersion,
     };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.backupsOpenFolder, async (_event, rawRequest: unknown) => {
+    BackupsOpenFolderRequestSchema.parse(rawRequest);
+    if (!context) {
+      throw new Error("backups.openFolder: handler registered without filesystem context");
+    }
+    const openError = await shell.openPath(context.paths.backupsDir);
+    if (openError) {
+      throw new Error("backups.openFolder: failed to open backups folder");
+    }
+    return { ok: true };
   });
 
   // Asset-vault maintenance (T059) — all behind the typed surface. The renderer

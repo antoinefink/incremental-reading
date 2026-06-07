@@ -191,6 +191,7 @@ export const IPC_CHANNELS = {
   // remediations reuse the existing `extracts:*` commands.
   extractStagnationList: "extractStagnation:list",
   backupsCreate: "backups:create",
+  backupsOpenFolder: "backups:openFolder",
   // Background-runner observe surface (T058). `jobs:list` reads the current queue.
   // The renderer enqueues ONLY via `sources:importUrl` — there is intentionally NO
   // `jobs:enqueue` channel (a generic renderer enqueue is deferred to M14/M18).

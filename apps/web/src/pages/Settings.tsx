@@ -640,8 +640,10 @@ export function Settings() {
   const [settings, setSettings] = useState<RendererSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [backingUp, setBackingUp] = useState(false);
+  const [openingBackupsFolder, setOpeningBackupsFolder] = useState(false);
   const [backup, setBackup] = useState<BackupsCreateResult | null>(null);
   const [backupError, setBackupError] = useState<string | null>(null);
+  const [backupFolderError, setBackupFolderError] = useState<string | null>(null);
   // Browser-capture pairing (T062) — the loopback server's token + running state.
   const [pairing, setPairing] = useState<CapturePairingResult | null>(null);
   const [pairingError, setPairingError] = useState<string | null>(null);
@@ -664,6 +666,18 @@ export function Settings() {
       setBackupError(e instanceof Error ? e.message : String(e));
     } finally {
       setBackingUp(false);
+    }
+  }, []);
+
+  const openBackupsFolder = useCallback(async () => {
+    setOpeningBackupsFolder(true);
+    setBackupFolderError(null);
+    try {
+      await appApi.openBackupsFolder();
+    } catch (e) {
+      setBackupFolderError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setOpeningBackupsFolder(false);
     }
   }, []);
 
@@ -1074,20 +1088,36 @@ export function Settings() {
           label="Back up now"
           hint="Export the database + asset vault to a portable, hashed ZIP under backups/."
         >
-          <button
-            type="button"
-            data-testid="settings-backup-now"
-            disabled={backingUp}
-            onClick={() => void runBackup()}
-            className={
-              backingUp
-                ? "inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 font-medium text-sm text-text-3"
-                : "inline-flex items-center gap-2 rounded-md border border-accent-soft-bd bg-accent-soft px-3 py-1.5 font-medium text-accent-text text-sm hover:bg-accent-soft/80"
-            }
-          >
-            <Icon name="download" size={14} />
-            {backingUp ? "Backing up…" : "Back up now"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              data-testid="settings-backup-now"
+              disabled={backingUp}
+              onClick={() => void runBackup()}
+              className={
+                backingUp
+                  ? "inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 font-medium text-sm text-text-3"
+                  : "inline-flex items-center gap-2 rounded-md border border-accent-soft-bd bg-accent-soft px-3 py-1.5 font-medium text-accent-text text-sm hover:bg-accent-soft/80"
+              }
+            >
+              <Icon name="download" size={14} />
+              {backingUp ? "Backing up…" : "Back up now"}
+            </button>
+            <button
+              type="button"
+              data-testid="settings-open-backups-folder"
+              disabled={openingBackupsFolder}
+              onClick={() => void openBackupsFolder()}
+              className={
+                openingBackupsFolder
+                  ? "inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 font-medium text-sm text-text-3"
+                  : "inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 font-medium text-sm text-text-2 hover:border-border-strong hover:text-text"
+              }
+            >
+              <Icon name="external" size={14} />
+              {openingBackupsFolder ? "Opening…" : "Open backups folder"}
+            </button>
+          </div>
         </SettingRow>
         {backup ? (
           <SettingRow label="Last backup" hint={backup.path}>
@@ -1104,6 +1134,13 @@ export function Settings() {
           <SettingRow label="Backup failed" hint="See the error below.">
             <span data-testid="settings-backup-error" className="text-danger text-sm">
               {backupError}
+            </span>
+          </SettingRow>
+        ) : null}
+        {backupFolderError ? (
+          <SettingRow label="Open folder failed" hint="The backup command is still available.">
+            <span data-testid="settings-backup-folder-error" className="text-danger text-sm">
+              {backupFolderError}
             </span>
           </SettingRow>
         ) : null}

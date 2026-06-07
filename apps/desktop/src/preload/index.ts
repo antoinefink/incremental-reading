@@ -442,6 +442,7 @@ const appApi: AppApi = {
   },
   backups: {
     create: () => ipcRenderer.invoke(IPC_CHANNELS.backupsCreate),
+    openFolder: () => ipcRenderer.invoke(IPC_CHANNELS.backupsOpenFolder),
   },
   jobs: {
     // Observe the background-runner queue (T058) — invoke only. NO `enqueue`: per

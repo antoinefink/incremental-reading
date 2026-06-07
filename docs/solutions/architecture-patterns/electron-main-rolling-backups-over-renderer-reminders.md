@@ -115,6 +115,7 @@ If a user manually creates a backup at 10:00, the automatic service can treat th
 ## Related
 
 - [Automatic rolling backups plan](../../plans/2026-06-06-002-feat-automatic-rolling-backups-plan.md)
+- [Open managed backup folders with pathless IPC](./pathless-backups-open-folder-ipc.md)
 - [Desktop architecture](../../architecture.md)
 - [Safety, analytics, and backup tasks](../../tasks/M9-safety-analytics-backup.md)
 - [MVP ship tasks](../../tasks/M10-ship-mvp.md)

@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   AnalyticsGetRequestSchema,
   BackupsCreateRequestSchema,
+  BackupsOpenFolderRequestSchema,
   BalanceGetRequestSchema,
   CaptureGetPairingRequestSchema,
   CaptureRegenerateTokenRequestSchema,
@@ -284,6 +285,7 @@ describe("IPC channels", () => {
         "analytics:get",
         "balance:get",
         "backups:create",
+        "backups:openFolder",
         "jobs:list",
         "jobs:updated",
         "vault:verify",
@@ -2446,6 +2448,13 @@ describe("BackupsCreateRequestSchema (T047)", () => {
   it("takes no arguments (void request)", () => {
     expect(BackupsCreateRequestSchema.parse(undefined)).toBeUndefined();
     expect(() => BackupsCreateRequestSchema.parse({ anything: true })).toThrow();
+  });
+});
+
+describe("BackupsOpenFolderRequestSchema", () => {
+  it("takes no arguments (void request)", () => {
+    expect(BackupsOpenFolderRequestSchema.parse(undefined)).toBeUndefined();
+    expect(() => BackupsOpenFolderRequestSchema.parse({ path: "/tmp" })).toThrow();
   });
 });
 

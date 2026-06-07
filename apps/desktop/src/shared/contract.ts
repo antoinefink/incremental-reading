@@ -5246,6 +5246,14 @@ export interface BackupsCreateResult {
   readonly schemaVersion: string;
 }
 
+/** `backups.openFolder()` takes no arguments. */
+export const BackupsOpenFolderRequestSchema = z.void();
+
+export interface BackupsOpenFolderResult {
+  /** Confirms Electron accepted the fixed open-backups-folder request. */
+  readonly ok: true;
+}
+
 // ---------------------------------------------------------------------------
 // The typed surface the renderer sees as `window.appApi`.
 // ---------------------------------------------------------------------------
@@ -5938,6 +5946,12 @@ export interface AppApi {
      * final `.zip` path for display (no raw filesystem access reaches the renderer).
      */
     create(): Promise<BackupsCreateResult>;
+    /**
+     * Open the managed local backups directory in the OS file manager through a
+     * fixed Electron main-process command. The renderer supplies no path and receives
+     * no path.
+     */
+    openFolder(): Promise<BackupsOpenFolderResult>;
   };
   readonly jobs: {
     /**

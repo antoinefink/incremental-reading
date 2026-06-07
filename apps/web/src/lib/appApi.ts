@@ -3383,6 +3383,11 @@ export interface BackupsCreateResult {
   readonly schemaVersion: string;
 }
 
+export interface BackupsOpenFolderResult {
+  /** Confirms Electron accepted the fixed open-backups-folder request. */
+  readonly ok: true;
+}
+
 /** The exact shape the preload exposes as `window.appApi`. */
 export interface AppApi {
   readonly app: {
@@ -3600,6 +3605,7 @@ export interface AppApi {
   };
   readonly backups: {
     create(): Promise<BackupsCreateResult>;
+    openFolder(): Promise<BackupsOpenFolderResult>;
   };
   readonly jobs: {
     /** Observe the on-device background-runner queue (T058) — read-only. */
@@ -4563,6 +4569,14 @@ export const appApi = {
    */
   createBackup(): Promise<BackupsCreateResult> {
     return requireAppApi().backups.create();
+  },
+  /**
+   * Open the managed local backups folder through a fixed desktop command. The
+   * renderer passes no path and receives no path; Electron main resolves the
+   * canonical app-data `backups/` directory.
+   */
+  openBackupsFolder(): Promise<BackupsOpenFolderResult> {
+    return requireAppApi().backups.openFolder();
   },
   /**
    * Observe the on-device background-runner queue (T058) — read-only. Returns an
