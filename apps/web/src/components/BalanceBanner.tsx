@@ -17,8 +17,8 @@
  *
  * Shared by the inbox (`screen-inbox`) and the analytics view (`screen-analytics`)
  * so both surfaces read the SAME computed numbers and can never disagree. Renders
- * `null` when the warning is disabled, the snapshot is `ok`, or we are not running
- * inside the desktop shell.
+ * `null` when the warning is disabled, the snapshot is `ok`, no current action is
+ * available, or we are not running inside the desktop shell.
  */
 
 import { useNavigate } from "@tanstack/react-router";
@@ -71,8 +71,18 @@ export function BalanceBanner({ asOf, refreshKey = 0 }: BalanceBannerProps) {
     return () => window.removeEventListener(UNDO_EVENT, handler);
   }, [load]);
 
-  // Hidden when disabled, balanced, or no data — it is purely advisory.
-  if (!enabled || !data?.imbalanced) return null;
+  const hasDueQueueWork = (data?.dueQueueItems ?? 0) > 0;
+  const hasInboxWork = (data?.inboxSources ?? 0) > 0;
+
+  // Hidden when disabled, balanced, no data, or there is no honest action to offer.
+  if (!enabled || !data?.imbalanced || (!hasDueQueueWork && !hasInboxWork)) return null;
+
+  const guidance =
+    hasDueQueueWork && hasInboxWork
+      ? "Process queue work or triage inbox sources before importing more."
+      : hasDueQueueWork
+        ? "Open the queue before importing more."
+        : "Triage inbox sources before importing more.";
 
   const danger = data.severity === "danger";
   const tone = danger
@@ -102,28 +112,32 @@ export function BalanceBanner({ asOf, refreshKey = 0 }: BalanceBannerProps) {
           <span data-testid="balance-cards">{data.cardsCreated}</span> card
           {data.cardsCreated === 1 ? "" : "s"} created —{" "}
           <span data-testid="balance-reviews">{data.reviewsDueThisWeek}</span> review
-          {data.reviewsDueThisWeek === 1 ? "" : "s"} due this week. Distill before importing more.
+          {data.reviewsDueThisWeek === 1 ? "" : "s"} due this week. {guidance}
         </div>
       </div>
       <div className="ml-auto flex flex-none items-center gap-2">
-        <button
-          type="button"
-          data-testid="balance-open-queue"
-          onClick={() => void navigate({ to: "/queue" })}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 font-medium text-sm text-text-2 hover:text-text"
-        >
-          <Icon name="play" size={13} />
-          Open queue
-        </button>
-        <button
-          type="button"
-          data-testid="balance-triage-inbox"
-          onClick={() => void navigate({ to: "/inbox" })}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 font-medium text-sm text-text-2 hover:text-text"
-        >
-          <Icon name="inbox" size={13} />
-          Triage inbox
-        </button>
+        {hasDueQueueWork ? (
+          <button
+            type="button"
+            data-testid="balance-open-queue"
+            onClick={() => void navigate({ to: "/queue" })}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 font-medium text-sm text-text-2 hover:text-text"
+          >
+            <Icon name="play" size={13} />
+            Open queue
+          </button>
+        ) : null}
+        {hasInboxWork ? (
+          <button
+            type="button"
+            data-testid="balance-triage-inbox"
+            onClick={() => void navigate({ to: "/inbox" })}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 font-medium text-sm text-text-2 hover:text-text"
+          >
+            <Icon name="inbox" size={13} />
+            Triage inbox
+          </button>
+        ) : null}
       </div>
     </div>
   );

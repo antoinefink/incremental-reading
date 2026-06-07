@@ -96,10 +96,83 @@ describe("AnalyticsService.computeBalance (T046)", () => {
     expect(b.cardsCreated).toBe(3);
     // Only the card due in 3 days counts; the one due in 20 days is outside the week.
     expect(b.reviewsDueThisWeek).toBe(1);
+    expect(b.inboxSources).toBe(0);
+    expect(b.dueQueueItems).toBe(0);
 
     // 8 imports vs 5 output (2 extracts + 3 cards): ratio 1.6 ≥ factor 1.5 → warn.
     expect(b.imbalanced).toBe(true);
     expect(b.severity).toBe("warn");
+  });
+
+  it("reports inbox imports as actionable without pretending they are queue due", () => {
+    const asOf = new Date(2026, 4, 30, 18, 0, 0);
+    const asOfIso = asOf.toISOString() as IsoTimestamp;
+    const sources = new ElementRepository(handle.db);
+
+    for (let i = 0; i < 6; i++) {
+      const el = sources.create({
+        type: "source",
+        status: "inbox",
+        stage: "raw_source",
+        priority: 0.5,
+        title: `Inbox source ${i}`,
+      });
+      handle.db
+        .update(elements)
+        .set({ createdAt: localNoon(asOf, i % 7), updatedAt: localNoon(asOf, i % 7) })
+        .where(eq(elements.id, el.id))
+        .run();
+    }
+
+    const b = new AnalyticsService(handle.db).computeBalance(asOfIso);
+
+    expect(b.sourcesImported).toBe(6);
+    expect(b.inboxSources).toBe(6);
+    expect(b.dueQueueItems).toBe(0);
+    expect(b.imbalanced).toBe(true);
+    expect(b.severity).toBe("warn");
+  });
+
+  it("keeps the raw imbalance judgment when there is no current actionable work", () => {
+    const asOf = new Date(2026, 4, 30, 18, 0, 0);
+    const asOfIso = asOf.toISOString() as IsoTimestamp;
+
+    for (let i = 0; i < 6; i++) seedElement(handle, "source", localNoon(asOf, i % 7));
+
+    const b = new AnalyticsService(handle.db).computeBalance(asOfIso);
+
+    expect(b.sourcesImported).toBe(6);
+    expect(b.inboxSources).toBe(0);
+    expect(b.dueQueueItems).toBe(0);
+    expect(b.imbalanced).toBe(true);
+    expect(b.severity).toBe("warn");
+  });
+
+  it("separates due-now queue items from reviews due later this week", () => {
+    const asOf = new Date(2026, 4, 30, 18, 0, 0);
+    const asOfIso = asOf.toISOString() as IsoTimestamp;
+
+    const future3 = new Date(asOf.getTime() + 3 * 86_400_000).toISOString() as IsoTimestamp;
+    seedDueCard(handle, localNoon(asOf, 1), future3);
+
+    const b = new AnalyticsService(handle.db).computeBalance(asOfIso);
+
+    expect(b.reviewsDueThisWeek).toBe(1);
+    expect(b.dueQueueItems).toBe(0);
+  });
+
+  it("counts due-now cards and attention items as queue work", () => {
+    const asOf = new Date(2026, 4, 30, 18, 0, 0);
+    const asOfIso = asOf.toISOString() as IsoTimestamp;
+
+    seedDueCard(handle, localNoon(asOf, 1), asOfIso);
+    const attentionId = seedElement(handle, "extract", localNoon(asOf, 1));
+    handle.db.update(elements).set({ dueAt: asOfIso }).where(eq(elements.id, attentionId)).run();
+
+    const b = new AnalyticsService(handle.db).computeBalance(asOfIso);
+
+    expect(b.reviewsDueThisWeek).toBe(1);
+    expect(b.dueQueueItems).toBe(2);
   });
 
   it("stays ok on a balanced week (processing keeps pace with imports)", () => {

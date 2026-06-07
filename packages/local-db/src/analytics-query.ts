@@ -151,6 +151,10 @@ export interface BalanceSummary {
   readonly cardsCreated: number;
   /** Cards due for FSRS review within the next `windowDays` days (forward-looking). */
   readonly reviewsDueThisWeek: number;
+  /** Live source elements currently waiting in the inbox. */
+  readonly inboxSources: number;
+  /** Items that would appear in `/queue` at `asOf`: due cards + due attention items. */
+  readonly dueQueueItems: number;
   /** True when imports outpace processing (`severity !== "ok"`). */
   readonly imbalanced: boolean;
   /** The severity bucket driving the banner variant (`ok`/`warn`/`danger`). */
@@ -307,6 +311,8 @@ export class AnalyticsService {
     const sourcesImported = this.countCreatedInWindow("source", windowStartIso, asOf);
     const extractsCreated = this.countCreatedInWindow("extract", windowStartIso, asOf);
     const cardsCreated = this.countCreatedInWindow("card", windowStartIso, asOf);
+    const inboxSources = this.queue.inboxCount("source");
+    const dueQueueItems = this.queue.dueCardCount(asOf) + this.queue.dueAttentionCount(asOf);
 
     // "Reviews due this week" looks FORWARD: cards due within the next `windowDays`.
     const windowEnd = new Date(asOfDate);
@@ -328,6 +334,8 @@ export class AnalyticsService {
       extractsCreated,
       cardsCreated,
       reviewsDueThisWeek,
+      inboxSources,
+      dueQueueItems,
       imbalanced: judgment.imbalanced,
       severity: judgment.severity,
     };

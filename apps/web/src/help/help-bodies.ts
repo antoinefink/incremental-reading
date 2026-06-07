@@ -660,7 +660,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "When you have imported significantly more sources than you have created extracts or cards in the current week, the <code>BalanceBanner</code> appears at the top of the inbox and the analytics screen. It shows the counts for that week — sources imported, extracts created, cards created, and reviews due — and offers two direct actions: <strong>Open queue</strong> and <strong>Triage inbox</strong>. It is advisory only and hides when the balance is healthy or when you have turned it off in Settings.",
+      text: "When you have imported significantly more sources than you have created extracts or cards in the current week, the <code>BalanceBanner</code> appears at the top of the inbox and the analytics screen. It shows the counts for that week — sources imported, extracts created, cards created, and reviews due. <strong>Open queue</strong> appears only when due queue work exists, <strong>Triage inbox</strong> appears only when inbox sources exist, and the banner hides when neither action is available. It is advisory only and also hides when the balance is healthy or when you have turned it off in Settings.",
     },
     {
       type: "h2",

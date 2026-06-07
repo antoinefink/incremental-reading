@@ -3274,6 +3274,8 @@ export interface BalanceGetResult {
   readonly extractsCreated: number;
   readonly cardsCreated: number;
   readonly reviewsDueThisWeek: number;
+  readonly inboxSources: number;
+  readonly dueQueueItems: number;
   readonly imbalanced: boolean;
   readonly severity: BalanceSeverity;
 }

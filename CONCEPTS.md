@@ -36,6 +36,18 @@ The inbox action that accepts a source into active processing and immediately op
 
 The local reading surface for processing a source inside the app, distinct from opening the source's external canonical URL.
 
+### Due queue
+
+The currently actionable processing set: due active-recall cards plus due attention-scheduled sources, topics, extracts, and similar non-card work.
+
+Due queue work is distinct from inbox sources, which still need triage, and from future review load, which may be forecast without being actionable yet.
+
+### Import/process balance
+
+A read-only advisory signal that compares how much material the user has imported with how much processing output they have produced.
+
+Import/process balance can be analytically imbalanced even when no due queue work exists. UI actions from this signal should route only to surfaces that currently contain work, such as inbox triage or the due queue.
+
 ### Article image
 
 An image discovered while importing a web article and copied into the local Asset vault so the source remains readable without hotlinking the original remote image.

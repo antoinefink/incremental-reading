@@ -2987,6 +2987,8 @@ describe("DbService — balance (T046)", () => {
     expect(balance.extractsCreated).toBeGreaterThanOrEqual(0);
     expect(balance.cardsCreated).toBeGreaterThanOrEqual(0);
     expect(balance.reviewsDueThisWeek).toBeGreaterThanOrEqual(0);
+    expect(balance.inboxSources).toBeGreaterThanOrEqual(0);
+    expect(balance.dueQueueItems).toBeGreaterThanOrEqual(0);
     expect(["ok", "warn", "danger"]).toContain(balance.severity);
     expect(balance.imbalanced).toBe(balance.severity !== "ok");
 
@@ -3009,6 +3011,8 @@ describe("DbService — balance (T046)", () => {
     expect(balance.sourcesImported).toBeGreaterThanOrEqual(10);
     expect(balance.extractsCreated).toBe(0);
     expect(balance.cardsCreated).toBe(0);
+    expect(balance.inboxSources).toBeGreaterThanOrEqual(10);
+    expect(balance.dueQueueItems).toBe(0);
     expect(balance.imbalanced).toBe(true);
     expect(balance.severity).toBe("danger");
     svc.close();

@@ -11,7 +11,7 @@
  *
  *   1. the `balance.*` bridge surface exists (no raw SQL);
  *   2. after importing many sources with no processing, the advisory `Banner`
- *      appears on the inbox with the four weekly numbers;
+ *      appears on the inbox with the four weekly numbers and no false queue CTA;
  *   3. toggling the `balanceWarnings` setting off hides the banner;
  *   4. the imported counts SURVIVE AN APP RESTART — recomputed from the durable
  *      `elements` rows, so re-enabling the warning shows the banner again.
@@ -44,6 +44,8 @@ async function balance(page: Page): Promise<{
   sourcesImported: number;
   extractsCreated: number;
   cardsCreated: number;
+  inboxSources: number;
+  dueQueueItems: number;
   imbalanced: boolean;
   severity: string;
 }> {
@@ -54,6 +56,8 @@ async function balance(page: Page): Promise<{
           sourcesImported: number;
           extractsCreated: number;
           cardsCreated: number;
+          inboxSources: number;
+          dueQueueItems: number;
           imbalanced: boolean;
           severity: string;
         }>;
@@ -114,9 +118,13 @@ test("the balance banner appears on the inbox when imports outpace processing", 
   expect(b.sourcesImported).toBeGreaterThanOrEqual(10);
   expect(b.extractsCreated).toBe(0);
   expect(b.cardsCreated).toBe(0);
+  expect(b.inboxSources).toBeGreaterThanOrEqual(10);
+  expect(b.dueQueueItems).toBe(0);
   expect(b.imbalanced).toBe(true);
 
-  // The advisory banner shows on the inbox with the four weekly numbers.
+  // The advisory banner shows on the inbox with the four weekly numbers and only
+  // the action that can actually lead to work. Imported inbox sources are not due
+  // queue items yet.
   await page.goto(`${baseUrl}/inbox`);
   await page.waitForLoadState("domcontentloaded");
   await expect(page.getByTestId("route-inbox")).toBeVisible();
@@ -126,6 +134,8 @@ test("the balance banner appears on the inbox when imports outpace processing", 
   await expect(page.getByTestId("balance-extracts")).toHaveText("0");
   await expect(page.getByTestId("balance-cards")).toHaveText("0");
   await expect(page.getByTestId("balance-reviews")).toHaveText(/\d+/);
+  await expect(page.getByTestId("balance-open-queue")).toHaveCount(0);
+  await expect(page.getByTestId("balance-triage-inbox")).toBeVisible();
 
   const bannerBox = await banner.boundingBox();
   const rowBox = await page.getByTestId("inbox-row").first().boundingBox();

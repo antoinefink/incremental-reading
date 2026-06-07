@@ -154,6 +154,14 @@ export class QueueRepository {
     return rows.map(rowToElement);
   }
 
+  /** Count live elements of a type currently in the inbox; same filter as {@link inbox}. */
+  inboxCount(type?: ElementType): number {
+    const condition = type
+      ? and(eq(elements.status, "inbox"), eq(elements.type, type), isNull(elements.deletedAt))
+      : and(eq(elements.status, "inbox"), isNull(elements.deletedAt));
+    return this.db.select({ n: sqlCount() }).from(elements).where(condition).get()?.n ?? 0;
+  }
+
   /**
    * Count of cards due at or before `asOf` — a cheap SQL `COUNT(*)` (T100). Previously
    * `this.dueCards(asOf).length` materialized + `rowToElement`-mapped every due row
@@ -210,23 +218,25 @@ export class QueueRepository {
    * queue filter as {@link dueCards}, including the T082 `cards.is_retired` join).
    */
   dueCardsBetween(from: IsoTimestamp, to: IsoTimestamp): number {
-    return this.db
-      .select({ id: elements.id })
-      .from(reviewStates)
-      .innerJoin(elements, eq(elements.id, reviewStates.elementId))
-      .innerJoin(cards, eq(cards.elementId, elements.id))
-      .where(
-        and(
-          eq(elements.type, "card"),
-          isNull(elements.deletedAt),
-          notInArray(elements.status, QUEUE_EXCLUDED_STATUSES as ElementStatus[]),
-          eq(cards.isRetired, false),
-          isNotNull(reviewStates.dueAt),
-          gte(reviewStates.dueAt, from),
-          lte(reviewStates.dueAt, to),
-        ),
-      )
-      .all().length;
+    return (
+      this.db
+        .select({ n: sqlCount() })
+        .from(reviewStates)
+        .innerJoin(elements, eq(elements.id, reviewStates.elementId))
+        .innerJoin(cards, eq(cards.elementId, elements.id))
+        .where(
+          and(
+            eq(elements.type, "card"),
+            isNull(elements.deletedAt),
+            notInArray(elements.status, QUEUE_EXCLUDED_STATUSES as ElementStatus[]),
+            eq(cards.isRetired, false),
+            isNotNull(reviewStates.dueAt),
+            gte(reviewStates.dueAt, from),
+            lte(reviewStates.dueAt, to),
+          ),
+        )
+        .get()?.n ?? 0
+    );
   }
 
   /** The single next due card (soonest FSRS due time), or `null`. */

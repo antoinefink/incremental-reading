@@ -5035,7 +5035,8 @@ export interface AnalyticsGetResult {
  * the pure `@interleave/core` `judgeBalance` rule (tunable via the user's
  * `importBalanceFactor` setting). It returns the four weekly headline numbers —
  * sources imported / extracts created / cards created / reviews due this week —
- * plus the `imbalanced` / `severity` judgment that drives the advisory `Banner`.
+ * plus current inbox / due-queue counts and the `imbalanced` / `severity`
+ * judgment that drives the advisory `Banner`.
  *
  * ADVISORY only: it NEVER mutates a schedule (auto-postpone is M16/T077). Reusing
  * the analytics aggregation guarantees the inbox banner + the analytics view show
@@ -5069,6 +5070,10 @@ export interface BalanceGetResult {
   readonly cardsCreated: number;
   /** Cards due for FSRS review within the next `windowDays` days (forward-looking). */
   readonly reviewsDueThisWeek: number;
+  /** Live source elements currently waiting in the inbox. */
+  readonly inboxSources: number;
+  /** Items that would appear in `/queue` at `asOf`: due cards + due attention items. */
+  readonly dueQueueItems: number;
   /** True when imports outpace processing (`severity !== "ok"`). */
   readonly imbalanced: boolean;
   /** The severity bucket driving the banner variant. */

@@ -4954,10 +4954,11 @@ export class DbService {
   /**
    * The import/process balance snapshot (T046) via
    * {@link AnalyticsService.computeBalance} (in `packages/local-db`): the week's
-   * sources imported / extracts created / cards created / reviews due, plus the
-   * imbalance judgment (the pure `@interleave/core` `judgeBalance` rule, tuned by
-   * the user's `importBalanceFactor` setting). REUSES the analytics aggregation so
-   * the inbox banner + analytics view can't disagree. Read-only — no mutation, no
+   * sources imported / extracts created / cards created / reviews due, current
+   * inbox / due-queue counts, plus the imbalance judgment (the pure
+   * `@interleave/core` `judgeBalance` rule, tuned by the user's
+   * `importBalanceFactor` setting). REUSES the analytics aggregation so the inbox
+   * banner + analytics view can't disagree. Read-only — no mutation, no
    * `operation_log`, no schedule changes. `asOf` defaults to "now", `windowDays`
    * to 7. The `balanceWarnings` on/off setting is honoured in the RENDERER (it
    * controls whether the banner shows); the snapshot is always computed so the
@@ -4977,6 +4978,8 @@ export class DbService {
       extractsCreated: summary.extractsCreated,
       cardsCreated: summary.cardsCreated,
       reviewsDueThisWeek: summary.reviewsDueThisWeek,
+      inboxSources: summary.inboxSources,
+      dueQueueItems: summary.dueQueueItems,
       imbalanced: summary.imbalanced,
       severity: summary.severity,
     };

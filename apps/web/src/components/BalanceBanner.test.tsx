@@ -25,6 +25,8 @@ const h = vi.hoisted(() => {
     extractsCreated: 2,
     cardsCreated: 1,
     reviewsDueThisWeek: 14,
+    inboxSources: 3,
+    dueQueueItems: 4,
     imbalanced: true,
     severity: "warn",
   };
@@ -75,6 +77,43 @@ describe("BalanceBanner (T046)", () => {
     render(<BalanceBanner />);
     const banner = await screen.findByTestId("balance-banner");
     expect(banner.getAttribute("data-severity")).toBe("danger");
+  });
+
+  it("hides the queue action when the due queue is empty", async () => {
+    h.getBalance.mockResolvedValue({
+      ...h.imbalanced,
+      reviewsDueThisWeek: 5,
+      inboxSources: 3,
+      dueQueueItems: 0,
+    });
+    render(<BalanceBanner />);
+    await screen.findByTestId("balance-banner");
+    expect(screen.queryByTestId("balance-open-queue")).toBeNull();
+    expect(screen.getByTestId("balance-triage-inbox")).toBeInTheDocument();
+  });
+
+  it("shows the queue action without inbox triage when only the due queue has work", async () => {
+    h.getBalance.mockResolvedValue({
+      ...h.imbalanced,
+      inboxSources: 0,
+      dueQueueItems: 2,
+    });
+    render(<BalanceBanner />);
+    await screen.findByTestId("balance-banner");
+    expect(screen.getByTestId("balance-open-queue")).toBeInTheDocument();
+    expect(screen.queryByTestId("balance-triage-inbox")).toBeNull();
+  });
+
+  it("is hidden when the snapshot is imbalanced but there is no actionable work", async () => {
+    h.getBalance.mockResolvedValue({
+      ...h.imbalanced,
+      inboxSources: 0,
+      dueQueueItems: 0,
+    });
+    const { container } = render(<BalanceBanner />);
+    await waitFor(() => expect(h.getBalance).toHaveBeenCalled());
+    expect(screen.queryByTestId("balance-banner")).toBeNull();
+    expect(container.querySelector("[data-testid='balance-banner']")).toBeNull();
   });
 
   it("is hidden when the week is balanced (severity ok)", async () => {
