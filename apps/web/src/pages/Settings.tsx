@@ -191,15 +191,16 @@ function Toggle({
       onClick={() => onChange(!checked)}
       className={
         checked
-          ? "relative inline-flex h-6 w-11 items-center rounded-full bg-accent transition-colors"
-          : "relative inline-flex h-6 w-11 items-center rounded-full bg-surface transition-colors ring-1 ring-border"
+          ? "relative inline-flex h-6 w-11 rounded-full bg-accent transition-colors"
+          : "relative inline-flex h-6 w-11 rounded-full bg-surface transition-colors ring-1 ring-border"
       }
     >
       <span
+        data-testid={`${name}-thumb`}
         className={
           checked
-            ? "inline-block size-5 translate-x-[22px] rounded-full bg-text-on-accent transition-transform"
-            : "inline-block size-5 translate-x-0.5 rounded-full bg-text-3 transition-transform"
+            ? "absolute top-0.5 left-[calc(100%-var(--s-5)-2px)] size-5 rounded-full bg-text-on-accent transition-[left]"
+            : "absolute top-0.5 left-0.5 size-5 rounded-full bg-text-3 transition-[left]"
         }
       />
     </button>

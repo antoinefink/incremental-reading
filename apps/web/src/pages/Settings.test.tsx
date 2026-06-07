@@ -163,6 +163,18 @@ describe("Settings", () => {
     expect(localStorage.getItem("interleave.theme")).toBe("system");
   });
 
+  it("pins switch thumbs to the correct track edge for checked and unchecked states", async () => {
+    const { findByTestId } = render(<Settings />);
+
+    const checkedThumb = await findByTestId("setting-bury-siblings-thumb");
+    const uncheckedThumb = await findByTestId("setting-retention-by-band-thumb");
+
+    expect(checkedThumb).toHaveClass("left-[calc(100%-var(--s-5)-2px)]");
+    expect(checkedThumb).not.toHaveClass("translate-x-[22px]");
+    expect(uncheckedThumb).toHaveClass("left-0.5");
+    expect(uncheckedThumb).not.toHaveClass("translate-x-0.5");
+  });
+
   it("runs a backup and displays the result", async () => {
     const { getByTestId, findByTestId } = render(<Settings />);
 
