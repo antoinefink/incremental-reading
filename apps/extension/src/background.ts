@@ -8,8 +8,7 @@
  *
  * Responsibilities:
  *   - register the context menus ("Save page" / "Save selection to Interleave"),
- *   - handle the `commands` keyboard shortcuts,
- *   - answer popup/side-panel messages (save page / save selection / save to inbox),
+ *   - answer popup/side-panel messages (save page / save selection),
  *   - scrape the active tab (outerHTML + title + url) via `chrome.scripting`,
  *   - POST the shaped capture (with the bearer token) to the loopback server,
  *   - surface success / failure / not-running / not-paired via the action badge +
@@ -67,21 +66,6 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   } else if (info.menuItemId === MENU_OPEN_PANEL && chrome.sidePanel?.open) {
     void chrome.sidePanel.open({ tabId: tab.id });
   }
-});
-
-// --- keyboard commands ------------------------------------------------------
-
-chrome.commands.onCommand.addListener((command) => {
-  void (async () => {
-    const tab = await activeTab();
-    if (!tab) return;
-    if (command === "save-page") await savePage(tab);
-    else if (command === "save-selection") await saveSelection(tab, null);
-    else if (command === "open-panel" && tab.id && chrome.sidePanel?.open) {
-      // Open the richer T063 capture panel beside the page (priority + reason).
-      await chrome.sidePanel.open({ tabId: tab.id });
-    }
-  })();
 });
 
 // --- popup / side-panel messages -------------------------------------------

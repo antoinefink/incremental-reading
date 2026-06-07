@@ -18,15 +18,18 @@ vi.mock("./shared", async () => {
 interface ChromeListeners {
   onInstalled: (() => void) | undefined;
   onClicked:
-    | ((info: { menuItemId: string; selectionText?: string }, tab?: { id?: number }) => void)
+    | ((
+        info: { menuItemId: string; selectionText?: string },
+        tab?: { id?: number; url?: string; title?: string },
+      ) => void)
     | undefined;
-  onCommand: ((command: string) => void) | undefined;
   onMessage:
     | ((
         message: {
           type: "save-page" | "save-selection";
           priority?: "A" | "B" | "C" | "D";
           reason?: string;
+          selection?: string;
         },
         sender: unknown,
         sendResponse: (response: unknown) => void,
@@ -37,14 +40,12 @@ interface ChromeListeners {
 const listeners: ChromeListeners = {
   onInstalled: undefined,
   onClicked: undefined,
-  onCommand: undefined,
   onMessage: undefined,
 };
 
 function installChromeMock() {
   listeners.onInstalled = undefined;
   listeners.onClicked = undefined;
-  listeners.onCommand = undefined;
   listeners.onMessage = undefined;
 
   vi.stubGlobal("chrome", {
@@ -57,7 +58,6 @@ function installChromeMock() {
       create: vi.fn(),
       onClicked: { addListener: vi.fn((fn) => (listeners.onClicked = fn)) },
     },
-    commands: { onCommand: { addListener: vi.fn((fn) => (listeners.onCommand = fn)) } },
     tabs: {
       query: vi.fn(async () => [{ id: 7, url: "https://example.com/a", title: "Tab title" }]),
     },
@@ -110,6 +110,10 @@ async function importBackground() {
       setBadgeBackgroundColor: ReturnType<typeof vi.fn>;
     };
     notifications: typeof chrome.notifications & { create: ReturnType<typeof vi.fn> };
+    sidePanel: NonNullable<typeof chrome.sidePanel> & {
+      open: ReturnType<typeof vi.fn>;
+      setPanelBehavior: ReturnType<typeof vi.fn>;
+    };
   };
 }
 
@@ -129,7 +133,12 @@ describe("extension background worker", () => {
       title: "Save selection to Interleave",
       contexts: ["selection"],
     });
-    expect(chrome.sidePanel?.setPanelBehavior).toHaveBeenCalledWith({
+    expect(chromeMock.contextMenus.create).toHaveBeenCalledWith({
+      id: "interleave-open-panel",
+      title: "Open Interleave panel",
+      contexts: ["page", "selection"],
+    });
+    expect(chromeMock.sidePanel.setPanelBehavior).toHaveBeenCalledWith({
       openPanelOnActionClick: false,
     });
   });
@@ -168,5 +177,55 @@ describe("extension background worker", () => {
 
     vi.advanceTimersByTime(4000);
     expect(chromeMock.action.setBadgeText).toHaveBeenCalledWith({ text: "" });
+  });
+
+  it("sends explicit selection payloads from popup messages without re-reading the page", async () => {
+    await importBackground();
+    const response = new Promise((resolve) => {
+      const keptOpen = listeners.onMessage?.(
+        {
+          type: "save-selection",
+          selection: "Selected text",
+          priority: "A",
+          reason: "This matters",
+        },
+        {},
+        resolve,
+      );
+      expect(keptOpen).toBe(true);
+    });
+
+    await expect(response).resolves.toMatchObject({ kind: "ok" });
+    expect(sendCapture).toHaveBeenCalledWith({
+      kind: "selection",
+      url: "https://example.com/a",
+      title: "Tab title",
+      selection: "Selected text",
+      priority: "A",
+      reason: "This matters",
+    });
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
+  it("saves context-menu selections and opens the panel from the explicit menu action", async () => {
+    const chromeMock = await importBackground();
+
+    listeners.onClicked?.(
+      { menuItemId: "interleave-save-selection", selectionText: "Context selected" },
+      { id: 7, url: "https://example.com/menu", title: "Menu tab" },
+    );
+
+    await vi.waitFor(() =>
+      expect(sendCapture).toHaveBeenCalledWith({
+        kind: "selection",
+        url: "https://example.com/menu",
+        title: "Menu tab",
+        selection: "Context selected",
+      }),
+    );
+
+    listeners.onClicked?.({ menuItemId: "interleave-open-panel" }, { id: 7 });
+
+    expect(chromeMock.sidePanel.open).toHaveBeenCalledWith({ tabId: 7 });
   });
 });

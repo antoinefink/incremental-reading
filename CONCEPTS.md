@@ -26,6 +26,8 @@ Source lineage is different from general hierarchy: it is evidence grounding, so
 
 A browser-extension initiated import flow that turns the current page or selected browser content into a Source while leaving validation, activation, and local reader navigation inside the desktop app.
 
+Browser capture surfaces may collect selected text, page context, and priority intent, but they remain untrusted request surfaces. The desktop app owns pairing validation, source creation, activation, and reader navigation.
+
 ### Read now
 
 The inbox action that accepts a source into active processing and immediately opens the local reader for that source.

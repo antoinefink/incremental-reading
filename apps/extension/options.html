@@ -5,54 +5,91 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Interleave — Options</title>
     <link rel="stylesheet" href="tokens.css" />
-    <style>
-      body {
-        padding: 24px;
-        max-width: 520px;
-        margin: 0 auto;
-      }
-      .field {
-        margin-bottom: 16px;
-      }
-      .row {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-      }
-      .help {
-        font-size: 12px;
-        color: var(--text-3);
-        margin-top: 4px;
-      }
-    </style>
   </head>
-  <body>
-    <h1>Interleave</h1>
-    <p class="muted">
-      Pair this extension with the Interleave desktop app. In the app, open
-      <strong>Settings → Browser capture</strong>, enable it, and copy the token.
-    </p>
+  <body class="options-page">
+    <main class="options-shell">
+      <header class="options-head">
+        <div class="options-brand">
+          <span class="brand-chip brand-chip--large" aria-hidden="true">
+            <img src="icons/icon-48.png" alt="" />
+          </span>
+          <span class="brand-copy">
+            <span class="brand-name">Interleave</span>
+            <span class="brand-sub">Browser capture</span>
+          </span>
+        </div>
+        <h1>Pair the extension</h1>
+        <p>
+          Connect Chrome to the local Interleave desktop app. Captures stay on this machine through
+          the token-protected loopback server.
+        </p>
+      </header>
 
-    <div class="card" style="margin-top: 16px">
-      <div class="field">
-        <label for="token">Pairing token</label>
-        <input id="token" type="password" placeholder="Paste the token from Settings" autocomplete="off" />
-      </div>
-      <div class="field">
-        <label for="port">Port</label>
-        <input id="port" type="number" min="1" max="65535" />
-        <div class="help">Leave as-is unless Settings shows a different port.</div>
-      </div>
-      <div class="row">
-        <button id="save" class="primary" type="button">Save & test connection</button>
-        <span id="status" class="status warn" hidden></span>
-      </div>
-    </div>
+      <section id="connection-card" class="connection-card connection-card--off" aria-live="polite">
+        <span class="connection-icon" aria-hidden="true"></span>
+        <span class="connection-copy">
+          <span id="connection-title" class="connection-title">Not connected</span>
+          <span id="connection-detail" class="connection-detail">
+            Paste the token from Settings to pair this extension.
+          </span>
+        </span>
+      </section>
 
-    <p class="help" style="margin-top: 16px">
-      Captures travel only to <code>http://127.0.0.1</code> on this machine — never the cloud. The
-      desktop app validates the token + this extension's origin on every request.
-    </p>
+      <section class="options-card" aria-labelledby="pairing-steps-title">
+        <h2 id="pairing-steps-title">Pairing steps</h2>
+        <ol class="pairing-steps">
+          <li><span>1</span>Open Interleave desktop.</li>
+          <li><span>2</span>Go to <b>Settings / Browser capture</b> and copy the token.</li>
+          <li><span>3</span>Paste it below, then test the connection.</li>
+        </ol>
+      </section>
+
+      <section class="options-card" aria-labelledby="pairing-form-title">
+        <h2 id="pairing-form-title">Connection</h2>
+        <div class="options-form">
+          <label class="field">
+            <span class="field-label">Pairing token</span>
+            <span class="input-wrap">
+              <input
+                id="token"
+                class="input input--mono"
+                type="password"
+                placeholder="Paste the token from Settings"
+                autocomplete="off"
+              />
+              <button id="toggle-token" class="input-eye" type="button" aria-label="Show token">
+                Show
+              </button>
+            </span>
+          </label>
+
+          <div class="field-row">
+            <label class="field field--narrow">
+              <span class="field-label">Port</span>
+              <input id="port" class="input input--mono" type="number" min="1" max="65535" />
+            </label>
+            <p class="field-help field-help--row">
+              Leave as-is unless Settings shows a different port.
+            </p>
+          </div>
+
+          <div class="options-actions">
+            <button id="save" class="btn btn--primary btn--lg" type="button">
+              Save &amp; test connection
+            </button>
+            <span id="status" class="status warn" hidden></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="privacy-note">
+        <span class="privacy-icon" aria-hidden="true"></span>
+        <p>
+          <b>Local-only.</b> Captures travel only to <code>http://127.0.0.1</code> on this machine.
+          The desktop app validates the token and this extension's origin on every request.
+        </p>
+      </section>
+    </main>
 
     <script type="module" src="options.js"></script>
   </body>

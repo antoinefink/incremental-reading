@@ -72,10 +72,9 @@ The extension's own runtime is verified once by hand with this checklist:
 6. **Save selection:** select text → right-click → **Save selection to
    Interleave** → expect a selection source in the inbox (its “why added”
    provenance carries the surrounding-text context anchor).
-7. **Side panel (T063):** action popup → **Open side panel** (or the “Open
-   Interleave panel” context-menu / command) → the panel opens beside the page.
-   Select text on the page → **Use current selection** → pick priority **A** →
-   type a **reason** → **Save selection** → expect a success status, the source
+7. **Side panel (T063):** open the Interleave side panel beside the page. Select
+   text on the page → **Use current selection** → pick priority **A** → type a
+   **reason** → **Save selection** → expect a success status, the source
    appearing in the panel’s **Recent captures**, and the desktop inbox source
    carrying that **priority** and a **“why added”** holding the reason + the
    folded-in surrounding-text anchor.
@@ -90,6 +89,6 @@ The extension's own runtime is verified once by hand with this checklist:
   origin via a pairing handshake (the options page POSTs its origin during
   “Test connection”); never `*`.
 - **POST-only** `/capture` + a **GET-only** unauthenticated `/ping`; everything
-  else → `405`. No generic command surface, no `db.query`.
+  else → `405`. No generic runtime control surface, no `db.query`.
 - **Zod-validated** payloads + a hard body-size cap.
 - **Off until paired** — the server does not open a port on a fresh install.

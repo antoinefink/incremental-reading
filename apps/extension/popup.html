@@ -2,50 +2,64 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Interleave</title>
     <link rel="stylesheet" href="tokens.css" />
-    <style>
-      body {
-        width: 260px;
-        padding: 14px;
-      }
-      .actions {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        margin-top: 12px;
-      }
-      .actions button {
-        width: 100%;
-        text-align: left;
-      }
-      #result {
-        margin-top: 12px;
-      }
-      .link {
-        background: none;
-        border: none;
-        color: var(--accent-text);
-        padding: 0;
-        font-size: 12px;
-        cursor: pointer;
-        text-decoration: underline;
-      }
-    </style>
   </head>
-  <body>
-    <h1>Save to Interleave</h1>
-    <p class="muted" id="page-title">…</p>
-    <div class="actions">
-      <button id="save-page" class="primary" type="button">Save page</button>
-      <button id="save-selection" type="button">Save selection</button>
-      <button id="save-inbox" type="button">Save to inbox</button>
+  <body class="popup-page">
+    <div class="popup-shell" role="dialog" aria-label="Save to Interleave">
+      <header class="popup-head">
+        <span class="brand-chip" aria-hidden="true">
+          <img src="icons/icon-32.png" alt="" />
+        </span>
+        <span class="brand-copy">
+          <span class="brand-name">Interleave</span>
+          <span class="brand-sub">Capture</span>
+        </span>
+        <span id="connection-pill" class="conn-pill conn-pill--warn">Checking</span>
+      </header>
+
+      <main id="popup-body" class="popup-body"></main>
+
+      <footer class="popup-foot">
+        <button id="open-options" class="foot-link" type="button">
+          <svg
+            class="icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path
+              d="M12.2 2h-.4a2 2 0 0 0-2 2v.2a2 2 0 0 1-1 1.7l-.4.2a2 2 0 0 1-2 0l-.2-.1a2 2 0 0 0-2.7.7l-.2.3a2 2 0 0 0 .7 2.7l.2.1a2 2 0 0 1 1 1.7v.5a2 2 0 0 1-1 1.7l-.2.1a2 2 0 0 0-.7 2.7l.2.3a2 2 0 0 0 2.7.7l.2-.1a2 2 0 0 1 2 0l.4.2a2 2 0 0 1 1 1.7v.2a2 2 0 0 0 2 2h.4a2 2 0 0 0 2-2v-.2a2 2 0 0 1 1-1.7l.4-.2a2 2 0 0 1 2 0l.2.1a2 2 0 0 0 2.7-.7l.2-.3a2 2 0 0 0-.7-2.7l-.2-.1a2 2 0 0 1-1-1.7v-.5a2 2 0 0 1 1-1.7l.2-.1a2 2 0 0 0 .7-2.7l-.2-.3a2 2 0 0 0-2.7-.7l-.2.1a2 2 0 0 1-2 0l-.4-.2a2 2 0 0 1-1-1.7V4a2 2 0 0 0-2-2Z"
+            />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          Options &amp; pairing
+        </button>
+        <span class="foot-spacer"></span>
+        <span class="foot-local" title="Captures stay on this machine through 127.0.0.1">
+          <svg
+            class="icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path
+              d="M20 13c0 5-3.5 7.5-7.7 8.9a1 1 0 0 1-.6 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.2-2.7a1.2 1.2 0 0 1 1.6 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1z"
+            />
+          </svg>
+          Local-only
+        </span>
+      </footer>
     </div>
-    <div id="result"></div>
-    <p style="margin-top: 12px; display: flex; gap: 12px">
-      <button id="open-panel" class="link" type="button">Open side panel</button>
-      <button id="open-options" class="link" type="button">Options / pairing</button>
-    </p>
     <script type="module" src="popup.js"></script>
   </body>
 </html>

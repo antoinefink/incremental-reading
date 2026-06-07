@@ -35,24 +35,5 @@
     "32": "icons/icon-32.png",
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
-  },
-  "commands": {
-    "save-page": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+S",
-        "mac": "Command+Shift+S"
-      },
-      "description": "Save the whole page to Interleave"
-    },
-    "save-selection": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+E",
-        "mac": "Command+Shift+E"
-      },
-      "description": "Save the current selection to Interleave"
-    },
-    "open-panel": {
-      "description": "Open the Interleave capture side panel"
-    }
   }
 }

@@ -1,132 +1,451 @@
 /**
- * Action popup (T062).
+ * Action popup.
  *
  * BROWSER BOUNDARY: runs in Chrome, styled with the re-declared design tokens.
- * It dispatches save messages to the background worker (which holds the loopback
- * client) and renders the worker's normalized outcome. "Save to inbox" is a page
- * save (the whole page into the inbox) — the richer priority+reason capture is
- * the side panel (T063).
+ * It reads only the active tab + selected text, dispatches narrow save messages
+ * to the background worker, and renders the worker's normalized outcome.
  */
 
-import type { CaptureOutcome, OpenSourceOutcome } from "./shared";
-import { openCapturedSource } from "./shared";
+import type { CaptureOutcome, OpenSourceOutcome, PairedConfig } from "./shared";
+import { openCapturedSource, pingApp, readPairedConfig } from "./shared";
 
-const titleEl = document.getElementById("page-title") as HTMLParagraphElement;
-const resultEl = document.getElementById("result") as HTMLDivElement;
+type Priority = "A" | "B" | "C" | "D";
+type ConnectionState = "checking" | "ok" | "offline" | "not-paired";
+type Phase = "idle" | "saving" | "saved";
+
+interface PageContext {
+  readonly title: string;
+  readonly url: string;
+  readonly domain: string;
+}
+
+interface SavedState {
+  readonly kind: "page" | "selection";
+  readonly priority: Priority;
+  readonly title: string;
+  readonly sourceId: string;
+  readonly deduped: boolean;
+}
+
+const PRIORITY_HINT: Readonly<Record<Priority, readonly [string, string]>> = {
+  A: ["Protected", "high value - resurfaces soon"],
+  B: ["Important", "useful to keep around"],
+  C: ["Normal", "standard review cadence"],
+  D: ["Someday", "low priority - background decay"],
+};
+
+const bodyEl = document.getElementById("popup-body") as HTMLElement;
+const pillEl = document.getElementById("connection-pill") as HTMLSpanElement;
+const optionsButton = document.getElementById("open-options") as HTMLButtonElement;
+
+let page: PageContext = {
+  title: "Current tab",
+  url: "",
+  domain: "current page",
+};
+let selection = "";
+let priority: Priority = "C";
+let phase: Phase = "idle";
+let connection: ConnectionState = "checking";
+let savedState: SavedState | null = null;
+let lastError: string | null = null;
+let pairedConfig: PairedConfig | null = null;
 
 async function init(): Promise<void> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  titleEl.textContent = tab?.title ?? tab?.url ?? "Current tab";
-}
-
-function render(outcome: CaptureOutcome): void {
-  resultEl.innerHTML = "";
-  const el = document.createElement("span");
-  switch (outcome.kind) {
-    case "ok":
-      el.className = "status ok";
-      el.textContent = outcome.response.deduped
-        ? `Already saved: ${outcome.response.title}`
-        : `Saved: ${outcome.response.title}`;
-      resultEl.appendChild(el);
-      resultEl.appendChild(openButton(outcome.response.id));
-      return;
-    case "not-paired":
-      el.className = "status warn";
-      el.textContent = "Not paired — open Options";
-      break;
-    case "bad-token":
-      el.className = "status warn";
-      el.textContent = "Bad token — re-pair in Options";
-      break;
-    case "not-running":
-      el.className = "status err";
-      el.textContent = "App not running";
-      break;
-    default:
-      el.className = "status err";
-      el.textContent = outcome.message;
-  }
-  resultEl.appendChild(el);
-}
-
-function openButton(sourceId: string): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "status-action";
-  button.textContent = "Open in Interleave";
-  button.addEventListener("click", () => {
-    void openSourceFromButton(sourceId, button);
+  optionsButton.addEventListener("click", () => {
+    void chrome.runtime.openOptionsPage();
   });
-  return button;
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  page = pageFromTab(tab);
+  selection = await readSelection(tab?.id);
+  render();
+  await refreshConnection();
 }
 
-async function openSourceFromButton(sourceId: string, button: HTMLButtonElement): Promise<void> {
-  button.disabled = true;
-  button.textContent = "Opening…";
-  const outcome = await openCapturedSource(sourceId, { activate: true });
-  renderOpenOutcome(outcome, button);
+function pageFromTab(tab: chrome.tabs.Tab | undefined): PageContext {
+  const url = tab?.url ?? "";
+  return {
+    title: tab?.title ?? url ?? "Current tab",
+    url,
+    domain: domainFromUrl(url),
+  };
 }
 
-function renderOpenOutcome(outcome: OpenSourceOutcome, button: HTMLButtonElement): void {
-  if (outcome.kind === "ok") {
-    button.textContent = "Opened in Interleave";
+function domainFromUrl(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url || "current page";
+  }
+}
+
+async function readSelection(tabId: number | undefined): Promise<string> {
+  if (!tabId || !chrome.scripting?.executeScript) return "";
+  try {
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => window.getSelection()?.toString().trim() ?? "",
+    });
+    return typeof result?.result === "string" ? result.result.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+async function refreshConnection(): Promise<void> {
+  connection = "checking";
+  render();
+  pairedConfig = await readPairedConfig();
+  if (!pairedConfig.token) {
+    connection = "not-paired";
+    render();
     return;
   }
-  button.disabled = false;
-  button.textContent = "Open in Interleave";
+  connection = (await pingApp(pairedConfig.port)) ? "ok" : "offline";
+  render();
+}
 
-  let status = resultEl.querySelector<HTMLSpanElement>(".open-status");
-  if (!status) {
-    status = document.createElement("span");
-    resultEl.appendChild(status);
+function render(): void {
+  renderConnectionPill();
+  if (phase === "saved" && savedState) {
+    renderSaved();
+    return;
   }
+  if (connection === "offline" || connection === "not-paired") {
+    renderBlocked();
+    return;
+  }
+  renderIdle();
+}
 
-  switch (outcome.kind) {
+function renderConnectionPill(): void {
+  switch (connection) {
+    case "ok":
+      pillEl.className = "conn-pill conn-pill--ok";
+      pillEl.innerHTML = `${icon("shield")} Connected`;
+      pillEl.title = "Paired with Interleave. Captures stay on 127.0.0.1.";
+      break;
+    case "offline":
+      pillEl.className = "conn-pill conn-pill--err";
+      pillEl.innerHTML = `<span class="conn-dot"></span> App offline`;
+      pillEl.title = "The Interleave desktop app is not reachable.";
+      break;
     case "not-paired":
-      status.className = "status warn open-status";
-      status.textContent = "Not paired — open Options";
-      break;
-    case "bad-token":
-      status.className = "status warn open-status";
-      status.textContent = "Bad token — re-pair in Options";
-      break;
-    case "not-running":
-      status.className = "status err open-status";
-      status.textContent = "App not running";
+      pillEl.className = "conn-pill conn-pill--warn";
+      pillEl.innerHTML = `<span class="conn-dot"></span> Not paired`;
+      pillEl.title = "Pair this extension from Options.";
       break;
     default:
-      status.className = "status err open-status";
-      status.textContent = outcome.message;
+      pillEl.className = "conn-pill conn-pill--warn";
+      pillEl.textContent = "Checking";
+      pillEl.title = "Checking the Interleave desktop app.";
+  }
+}
+
+function renderIdle(): void {
+  const hasSelection = selection.length > 0;
+  const saving = phase === "saving";
+  const [hintTitle, hintBody] = PRIORITY_HINT[priority];
+
+  bodyEl.innerHTML = `
+    ${pageRow()}
+    <section class="capture-section">
+      <div class="section-label">
+        <span>Selection</span>
+        <span class="label-action">${
+          hasSelection ? `<b>${wordCount(selection)}</b> words -> extract` : "whole page"
+        }</span>
+      </div>
+      ${
+        hasSelection
+          ? `<div class="selection-preview">${escapeHtml(selection)}</div>`
+          : `<div class="selection-empty">${icon("text")} Select text on the page to save just a passage</div>`
+      }
+    </section>
+    <section class="capture-section">
+      <div class="section-label"><span>Priority</span></div>
+      ${priorityGroup(saving)}
+      <div class="priority-hint"><b>${hintTitle}</b> - ${hintBody}</div>
+    </section>
+    ${lastError ? `<div class="banner banner--danger" role="alert">${icon("warning")}<span>${escapeHtml(lastError)}</span></div>` : ""}
+    <div class="popup-actions">
+      ${
+        hasSelection
+          ? `<button id="save-selection" class="btn btn--primary btn--lg btn--block" type="button" ${
+              saving ? "disabled" : ""
+            }>${saving ? spinner() : icon("extract")}${saving ? "Saving..." : "Save selection"}</button>
+             <button id="save-page" class="btn btn--block" type="button" ${saving ? "disabled" : ""}>${icon("bookmark")}Save whole page instead</button>`
+          : `<button id="save-page" class="btn btn--primary btn--lg btn--block" type="button" ${
+              saving ? "disabled" : ""
+            }>${saving ? spinner() : icon("bookmark")}${saving ? "Saving..." : "Save page"}</button>`
+      }
+    </div>
+    <div id="save-result" class="sr-only" aria-live="polite"></div>
+  `;
+
+  wirePriority();
+  bodyEl.querySelector<HTMLButtonElement>("#save-page")?.addEventListener("click", () => {
+    send("save-page");
+  });
+  bodyEl.querySelector<HTMLButtonElement>("#save-selection")?.addEventListener("click", () => {
+    send("save-selection");
+  });
+}
+
+function renderSaved(): void {
+  const saved = savedState;
+  if (!saved) return;
+  const isSelection = saved.kind === "selection";
+  bodyEl.innerHTML = `
+    <div class="saved-wrap">
+      <span class="done-ring">${icon(saved.deduped ? "bookmark" : "check")}</span>
+      <div class="done-title">${
+        saved.deduped ? "Already saved" : isSelection ? "Extract saved" : "Saved to inbox"
+      }</div>
+      <div class="done-source">
+        <span class="source-icon">${icon(isSelection ? "extract" : "source")}</span>
+        <span class="done-source-title">${escapeHtml(isSelection ? clip(selection, 54) : saved.title)}</span>
+      </div>
+      <div class="done-meta">
+        <span class="badge-prio" data-p="${saved.priority}"><span class="prio-dot"></span>${saved.priority}</span>
+        <span>${isSelection ? "extract" : "page"} - just now</span>
+      </div>
+    </div>
+    <div class="popup-actions">
+      <button id="open-source" class="btn btn--primary btn--lg btn--block" type="button">${icon("external")}Open in Interleave</button>
+      <button id="save-another" class="btn btn--ghost btn--block" type="button">Save another</button>
+    </div>
+    <div id="save-result" class="open-result" aria-live="polite"></div>
+  `;
+
+  bodyEl.querySelector<HTMLButtonElement>("#open-source")?.addEventListener("click", (event) => {
+    void openSourceFromButton(saved.sourceId, event.currentTarget as HTMLButtonElement);
+  });
+  bodyEl.querySelector<HTMLButtonElement>("#save-another")?.addEventListener("click", () => {
+    phase = "idle";
+    savedState = null;
+    lastError = null;
+    render();
+  });
+}
+
+function renderBlocked(): void {
+  const offline = connection === "offline";
+  bodyEl.innerHTML = `
+    <div class="dimmed">${pageRow()}</div>
+    <div class="banner ${offline ? "banner--danger" : ""}" role="alert">
+      ${icon("warning")}
+      <span>
+        <b>${offline ? "Interleave is not reachable" : "Extension not paired"}</b>
+        <small>${
+          offline
+            ? "Open the desktop app and make sure Browser capture is enabled."
+            : "Paste the desktop pairing token in Options to start capturing."
+        }</small>
+      </span>
+    </div>
+    <div class="popup-actions">
+      ${
+        offline
+          ? `<button id="retry-connection" class="btn btn--lg btn--block" type="button">${icon("refresh")}Retry connection</button>`
+          : `<button id="pair-options" class="btn btn--primary btn--lg btn--block" type="button">${icon("settings")}Open Options to pair</button>`
+      }
+    </div>
+  `;
+  bodyEl.querySelector<HTMLButtonElement>("#retry-connection")?.addEventListener("click", () => {
+    void refreshConnection();
+  });
+  bodyEl.querySelector<HTMLButtonElement>("#pair-options")?.addEventListener("click", () => {
+    void chrome.runtime.openOptionsPage();
+  });
+}
+
+function pageRow(): string {
+  return `
+    <section class="page-row">
+      <span class="favicon-tile" aria-hidden="true">${escapeHtml(page.domain.charAt(0).toUpperCase() || "I")}</span>
+      <span class="page-main">
+        <span class="page-title">${escapeHtml(page.title)}</span>
+        <span class="page-meta">${icon("globe")}<span>${escapeHtml(page.domain)}</span></span>
+      </span>
+    </section>
+  `;
+}
+
+function priorityGroup(disabled = false): string {
+  return `
+    <div class="priority-row" role="group" aria-label="Priority">
+      ${(["A", "B", "C", "D"] as const)
+        .map(
+          (p) => `
+            <button class="priority-chip ${priority === p ? "priority-chip--on" : ""}" data-priority="${p}" type="button" aria-pressed="${priority === p}" ${
+              disabled ? "disabled" : ""
+            }>
+              <span class="prio-dot"></span>${p}
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function wirePriority(): void {
+  for (const chip of bodyEl.querySelectorAll<HTMLButtonElement>(".priority-chip")) {
+    chip.addEventListener("click", () => {
+      if (phase === "saving") return;
+      priority = chip.dataset.priority as Priority;
+      render();
+    });
   }
 }
 
 function send(type: "save-page" | "save-selection"): void {
-  resultEl.textContent = "Capturing…";
-  chrome.runtime.sendMessage({ type }, (outcome: CaptureOutcome) => {
-    if (chrome.runtime.lastError) {
-      render({ kind: "error", message: chrome.runtime.lastError.message ?? "Failed" });
-      return;
-    }
-    render(outcome);
-  });
+  const submittedPriority = priority;
+  const submittedSelection = selection;
+  phase = "saving";
+  lastError = null;
+  render();
+  chrome.runtime.sendMessage(
+    {
+      type,
+      priority: submittedPriority,
+      ...(type === "save-selection" && submittedSelection ? { selection: submittedSelection } : {}),
+    },
+    (outcome: CaptureOutcome) => {
+      if (chrome.runtime.lastError) {
+        phase = "idle";
+        lastError = chrome.runtime.lastError.message ?? "Failed";
+        render();
+        return;
+      }
+      renderCaptureOutcome(type, outcome, submittedPriority);
+    },
+  );
 }
 
-document.getElementById("save-page")?.addEventListener("click", () => send("save-page"));
-document.getElementById("save-inbox")?.addEventListener("click", () => send("save-page"));
-document.getElementById("save-selection")?.addEventListener("click", () => send("save-selection"));
-document.getElementById("open-options")?.addEventListener("click", () => {
-  void chrome.runtime.openOptionsPage();
-});
-// Open the richer T063 capture panel (priority + reason) beside the page.
-document.getElementById("open-panel")?.addEventListener("click", () => {
-  void (async () => {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id && chrome.sidePanel?.open) {
-      await chrome.sidePanel.open({ tabId: tab.id });
-      window.close();
-    }
-  })();
-});
+function renderCaptureOutcome(
+  type: "save-page" | "save-selection",
+  outcome: CaptureOutcome,
+  submittedPriority: Priority,
+): void {
+  phase = "idle";
+  switch (outcome.kind) {
+    case "ok":
+      savedState = {
+        kind: outcome.response.kind,
+        priority: submittedPriority,
+        title: outcome.response.title,
+        sourceId: outcome.response.id,
+        deduped: outcome.response.deduped,
+      };
+      phase = "saved";
+      lastError = null;
+      render();
+      return;
+    case "not-paired":
+    case "bad-token":
+      connection = "not-paired";
+      lastError = null;
+      render();
+      return;
+    case "not-running":
+      connection = "offline";
+      lastError = null;
+      render();
+      return;
+    default:
+      lastError =
+        outcome.message ||
+        (type === "save-selection" ? "Could not save selection" : "Could not save page");
+      render();
+  }
+}
+
+async function openSourceFromButton(sourceId: string, button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  button.innerHTML = `${spinner()}Opening...`;
+  const result = document.getElementById("save-result") as HTMLDivElement | null;
+  const outcome = await openCapturedSource(sourceId, { activate: true });
+  renderOpenOutcome(outcome, button, result);
+}
+
+function renderOpenOutcome(
+  outcome: OpenSourceOutcome,
+  button: HTMLButtonElement,
+  result: HTMLDivElement | null,
+): void {
+  if (!button.isConnected) return;
+  if (outcome.kind === "ok") {
+    button.textContent = "Opened in Interleave";
+    if (result?.isConnected) result.textContent = "Opened in Interleave";
+    return;
+  }
+  button.disabled = false;
+  button.innerHTML = `${icon("external")}Open in Interleave`;
+
+  if (!result?.isConnected) return;
+  result.className = "open-result open-result--error";
+  switch (outcome.kind) {
+    case "not-paired":
+      result.textContent = "Not paired - open Options";
+      break;
+    case "bad-token":
+      result.textContent = "Bad token - re-pair in Options";
+      break;
+    case "not-running":
+      result.textContent = "App not running";
+      break;
+    default:
+      result.textContent = outcome.message;
+  }
+}
+
+function icon(name: string): string {
+  const paths: Record<string, string> = {
+    bookmark: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />',
+    check: '<path d="M20 6 9 17l-5-5" />',
+    external:
+      '<path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />',
+    extract: '<path d="M5 4h14" /><path d="M5 9h14" /><path d="M5 14h9" /><path d="M5 19h6" />',
+    globe:
+      '<circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 0 20" /><path d="M12 2a15.3 15.3 0 0 0 0 20" />',
+    refresh:
+      '<path d="M21 12a9 9 0 0 1-15.5 6.3L3 16" /><path d="M3 21v-5h5" /><path d="M3 12A9 9 0 0 1 18.5 5.7L21 8" /><path d="M21 3v5h-5" />',
+    settings:
+      '<path d="M12.2 2h-.4a2 2 0 0 0-2 2v.2a2 2 0 0 1-1 1.7l-.4.2a2 2 0 0 1-2 0l-.2-.1a2 2 0 0 0-2.7.7l-.2.3a2 2 0 0 0 .7 2.7l.2.1a2 2 0 0 1 1 1.7v.5a2 2 0 0 1-1 1.7l-.2.1a2 2 0 0 0-.7 2.7l.2.3a2 2 0 0 0 2.7.7l.2-.1a2 2 0 0 1 2 0l.4.2a2 2 0 0 1 1 1.7v.2a2 2 0 0 0 2 2h.4a2 2 0 0 0 2-2v-.2a2 2 0 0 1 1-1.7l.4-.2a2 2 0 0 1 2 0l.2.1a2 2 0 0 0 2.7-.7l.2-.3a2 2 0 0 0-.7-2.7l-.2-.1a2 2 0 0 1-1-1.7v-.5a2 2 0 0 1 1-1.7l.2-.1a2 2 0 0 0 .7-2.7l-.2-.3a2 2 0 0 0-2.7-.7l-.2.1a2 2 0 0 1-2 0l-.4-.2a2 2 0 0 1-1-1.7V4a2 2 0 0 0-2-2Z" /><circle cx="12" cy="12" r="3" />',
+    shield:
+      '<path d="M20 13c0 5-3.5 7.5-7.7 8.9a1 1 0 0 1-.6 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.2-2.7a1.2 1.2 0 0 1 1.6 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1z" />',
+    source:
+      '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" />',
+    text: '<path d="M17 6.1H3" /><path d="M21 12.1H3" /><path d="M15.1 18H3" />',
+    warning:
+      '<path d="m21.7 18-8.5-14.7a1.4 1.4 0 0 0-2.4 0L2.3 18a1.4 1.4 0 0 0 1.2 2.1h17a1.4 1.4 0 0 0 1.2-2.1Z" /><path d="M12 9v4" /><path d="M12 17h.01" />',
+  };
+  return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] ?? ""}</svg>`;
+}
+
+function spinner(): string {
+  return '<span class="spin" aria-hidden="true"></span>';
+}
+
+function wordCount(value: string): number {
+  return value.trim().match(/\S+/g)?.length ?? 0;
+}
+
+function clip(value: string, max: number): string {
+  const clean = value.trim();
+  return clean.length > max ? `${clean.slice(0, max - 1)}...` : clean;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
 
 void init();
