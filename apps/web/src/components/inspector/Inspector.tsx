@@ -103,6 +103,29 @@ function fmtDate(iso: string | null): string {
   ).padStart(2, "0")}`;
 }
 
+/**
+ * Compare provenance URLs as user-facing locations. Canonicalization often only
+ * removes a trailing slash; keep query/hash differences because those can point
+ * at a meaningfully different imported URL.
+ */
+function comparableProvenanceUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed);
+    const path = url.pathname.replace(/\/+$/, "");
+    const auth = url.username ? `${url.username}${url.password ? `:${url.password}` : ""}@` : "";
+    return `${url.protocol.toLowerCase()}//${auth}${url.host.toLowerCase()}${path}${url.search}${url.hash}`;
+  } catch {
+    return trimmed.replace(/\/+$/, "");
+  }
+}
+
+function sameProvenanceUrl(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  return comparableProvenanceUrl(a) === comparableProvenanceUrl(b);
+}
+
 /** Format an ISO timestamp as a compact attention-scheduler recency label. */
 function seenLabel(iso: string | null): string {
   if (!iso) return "Not seen yet";
@@ -2050,16 +2073,18 @@ function InspectorBody({
                 "—"
               )}
             </MetaRow>
-            {provenance.canonicalUrl && (
+            {provenance.canonicalUrl &&
+            !sameProvenanceUrl(provenance.url, provenance.canonicalUrl) ? (
               <MetaRow k="Canonical URL">
                 <ExternalUrlLink testId="provenance-canonical-url" url={provenance.canonicalUrl} />
               </MetaRow>
-            )}
-            {provenance.originalUrl && provenance.originalUrl !== provenance.url && (
+            ) : null}
+            {provenance.originalUrl &&
+            !sameProvenanceUrl(provenance.originalUrl, provenance.url) ? (
               <MetaRow k="Original URL">
                 <ExternalUrlLink testId="provenance-original-url" url={provenance.originalUrl} />
               </MetaRow>
-            )}
+            ) : null}
             <MetaRow k="Published">{fmtDate(provenance.publishedAt)}</MetaRow>
             <MetaRow k="Accessed">
               <span data-testid="provenance-accessed-at">{fmtDate(provenance.accessedAt)}</span>

@@ -394,6 +394,33 @@ describe("Inspector", () => {
     );
   });
 
+  it("hides the canonical URL when it only differs from URL by a trailing slash", async () => {
+    const data = sourceData();
+    const provenance = data.provenance;
+    if (!provenance) throw new Error("Missing source provenance fixture");
+    h.selectedId = "src-1";
+    h.getInspectorData.mockResolvedValue({
+      data: {
+        ...data,
+        provenance: {
+          ...provenance,
+          url: "https://moretothat.com/travel-is-no-cure-for-the-mind/",
+          canonicalUrl: "https://moretothat.com/travel-is-no-cure-for-the-mind",
+          originalUrl: null,
+        },
+      },
+    });
+
+    render(<Inspector />);
+
+    expect(await screen.findByTestId("provenance-url")).toHaveAttribute(
+      "href",
+      "https://moretothat.com/travel-is-no-cure-for-the-mind/",
+    );
+    expect(screen.queryByTestId("provenance-canonical-url")).not.toBeInTheDocument();
+    expect(screen.queryByText("Canonical URL")).not.toBeInTheDocument();
+  });
+
   it("renders extract identity, properties, attention, and source lineage without duplicated facts", async () => {
     h.selectedId = "ext-1";
     h.getInspectorData.mockResolvedValue({ data: extractDataWithSourceLineage() });
