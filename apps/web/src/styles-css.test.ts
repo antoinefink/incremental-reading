@@ -20,6 +20,14 @@ function cssBlock(selector: string): string {
 }
 
 describe("global styles", () => {
+  it("locks scrolling to the app shell instead of the document body", () => {
+    const rootFrame = cssBlock("html,\nbody,\n#root");
+
+    expect(rootFrame).toContain("height: 100%;");
+    expect(rootFrame).toContain("overflow: hidden;");
+    expect(rootFrame).toContain("overscroll-behavior: none;");
+  });
+
   it("keeps native date picker icons visible in dark mode", () => {
     const dateInput = cssBlock('input[type="date"]');
     const darkDateInput = cssBlock('[data-theme="dark"] input[type="date"]');

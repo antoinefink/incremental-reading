@@ -151,6 +151,8 @@ html,
 body,
 #root {
   height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 /* Native date inputs do not always inherit text color for the browser-provided

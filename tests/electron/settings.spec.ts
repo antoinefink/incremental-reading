@@ -82,6 +82,58 @@ test("the /settings UI reads the persisted settings through the bridge", async (
   await app.close();
 });
 
+test("settings scrolling stays inside the app shell instead of moving the document", async () => {
+  const app = await launchApp(dataDir);
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+  await gotoSettings(page);
+
+  const shellPage = page.locator(".shell-page");
+  await expect(shellPage).toBeVisible();
+  const initial = await page.evaluate(() => {
+    const routeScroller = document.querySelector<HTMLElement>(".shell-page");
+    const shell = document.querySelector<HTMLElement>(".app-shell");
+    return {
+      bodyOverflow: getComputedStyle(document.body).overflowY,
+      documentTop: document.scrollingElement?.scrollTop ?? -1,
+      routeClientHeight: routeScroller?.clientHeight ?? 0,
+      routeScrollHeight: routeScroller?.scrollHeight ?? 0,
+      rootOverflow: getComputedStyle(document.documentElement).overflowY,
+      shellBottom: shell?.getBoundingClientRect().bottom ?? 0,
+      viewportHeight: window.innerHeight,
+      windowY: window.scrollY,
+    };
+  });
+  expect(initial.rootOverflow).toBe("hidden");
+  expect(initial.bodyOverflow).toBe("hidden");
+  expect(initial.windowY).toBe(0);
+  expect(initial.documentTop).toBe(0);
+  expect(initial.routeScrollHeight).toBeGreaterThanOrEqual(initial.routeClientHeight);
+  expect(Math.abs(initial.shellBottom - initial.viewportHeight)).toBeLessThanOrEqual(1);
+
+  await shellPage.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await shellPage.hover();
+  await page.mouse.wheel(0, 2500);
+
+  const afterWheel = await page.evaluate(() => {
+    const shell = document.querySelector<HTMLElement>(".app-shell");
+    return {
+      documentTop: document.scrollingElement?.scrollTop ?? -1,
+      shellBottom: shell?.getBoundingClientRect().bottom ?? 0,
+      viewportHeight: window.innerHeight,
+      windowY: window.scrollY,
+    };
+  });
+
+  expect(afterWheel.windowY).toBe(0);
+  expect(afterWheel.documentTop).toBe(0);
+  expect(Math.abs(afterWheel.shellBottom - afterWheel.viewportHeight)).toBeLessThanOrEqual(1);
+
+  await app.close();
+});
+
 test("changing a setting persists and SURVIVES a full app restart", async () => {
   // First launch: change the daily review budget + keyboard layout through the UI.
   const first = await launchApp(dataDir);

@@ -432,6 +432,7 @@
 .shell-page {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   min-height: 0;
 }
 
