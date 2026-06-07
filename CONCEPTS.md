@@ -34,6 +34,14 @@ The inbox action that accepts a source into active processing and immediately op
 
 The local reading surface for processing a source inside the app, distinct from opening the source's external canonical URL.
 
+## Public Surfaces
+
+### Public site
+
+A browser-only presentation surface for explaining or demonstrating Interleave outside the desktop app.
+
+It may reuse design tokens, static assets, and non-persistent demos, but it does not participate in local-first storage and must not expose desktop capabilities such as preload APIs, SQLite, or filesystem access.
+
 ## Discovery
 
 ### Collection Explorer

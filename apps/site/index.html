@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Interleave - Incremental reading for what you want to keep</title>
+    <meta
+      name="description"
+      content="Interleave is a local-first incremental reading app for importing too much, extracting what matters, and turning the best ideas into durable knowledge."
+    />
+    <link rel="icon" type="image/png" href="/assets/icon.png" />
+    <link rel="apple-touch-icon" href="/assets/icon.png" />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="logo" href="#top" aria-label="Interleave home">
+          <img class="logo__mark" src="/assets/logo.png" alt="" />
+          <span class="logo__name">Interleave</span>
+        </a>
+        <span class="header-spacer"></span>
+        <div class="header-actions">
+          <a
+            class="btn"
+            href="https://github.com/antoinefink/incremental-reading"
+            target="_blank"
+            rel="noopener"
+          >
+            <span class="ic" data-icon="globe"></span>Source
+          </a>
+          <a
+            class="btn btn--primary"
+            href="https://github.com/antoinefink/incremental-reading/releases"
+            target="_blank"
+            rel="noopener"
+          >
+            <span class="ic" data-icon="download"></span>Download
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero__inner">
+          <span class="eyebrow">
+            <span class="ic" data-icon="layers"></span>
+            Local-first incremental reading
+            <span class="dot-sep"></span>
+            <span class="mono">macOS &middot; Apple&nbsp;Silicon</span>
+          </span>
+          <h1>Read incrementally.<br /> <span class="accent">Remember for good.</span></h1>
+          <p class="hero__sub">
+            Keep more than you can read in one prioritized queue, extract the useful parts,
+            and turn only the best ideas into memory.
+          </p>
+          <div class="hero__cta">
+            <a
+              class="btn btn--primary btn--xl"
+              href="https://github.com/antoinefink/incremental-reading/releases"
+              target="_blank"
+              rel="noopener"
+            >
+              <span class="ic" data-icon="download"></span>Open GitHub Releases
+            </a>
+            <a
+              class="btn btn--xl"
+              href="https://github.com/antoinefink/incremental-reading"
+              target="_blank"
+              rel="noopener"
+            >
+              <span class="ic" data-icon="globe"></span>View source
+            </a>
+          </div>
+          <div class="hero__meta">
+            <span>Free and open source</span><span class="dot-sep"></span>
+            <span>Your library stays on your disk</span>
+          </div>
+        </div>
+
+        <div class="showcase wrap" aria-label="Live reader to extract demo">
+          <div class="appwin">
+            <div class="appwin__bar">
+              <div class="win-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+              <div class="appwin__crumbs">
+                <span class="ic" data-icon="library"></span>Library
+                <span class="crumb-sep ic" data-icon="chevronRight"></span>
+                <span class="ic" data-icon="source"></span>Why We Sleep
+              </div>
+              <span class="appwin__hint">Select a sentence below to extract it &middot; live demo</span>
+            </div>
+
+            <div class="reader-demo">
+              <div class="reader-demo__main">
+                <div class="reader-demo__title">The memory benefits of sleep</div>
+                <div class="reader-demo__byline">
+                  <span>Matthew Walker</span><span class="dot-sep"></span>
+                  <span class="badge prio prio--a">A</span>
+                  <span class="badge badge--due">Due today</span><span class="dot-sep"></span>
+                  <span class="mono">42% &middot; 18 min left</span>
+                </div>
+                <div class="reader-body" id="readerBody">
+                  <p>
+                    For as long as we have studied memory, scientists assumed that sleep was a
+                    passive state - the brain simply offline, waiting for morning. We now know
+                    the opposite is true. Sleep is one of the most cognitively active states
+                    there is.
+                  </p>
+                  <p>
+                    During deep NREM sleep, slow brainwaves act as a courier service,
+                    transporting memory packets from the short-term storage of the hippocampus to
+                    the long-term storage site of the neocortex. This nightly transfer
+                    accomplishes two things at once: it clears space for new learning the next
+                    day, and it cements yesterday's lessons into a more permanent form.
+                  </p>
+                  <p>
+                    The implication is practical. A night of sleep before learning prepares the
+                    brain to make new memories; a night of sleep after learning saves and
+                    integrates what was just acquired. Skip either side of that window and the
+                    gains quietly evaporate.
+                  </p>
+                  <span class="ex-hint">Try it: highlight a sentence, then choose <b>Extract</b>.</span>
+                </div>
+              </div>
+
+              <aside class="rail">
+                <div class="rail__head">
+                  <span class="rail__title">Extracts from this source</span>
+                  <span class="rail__count" id="railCount">1</span>
+                </div>
+                <div class="rail__body" id="railBody">
+                  <article class="xcard">
+                    <div class="xcard__top">
+                      <span class="tico tico--extract">
+                        <span class="ic" data-icon="extract" data-size="14"></span>
+                      </span>
+                      <span class="stage xcard__stage">
+                        <span class="stage-dot" style="background: var(--el-extract)"></span>
+                        Clean extract
+                      </span>
+                    </div>
+                    <div class="xcard__text">
+                      Sleep before learning prepares the brain to make new memories; sleep after
+                      learning saves them.
+                    </div>
+                    <div class="xcard__foot">
+                      <span class="sched sched--attn">
+                        <span class="ic" data-icon="gauge" data-size="12"></span>Queued
+                      </span>
+                      <span class="badge prio prio--a">A</span>
+                    </div>
+                  </article>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section--sunken" id="how">
+        <div class="wrap">
+          <div class="section-head">
+            <span class="kicker">The refinery</span>
+            <h2 class="section-title">A knowledge refinery, not a read-it-later pile.</h2>
+            <p class="section-lead">
+              Most imported material should fade away. The valuable part moves from source text
+              to extract, then to a small card you can actually keep.
+            </p>
+          </div>
+
+          <div class="pipe-wrap">
+            <div class="pipeline" id="pipeline"></div>
+            <div class="distill">
+              <div class="distill__step">
+                <div class="distill__label"><span class="n">1</span>Raw extract</div>
+                <div class="distill__box">
+                  &quot;Distributed practice means distributing learning episodes over time
+                  instead of massing them together.&quot;
+                </div>
+              </div>
+              <div class="distill__step">
+                <div class="distill__label"><span class="n">2</span>Atomic statement</div>
+                <div class="distill__box">
+                  &quot;Distributed practice = learning episodes spaced over time.&quot;
+                </div>
+              </div>
+              <div class="distill__step">
+                <div class="distill__label"><span class="n">3</span>Cloze card</div>
+                <div class="distill__box distill__box--final">
+                  &quot;Distributed practice means learning episodes are spaced over time rather
+                  than <span class="cloze">[ &hellip; ]</span>.&quot;
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section--sunken" id="features">
+        <div class="wrap">
+          <div class="section-head section-head--center">
+            <span class="kicker">What's inside</span>
+            <h2 class="section-title">The whole reading loop, end to end.</h2>
+            <p class="section-lead">
+              Import, triage, read, extract, distill, and remember - one local system for
+              people who save more than they can finish.
+            </p>
+          </div>
+
+          <div class="feat-grid">
+            <div class="feat">
+              <div class="feat__icon">
+                <span class="ic" data-icon="extract" data-size="18"></span>
+              </div>
+              <div class="feat__title">Extracts with lineage</div>
+              <p class="feat__body">
+                An extract becomes its own scheduled item while keeping its source, block, and
+                offsets. Cards stay traceable.
+              </p>
+              <div class="feat__foot">
+                <span class="tag">source</span>
+                <span class="ic" data-icon="chevronRight" data-size="12"></span>
+                <span class="tag">extract</span>
+                <span class="ic" data-icon="chevronRight" data-size="12"></span>
+                <span class="tag">card</span>
+              </div>
+            </div>
+            <div class="feat">
+              <div class="feat__icon">
+                <span class="ic" data-icon="gauge" data-size="18"></span>
+              </div>
+              <div class="feat__title">Two schedulers, on purpose</div>
+              <p class="feat__body">
+                FSRS schedules cards for recall. A separate attention scheduler decides when
+                sources and extracts should return.
+              </p>
+              <div class="feat__foot">
+                <span class="sched sched--fsrs">
+                  <span class="ic" data-icon="brain" data-size="12"></span>FSRS
+                </span>
+                <span class="sched sched--attn">
+                  <span class="ic" data-icon="gauge" data-size="12"></span>Attention
+                </span>
+              </div>
+            </div>
+            <div class="feat">
+              <div class="feat__icon">
+                <span class="ic" data-icon="bookmark" data-size="18"></span>
+              </div>
+              <div class="feat__title">Read-points</div>
+              <p class="feat__body">
+                Stop anywhere. Interleave remembers the exact place, so a hundred parallel
+                sources can stay calm.
+              </p>
+              <div class="feat__foot">
+                <span class="next-action">
+                  <span class="ic" data-icon="bookmark" data-size="12"></span>Resume at 42%
+                </span>
+              </div>
+            </div>
+            <div class="feat">
+              <div class="feat__icon">
+                <span class="ic" data-icon="target" data-size="18"></span>
+              </div>
+              <div class="feat__title">Distill, don't hoard</div>
+              <p class="feat__body">
+                Each time an extract returns, trim it, split it, rewrite it, or turn it into a
+                card. Delay becomes a filter.
+              </p>
+              <div class="feat__foot">
+                <span class="badge badge--soft">Raw</span>
+                <span class="ic" data-icon="chevronRight" data-size="12"></span>
+                <span class="badge badge--due">Atomic</span>
+              </div>
+            </div>
+            <div class="feat">
+              <div class="feat__icon">
+                <span class="ic" data-icon="command" data-size="18"></span>
+              </div>
+              <div class="feat__title">Keyboard-first</div>
+              <p class="feat__body">
+                Command palette, g-letter navigation, and fast card grading. Long sessions stay
+                efficient.
+              </p>
+              <div class="feat__foot">
+                <span class="kbd">&#8984;</span>
+                <span class="kbd">K</span>
+                <span class="feat__muted">command palette</span>
+              </div>
+            </div>
+            <div class="feat">
+              <div class="feat__icon">
+                <span class="ic" data-icon="shield" data-size="18"></span>
+              </div>
+              <div class="feat__title">Local-first and private</div>
+              <p class="feat__body">
+                Your library is a SQLite database on your own disk. No account, no cloud sync,
+                no telemetry.
+              </p>
+              <div class="feat__foot">
+                <span class="badge badge--done">On-device</span>
+                <span class="badge badge--soft">Open source</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section cta">
+        <div class="wrap wrap--narrow">
+          <div class="cta__panel">
+            <div class="cta__inner">
+              <img class="cta__logo" src="/assets/logo.png" alt="" />
+              <h2 class="cta__title">Get Interleave</h2>
+              <p class="cta__sub">
+                The macOS build lives on GitHub Releases. Free, open source, and entirely on
+                your machine.
+              </p>
+              <div class="cta__row">
+                <a
+                  class="btn btn--primary btn--xl"
+                  href="https://github.com/antoinefink/incremental-reading/releases"
+                  target="_blank"
+                  rel="noopener"
+                >
+                  <span class="ic" data-icon="download"></span>Open GitHub Releases
+                </a>
+                <a
+                  class="btn btn--xl"
+                  href="https://github.com/antoinefink/incremental-reading"
+                  target="_blank"
+                  rel="noopener"
+                >
+                  <span class="ic" data-icon="globe"></span>View source
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <div class="footer-inner">
+          <div class="footer-brand">
+            <a class="logo" href="#top" aria-label="Interleave home">
+              <img class="logo__mark" src="/assets/logo.png" alt="" />
+              <span class="logo__name">Interleave</span>
+            </a>
+            <p>
+              A desktop-first, local-first incremental reading app. Import sources, read them
+              gradually, extract what matters, and keep the best ideas traceable to their
+              source.
+            </p>
+          </div>
+          <div class="footer-links">
+            <div class="footer-col">
+              <h4>Get it</h4>
+              <a
+                href="https://github.com/antoinefink/incremental-reading/releases"
+                target="_blank"
+                rel="noopener"
+              >
+                Download
+              </a>
+              <a
+                href="https://github.com/antoinefink/incremental-reading/releases"
+                target="_blank"
+                rel="noopener"
+              >
+                Releases
+              </a>
+            </div>
+            <div class="footer-col">
+              <h4>Project</h4>
+              <a
+                href="https://github.com/antoinefink/incremental-reading"
+                target="_blank"
+                rel="noopener"
+              >
+                Source code
+              </a>
+              <a
+                href="https://github.com/antoinefink/incremental-reading#readme"
+                target="_blank"
+                rel="noopener"
+              >
+                Documentation
+              </a>
+              <a href="https://github.com/antoinefink" target="_blank" rel="noopener">
+                @antoinefink
+              </a>
+            </div>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <span>&copy; 2026 Interleave. A personal project by @antoinefink.</span>
+          <span class="mono">Built almost entirely by AI agents, human-directed.</span>
+        </div>
+      </div>
+    </footer>
+
+    <div class="sel-float" id="selFloat">
+      <div class="sel-toolbar">
+        <button class="sel-tool sel-tool--accent" type="button" data-action="extract">
+          <span class="ic" data-icon="extract" data-size="14"></span>Extract<span class="kbd">E</span>
+        </button>
+        <button class="sel-tool" type="button" data-action="cloze">
+          <span class="ic" data-icon="cloze" data-size="14"></span>Cloze<span class="kbd">C</span>
+        </button>
+        <span class="tool-div"></span>
+        <button class="sel-tool" type="button" data-action="highlight">
+          <span class="ic" data-icon="highlight" data-size="14"></span>Highlight<span class="kbd">H</span>
+        </button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/site.ts"></script>
+  </body>
+</html>
