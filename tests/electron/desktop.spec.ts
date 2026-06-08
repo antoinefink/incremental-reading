@@ -101,6 +101,32 @@ test("app.health() and db.getStatus() work through window.appApi", async () => {
   await app.close();
 });
 
+test("Electron E2E launches keep the main window hidden but automation-usable", async () => {
+  const app = await launchApp(dataDir);
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  const state = await app.evaluate(({ BrowserWindow, app: electronApp }) => {
+    const [win] = BrowserWindow.getAllWindows();
+    return {
+      dockVisible: process.platform === "darwin" ? (electronApp.dock?.isVisible?.() ?? null) : null,
+      isVisible: win?.isVisible(),
+      windowCount: BrowserWindow.getAllWindows().length,
+    };
+  });
+
+  expect(state.windowCount).toBe(1);
+  expect(state.isVisible).toBe(false);
+  if (state.dockVisible !== null) {
+    expect(state.dockVisible).toBe(false);
+  }
+  await expect(page.locator(".app-shell")).toBeAttached();
+  await page.getByTestId("user-chip").click();
+  await expect(page.getByRole("menuitem", { name: /^Settings$/ })).toBeVisible();
+
+  await app.close();
+});
+
 test("the window is locked down and the renderer has no raw Node/fs/SQLite access", async () => {
   const app = await launchApp(dataDir);
   const page = await app.firstWindow();

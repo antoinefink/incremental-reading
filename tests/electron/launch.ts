@@ -242,6 +242,9 @@ export async function launchApp(
       // Suppress the first-run onboarding overlay unless a spec opts in, so it
       // never covers the UI in the feature specs (all start empty). See main/index.ts.
       ...(options.showOnboarding ? {} : { INTERLEAVE_SUPPRESS_ONBOARDING: "1" }),
+      // Local Electron E2E launches should be automation-visible but user-invisible:
+      // no Dock spam and no foreground windows during the full suite.
+      INTERLEAVE_E2E_QUIET: "1",
       // Ensure production-mode renderer load (built files, not the dev server).
       VITE_DEV_SERVER_URL: "",
       NODE_ENV: "production",

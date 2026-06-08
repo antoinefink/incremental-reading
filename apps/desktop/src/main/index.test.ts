@@ -9,7 +9,8 @@ interface IndexHarness {
     on: ReturnType<typeof vi.fn>;
     whenReady: ReturnType<typeof vi.fn>;
     getVersion: ReturnType<typeof vi.fn>;
-    dock: { setIcon: ReturnType<typeof vi.fn> };
+    setActivationPolicy: ReturnType<typeof vi.fn>;
+    dock: { hide: ReturnType<typeof vi.fn>; setIcon: ReturnType<typeof vi.fn> };
   };
   callbacks: Map<string, (...args: unknown[]) => unknown>;
   dbService: Record<string, ReturnType<typeof vi.fn> | Record<string, unknown>>;
@@ -63,7 +64,8 @@ async function loadIndex(options: {
     on: vi.fn((event: string, fn: (...args: unknown[]) => unknown) => callbacks.set(event, fn)),
     whenReady: vi.fn(() => Promise.resolve()),
     getVersion: vi.fn(() => "0.2.0"),
-    dock: { setIcon: vi.fn() },
+    setActivationPolicy: vi.fn(),
+    dock: { hide: vi.fn(), setIcon: vi.fn() },
   };
   const BrowserWindow = {
     getAllWindows: vi.fn(() => []),
@@ -240,14 +242,72 @@ function firstCallOrder(fn: {
   return order;
 }
 
+function lastCallOrder(fn: { readonly mock: { readonly invocationCallOrder: readonly number[] } }) {
+  const order = fn.mock.invocationCallOrder.at(-1);
+  if (order === undefined) throw new Error("Expected a recorded call order");
+  return order;
+}
+
 describe("main entrypoint", () => {
   it("sets the checked-in Interleave dock icon on macOS dev launches", async () => {
     const harness = await loadIndex({ gotLock: true, platform: "darwin" });
 
+    expect(harness.app.setActivationPolicy).not.toHaveBeenCalled();
+    expect(harness.app.dock.hide).not.toHaveBeenCalled();
     expect(harness.nativeImage.createFromPath).toHaveBeenCalledWith(
       expect.stringMatching(/brand\/icon\.png$|build\/icon\.icns$/),
     );
     expect(harness.app.dock.setIcon).toHaveBeenCalledWith(harness.nativeImage.image);
+  });
+
+  it("uses accessory presentation and keeps the Dock icon hidden for quiet macOS E2E", async () => {
+    const harness = await loadIndex({
+      gotLock: true,
+      platform: "darwin",
+      env: { INTERLEAVE_E2E_QUIET: "1" },
+    });
+
+    expect(harness.app.setActivationPolicy).toHaveBeenCalledWith("accessory");
+    expect(firstCallOrder(harness.app.setActivationPolicy)).toBeLessThan(
+      firstCallOrder(harness.app.whenReady),
+    );
+    expect(harness.app.dock.hide).toHaveBeenCalledOnce();
+    expect(harness.nativeImage.createFromPath).not.toHaveBeenCalled();
+    expect(harness.app.dock.setIcon).not.toHaveBeenCalled();
+    expect(harness.createMainWindow).toHaveBeenCalledWith(
+      expect.objectContaining({ devServerUrl: undefined, showOnReady: false }),
+    );
+  });
+
+  it("ignores quiet E2E presentation outside macOS", async () => {
+    const harness = await loadIndex({
+      gotLock: true,
+      platform: "linux",
+      env: { INTERLEAVE_E2E_QUIET: "1" },
+    });
+
+    expect(harness.app.setActivationPolicy).not.toHaveBeenCalled();
+    expect(harness.app.dock.hide).not.toHaveBeenCalled();
+    expect(harness.app.dock.setIcon).not.toHaveBeenCalled();
+    expect(harness.createMainWindow).toHaveBeenCalledWith(
+      expect.objectContaining({ devServerUrl: undefined, showOnReady: true }),
+    );
+  });
+
+  it("ignores quiet E2E presentation for packaged apps", async () => {
+    const harness = await loadIndex({
+      gotLock: true,
+      isPackaged: true,
+      platform: "darwin",
+      env: { INTERLEAVE_E2E_QUIET: "1" },
+    });
+
+    expect(harness.app.setActivationPolicy).not.toHaveBeenCalled();
+    expect(harness.app.dock.hide).not.toHaveBeenCalled();
+    expect(harness.app.dock.setIcon).toHaveBeenCalledWith(harness.nativeImage.image);
+    expect(harness.createMainWindow).toHaveBeenCalledWith(
+      expect.objectContaining({ devServerUrl: undefined, showOnReady: true }),
+    );
   });
 
   it("quits immediately when another instance already owns the SQLite lock", async () => {
@@ -310,7 +370,7 @@ describe("main entrypoint", () => {
     );
     expect(harness.installApplicationMenu).toHaveBeenCalledOnce();
     expect(harness.createMainWindow).toHaveBeenCalledWith(
-      expect.objectContaining({ devServerUrl: undefined }),
+      expect.objectContaining({ devServerUrl: undefined, showOnReady: true }),
     );
 
     expect(harness.automaticBackupService.start).toHaveBeenCalledOnce();
@@ -333,8 +393,103 @@ describe("main entrypoint", () => {
 
     expect(harness.registerRendererProtocol).toHaveBeenCalledOnce();
     expect(harness.createMainWindow).toHaveBeenCalledWith(
-      expect.objectContaining({ devServerUrl: undefined }),
+      expect.objectContaining({ devServerUrl: undefined, showOnReady: true }),
     );
+  });
+
+  it("does not foreground an existing window while opening a captured source in quiet E2E", async () => {
+    const harness = await loadIndex({
+      gotLock: true,
+      platform: "darwin",
+      env: { INTERLEAVE_E2E_QUIET: "1" },
+    });
+    const win = fakeWindow();
+    harness.browserWindow.getAllWindows.mockReturnValue([win]);
+    const deps = harness.captureControllerConstructor.mock.calls[0]?.[0] as {
+      openSource(input: { id: string; activate: boolean }): Promise<unknown>;
+    };
+    const repos = harness.dbService.repos as {
+      elements: { findById: ReturnType<typeof vi.fn> };
+    };
+    repos.elements.findById.mockReturnValue({
+      id: "source-1",
+      type: "source",
+      status: "active",
+      deletedAt: null,
+    });
+
+    await expect(deps.openSource({ id: "source-1", activate: false })).resolves.toEqual({
+      status: "opened",
+      activated: false,
+    });
+
+    expect(win.show).not.toHaveBeenCalled();
+    expect(win.focus).not.toHaveBeenCalled();
+    expect(win.webContents.send).toHaveBeenCalledWith(IPC_CHANNELS.sourcesOpenReader, "source-1");
+  });
+
+  it("keeps newly created captured-source windows hidden in quiet E2E", async () => {
+    const harness = await loadIndex({
+      gotLock: true,
+      platform: "darwin",
+      env: { INTERLEAVE_E2E_QUIET: "1" },
+    });
+    const win = fakeWindow();
+    harness.browserWindow.getAllWindows.mockReturnValue([]);
+    harness.createMainWindow.mockClear();
+    harness.createMainWindow.mockReturnValue(win);
+    const deps = harness.captureControllerConstructor.mock.calls[0]?.[0] as {
+      openSource(input: { id: string; activate: boolean }): Promise<unknown>;
+    };
+    const repos = harness.dbService.repos as {
+      elements: { findById: ReturnType<typeof vi.fn> };
+    };
+    repos.elements.findById.mockReturnValue({
+      id: "source-1",
+      type: "source",
+      status: "active",
+      deletedAt: null,
+    });
+
+    await expect(deps.openSource({ id: "source-1", activate: false })).resolves.toEqual({
+      status: "opened",
+      activated: false,
+    });
+
+    expect(harness.createMainWindow).toHaveBeenCalledWith(
+      expect.objectContaining({ devServerUrl: undefined, showOnReady: false }),
+    );
+    expect(win.show).not.toHaveBeenCalled();
+    expect(win.focus).not.toHaveBeenCalled();
+    expect(win.loadURL).toHaveBeenCalledWith("app://bundle/source/source-1");
+  });
+
+  it("does not foreground an existing window on second-instance during quiet E2E", async () => {
+    const harness = await loadIndex({
+      gotLock: true,
+      platform: "darwin",
+      env: { INTERLEAVE_E2E_QUIET: "1" },
+    });
+    const win = fakeWindow();
+    harness.browserWindow.getAllWindows.mockReturnValue([win]);
+
+    harness.callbacks.get("second-instance")?.();
+
+    expect(win.restore).not.toHaveBeenCalled();
+    expect(win.focus).not.toHaveBeenCalled();
+  });
+
+  it("foregrounds an existing window on second-instance in normal launches", async () => {
+    const harness = await loadIndex({ gotLock: true, platform: "darwin" });
+    const win = fakeWindow();
+    win.isMinimized.mockReturnValue(true);
+    harness.browserWindow.getAllWindows.mockReturnValue([win]);
+
+    harness.callbacks.get("second-instance")?.();
+
+    expect(win.restore).toHaveBeenCalledOnce();
+    expect(win.focus).toHaveBeenCalledOnce();
+    expect(lastCallOrder(win.restore)).toBeLessThan(lastCallOrder(win.focus));
   });
 
   it("opens captured sources in an existing window without hard-reloading it", async () => {

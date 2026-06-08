@@ -74,9 +74,21 @@ const devServerUrl = app.isPackaged ? undefined : process.env.VITE_DEV_SERVER_UR
 interface DockIconApp {
   readonly dock?:
     | {
+        hide?(): void;
         setIcon(image: NativeImage): void;
       }
     | undefined;
+  readonly setActivationPolicy?: (policy: "regular" | "accessory" | "prohibited") => void;
+}
+
+export function isQuietE2eLaunch(options: {
+  readonly isPackaged: boolean;
+  readonly platform: NodeJS.Platform;
+  readonly env: NodeJS.ProcessEnv;
+}): boolean {
+  return (
+    !options.isPackaged && options.platform === "darwin" && options.env.INTERLEAVE_E2E_QUIET === "1"
+  );
 }
 
 export function resolveDockIconPath(baseDistDir: string): string | null {
@@ -95,8 +107,10 @@ export function installDockIcon(options: {
   readonly platform: NodeJS.Platform;
   readonly app: DockIconApp;
   readonly distDir: string;
+  readonly quietE2e?: boolean | undefined;
 }): void {
   if (options.platform !== "darwin" || !options.app.dock) return;
+  if (options.quietE2e) return;
 
   const iconPath = resolveDockIconPath(options.distDir);
   if (!iconPath) return;
@@ -107,13 +121,34 @@ export function installDockIcon(options: {
   }
 }
 
+export function applyQuietE2eActivationPolicy(options: {
+  readonly platform: NodeJS.Platform;
+  readonly app: DockIconApp;
+  readonly quietE2e: boolean;
+}): void {
+  if (!options.quietE2e || options.platform !== "darwin") return;
+
+  options.app.setActivationPolicy?.("accessory");
+}
+
+export function hideQuietE2eDock(options: {
+  readonly platform: NodeJS.Platform;
+  readonly app: DockIconApp;
+  readonly quietE2e: boolean;
+}): void {
+  if (!options.quietE2e || options.platform !== "darwin") return;
+
+  options.app.dock?.hide?.();
+}
+
 function rendererRouteUrl(routePath: string): string {
   const base = (devServerUrl ?? RENDERER_URL).replace(/\/+$/, "");
   const pathPart = routePath.replace(/^\/+/, "");
   return `${base}/${pathPart}`;
 }
 
-function focusWindow(win: BrowserWindow): void {
+function focusWindow(win: BrowserWindow, options: { readonly quietE2e: boolean }): void {
+  if (options.quietE2e) return;
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
@@ -122,7 +157,7 @@ function focusWindow(win: BrowserWindow): void {
 async function openSourceReader(sourceId: string): Promise<void> {
   const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
   if (win) {
-    focusWindow(win);
+    focusWindow(win, { quietE2e: isQuietE2e });
     if (!win.webContents.isLoadingMainFrame()) {
       win.webContents.send(IPC_CHANNELS.sourcesOpenReader, sourceId);
       return;
@@ -131,8 +166,8 @@ async function openSourceReader(sourceId: string): Promise<void> {
     return;
   }
 
-  const created = createMainWindow({ distDir, devServerUrl });
-  focusWindow(created);
+  const created = createMainWindow({ distDir, devServerUrl, showOnReady: !isQuietE2e });
+  focusWindow(created, { quietE2e: isQuietE2e });
   await created.loadURL(rendererRouteUrl(`/source/${encodeURIComponent(sourceId)}`));
 }
 
@@ -153,8 +188,16 @@ async function openCapturedSource(input: CaptureOpenSourceInput): Promise<Captur
   return { status: "opened", activated };
 }
 
+const isQuietE2e = isQuietE2eLaunch({
+  isPackaged: app.isPackaged,
+  platform: process.platform,
+  env: process.env,
+});
+applyQuietE2eActivationPolicy({ platform: process.platform, app, quietE2e: isQuietE2e });
+
 function bootstrap(): void {
-  installDockIcon({ platform: process.platform, app, distDir });
+  hideQuietE2eDock({ platform: process.platform, app, quietE2e: isQuietE2e });
+  installDockIcon({ platform: process.platform, app, distDir, quietE2e: isQuietE2e });
 
   // 1) App data dir + vault skeleton (idempotent).
   const paths = initAppPaths();
@@ -371,7 +414,7 @@ function bootstrap(): void {
   installApplicationMenu();
 
   // 6) Secure window.
-  createMainWindow({ distDir, devServerUrl });
+  createMainWindow({ distDir, devServerUrl, showOnReady: !isQuietE2e });
 }
 
 // The custom renderer scheme must be registered as privileged BEFORE ready.
@@ -390,6 +433,7 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
+    if (isQuietE2e) return;
     const [win] = BrowserWindow.getAllWindows();
     if (win) {
       if (win.isMinimized()) win.restore();
@@ -407,7 +451,7 @@ if (!gotLock) {
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow({ distDir, devServerUrl });
+      createMainWindow({ distDir, devServerUrl, showOnReady: !isQuietE2e });
     }
   });
 

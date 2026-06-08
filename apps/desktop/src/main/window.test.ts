@@ -11,15 +11,55 @@
  * `decideWindowOpen` / `isAllowedNavigation` are pure and need no window.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const electronMock = vi.hoisted(() => {
+  const instances: Array<{
+    options: Record<string, unknown>;
+    once: ReturnType<typeof vi.fn>;
+    show: ReturnType<typeof vi.fn>;
+    loadURL: ReturnType<typeof vi.fn>;
+    webContents: {
+      setWindowOpenHandler: ReturnType<typeof vi.fn>;
+      on: ReturnType<typeof vi.fn>;
+    };
+  }> = [];
+
+  class BrowserWindow {
+    options: Record<string, unknown>;
+    once = vi.fn();
+    show = vi.fn();
+    loadURL = vi.fn(async () => undefined);
+    webContents = {
+      setWindowOpenHandler: vi.fn(),
+      on: vi.fn(),
+    };
+
+    constructor(options: Record<string, unknown>) {
+      this.options = options;
+      instances.push(this);
+    }
+  }
+
+  return {
+    instances,
+    BrowserWindow,
+    openExternal: vi.fn(),
+  };
+});
 
 vi.mock("electron", () => ({
   app: { isPackaged: false },
-  BrowserWindow: class {},
-  shell: { openExternal: vi.fn() },
+  BrowserWindow: electronMock.BrowserWindow,
+  shell: { openExternal: electronMock.openExternal },
 }));
 
-import { decideWindowOpen, isAllowedNavigation } from "./window";
+import { createMainWindow, decideWindowOpen, isAllowedNavigation } from "./window";
+
+beforeEach(() => {
+  electronMock.instances.length = 0;
+  electronMock.openExternal.mockClear();
+});
 
 describe("decideWindowOpen", () => {
   it("routes http(s) URLs to the OS browser and still denies the popup", () => {
@@ -79,5 +119,29 @@ describe("isAllowedNavigation", () => {
   it("never treats an empty allowed origin as a wildcard match", () => {
     // A blank dev-server string must not match every URL.
     expect(isAllowedNavigation("https://example.com", ["app://bundle/", ""])).toBe(false);
+  });
+});
+
+describe("createMainWindow visibility", () => {
+  it("shows the window on ready-to-show by default", () => {
+    createMainWindow({ distDir: "/dist" });
+
+    const [win] = electronMock.instances;
+    expect(win?.options).toMatchObject({ show: false });
+    expect(win?.once).toHaveBeenCalledWith("ready-to-show", expect.any(Function));
+
+    const readyHandler = win?.once.mock.calls[0]?.[1] as (() => void) | undefined;
+    readyHandler?.();
+
+    expect(win?.show).toHaveBeenCalledOnce();
+  });
+
+  it("keeps quiet E2E windows hidden after ready-to-show", () => {
+    createMainWindow({ distDir: "/dist", showOnReady: false });
+
+    const [win] = electronMock.instances;
+    expect(win?.options).toMatchObject({ show: false });
+    expect(win?.once).not.toHaveBeenCalledWith("ready-to-show", expect.any(Function));
+    expect(win?.show).not.toHaveBeenCalled();
   });
 });

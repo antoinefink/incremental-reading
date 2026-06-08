@@ -42,6 +42,8 @@ export interface CreateWindowOptions {
   readonly distDir: string;
   /** Dev server URL; when set, the window loads it instead of the built files. */
   readonly devServerUrl?: string | undefined;
+  /** Whether the window should become visible as soon as the renderer is ready. */
+  readonly showOnReady?: boolean | undefined;
 }
 
 /** What a window-open request should resolve to (pure, so it is unit-tested). */
@@ -74,6 +76,7 @@ export function isAllowedNavigation(url: string, allowedOrigins: readonly string
 
 export function createMainWindow(options: CreateWindowOptions): BrowserWindow {
   const preloadPath = path.join(options.distDir, PRELOAD_FILENAME);
+  const showOnReady = options.showOnReady ?? true;
 
   const win = new BrowserWindow({
     width: 1280,
@@ -94,9 +97,11 @@ export function createMainWindow(options: CreateWindowOptions): BrowserWindow {
     },
   });
 
-  win.once("ready-to-show", () => {
-    win.show();
-  });
+  if (showOnReady) {
+    win.once("ready-to-show", () => {
+      win.show();
+    });
+  }
 
   // The packaged app never loads a dev server (T050): even if the env var leaks
   // into a shipped build, production loads the offline `app://` renderer.
