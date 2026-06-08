@@ -2667,6 +2667,7 @@ export class DbService {
    * {@link ElementRepository}, which mutates + appends the matching op in ONE
    * transaction:
    *  - `accept`       → `reschedule_element` (status `active`, attention `due_at`)
+   *  - `queueSoon`    → `reschedule_element` (status `scheduled`, due now)
    *  - `keepForLater` → `update_element` (status `dismissed`)
    *  - `setPriority`  → `update_element` (numeric priority from the label)
    *  - `delete`       → `soft_delete_element` (`deletedAt` + status `deleted`)
@@ -2688,6 +2689,10 @@ export class DbService {
       switch (action.kind) {
         case "accept": {
           this.attentionScheduleService.activateSourceWithReturnWithin(tx, id);
+          break;
+        }
+        case "queueSoon": {
+          this.attentionScheduleService.queueSourceSoonWithin(tx, id);
           break;
         }
         case "keepForLater": {

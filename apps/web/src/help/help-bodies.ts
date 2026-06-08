@@ -95,7 +95,7 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
     },
     {
       type: "p",
-      text: "Select the source in the Inbox list and press <kbd>1</kbd> to Activate it. Activating moves it out of the Inbox and into the pipeline. <b>Save for later</b> (<kbd>3</kbd>) sets it aside with no schedule; <b>Delete</b> (<kbd>6</kbd>) soft-deletes it to Trash. Inbox triage is a decision gate, not a reading list.",
+      text: "Select the source in the Inbox list and press <kbd>1</kbd> to Activate it. Activating moves it out of the Inbox and into the pipeline. <b>Queue soon</b> (<kbd>2</kbd>) makes it due in the queue without opening it. <b>Save for later</b> (<kbd>3</kbd>) sets it aside with no schedule; <b>Delete</b> (<kbd>6</kbd>) soft-deletes it to Trash. Inbox triage is a decision gate, not a reading list.",
     },
     {
       type: "h2",
@@ -778,20 +778,21 @@ export const HELP_BODIES: Record<string, HelpBlock[]> = {
   "inbox-triage": [
     {
       type: "p",
-      text: "The inbox is a decision gate. Its job is not to host reading — it is to get every item to a decision: active, saved, or gone. <em>Inbox zero</em> means every item has been decided, not finished.",
+      text: "The inbox is a decision gate. Its job is not to host reading — it is to get every item to a decision: active, queued, saved, or gone. <em>Inbox zero</em> means every item has been decided, not finished.",
     },
     {
       type: "h2",
-      text: "The three triage actions",
+      text: "The four triage actions",
     },
     {
       type: "p",
-      text: "Select any item in the inbox list to see the triage rail on the right. Three buttons appear, each with a keyboard shortcut.",
+      text: "Select any item in the inbox list to see the triage rail on the right. Four buttons appear, each with a keyboard shortcut.",
     },
     {
       type: "ul",
       items: [
         "<b>Read now</b> <kbd>1</kbd> — moves the item out of the inbox and into active reading with a default return date. It will come back in the daily queue, and the source reader keeps the read point so you can continue where you stopped.",
+        "<b>Queue soon</b> <kbd>2</kbd> — moves the item out of the inbox and makes it due in the queue without opening the reader. It will be sorted with the rest of the queue by priority, due date, and queue scoring; it is not forced to the front.",
         "<b>Save for later</b> <kbd>3</kbd> — marks the item as dismissed <strong>with no schedule and no due-queue entry</strong>. It will not appear in the queue or the process loop. You can find it again in <code>/library</code> by filtering on the dismissed status. Use this for material you want to keep but are not ready to read.",
         "<b>Delete</b> <kbd>6</kbd> — sends the item to Trash. This is a soft delete: the item is recoverable from <code>/trash</code> and <kbd>⌘Z</kbd> undoes it immediately. Use this when you know the item is not worth keeping.",
       ],

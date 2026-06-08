@@ -1793,6 +1793,9 @@ describe("InboxTriageRequestSchema (T012)", () => {
       action: { kind: "accept" },
     });
     expect(
+      InboxTriageRequestSchema.parse({ id: "el_1", action: { kind: "queueSoon" } }),
+    ).toBeTruthy();
+    expect(
       InboxTriageRequestSchema.parse({ id: "el_1", action: { kind: "keepForLater" } }),
     ).toBeTruthy();
     expect(

@@ -220,6 +220,31 @@ export class SchedulerService {
     return this.activateSourceWithReturnElement(tx, element, now);
   }
 
+  /**
+   * Queue an inbox source for immediate attention without opening it for active reading.
+   *
+   * This is the inbox `Queue soon` seam: the source leaves the capture inbox and becomes
+   * normal due queue work. It writes only the attention schedule (`elements.due_at`) and
+   * lifecycle status (`scheduled`); it never creates FSRS state.
+   */
+  queueSourceSoonWithin(
+    tx: TransactionClient,
+    id: ElementId,
+    now: IsoTimestamp = nowIso(),
+  ): ScheduleResult {
+    const element = this.requireAttentionElementWithin(tx, id);
+    if (element.type !== "source") {
+      throw new Error(
+        `SchedulerService: element ${element.id} is a ${element.type} — only sources can be queued from inbox`,
+      );
+    }
+    const rescheduled = this.elements.rescheduleWithin(tx, element.id, now, "scheduled", {
+      action: "queueSoon",
+      queueSoon: true,
+    });
+    return { element: rescheduled, intervalDays: 0 };
+  }
+
   private activateSourceWithReturnElement(
     tx: TransactionClient | InterleaveDatabase,
     element: Element,

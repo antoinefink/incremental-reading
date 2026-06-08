@@ -1558,6 +1558,7 @@ export interface InboxGetResult {
 /** One triage action applied to an inbox source (discriminated by `kind`). */
 export type InboxTriageAction =
   | { readonly kind: "accept" }
+  | { readonly kind: "queueSoon" }
   | { readonly kind: "keepForLater" }
   | { readonly kind: "setPriority"; readonly priority: PriorityLabelInput }
   | { readonly kind: "delete" };

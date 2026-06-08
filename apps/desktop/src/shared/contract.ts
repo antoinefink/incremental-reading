@@ -2354,6 +2354,7 @@ export interface InboxGetResult {
  * One triage action applied to an inbox source. A discriminated union so the
  * main side rejects an unknown action at the boundary:
  *  - `accept`      → status `active` + attention `due_at` (leaves the inbox)
+ *  - `queueSoon`   → status `scheduled` + due now (leaves the inbox)
  *  - `keepForLater`→ status `dismissed` (set aside, leaves the inbox)
  *  - `setPriority` → numeric priority from the A/B/C/D label (status unchanged)
  *  - `delete`      → soft-delete (`deletedAt` + status `deleted`)
@@ -2362,6 +2363,7 @@ export const InboxTriageRequestSchema = z.object({
   id: ElementIdSchema,
   action: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("accept") }),
+    z.object({ kind: z.literal("queueSoon") }),
     z.object({ kind: z.literal("keepForLater") }),
     z.object({ kind: z.literal("setPriority"), priority: PriorityLabelSchema }),
     z.object({ kind: z.literal("delete") }),

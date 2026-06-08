@@ -4,14 +4,14 @@
  * Rebuilt from the kit's `screen-inbox.jsx` for React 19 + Tailwind v4: an import
  * strip on top, then a two-pane body — a left list of inbox-status sources and a
  * right preview pane with a metadata rail, an A/B/C/D priority chip group, and a
- * triage action list (Read now / Save for later / Delete with keyboard hints).
+ * triage action list (Read now / Queue soon / Save for later / Delete with keyboard hints).
  *
  * Data flows STRICTLY through the typed `window.appApi` bridge (the renderer never
  * touches SQLite): `inbox.list()` / `inbox.get(id)` to read, `sources.importManual`
- * to create, and `inbox.triage` to accept / keep / prioritize / delete. Selecting
- * an item also sets `useSelection().select(id)` so the shell's universal inspector
- * reacts. The component is pure UI orchestration — no SQL, no scheduling rules, no
- * priority math (priority labels map to numbers on the main side).
+ * to create, and `inbox.triage` to read now / queue soon / keep / prioritize /
+ * delete. Selecting an item also sets `useSelection().select(id)` so the shell's
+ * universal inspector reacts. The component is pure UI orchestration — no SQL, no
+ * scheduling rules, no priority math (priority labels map to numbers on the main side).
  *
  * Every import chip is live: "Paste text" / "Manual note" open the New-source
  * modal, "Paste URL" the Import-from-URL modal, "Import PDF" / "Import file" the
@@ -254,7 +254,7 @@ function PreviewPane({
   detail: InboxItemDetail;
   busy: boolean;
   onReadNow: () => void;
-  onTriage: (kind: "keepForLater" | "delete") => void;
+  onTriage: (kind: "queueSoon" | "keepForLater" | "delete") => void;
   onSetPriority: (label: PriorityLabelInput) => void;
   triageActionsRef: Ref<HTMLElement>;
   readNowButtonRef: Ref<HTMLButtonElement>;
@@ -411,7 +411,7 @@ function PreviewPane({
           }
         >
           <div className="mb-2 font-medium text-text-2 text-xs uppercase tracking-wide">
-            Triage <span className="font-normal text-text-3 normal-case">1 · 3 · 6</span>
+            Triage <span className="font-normal text-text-3 normal-case">1 · 2 · 3 · 6</span>
           </div>
           <div className="space-y-2">
             <TriageButton
@@ -424,6 +424,15 @@ function PreviewPane({
               primary
               disabled={busy}
               onClick={onReadNow}
+            />
+            <TriageButton
+              testid="inbox-queue-soon"
+              icon="queue"
+              label="Queue soon"
+              hint="2"
+              ariaLabel="Queue soon: schedule in the due queue without opening"
+              disabled={busy}
+              onClick={() => onTriage("queueSoon")}
             />
             <TriageButton
               testid="inbox-keep"
@@ -466,14 +475,17 @@ export function InboxScreen() {
   const readNowButtonRef = useRef<HTMLButtonElement | null>(null);
   const triageHighlightTimerRef = useRef<number | null>(null);
   const pendingTriageFocusRef = useRef<string | null>(null);
+  const selectedIdRef = useRef<string | null>(selectedId);
+  const selIdRef = useRef<string | null>(selId);
+  const triageInFlightRef = useRef(false);
   const [triageHighlighted, setTriageHighlighted] = useState(false);
   // Bumped after any list change (import / triage) so the balance banner re-reads
   // the week's counts without a full remount.
   const [balanceRefresh, setBalanceRefresh] = useState(0);
 
   /** Reload the list; keep/repair the current selection. */
-  const refresh = useCallback(async (preferId?: string | null) => {
-    if (!isDesktop()) return;
+  const refresh = useCallback(async (preferId?: string | null): Promise<boolean> => {
+    if (!isDesktop()) return true;
     try {
       const { items: next } = await appApi.listInbox();
       setItems(next);
@@ -481,13 +493,24 @@ export function InboxScreen() {
       setError(null);
       setSelId((prev) => {
         const wanted = preferId ?? prev;
-        if (wanted && next.some((i) => i.id === wanted)) return wanted;
-        return next[0]?.id ?? null;
+        const nextId = wanted && next.some((i) => i.id === wanted) ? wanted : (next[0]?.id ?? null);
+        selIdRef.current = nextId;
+        return nextId;
       });
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      return false;
     }
   }, []);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
+  useEffect(() => {
+    selIdRef.current = selId;
+  }, [selId]);
 
   // Initial load.
   useEffect(() => {
@@ -536,7 +559,10 @@ export function InboxScreen() {
     };
   }, [selId, select]);
 
-  const onSelect = useCallback((id: string) => setSelId(id), []);
+  const onSelect = useCallback((id: string) => {
+    selIdRef.current = id;
+    setSelId(id);
+  }, []);
 
   const revealInboxTriageActions = useCallback(() => {
     const triageActions = triageActionsRef.current;
@@ -696,22 +722,31 @@ export function InboxScreen() {
   );
 
   const onTriage = useCallback(
-    async (kind: "keepForLater" | "delete") => {
-      if (!selId || busy) return;
+    async (kind: "queueSoon" | "keepForLater" | "delete") => {
+      if (!selId || busy || triageInFlightRef.current) return;
+      const actedId = selId;
+      triageInFlightRef.current = true;
       setBusy(true);
       try {
-        await appApi.triageInboxItem({ id: selId, action: { kind } });
-        // accept/keep/delete all remove the source from the inbox list.
-        if (selectedId === selId) select(null);
-        await refresh(null);
-        setError(null);
+        await appApi.triageInboxItem({ id: actedId, action: { kind } });
+        // accept/queue/keep/delete all remove the source from the inbox list.
+        setItems((prev) => prev.filter((item) => item.id !== actedId));
+        setDetail((prev) => (prev?.summary.id === actedId ? null : prev));
+        if (selIdRef.current === actedId) {
+          selIdRef.current = null;
+          setSelId(null);
+          if (selectedIdRef.current === actedId) select(null);
+        }
+        const refreshed = await refresh(null);
+        if (refreshed) setError(null);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
+        triageInFlightRef.current = false;
         setBusy(false);
       }
     },
-    [selId, busy, refresh, select, selectedId],
+    [selId, busy, refresh, select],
   );
 
   const onSetPriority = useCallback(
@@ -740,7 +775,7 @@ export function InboxScreen() {
     [selId, busy, refresh],
   );
 
-  // Keyboard triage: 1 = read now, 3 = save for later, 6 = delete (ignore when a
+  // Keyboard triage: 1 = read now, 2 = queue soon, 3 = save for later, 6 = delete (ignore when a
   // field/modal is focused, matching the kit's 1–6 hints).
   useEffect(() => {
     if (!desktop || modalOpen || urlModalOpen || fileModalOpen || !selId) return;
@@ -749,6 +784,7 @@ export function InboxScreen() {
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "1") void onReadNow();
+      else if (e.key === "2") void onTriage("queueSoon");
       else if (e.key === "3") void onTriage("keepForLater");
       else if (e.key === "6") void onTriage("delete");
     }

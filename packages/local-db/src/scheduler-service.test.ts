@@ -16,7 +16,7 @@
  *  - a `card` is REJECTED (cards schedule on FSRS, never the attention heuristic).
  */
 
-import type { BlockId, ElementId, Priority } from "@interleave/core";
+import type { BlockId, ElementId, ElementStatus, Priority } from "@interleave/core";
 import type { DbHandle } from "@interleave/db";
 import { elements, operationLog, reviewStates } from "@interleave/db";
 import { eq } from "drizzle-orm";
@@ -33,12 +33,16 @@ import { createInMemoryDb } from "./test-db";
 
 let handle: DbHandle;
 
-function seedSource(handle: DbHandle, priority: Priority = 0.625): ElementId {
+function seedSource(
+  handle: DbHandle,
+  priority: Priority = 0.625,
+  status: ElementStatus = "active",
+): ElementId {
   const sources = new SourceRepository(handle.db);
   const { element } = sources.createWithDocument({
     title: "On the Measure of Intelligence",
     priority,
-    status: "active",
+    status,
     stage: "raw_source",
     body: "Intro paragraph one.\n\nThe definition paragraph two.\n\nA third paragraph.",
   });
@@ -134,6 +138,51 @@ describe("SchedulerService.rescheduleForAction", () => {
 
     expect(() => service.activateSourceWithReturn(extractId)).toThrow(/only sources/i);
     expect(() => service.activateSourceWithReturn(card.id)).toThrow(/card/i);
+  });
+
+  it("queues a source for immediate attention without creating FSRS state", () => {
+    const sourceId = seedSource(handle, 0.625, "inbox");
+    const service = new SchedulerService(handle.db);
+    const now = "2026-05-30T12:00:00.000Z";
+
+    const { element, intervalDays } = handle.db.transaction((tx) =>
+      service.queueSourceSoonWithin(tx, sourceId, now),
+    );
+
+    expect(intervalDays).toBe(0);
+    expect(element.status).toBe("scheduled");
+    expect(element.dueAt).toBe(now);
+
+    const persisted = new ElementRepository(handle.db).findById(sourceId);
+    expect(persisted?.status).toBe("scheduled");
+    expect(persisted?.dueAt).toBe(now);
+
+    const ops = rescheduleOps(handle, sourceId);
+    expect(ops.at(-1)?.payload).toMatchObject({
+      action: "queueSoon",
+      queueSoon: true,
+      status: "scheduled",
+      prevStatus: "inbox",
+      prevDueAt: null,
+    });
+
+    const reviewRow = handle.db
+      .select()
+      .from(reviewStates)
+      .where(eq(reviewStates.elementId, sourceId))
+      .get();
+    expect(reviewRow).toBeUndefined();
+  });
+
+  it("only queues sources with the inbox queue-soon seam", () => {
+    const { extractId } = seedExtract(handle);
+    const service = new SchedulerService(handle.db);
+    const before = rescheduleOps(handle, extractId).length;
+
+    expect(() =>
+      handle.db.transaction((tx) => service.queueSourceSoonWithin(tx, extractId)),
+    ).toThrow(/only sources/i);
+    expect(rescheduleOps(handle, extractId).length).toBe(before);
   });
 
   it("persists a future due_at, status scheduled, and exactly one reschedule_element op", () => {

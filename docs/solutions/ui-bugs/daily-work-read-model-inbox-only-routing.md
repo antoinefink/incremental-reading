@@ -166,6 +166,7 @@ Keeping read point and `due_at` separate preserves the domain model. Lifecycle s
 ## Related Issues
 
 - [Balance banner should not route fresh imports to an empty queue](./balance-banner-queue-inbox-action-gating.md) documents the same actionability invariant for the import/process balance banner.
+- [Inbox Queue soon schedules sources due now without opening the reader](../workflow-issues/inbox-triage-queue-soon-attention-scheduling.md) documents the explicit triage action that moves an inbox source into due attention work without treating it as active reading.
 - [URL and browser-captured articles should open as internal readable sources](./url-imported-articles-inbox-processing.md) documents the inbox-source lifecycle invariant that fresh imports remain inbox work until accepted or opened; `Read now` now also creates the attention return path described here.
 - [Durable source block processing state](../architecture-patterns/durable-source-block-processing-state.md) is the source-reader precedent for deriving completion and resume decisions from durable source progress.
 - [Review activity heatmap read model](../architecture-patterns/review-activity-heatmap-read-model.md) is an adjacent read-model precedent: computed UI-facing counts belong behind typed IPC, not in React.

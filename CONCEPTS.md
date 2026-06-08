@@ -32,6 +32,12 @@ Browser capture surfaces may collect selected text, page context, and priority i
 
 The inbox action that accepts a source into active reading, gives it an attention return date, and immediately opens the local reader for that source.
 
+### Queue soon
+
+The inbox action that accepts a source into the Due queue by scheduling it for immediate attention without opening the local reader.
+
+Queue soon is distinct from Read now because it does not imply the user started reading, and distinct from Save for later because it creates due work instead of passive storage.
+
 ### Source reader
 
 The local reading surface for processing a source inside the app, distinct from opening the source's external canonical URL.

@@ -422,6 +422,156 @@ test.describe("Read now source return path", () => {
   });
 });
 
+test.describe("Queue soon inbox triage", () => {
+  let queueSoonDataDir: string;
+  const ARTICLE_TITLE = "Queued soon article";
+  const ARTICLE_BODY =
+    "This source should enter the queue soon.\n\nIt should not open the source reader immediately.";
+
+  test.beforeAll(() => {
+    ensureBuilt();
+    queueSoonDataDir = makeDataDir();
+  });
+
+  test("Queue soon makes an inbox source due in the queue without opening the reader", async () => {
+    const app = await launchApp(queueSoonDataDir);
+    const page = await app.firstWindow();
+    await page.waitForLoadState("domcontentloaded");
+    const url = new URL(page.url());
+    const rendererBaseUrl = `${url.protocol}//${url.host}`;
+
+    await page.getByTestId("nav-inbox").click();
+    await expect(page.getByTestId("route-inbox")).toBeVisible();
+    await page.getByTestId("inbox-empty-new").click();
+    await expect(page.getByTestId("new-source-modal")).toBeVisible();
+    await page.getByTestId("new-source-title").fill(ARTICLE_TITLE);
+    await page.getByTestId("new-source-body").fill(ARTICLE_BODY);
+    await page.getByTestId("new-source-submit").click();
+    await expect(page.getByTestId("new-source-modal")).toBeHidden();
+
+    const sourceId = await page.evaluate(async (title) => {
+      const api = window.appApi as unknown as {
+        inbox: {
+          list(): Promise<{ items: { id: string; title: string }[] }>;
+        };
+      };
+      const { items } = await api.inbox.list();
+      const item = items.find((candidate) => candidate.title === title);
+      if (!item) throw new Error("imported source not found in inbox");
+      return item.id;
+    }, ARTICLE_TITLE);
+
+    const inboxUrl = page.url();
+    await page.getByTestId("inbox-queue-soon").click();
+    await expect(page).toHaveURL(inboxUrl);
+    await expect(page.getByTestId("route-inbox")).toBeVisible();
+    await expect(page.getByTestId("inbox-empty")).toBeVisible();
+    await expect(page).not.toHaveURL(new RegExp(`/source/${sourceId}$`));
+
+    const scheduled = await page.evaluate(async (id) => {
+      const api = window.appApi as unknown as {
+        inbox: {
+          list(): Promise<{ items: { id: string; title: string }[] }>;
+        };
+        inspector: {
+          get(req: { id: string }): Promise<{
+            data: {
+              element: { id: string; type: string; status: string; dueAt: string | null };
+            } | null;
+          }>;
+        };
+        queue: {
+          list(req: {
+            asOf: string;
+          }): Promise<{ items: { id: string; type: string; scheduler: string }[] }>;
+        };
+      };
+      const inbox = await api.inbox.list();
+      const inspected = await api.inspector.get({ id });
+      const dueAt = inspected.data?.element.dueAt;
+      if (!dueAt) throw new Error("source did not receive a due_at");
+      const queue = await api.queue.list({ asOf: dueAt });
+      return {
+        inboxIds: inbox.items.map((item) => item.id),
+        element: inspected.data?.element ?? null,
+        queueItems: queue.items,
+      };
+    }, sourceId);
+
+    expect(scheduled.inboxIds).not.toContain(sourceId);
+    expect(scheduled.element).toMatchObject({
+      id: sourceId,
+      type: "source",
+      status: "scheduled",
+    });
+    expect(scheduled.element?.dueAt).not.toBeNull();
+    expect(scheduled.queueItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: sourceId, type: "source", scheduler: "attention" }),
+      ]),
+    );
+    const dueAt = scheduled.element?.dueAt;
+    if (!dueAt) throw new Error("queued source missing due_at after assertion");
+
+    await page.goto(`${rendererBaseUrl}/queue?asOf=${encodeURIComponent(dueAt)}`);
+    await expect(page.getByTestId("route-queue")).toBeVisible();
+    const queueRow = page.getByTestId("queue-item").filter({ hasText: ARTICLE_TITLE });
+    await expect(queueRow).toHaveAttribute("data-element-id", sourceId);
+
+    await app.close();
+
+    const restarted = await launchApp(queueSoonDataDir);
+    const restartedPage = await restarted.firstWindow();
+    await restartedPage.waitForLoadState("domcontentloaded");
+
+    const afterRestart = await restartedPage.evaluate(
+      async ({ id, asOf }) => {
+        const api = window.appApi as unknown as {
+          inbox: {
+            list(): Promise<{ items: { id: string }[] }>;
+          };
+          inspector: {
+            get(req: { id: string }): Promise<{
+              data: {
+                element: { id: string; type: string; status: string; dueAt: string | null };
+              } | null;
+            }>;
+          };
+          queue: {
+            list(req: {
+              asOf: string;
+            }): Promise<{ items: { id: string; type: string; scheduler: string }[] }>;
+          };
+        };
+        const inbox = await api.inbox.list();
+        const inspected = await api.inspector.get({ id });
+        const queue = await api.queue.list({ asOf });
+        return {
+          inboxIds: inbox.items.map((item) => item.id),
+          element: inspected.data?.element ?? null,
+          queueItems: queue.items,
+        };
+      },
+      { id: sourceId, asOf: dueAt },
+    );
+
+    expect(afterRestart.inboxIds).not.toContain(sourceId);
+    expect(afterRestart.element).toMatchObject({
+      id: sourceId,
+      type: "source",
+      status: "scheduled",
+      dueAt,
+    });
+    expect(afterRestart.queueItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: sourceId, type: "source", scheduler: "attention" }),
+      ]),
+    );
+
+    await restarted.close();
+  });
+});
+
 /**
  * Source provenance (T014) — a manual import with a messy URL captures the
  * canonical URL, the verbatim original URL, and an auto-stamped accessed date,

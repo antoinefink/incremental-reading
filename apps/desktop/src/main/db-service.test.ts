@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ElementId } from "@interleave/core";
+import type { ElementId, IsoTimestamp } from "@interleave/core";
 import { MIGRATIONS_DIR, openDatabase } from "@interleave/db";
 import { seedDemoCollection } from "@interleave/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -403,6 +403,75 @@ describe("DbService", () => {
     expect(ops[0]?.payload).toMatchObject({
       action: "activate",
       status: "active",
+      prevStatus: "inbox",
+      prevDueAt: null,
+    });
+
+    svc.close();
+  });
+
+  it("queue-soon triage schedules an inbox source into the due attention queue without opening it", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+
+    const before = new Date().toISOString();
+    const protectedDue = svc.repos.elements.create({
+      type: "source",
+      status: "scheduled",
+      stage: "raw_source",
+      priority: 0.875,
+      dueAt: before as IsoTimestamp,
+      title: "Protected source already due",
+    });
+    const { id } = svc.importManualSource({
+      title: "Queueable source",
+      body: "Read this soon, but not right now.",
+      priority: "B",
+    });
+    const result = svc.triageInboxItem({
+      id,
+      action: { kind: "queueSoon" },
+    });
+    const after = new Date().toISOString();
+
+    expect(result.deleted).toBe(false);
+    expect(result.item?.status).toBe("scheduled");
+    expect(svc.listInbox().items.map((item) => item.id)).not.toContain(id);
+
+    const element = svc.repos.elements.findById(id as never);
+    expect(element?.status).toBe("scheduled");
+    expect(element?.dueAt).not.toBeNull();
+    expect(element?.dueAt && element.dueAt >= before).toBe(true);
+    expect(element?.dueAt && element.dueAt <= after).toBe(true);
+
+    const queue = svc.listQueue({ asOf: after });
+    const queueIds = queue.items.map((item) => item.id);
+    const row = queue.items.find((item) => item.id === id);
+    expect(row).toMatchObject({
+      id,
+      type: "source",
+      status: "scheduled",
+      scheduler: "attention",
+      priority: 0.625,
+      title: "Queueable source",
+    });
+    expect(queueIds.indexOf(protectedDue.id)).toBeLessThan(queueIds.indexOf(id));
+
+    const reviewStateCount = svc.raw.sqlite
+      .prepare("SELECT COUNT(*) AS n FROM review_states WHERE element_id = ?")
+      .get(id) as { n: number };
+    expect(reviewStateCount.n).toBe(0);
+
+    const op = svc.raw.sqlite
+      .prepare(
+        "SELECT op_type, payload FROM operation_log WHERE element_id = ? ORDER BY rowid DESC LIMIT 1",
+      )
+      .get(id) as { op_type: string; payload: string };
+    expect(op.op_type).toBe("reschedule_element");
+    expect(JSON.parse(op.payload)).toMatchObject({
+      action: "queueSoon",
+      queueSoon: true,
+      status: "scheduled",
       prevStatus: "inbox",
       prevDueAt: null,
     });

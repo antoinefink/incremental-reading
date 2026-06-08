@@ -234,8 +234,14 @@ const items = [
   },
 ];
 
+function inboxItem(index: number): (typeof items)[number] {
+  const item = items[index];
+  if (!item) throw new Error(`expected inbox fixture at index ${index}`);
+  return item;
+}
+
 function detail(id = "src-1") {
-  const summary = items.find((item) => item.id === id) ?? items[0];
+  const summary = items.find((item) => item.id === id) ?? inboxItem(0);
   return {
     summary,
     provenance: {
@@ -452,6 +458,8 @@ describe("InboxScreen", () => {
 
     await findByTestId("inbox-read-now");
     expect(getByRole("button", { name: /read now/i })).toBeInTheDocument();
+    expect(getByRole("button", { name: /queue soon/i })).toBeInTheDocument();
+    expect(getByTestId("inbox-triage-actions")).toHaveTextContent("1 · 2 · 3 · 6");
     fireEvent.click(getByTestId("inbox-read-now"));
     await waitFor(() =>
       expect(h.triageInboxItem).toHaveBeenCalledWith({
@@ -460,6 +468,81 @@ describe("InboxScreen", () => {
       }),
     );
     expect(h.navigate).toHaveBeenCalledWith({ to: "/source/$id", params: { id: "src-1" } });
+  });
+
+  it("queues the selected item soon without navigating away from inbox", async () => {
+    const { getByTestId, findByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-queue-soon");
+    h.listInbox.mockClear();
+    fireEvent.click(getByTestId("inbox-queue-soon"));
+
+    await waitFor(() =>
+      expect(h.triageInboxItem).toHaveBeenCalledWith({
+        id: "src-1",
+        action: { kind: "queueSoon" },
+      }),
+    );
+    expect(h.navigate).not.toHaveBeenCalled();
+    expect(h.listInbox).toHaveBeenCalled();
+  });
+
+  it("keeps a queue-soon refresh error visible and removes the acted row locally", async () => {
+    const { getByTestId, findByTestId, queryByText } = render(<InboxScreen />);
+
+    await findByTestId("inbox-queue-soon");
+    h.listInbox.mockClear();
+    h.listInbox.mockRejectedValueOnce(new Error("reload failed"));
+    fireEvent.click(getByTestId("inbox-queue-soon"));
+
+    expect(await findByTestId("inbox-error")).toHaveTextContent("reload failed");
+    expect(h.navigate).not.toHaveBeenCalled();
+    expect(queryByText("Inbox source")).not.toBeInTheDocument();
+  });
+
+  it("preserves a newer selected row when queue soon resolves", async () => {
+    let resolveTriage!: (value: { item: (typeof items)[number]; deleted: boolean }) => void;
+    h.triageInboxItem.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveTriage = resolve;
+      }),
+    );
+    const { getAllByTestId, getByTestId, findByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-queue-soon");
+    h.listInbox.mockClear();
+    h.listInbox.mockResolvedValue({ items: [inboxItem(1)] });
+    fireEvent.click(getByTestId("inbox-queue-soon"));
+    const secondRow = getAllByTestId("inbox-row")[1];
+    if (!secondRow) throw new Error("expected a second inbox row");
+    fireEvent.click(secondRow);
+
+    await waitFor(() =>
+      expect(getByTestId("inbox-preview-title")).toHaveTextContent("Second source"),
+    );
+    resolveTriage({ item: inboxItem(0), deleted: false });
+
+    await waitFor(() => expect(h.listInbox).toHaveBeenCalled());
+    expect(h.select).not.toHaveBeenCalledWith(null);
+    expect(getByTestId("inbox-preview-title")).toHaveTextContent("Second source");
+  });
+
+  it("does not repeat the queue-soon shortcut while the triage mutation is unresolved", async () => {
+    let resolveTriage!: (value: { item: (typeof items)[number]; deleted: boolean }) => void;
+    h.triageInboxItem.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveTriage = resolve;
+      }),
+    );
+    const { findByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-queue-soon");
+    fireEvent.keyDown(window, { key: "2" });
+    fireEvent.keyDown(window, { key: "2" });
+
+    await waitFor(() => expect(h.triageInboxItem).toHaveBeenCalledTimes(1));
+    resolveTriage({ item: inboxItem(0), deleted: false });
+    await waitFor(() => expect(h.listInbox).toHaveBeenCalledTimes(2));
   });
 
   it("falls back to full body text when a formatted body is unavailable", async () => {
@@ -530,6 +613,23 @@ describe("InboxScreen", () => {
 
     expect(await findByTestId("inbox-error")).toHaveTextContent("cannot activate");
     expect(h.navigate).not.toHaveBeenCalled();
+  });
+
+  it("uses the 2 shortcut for Queue soon and does not navigate", async () => {
+    const { findByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-queue-soon");
+    h.listInbox.mockClear();
+    fireEvent.keyDown(window, { key: "2" });
+
+    await waitFor(() =>
+      expect(h.triageInboxItem).toHaveBeenCalledWith({
+        id: "src-1",
+        action: { kind: "queueSoon" },
+      }),
+    );
+    expect(h.navigate).not.toHaveBeenCalled();
+    expect(h.listInbox).toHaveBeenCalled();
   });
 
   it("does not navigate when Read now returns a stale inbox result", async () => {
