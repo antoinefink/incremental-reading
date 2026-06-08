@@ -48,6 +48,8 @@ const h = vi.hoisted(() => {
     protected: true,
     due: "overdue",
     dueLabel: "Overdue",
+    queueEligible: true,
+    notInQueueReason: null,
   };
   const extractRow: QueueItemSummary = {
     id: "extract-1",
@@ -78,6 +80,8 @@ const h = vi.hoisted(() => {
     protected: false,
     due: "today",
     dueLabel: "Due today",
+    queueEligible: true,
+    notInQueueReason: null,
   };
   const sourceRow: QueueItemSummary = {
     id: "source-1",
@@ -108,6 +112,8 @@ const h = vi.hoisted(() => {
     protected: true,
     due: "overdue",
     dueLabel: "Overdue",
+    queueEligible: true,
+    notInQueueReason: null,
   };
   const topicRow: QueueItemSummary = {
     id: "topic-1",
@@ -138,6 +144,8 @@ const h = vi.hoisted(() => {
     protected: false,
     due: "today",
     dueLabel: "Due today",
+    queueEligible: true,
+    notInQueueReason: null,
   };
   // A verification TASK (T092) linked to the source above — opening it must JUMP TO
   // the protected source's reader, not open the task in /process.
@@ -170,6 +178,8 @@ const h = vi.hoisted(() => {
     protected: true,
     due: "overdue",
     dueLabel: "Overdue",
+    queueEligible: true,
+    notInQueueReason: null,
   };
   const cardTaskRow: QueueItemSummary = {
     ...taskRow,

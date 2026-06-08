@@ -230,6 +230,7 @@ export const IPC_CHANNELS = {
   maintenanceDuplicates: "maintenance:duplicates",
   maintenanceCardsWithoutSources: "maintenance:cardsWithoutSources",
   maintenanceBrokenSources: "maintenance:brokenSources",
+  maintenanceSchedulerConsistency: "maintenance:schedulerConsistency",
   maintenanceIntegrity: "maintenance:integrity",
   maintenanceLowValue: "maintenance:lowValue",
   maintenanceDedupe: "maintenance:dedupe",

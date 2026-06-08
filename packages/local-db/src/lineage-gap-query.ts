@@ -34,6 +34,7 @@
 
 import {
   type ElementId,
+  type ElementStatus,
   type IsoTimestamp,
   type PriorityLabel,
   priorityToLabel,
@@ -48,6 +49,7 @@ import {
 } from "@interleave/db";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { nowIso } from "./ids";
+import { isQueueActionableStatus } from "./queue-repository";
 
 /** Asset kinds that constitute a source's openable SNAPSHOT (the bytes you re-open). */
 const SNAPSHOT_ASSET_KINDS = ["source_html", "source_pdf", "source_epub", "snapshot"] as const;
@@ -248,6 +250,7 @@ export class LineageGapQuery {
         type: elements.type,
         title: elements.title,
         priority: elements.priority,
+        status: elements.status,
         createdAt: elements.createdAt,
         updatedAt: elements.updatedAt,
       })
@@ -257,6 +260,7 @@ export class LineageGapQuery {
 
     const candidates: LowValueRow[] = [];
     for (const r of rows) {
+      if (!isQueueActionableStatus(r.status as ElementStatus)) continue;
       const label = priorityToLabel(r.priority);
       // Low-priority band only — C/D are sacrificed first under overload.
       if (label !== "C" && label !== "D") continue;

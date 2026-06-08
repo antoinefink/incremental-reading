@@ -248,13 +248,21 @@ describe("LineageGapQuery.lowValueCandidates", () => {
       status: "active",
       stage: "raw_source",
     });
+    const doneSource = repos.sources.create({
+      title: "Done stale",
+      priority: PRIORITY_LABEL_VALUE.D,
+      status: "done",
+      stage: "raw_source",
+    });
     backdateUpdatedAt(cSource.element.id, "2026-01-01T00:00:00.000Z");
     backdateUpdatedAt(dSource.element.id, "2026-01-02T00:00:00.000Z");
+    backdateUpdatedAt(doneSource.element.id, "2026-01-03T00:00:00.000Z");
 
     const rows = gaps.lowValueCandidates({ asOf, staleDays: 30 });
     const ids = rows.map((r) => r.element.id);
     expect(ids).toContain(cSource.element.id);
     expect(ids).toContain(dSource.element.id);
+    expect(ids).not.toContain(doneSource.element.id);
     expect(ids).not.toContain("High value");
     // D (0.10) sorts before C (0.35) — lowest priority first.
     expect(ids[0]).toBe(dSource.element.id);

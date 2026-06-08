@@ -19,8 +19,8 @@
  *  - **postpone** — reschedule further out (`reschedule_element`) and record a
  *    postpone marker in the op payload so the attention scheduler (T028) +
  *    stagnation analytics (T084) can count postpones WITHOUT a schema migration.
- *  - **mark done** — status `done` (`update_element`); the extract leaves the
- *    active rotation but its lineage stays intact.
+ *  - **mark done** — status `done` + clear active due (`update_element`); the extract
+ *    leaves the active rotation but its lineage stays intact.
  *  - **delete** — SOFT delete (`soft_delete_element`); never destroys user data,
  *    lineage rows remain valid, recoverable from the trash.
  *
@@ -213,13 +213,13 @@ export class ExtractService {
   }
 
   /**
-   * Mark an extract done: status `done` via {@link ElementRepository.update}
-   * (`update_element`). The extract leaves the active rotation; its body, anchor,
-   * and lineage stay intact and recoverable.
+   * Mark an extract done: status `done` and clear active due via
+   * {@link ElementRepository.update} (`update_element`). The extract leaves the
+   * active rotation; its body, anchor, and lineage stay intact and recoverable.
    */
   markDone(id: ElementId): ExtractActionResult {
     this.requireExtract(id);
-    return { element: this.elements.update(id, { status: "done" }) };
+    return { element: this.elements.update(id, { status: "done", dueAt: null }) };
   }
 
   /**

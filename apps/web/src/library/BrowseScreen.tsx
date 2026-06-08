@@ -81,8 +81,13 @@ function parseStatus(value: unknown): string | null {
 
 /** A due-state badge (overdue / today / soon) — matches the queue's `DueBadge`. */
 function DueBadge({ item }: { item: LibraryItem }) {
-  const cls =
-    item.due === "overdue" ? "badge--overdue" : item.due === "today" ? "badge--due" : "badge--soft";
+  const cls = !item.queueEligible
+    ? "badge--soft"
+    : item.due === "overdue"
+      ? "badge--overdue"
+      : item.due === "today"
+        ? "badge--due"
+        : "badge--soft";
   return (
     <span className={`badge ${cls}`} data-testid="library-detail-due">
       {item.dueLabel}
@@ -482,7 +487,10 @@ export function BrowseScreen() {
                             data-testid="library-result"
                             data-result-id={r.id}
                             data-result-type={r.type}
-                            onClick={() => setSelId(r.id)}
+                            onClick={() => {
+                              setSelId(r.id);
+                              select(r.id);
+                            }}
                             onDoubleClick={() => open(r)}
                           >
                             <div style={{ minWidth: 0 }}>
@@ -523,6 +531,11 @@ export function BrowseScreen() {
                   <SchedulerChip scheduler={selected.scheduler} />
                   {selected.dueAt ? <DueBadge item={selected} /> : null}
                 </div>
+                {selected.notInQueueReason ? (
+                  <div className="lib-detail__reason" data-testid="library-detail-queue-reason">
+                    {selected.notInQueueReason}
+                  </div>
+                ) : null}
                 {/* Source reference (T043) — the shared RefBlock so the library reads
                     a source reference the same way the inspector/review do. */}
                 {selected.sourceTitle ? (

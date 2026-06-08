@@ -482,6 +482,10 @@ export interface QueueItemSummary {
   readonly protected: boolean;
   readonly due: QueueDueState;
   readonly dueLabel: string;
+  /** True only when this row is actionable in the due queue at the read clock. */
+  readonly queueEligible: boolean;
+  /** Human explanation when an inventory row has scheduler history but is not in Queue. */
+  readonly notInQueueReason: string | null;
 }
 
 /** Per-type counts over the unfiltered due set + the at-risk counts. */
@@ -656,6 +660,10 @@ export interface QueueActUndo {
   readonly kind: "restore" | "status";
   /** The status the row had BEFORE the action (the target the undo restores). */
   readonly previousStatus: string;
+  /** The element due time BEFORE the action, restored by snackbar undo. */
+  readonly previousDueAt?: string | null;
+  /** The FSRS due time BEFORE the action for cards, restored by snackbar/global undo. */
+  readonly previousReviewDueAt?: string | null;
 }
 
 export interface QueueActResult {
@@ -1371,6 +1379,7 @@ export interface DuplicateReportResult {
 export interface MaintenanceReportResult {
   readonly duplicateCount: number;
   readonly cardsWithoutSourcesCount: number;
+  readonly schedulerConsistencyCount: number;
   readonly orphanFileCount: number;
   readonly orphanBytes: number;
   readonly lowValueCount: number;
@@ -1400,6 +1409,27 @@ export interface BrokenSourceRowSummary {
 
 export interface MaintenanceBrokenSourcesResult {
   readonly rows: readonly BrokenSourceRowSummary[];
+}
+
+export type SchedulerConsistencyReason =
+  | "terminal-element-due"
+  | "terminal-card-review-due"
+  | "retired-card-review-due"
+  | "scheduled-attention-missing-due";
+
+export interface SchedulerConsistencyRowSummary {
+  readonly element: MaintenanceRef & { readonly status: string };
+  readonly reason: SchedulerConsistencyReason;
+  readonly elementDueAt: string | null;
+  readonly reviewDueAt: string | null;
+}
+
+export interface MaintenanceSchedulerConsistencyRequest {
+  readonly limit?: number;
+}
+
+export interface MaintenanceSchedulerConsistencyResult {
+  readonly rows: readonly SchedulerConsistencyRowSummary[];
 }
 
 /** One low-value, stale candidate for bulk postpone / archive. */
@@ -2590,6 +2620,8 @@ export interface ConceptMemberSummary {
   readonly scheduler: SchedulerSignals;
   readonly due: QueueDueState;
   readonly dueLabel: string;
+  readonly queueEligible: boolean;
+  readonly notInQueueReason: string | null;
 }
 
 export interface ConceptsMembersResult {
@@ -3010,6 +3042,10 @@ export interface SearchResult {
   readonly due: QueueDueState;
   /** A short human due label ("Overdue", "Due today", "in 3d", "Scheduled"). */
   readonly dueLabel: string;
+  /** True only when this result is actionable in the due queue at the read clock. */
+  readonly queueEligible: boolean;
+  /** Human explanation when a result has scheduler history but is not in Queue. */
+  readonly notInQueueReason: string | null;
 }
 
 export interface SearchQueryRequest {
@@ -3215,6 +3251,8 @@ export interface LibraryItem {
   readonly scheduler: SchedulerSignals;
   readonly due: QueueDueState;
   readonly dueLabel: string;
+  readonly queueEligible: boolean;
+  readonly notInQueueReason: string | null;
   /** The element a `task` row protects, or `null` for non-task/unlinked rows. */
   readonly linkedElementId: string | null;
   /** The protected element's type, paired with `linkedElementId` for task routing. */
@@ -3835,6 +3873,10 @@ export interface AppApi {
     cardsWithoutSources(): Promise<MaintenanceCardsWithoutSourcesResult>;
     /** Broken sources (T099) — snapshot bytes missing / absent; read-only. */
     brokenSources(): Promise<MaintenanceBrokenSourcesResult>;
+    /** Scheduler drift hidden from Queue but visible in inventory; read-only. */
+    schedulerConsistency(
+      request?: MaintenanceSchedulerConsistencyRequest,
+    ): Promise<MaintenanceSchedulerConsistencyResult>;
     /** Low-priority, stale candidates (T099) for bulk postpone / archive; read-only. */
     lowValue(request?: MaintenanceLowValueRequest): Promise<MaintenanceLowValueResult>;
     /** The on-demand deep DB + vault integrity check (T099); read-only. */
@@ -4917,6 +4959,7 @@ export const appApi = {
         Promise.resolve({
           duplicateCount: 0,
           cardsWithoutSourcesCount: 0,
+          schedulerConsistencyCount: 0,
           orphanFileCount: 0,
           orphanBytes: 0,
           lowValueCount: 0,
@@ -4931,6 +4974,7 @@ export const appApi = {
         }),
       cardsWithoutSources: () => Promise.resolve({ rows: [] }),
       brokenSources: () => Promise.resolve({ rows: [] }),
+      schedulerConsistency: () => Promise.resolve({ rows: [] }),
       lowValue: () => Promise.resolve({ rows: [] }),
       integrity: () =>
         Promise.resolve({

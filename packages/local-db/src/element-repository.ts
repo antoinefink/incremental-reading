@@ -87,6 +87,8 @@ export interface UpdateElementInput {
 export interface OpContext {
   /** Groups the ops of one bulk action so undo reverses the whole batch. */
   readonly batchId?: string;
+  /** Command-specific audit/undo metadata merged into the existing op payload. */
+  readonly extras?: Readonly<Record<string, unknown>>;
 }
 
 export class ElementRepository {
@@ -254,6 +256,7 @@ export class ElementRepository {
         patch,
         prev,
         ...(opContext?.batchId ? { batchId: opContext.batchId } : {}),
+        ...(opContext?.extras ?? {}),
       },
     });
     return rowToElement(row);

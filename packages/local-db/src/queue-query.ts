@@ -38,6 +38,7 @@ import type {
 import { priorityToLabel } from "@interleave/core";
 import { type SessionMode, scoreQueueItems } from "@interleave/scheduler";
 import type { Repositories } from "./index";
+import { isQueueActionableStatus } from "./queue-repository";
 
 export type { SessionMode } from "@interleave/scheduler";
 
@@ -75,6 +76,11 @@ export interface QueueSchedulerSignals {
 
 /** How "due" a row is relative to `asOf`. */
 export type QueueDueState = "overdue" | "today" | "soon";
+
+export interface QueueEligibilitySummary {
+  readonly eligible: boolean;
+  readonly reason: string | null;
+}
 
 /** A flat, JSON-serializable queue row crossing IPC to the renderer. */
 export interface QueueItemSummary {
@@ -127,6 +133,10 @@ export interface QueueItemSummary {
   readonly due: QueueDueState;
   /** A short human due label ("Overdue", "Due today", "in 3d"). */
   readonly dueLabel: string;
+  /** True only when this row is actionable in the due queue at the read clock. */
+  readonly queueEligible: boolean;
+  /** Human explanation when an inventory row has scheduler history but is not in Queue. */
+  readonly notInQueueReason: string | null;
 }
 
 /** The filters a queue read accepts. All optional; absent = no narrowing. */
@@ -228,6 +238,68 @@ function dueLabelFor(dueAt: string | null, state: QueueDueState, asOf: number): 
   if (Number.isNaN(due)) return "Scheduled";
   const days = Math.max(1, Math.round((due - asOf) / DAY_MS));
   return `in ${days}d`;
+}
+
+function formatReturnDate(dueAt: string): string {
+  const due = Date.parse(dueAt);
+  if (Number.isNaN(due)) return "later";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(due));
+}
+
+function statusLabel(status: ElementStatus): string {
+  if (status === "done") return "Done";
+  if (status === "dismissed") return "Dismissed";
+  if (status === "suspended") return "Suspended";
+  if (status === "inbox") return "Inbox";
+  if (status === "deleted") return "Deleted";
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function notInQueueReasonFor(
+  element: Element,
+  dueAt: string | null,
+  asOfMs: number,
+  cardRetired: boolean,
+): string | null {
+  if (element.deletedAt) return "Not in queue: deleted";
+  if (cardRetired) return "Not in queue: card is retired";
+  if (!isQueueActionableStatus(element.status)) {
+    return `Not in queue: status is ${statusLabel(element.status)}`;
+  }
+  if (!dueAt) return "Not in queue: no return scheduled";
+  const due = Date.parse(dueAt);
+  if (Number.isNaN(due)) return "Not in queue: invalid due date";
+  if (due > asOfMs) return `Not in queue: returns ${formatReturnDate(dueAt)}`;
+  return null;
+}
+
+function queueEligibilityFor(
+  element: Element,
+  dueAt: string | null,
+  asOfMs: number,
+  cardRetired = false,
+): QueueEligibilitySummary {
+  const reason = notInQueueReasonFor(element, dueAt, asOfMs, cardRetired);
+  return { eligible: reason === null, reason };
+}
+
+function inventoryDueLabelFor(
+  element: Element,
+  dueAt: string | null,
+  state: QueueDueState,
+  asOfMs: number,
+  queueEligible: boolean,
+): string {
+  if (queueEligible) return dueLabelFor(dueAt, state, asOfMs);
+  if (!isQueueActionableStatus(element.status)) return statusLabel(element.status);
+  if (!dueAt) return "No return scheduled";
+  const due = Date.parse(dueAt);
+  if (!Number.isNaN(due) && due > asOfMs) return `Returns ${formatReturnDate(dueAt)}`;
+  return "No return scheduled";
 }
 
 /**
@@ -491,6 +563,12 @@ export class QueueQuery {
       : null;
     const dueAt = state?.dueAt ?? element.dueAt;
     const due = dueStateFor(dueAt, asOfMs);
+    const cardRetired = batch
+      ? false
+      : (this.repos.review.findCardById(element.id)?.card.isRetired ?? false);
+    const queueEligibility = batch
+      ? { eligible: true, reason: null }
+      : queueEligibilityFor(element, dueAt, asOfMs, cardRetired);
     const sourceId = element.type === "source" ? element.id : element.sourceId;
     const siblingGroupId =
       (batch ? batch.siblingGroups.get(element.id) : this.siblingGroupOf(element.id)) ?? null;
@@ -530,7 +608,9 @@ export class QueueQuery {
       linkedElementType: null,
       protected: priorityToLabel(element.priority) === "A",
       due,
-      dueLabel: dueLabelFor(dueAt, due, asOfMs),
+      dueLabel: inventoryDueLabelFor(element, dueAt, due, asOfMs, queueEligibility.eligible),
+      queueEligible: queueEligibility.eligible,
+      notInQueueReason: queueEligibility.reason,
     };
   }
 
@@ -546,6 +626,9 @@ export class QueueQuery {
     batch?: BatchContext,
   ): QueueItemSummary {
     const due = dueStateFor(element.dueAt, asOfMs);
+    const queueEligibility = batch
+      ? { eligible: true, reason: null }
+      : queueEligibilityFor(element, element.dueAt, asOfMs);
     const sourceId = element.type === "source" ? element.id : element.sourceId;
     const ctx = batch ? null : this.sourceContext(element);
     const concept = batch
@@ -589,7 +672,15 @@ export class QueueQuery {
       linkedElementType: linked?.type ?? null,
       protected: priorityToLabel(element.priority) === "A",
       due,
-      dueLabel: dueLabelFor(element.dueAt, due, asOfMs),
+      dueLabel: inventoryDueLabelFor(
+        element,
+        element.dueAt,
+        due,
+        asOfMs,
+        queueEligibility.eligible,
+      ),
+      queueEligible: queueEligibility.eligible,
+      notInQueueReason: queueEligibility.reason,
     };
   }
 

@@ -72,7 +72,9 @@ const h = vi.hoisted(() => {
     dueAt: null,
     scheduler: attention,
     due: "soon",
-    dueLabel: "Scheduled",
+    dueLabel: "No return scheduled",
+    queueEligible: false,
+    notInQueueReason: "Not in queue: no return scheduled",
   };
   const extractMember: ConceptMemberSummary = {
     id: "ext-1",
@@ -87,6 +89,8 @@ const h = vi.hoisted(() => {
     scheduler: attention,
     due: "today",
     dueLabel: "Due today",
+    queueEligible: true,
+    notInQueueReason: null,
   };
   const cardMember: ConceptMemberSummary = {
     id: "card-1",
@@ -101,6 +105,8 @@ const h = vi.hoisted(() => {
     scheduler: fsrs,
     due: "today",
     dueLabel: "Due today",
+    queueEligible: true,
+    notInQueueReason: null,
   };
   return {
     parent,

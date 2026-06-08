@@ -11,8 +11,10 @@
  *    (a deliberate THIN defer for M5 — full FSRS grade-driven rescheduling is M7);
  *  - `raise` / `lower` → the `@interleave/core` band helpers + {@link ElementRepository.setPriority}
  *    (`update_element`);
- *  - `markDone` → status `done` via {@link ElementRepository.update} (`update_element`);
- *  - `dismiss` → status `dismissed` via {@link ElementRepository.update} (`update_element`);
+ *  - `markDone` → status `done` + clear active due via {@link ElementRepository.update}
+ *    (`update_element`);
+ *  - `dismiss` → status `dismissed` + clear active due via {@link ElementRepository.update}
+ *    (`update_element`);
  *  - `delete` → SOFT delete via {@link ElementRepository.softDelete} (`soft_delete_element`),
  *    recoverable via {@link ElementRepository.restore}.
  *
@@ -124,6 +126,10 @@ export interface QueueActionUndo {
   readonly kind: "restore" | "status";
   /** The status to restore to (the row's status BEFORE the action). */
   readonly previousStatus: ElementStatus;
+  /** The element due time BEFORE the action, restored by snackbar undo. */
+  readonly previousDueAt?: IsoTimestamp | null;
+  /** The FSRS due time BEFORE the action for cards, restored by snackbar/global undo. */
+  readonly previousReviewDueAt?: IsoTimestamp | null;
 }
 
 export class QueueActionService {
@@ -299,16 +305,41 @@ export class QueueActionService {
   }
 
   /**
-   * Mark done / dismiss — set the lifecycle status (`update_element`). The row
-   * LEAVES the due list; the undo snackbar re-sets the PRIOR status. Lineage, body,
-   * and anchors are untouched.
+   * Mark done / dismiss — set the lifecycle status and clear active scheduling
+   * (`update_element`). The row LEAVES the due list; the undo snackbar restores the
+   * PRIOR status + due pre-image. Lineage, body, and anchors are untouched.
    */
   private setStatus(element: Element, status: ElementStatus): QueueActionResult {
-    const updated = this.elements.update(element.id, { status });
+    const previousReviewDueAt =
+      element.type === "card" ? reviewDueOf(this.review, element.id) : undefined;
+    const updated = this.db.transaction((tx) => {
+      if (element.type === "card") {
+        tx.update(reviewStates)
+          .set({ dueAt: null })
+          .where(eq(reviewStates.elementId, element.id))
+          .run();
+      }
+      return this.elements.updateWithin(
+        tx,
+        element.id,
+        { status, dueAt: null },
+        {
+          extras: {
+            queueExit: true,
+            ...(previousReviewDueAt !== undefined ? { prevReviewDueAt: previousReviewDueAt } : {}),
+          },
+        },
+      );
+    });
     return {
       element: updated,
       removed: true,
-      undo: { kind: "status", previousStatus: element.status },
+      undo: {
+        kind: "status",
+        previousStatus: element.status,
+        previousDueAt: element.dueAt,
+        ...(previousReviewDueAt !== undefined ? { previousReviewDueAt } : {}),
+      },
     };
   }
 
@@ -335,6 +366,32 @@ export class QueueActionService {
     if (undo.kind === "restore") {
       return this.elements.restore(id, undo.previousStatus);
     }
-    return this.elements.update(id, { status: undo.previousStatus });
+    return this.db.transaction((tx) => {
+      const currentReviewDueAt =
+        undo.previousReviewDueAt !== undefined
+          ? ((tx
+              .select({ dueAt: reviewStates.dueAt })
+              .from(reviewStates)
+              .where(eq(reviewStates.elementId, id))
+              .get()?.dueAt ?? null) as IsoTimestamp | null)
+          : undefined;
+      if (undo.previousReviewDueAt !== undefined) {
+        tx.update(reviewStates)
+          .set({ dueAt: undo.previousReviewDueAt })
+          .where(eq(reviewStates.elementId, id))
+          .run();
+      }
+      return this.elements.updateWithin(
+        tx,
+        id,
+        {
+          status: undo.previousStatus,
+          ...(Object.hasOwn(undo, "previousDueAt") ? { dueAt: undo.previousDueAt ?? null } : {}),
+        },
+        currentReviewDueAt !== undefined
+          ? { extras: { queueExit: true, prevReviewDueAt: currentReviewDueAt } }
+          : undefined,
+      );
+    });
   }
 }

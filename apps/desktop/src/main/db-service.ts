@@ -1196,7 +1196,16 @@ export class DbService {
       item,
       removed: result.removed,
       undo: result.undo
-        ? { kind: result.undo.kind, previousStatus: result.undo.previousStatus }
+        ? {
+            kind: result.undo.kind,
+            previousStatus: result.undo.previousStatus,
+            ...(result.undo.previousDueAt !== undefined
+              ? { previousDueAt: result.undo.previousDueAt }
+              : {}),
+            ...(result.undo.previousReviewDueAt !== undefined
+              ? { previousReviewDueAt: result.undo.previousReviewDueAt }
+              : {}),
+          }
         : null,
     };
   }
@@ -1246,6 +1255,12 @@ export class DbService {
     this.queueActionService.undo(id, {
       kind: request.undo.kind,
       previousStatus: request.undo.previousStatus as ElementStatus,
+      ...(request.undo.previousDueAt !== undefined
+        ? { previousDueAt: request.undo.previousDueAt as IsoTimestamp | null }
+        : {}),
+      ...(request.undo.previousReviewDueAt !== undefined
+        ? { previousReviewDueAt: request.undo.previousReviewDueAt as IsoTimestamp | null }
+        : {}),
     });
     return { item: this.queueQuery.summaryFor(id) };
   }
@@ -1529,6 +1544,13 @@ export class DbService {
     rows: ReturnType<MaintenanceService["lowValueCandidates"]>["rows"];
   } {
     return this.maintenanceService.lowValueCandidates(request?.asOf, request?.limit);
+  }
+
+  /** Scheduler drift hidden from Queue but visible in inventory. */
+  getMaintenanceSchedulerConsistency(request?: { limit?: number | undefined }): {
+    rows: ReturnType<MaintenanceService["schedulerConsistency"]>["rows"];
+  } {
+    return this.maintenanceService.schedulerConsistency(request?.limit);
   }
 
   /** The DB + vault integrity DEEP check (on-demand). Read-only. */
@@ -2505,7 +2527,9 @@ export class DbService {
       dueAt: summary?.dueAt ?? element.dueAt ?? null,
       scheduler,
       due: summary?.due ?? "soon",
-      dueLabel: summary?.dueLabel ?? "Scheduled",
+      dueLabel: summary?.dueLabel ?? "No return scheduled",
+      queueEligible: summary?.queueEligible ?? false,
+      notInQueueReason: summary?.notInQueueReason ?? "Not in queue: summary unavailable",
       semantic: hit.source === "semantic" || hit.source === "both",
       vecDistance: hit.vecDistance ?? null,
     };
@@ -4510,7 +4534,9 @@ export class DbService {
         dueAt: summary?.dueAt ?? element.dueAt ?? null,
         scheduler,
         due: summary?.due ?? "soon",
-        dueLabel: summary?.dueLabel ?? "Scheduled",
+        dueLabel: summary?.dueLabel ?? "No return scheduled",
+        queueEligible: summary?.queueEligible ?? false,
+        notInQueueReason: summary?.notInQueueReason ?? "Not in queue: summary unavailable",
       });
     }
     return { members };
@@ -4749,7 +4775,9 @@ export class DbService {
         dueAt: summary?.dueAt ?? element.dueAt ?? null,
         scheduler,
         due: summary?.due ?? "soon",
-        dueLabel: summary?.dueLabel ?? "Scheduled",
+        dueLabel: summary?.dueLabel ?? "No return scheduled",
+        queueEligible: summary?.queueEligible ?? false,
+        notInQueueReason: summary?.notInQueueReason ?? "Not in queue: summary unavailable",
       });
     }
 
@@ -4862,7 +4890,9 @@ export class DbService {
         dueAt: summary?.dueAt ?? element.dueAt ?? null,
         scheduler,
         due: summary?.due ?? "soon",
-        dueLabel: summary?.dueLabel ?? "Scheduled",
+        dueLabel: summary?.dueLabel ?? "No return scheduled",
+        queueEligible: summary?.queueEligible ?? false,
+        notInQueueReason: summary?.notInQueueReason ?? "Not in queue: summary unavailable",
         linkedElementId: linked?.id ?? null,
         linkedElementType: linked?.type ?? null,
       });

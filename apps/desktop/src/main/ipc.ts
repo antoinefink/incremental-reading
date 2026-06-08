@@ -90,6 +90,7 @@ import {
   MaintenanceLowValueRequestSchema,
   MaintenanceOrphanMediaRequestSchema,
   MaintenanceReportRequestSchema,
+  MaintenanceSchedulerConsistencyRequestSchema,
   OptimizationApplyRequestSchema,
   OptimizationSuggestRequestSchema,
   PickImportFileRequestSchema,
@@ -1478,6 +1479,11 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.maintenanceBrokenSources, async (_event, rawRequest: unknown) => {
     MaintenanceBrokenSourcesRequestSchema.parse(rawRequest);
     return dbService.getMaintenanceBrokenSources();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.maintenanceSchedulerConsistency, (_event, rawRequest: unknown) => {
+    const request = MaintenanceSchedulerConsistencyRequestSchema.parse(rawRequest);
+    return dbService.getMaintenanceSchedulerConsistency(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.maintenanceLowValue, (_event, rawRequest: unknown) => {

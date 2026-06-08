@@ -274,12 +274,13 @@ describe("ExtractService.postpone", () => {
 });
 
 describe("ExtractService.markDone", () => {
-  it("sets status done and logs update_element, leaving lineage intact", () => {
+  it("sets status done, clears active due, and logs update_element, leaving lineage intact", () => {
     const { sourceId, extractId } = seedExtract(handle);
     const service = new ExtractService(handle.db);
 
     const { element } = service.markDone(extractId);
     expect(element.status).toBe("done");
+    expect(element.dueAt).toBeNull();
     expect(opsFor(handle, extractId).at(-1)).toBe("update_element");
 
     // Lineage to the source is untouched.

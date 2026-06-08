@@ -78,6 +78,7 @@ import type {
   MaintenanceIntegrityRequest,
   MaintenanceLowValueRequest,
   MaintenanceOrphanMediaRequest,
+  MaintenanceSchedulerConsistencyRequest,
   OptimizationApplyRequest,
   OptimizationSuggestRequest,
   PickImportFileRequest,
@@ -509,6 +510,8 @@ const appApi: AppApi = {
     duplicates: () => ipcRenderer.invoke(IPC_CHANNELS.maintenanceDuplicates),
     cardsWithoutSources: () => ipcRenderer.invoke(IPC_CHANNELS.maintenanceCardsWithoutSources),
     brokenSources: () => ipcRenderer.invoke(IPC_CHANNELS.maintenanceBrokenSources),
+    schedulerConsistency: (request?: MaintenanceSchedulerConsistencyRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.maintenanceSchedulerConsistency, request),
     lowValue: (request?: MaintenanceLowValueRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.maintenanceLowValue, request),
     integrity: (request?: MaintenanceIntegrityRequest) =>

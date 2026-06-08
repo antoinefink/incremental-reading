@@ -47,12 +47,17 @@ import { rowToElement, rowToReviewState } from "./mappers";
  * reappear on the next read. (`deleted` is redundant with the `deletedAt` guard
  * but listed for intent.)
  */
-const QUEUE_EXCLUDED_STATUSES: readonly ElementStatus[] = [
+export const QUEUE_EXCLUDED_STATUSES: readonly ElementStatus[] = [
   "done",
   "dismissed",
   "suspended",
   "deleted",
 ];
+
+/** True when the lifecycle status can still put an element into today's work queue. */
+export function isQueueActionableStatus(status: ElementStatus): boolean {
+  return !QUEUE_EXCLUDED_STATUSES.includes(status);
+}
 
 export class QueueRepository {
   constructor(private readonly db: InterleaveDatabase) {}

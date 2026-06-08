@@ -232,7 +232,36 @@ export class UndoService {
         if (typeof prev !== "object" || prev === null || Object.keys(prev).length === 0) {
           return null;
         }
-        const updated = this.elements.update(id, prev as Record<string, never>);
+        const isQueueExit = op.payload.queueExit === true;
+        const prevReviewDueAt =
+          isQueueExit && Object.hasOwn(op.payload, "prevReviewDueAt")
+            ? ((op.payload.prevReviewDueAt ?? null) as IsoTimestamp | null)
+            : undefined;
+        const updated = this.db.transaction((tx) => {
+          const currentReviewDueAt =
+            prevReviewDueAt !== undefined
+              ? ((tx
+                  .select({ dueAt: reviewStates.dueAt })
+                  .from(reviewStates)
+                  .where(eq(reviewStates.elementId, id))
+                  .get()?.dueAt ?? null) as IsoTimestamp | null)
+              : undefined;
+          const el = this.elements.updateWithin(
+            tx,
+            id,
+            prev as Record<string, never>,
+            currentReviewDueAt !== undefined
+              ? { extras: { queueExit: true, prevReviewDueAt: currentReviewDueAt } }
+              : undefined,
+          );
+          if (prevReviewDueAt !== undefined) {
+            tx.update(reviewStates)
+              .set({ dueAt: prevReviewDueAt })
+              .where(eq(reviewStates.elementId, id))
+              .run();
+          }
+          return el;
+        });
         return `Reverted "${updated.title}"`;
       }
       case "reschedule_element": {

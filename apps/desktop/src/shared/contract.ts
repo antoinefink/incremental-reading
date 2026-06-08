@@ -650,6 +650,10 @@ export interface QueueItemSummary {
   readonly due: QueueDueState;
   /** A short human due label ("Overdue" / "Due today" / "in 3d"). */
   readonly dueLabel: string;
+  /** True only when this row is actionable in the due queue at the read clock. */
+  readonly queueEligible: boolean;
+  /** Human explanation when an inventory row has scheduler history but is not in Queue. */
+  readonly notInQueueReason: string | null;
 }
 
 /**
@@ -715,8 +719,9 @@ export interface QueueListResult {
  *    for M5 — full FSRS grade-driven rescheduling is M7). The two schedulers stay
  *    SEPARATE — a card is never put on the attention heuristic.
  *  - `raise` / `lower` → the `@interleave/core` band helpers + `update_element`.
- *  - `markDone` → status `done` (`update_element`); `dismiss` → status `dismissed`
- *    (`update_element`); `delete` → SOFT delete (`soft_delete_element`), recoverable.
+ *  - `markDone` → status `done` + clear active due (`update_element`); `dismiss` →
+ *    status `dismissed` + clear active due (`update_element`); `delete` → SOFT delete
+ *    (`soft_delete_element`), recoverable.
  *
  * Each path is validated main-side, runs in ONE transaction, and appends exactly
  * the correct EXISTING op (NO new op types — the closed 15-op set is unchanged).
@@ -747,6 +752,10 @@ export interface QueueActUndo {
   readonly kind: "restore" | "status";
   /** The status the row had BEFORE the action (the target the undo restores). */
   readonly previousStatus: string;
+  /** The element due time BEFORE the action, restored by snackbar undo. */
+  readonly previousDueAt?: string | null;
+  /** The FSRS due time BEFORE the action for cards, restored by snackbar/global undo. */
+  readonly previousReviewDueAt?: string | null;
 }
 
 export interface QueueActResult {
@@ -830,6 +839,8 @@ export const QueueUndoRequestSchema = z.object({
     kind: z.enum(["restore", "status"]),
     /** The status the row had BEFORE the action (the target to restore to). */
     previousStatus: z.enum(ELEMENT_STATUSES),
+    previousDueAt: IsoTimestampInputSchema.nullable().optional(),
+    previousReviewDueAt: IsoTimestampInputSchema.nullable().optional(),
   }),
 });
 export type QueueUndoRequest = z.infer<typeof QueueUndoRequestSchema>;
@@ -2093,6 +2104,7 @@ export type MaintenanceReportRequest = z.infer<typeof MaintenanceReportRequestSc
 export interface MaintenanceReportResult {
   readonly duplicateCount: number;
   readonly cardsWithoutSourcesCount: number;
+  readonly schedulerConsistencyCount: number;
   readonly orphanFileCount: number;
   readonly orphanBytes: number;
   readonly lowValueCount: number;
@@ -2135,6 +2147,29 @@ export const MaintenanceBrokenSourcesRequestSchema = z.void();
 export type MaintenanceBrokenSourcesRequest = z.infer<typeof MaintenanceBrokenSourcesRequestSchema>;
 export interface MaintenanceBrokenSourcesResult {
   readonly rows: readonly BrokenSourceRowSummary[];
+}
+
+export type SchedulerConsistencyReason =
+  | "terminal-element-due"
+  | "terminal-card-review-due"
+  | "retired-card-review-due"
+  | "scheduled-attention-missing-due";
+
+export interface SchedulerConsistencyRowSummary {
+  readonly element: MaintenanceRefSummary & { readonly status: string };
+  readonly reason: SchedulerConsistencyReason;
+  readonly elementDueAt: string | null;
+  readonly reviewDueAt: string | null;
+}
+
+export const MaintenanceSchedulerConsistencyRequestSchema = z
+  .object({ limit: z.number().int().positive().max(500).optional() })
+  .optional();
+export type MaintenanceSchedulerConsistencyRequest = z.infer<
+  typeof MaintenanceSchedulerConsistencyRequestSchema
+>;
+export interface MaintenanceSchedulerConsistencyResult {
+  readonly rows: readonly SchedulerConsistencyRowSummary[];
 }
 
 /** One low-value, stale candidate for the bulk postpone / archive action. */
@@ -4037,6 +4072,10 @@ export interface ConceptMemberSummary {
   readonly due: QueueDueState;
   /** A short human due label ("Overdue", "Due today", "in 3d", "Scheduled"). */
   readonly dueLabel: string;
+  /** True only when this member is actionable in the due queue at the read clock. */
+  readonly queueEligible: boolean;
+  /** Human explanation when a member has scheduler history but is not in Queue. */
+  readonly notInQueueReason: string | null;
 }
 
 export interface ConceptsMembersResult {
@@ -4590,6 +4629,10 @@ export interface SearchResult {
   readonly due: QueueDueState;
   /** A short human due label ("Overdue", "Due today", "in 3d", "Scheduled"). */
   readonly dueLabel: string;
+  /** True only when this result is actionable in the due queue at the read clock. */
+  readonly queueEligible: boolean;
+  /** Human explanation when a result has scheduler history but is not in Queue. */
+  readonly notInQueueReason: string | null;
 }
 
 export const SearchQueryRequestSchema = z.object({
@@ -4886,6 +4929,10 @@ export interface LibraryItem {
   readonly due: QueueDueState;
   /** A short human due label ("Overdue", "Due today", "in 3d", "Scheduled"). */
   readonly dueLabel: string;
+  /** True only when this item is actionable in the due queue at the read clock. */
+  readonly queueEligible: boolean;
+  /** Human explanation when an item has scheduler history but is not in Queue. */
+  readonly notInQueueReason: string | null;
   /** The element a `task` row protects, or `null` for non-task/unlinked rows. */
   readonly linkedElementId: string | null;
   /** The protected element's type, paired with `linkedElementId` for task routing. */
@@ -6297,6 +6344,10 @@ export interface AppApi {
     brokenSources(
       request?: MaintenanceBrokenSourcesRequest,
     ): Promise<MaintenanceBrokenSourcesResult>;
+    /** Scheduler drift hidden from Queue but visible in inventory; read-only. */
+    schedulerConsistency(
+      request?: MaintenanceSchedulerConsistencyRequest,
+    ): Promise<MaintenanceSchedulerConsistencyResult>;
     /** Low-priority, stale candidates (T099) for bulk postpone / archive; read-only. */
     lowValue(request?: MaintenanceLowValueRequest): Promise<MaintenanceLowValueResult>;
     /** The on-demand deep DB + vault integrity check (T099); read-only. */

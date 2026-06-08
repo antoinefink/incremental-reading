@@ -73,6 +73,8 @@ const h = vi.hoisted(() => {
     protected: true,
     due: "overdue",
     dueLabel: "Overdue",
+    queueEligible: true,
+    notInQueueReason: null,
   };
   const extractRow: QueueItemSummary = {
     id: "extract-1",
@@ -103,6 +105,8 @@ const h = vi.hoisted(() => {
     protected: false,
     due: "today",
     dueLabel: "Due today",
+    queueEligible: true,
+    notInQueueReason: null,
   };
   // A due TOPIC — an attention-scheduled element. Clicking it must route into the
   // one-at-a-time /process loop (NOT the FSRS /review session, which has no card to
@@ -136,6 +140,8 @@ const h = vi.hoisted(() => {
     protected: false,
     due: "today",
     dueLabel: "Due today",
+    queueEligible: true,
+    notInQueueReason: null,
   };
   // A due CARD — an FSRS-scheduled element. Clicking it must route into direct
   // card detail, while batch review stays behind the dedicated /review affordances.
@@ -168,6 +174,8 @@ const h = vi.hoisted(() => {
     protected: false,
     due: "overdue",
     dueLabel: "Overdue",
+    queueEligible: true,
+    notInQueueReason: null,
   };
   const queue: QueueListResult = {
     items: [sourceRow, extractRow, topicRow, cardRow],
@@ -213,6 +221,8 @@ const h = vi.hoisted(() => {
     protected: false,
     due: "overdue",
     dueLabel: "Overdue",
+    queueEligible: true,
+    notInQueueReason: null,
   };
   const analytics: AnalyticsGetResult = {
     asOf: "2026-05-30T18:00:00.000Z",

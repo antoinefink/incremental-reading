@@ -82,7 +82,9 @@ function sourceHit(overrides: Partial<SearchResult> = {}): SearchResult {
       lastProcessedAt: null,
     },
     due: "soon",
-    dueLabel: "Scheduled",
+    dueLabel: "No return scheduled",
+    queueEligible: false,
+    notInQueueReason: "Not in queue: no return scheduled",
     ...overrides,
   };
 }

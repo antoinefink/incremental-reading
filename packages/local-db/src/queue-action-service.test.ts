@@ -120,21 +120,30 @@ describe("QueueActionService.act", () => {
     expect(priorityToLabel(elements.findById(id)?.priority ?? 0)).toBe("C");
   });
 
-  it("markDone sets status done (update_element) and undo re-sets the prior status", () => {
+  it("markDone sets status done, clears active due, and undo restores both", () => {
     const id = seedExtract(handle);
     const service = new QueueActionService(handle.db);
     const elements = new ElementRepository(handle.db);
-    const prior = elements.findById(id)?.status;
+    const before = elements.findById(id);
+    const prior = before?.status;
+    const priorDueAt = before?.dueAt ?? null;
 
     const res = service.act(id, "markDone");
     expect(res.element.status).toBe("done");
+    expect(res.element.dueAt).toBeNull();
     expect(res.removed).toBe(true);
-    expect(res.undo).toEqual({ kind: "status", previousStatus: prior });
+    expect(res.undo).toEqual({
+      kind: "status",
+      previousStatus: prior,
+      previousDueAt: priorDueAt,
+    });
     expect(elements.findById(id)?.status).toBe("done");
+    expect(elements.findById(id)?.dueAt).toBeNull();
 
-    // Undo restores the prior status via update_element.
+    // Undo restores the prior status and due via update_element.
     if (res.undo) service.undo(id, res.undo);
     expect(elements.findById(id)?.status).toBe(prior);
+    expect(elements.findById(id)?.dueAt).toBe(priorDueAt);
   });
 
   it("source markDone requires all blocks resolved unless explicitly confirmed", () => {
@@ -168,10 +177,80 @@ describe("QueueActionService.act", () => {
   it("dismiss sets status dismissed (update_element)", () => {
     const id = seedExtract(handle);
     const service = new QueueActionService(handle.db);
+    const priorDueAt = new ElementRepository(handle.db).findById(id)?.dueAt ?? null;
     const res = service.act(id, "dismiss");
     expect(res.element.status).toBe("dismissed");
+    expect(res.element.dueAt).toBeNull();
     expect(res.removed).toBe(true);
     expect(res.undo?.kind).toBe("status");
+    expect(res.undo?.previousDueAt).toBe(priorDueAt);
+  });
+
+  it("markDone on a card clears element due and FSRS due, then undo restores both", () => {
+    const id = seedCard(handle);
+    const service = new QueueActionService(handle.db);
+    const elements = new ElementRepository(handle.db);
+    const review = new ReviewRepository(handle.db);
+    const priorElementDueAt = elements.findById(id)?.dueAt ?? null;
+    const priorReviewDueAt = review.findReviewState(id)?.dueAt ?? null;
+    const priorStatus = elements.findById(id)?.status;
+
+    const res = service.act(id, "markDone");
+    expect(res.element.status).toBe("done");
+    expect(res.element.dueAt).toBeNull();
+    expect(review.findReviewState(id)?.dueAt).toBeNull();
+    expect(res.undo).toEqual({
+      kind: "status",
+      previousStatus: priorStatus,
+      previousDueAt: priorElementDueAt,
+      previousReviewDueAt: priorReviewDueAt,
+    });
+
+    if (res.undo) service.undo(id, res.undo);
+    expect(elements.findById(id)?.status).toBe(priorStatus);
+    expect(elements.findById(id)?.dueAt).toBe(priorElementDueAt);
+    expect(review.findReviewState(id)?.dueAt).toBe(priorReviewDueAt);
+  });
+
+  it("global undo of a card queue-exit undo clears FSRS due again", () => {
+    const id = seedCard(handle);
+    const service = new QueueActionService(handle.db);
+    const undo = new UndoService(handle.db);
+    const elements = new ElementRepository(handle.db);
+    const review = new ReviewRepository(handle.db);
+    const priorReviewDueAt = review.findReviewState(id)?.dueAt ?? null;
+
+    service.act(id, "markDone");
+    expect(review.findReviewState(id)?.dueAt).toBeNull();
+
+    const restored = undo.undoLast();
+    expect(restored.undone).toBe(true);
+    expect(elements.findById(id)?.status).toBe("pending");
+    expect(review.findReviewState(id)?.dueAt).toBe(priorReviewDueAt);
+
+    const redone = undo.undoLast();
+    expect(redone.undone).toBe(true);
+    expect(elements.findById(id)?.status).toBe("done");
+    expect(elements.findById(id)?.dueAt).toBeNull();
+    expect(review.findReviewState(id)?.dueAt).toBeNull();
+  });
+
+  it("global undo after snackbar undo of a card queue exit clears FSRS due again", () => {
+    const id = seedCard(handle);
+    const service = new QueueActionService(handle.db);
+    const undo = new UndoService(handle.db);
+    const elements = new ElementRepository(handle.db);
+    const review = new ReviewRepository(handle.db);
+
+    const res = service.act(id, "markDone");
+    if (res.undo) service.undo(id, res.undo);
+    expect(review.findReviewState(id)?.dueAt).toBe(res.undo?.previousReviewDueAt);
+
+    const redone = undo.undoLast();
+    expect(redone.undone).toBe(true);
+    expect(elements.findById(id)?.status).toBe("done");
+    expect(elements.findById(id)?.dueAt).toBeNull();
+    expect(review.findReviewState(id)?.dueAt).toBeNull();
   });
 
   it("delete is SOFT (deletedAt set, row still present) and undo restores it", () => {

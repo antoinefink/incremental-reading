@@ -40,6 +40,7 @@ import type {
   DuplicateReport,
   LineageGapRow,
   LowValueRow,
+  SchedulerConsistencyRow,
 } from "@interleave/local-db";
 import { nowIso } from "@interleave/local-db";
 import type { AssetVaultService, VaultIntegrityReport } from "./asset-vault-service";
@@ -92,6 +93,7 @@ export interface IntegrityReport {
 export interface MaintenanceReport {
   readonly duplicateCount: number;
   readonly cardsWithoutSourcesCount: number;
+  readonly schedulerConsistencyCount: number;
   readonly orphanFileCount: number;
   readonly orphanBytes: number;
   readonly lowValueCount: number;
@@ -130,10 +132,12 @@ export class MaintenanceService {
     const dup = repos.dedupReport.report();
     const sourceless = repos.lineageGap.cardsWithoutSources();
     const lowValue = repos.lineageGap.lowValueCandidates();
+    const schedulerConsistencyCount = repos.schedulerConsistency.count();
     const orphans = await this.dbService.findVaultOrphans();
     return {
       duplicateCount: dup.totalDuplicates,
       cardsWithoutSourcesCount: sourceless.length,
+      schedulerConsistencyCount,
       orphanFileCount: orphans.orphans.length,
       orphanBytes: orphans.totalBytes,
       lowValueCount: lowValue.length,
@@ -159,6 +163,11 @@ export class MaintenanceService {
         ...(limit !== undefined ? { limit } : {}),
       }),
     };
+  }
+
+  /** Stale scheduler state that is hidden from Queue but should be inspected. */
+  schedulerConsistency(limit?: number): { rows: SchedulerConsistencyRow[] } {
+    return { rows: this.dbService.repos.schedulerConsistency.list(limit) };
   }
 
   /**

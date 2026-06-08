@@ -818,7 +818,11 @@ describe("DbService", () => {
     const done = svc.actOnQueueItem({ id: extract.id, action: { kind: "markDone" } });
     expect(done.removed).toBe(true);
     expect(done.item).toBeNull();
-    expect(done.undo).toEqual({ kind: "status", previousStatus: "active" });
+    expect(done.undo).toEqual({
+      kind: "status",
+      previousStatus: "active",
+      previousDueAt: null,
+    });
     expect(svc.repos.elements.findById(extract.id)?.status).toBe("done");
 
     // Undo re-sets the prior status; the restored summary comes back.
@@ -4175,6 +4179,7 @@ describe("DbService maintenance reads (T099)", () => {
     const report = await svc.getMaintenanceReport();
     expect(typeof report.duplicateCount).toBe("number");
     expect(typeof report.cardsWithoutSourcesCount).toBe("number");
+    expect(typeof report.schedulerConsistencyCount).toBe("number");
     expect(typeof report.orphanFileCount).toBe("number");
     expect(report.integrity).toBeNull();
 
@@ -4190,6 +4195,9 @@ describe("DbService maintenance reads (T099)", () => {
 
     const low = svc.getMaintenanceLowValue();
     expect(Array.isArray(low.rows)).toBe(true);
+
+    const schedulerConsistency = svc.getMaintenanceSchedulerConsistency();
+    expect(Array.isArray(schedulerConsistency.rows)).toBe(true);
 
     const integrity = await svc.getMaintenanceIntegrity();
     expect(integrity.db.ok).toBe(true);

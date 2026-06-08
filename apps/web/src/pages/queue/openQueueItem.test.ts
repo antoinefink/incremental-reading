@@ -32,6 +32,8 @@ function queueItem(overrides: Partial<QueueItemSummary>): QueueItemSummary {
     protected: false,
     due: "today",
     dueLabel: "Due today",
+    queueEligible: true,
+    notInQueueReason: null,
     ...overrides,
   };
 }

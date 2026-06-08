@@ -367,6 +367,11 @@
   gap: 6px;
   flex-wrap: wrap;
 }
+.lib-detail__reason {
+  font-size: var(--t-2xs);
+  line-height: 1.45;
+  color: var(--text-3);
+}
 
 /* empty state */
 .lib-empty {

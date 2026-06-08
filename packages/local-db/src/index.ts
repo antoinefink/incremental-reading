@@ -273,7 +273,11 @@ export {
   type QueueScheduler,
   type QueueSchedulerSignals,
 } from "./queue-query";
-export { QueueRepository } from "./queue-repository";
+export {
+  isQueueActionableStatus,
+  QUEUE_EXCLUDED_STATUSES,
+  QueueRepository,
+} from "./queue-repository";
 export {
   type CatchUpPreview,
   DEFAULT_CATCHUP_SPREAD_DAYS,
@@ -313,6 +317,11 @@ export {
   type NextReviewCardInput,
   ReviewSessionService,
 } from "./review-session-service";
+export {
+  SchedulerConsistencyQuery,
+  type SchedulerConsistencyReason,
+  type SchedulerConsistencyRow,
+} from "./scheduler-consistency-query";
 export { type ScheduleResult, SchedulerService } from "./scheduler-service";
 export {
   emptySearchFacetCounts,
@@ -437,6 +446,8 @@ export interface Repositories {
   readonly sourceYield: import("./source-yield-query").SourceYieldQuery;
   /** The extract-stagnation scan (T084) — extracts that keep returning without progressing. */
   readonly extractStagnation: import("./extract-stagnation-query").ExtractStagnationQuery;
+  /** Scheduler drift diagnostics: stale due rows that are hidden from the Queue. */
+  readonly schedulerConsistency: import("./scheduler-consistency-query").SchedulerConsistencyQuery;
   /** The on-device semantic-search vector store (T087) — `sqlite-vec` KNN, NO op-log. */
   readonly embeddings: import("./embedding-repository").EmbeddingRepository;
   /** The FTS+vec fusion layer (T087) — fuses keyword + semantic hits, FTS-only degrade. */
@@ -490,6 +501,7 @@ import { OperationLogRepository } from "./operation-log-repository";
 import { QueueRepository } from "./queue-repository";
 import { RelatedService } from "./related-service";
 import { ReviewRepository } from "./review-repository";
+import { SchedulerConsistencyQuery } from "./scheduler-consistency-query";
 import { SearchRepository } from "./search-repository";
 import { SemanticSearchRepository } from "./semantic-search-repository";
 import { SettingsRepository } from "./settings-repository";
@@ -551,6 +563,7 @@ export function createRepositories(
     occlusionMasks: new OcclusionMasksRepository(db),
     sourceYield: new SourceYieldQuery(db),
     extractStagnation: new ExtractStagnationQuery(db),
+    schedulerConsistency: new SchedulerConsistencyQuery(db),
     embeddings,
     semanticSearch: new SemanticSearchRepository(search, embeddings),
     tasks: new TaskService(db),

@@ -76,6 +76,18 @@ The currently actionable processing set: due active-recall cards plus due attent
 
 Due queue work is distinct from inbox sources, which still need triage, and from future review load, which may be forecast without being actionable yet.
 
+### Queue eligibility
+
+The backend-owned decision that an element belongs in the current Due queue at a specific read clock.
+
+Queue eligibility is stricter than having scheduler history: terminal statuses, deleted elements, retired cards, missing return dates, and future return dates can all make an inventory row not actionable even when it has a due-related timestamp.
+
+### Inventory scheduler state
+
+The scheduler label and diagnostics shown on Browse, Search, Concept members, or related inventory surfaces for a live element.
+
+Inventory scheduler state may explain why an item is not in the Due queue, such as "Done", "No return scheduled", or "Returns Jun 13". Action-colored due badges should be reserved for queue-eligible rows.
+
 ### Import/process balance
 
 A read-only advisory signal that compares how much material the user has imported with how much processing output they have produced.

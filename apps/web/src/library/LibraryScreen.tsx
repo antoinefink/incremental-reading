@@ -42,6 +42,7 @@ import {
 } from "../lib/appApi";
 import { ReviewModeButton } from "../review/ReviewModeButton";
 import "../review/review.css";
+import { useSelection } from "../shell/selection";
 import {
   explorerSearchParams,
   PRIORITIES,
@@ -106,8 +107,9 @@ function emptyQueryBrowseRequest(filters: {
 
 /** A due-state badge (overdue / today / soon) — matches the queue's `DueBadge`. */
 function DueBadge({ result }: { result: SearchResult }) {
-  const cls =
-    result.due === "overdue"
+  const cls = !result.queueEligible
+    ? "badge--soft"
+    : result.due === "overdue"
       ? "badge--overdue"
       : result.due === "today"
         ? "badge--due"
@@ -138,6 +140,7 @@ export function LibraryScreen() {
   const desktop = isDesktop();
   const navigate = useNavigate();
   const routeSearch = useSearch({ strict: false }) as Record<string, unknown>;
+  const { select } = useSelection();
   const routeQuery = parseStringParam(routeSearch.q) ?? "";
   const routeType = parseSearchableType(routeSearch.type);
   const routeConceptId = parseStringParam(routeSearch.conceptId);
@@ -409,7 +412,10 @@ export function LibraryScreen() {
         data-testid="library-result"
         data-result-id={r.id}
         data-result-type={r.type}
-        onClick={() => setSelId(r.id)}
+        onClick={() => {
+          setSelId(r.id);
+          select(r.id);
+        }}
         onDoubleClick={() => open(r)}
       >
         <div style={{ minWidth: 0 }}>
@@ -438,7 +444,7 @@ export function LibraryScreen() {
         <Prio priority={r.priority} />
       </button>
     ),
-    [selId, open, debouncedQuery],
+    [selId, select, open, debouncedQuery],
   );
 
   // The Map tab's "members" volume — the GLOBAL member count across all element
@@ -739,6 +745,11 @@ export function LibraryScreen() {
                   <SchedulerChip scheduler={selected.scheduler} />
                   {selected.dueAt ? <DueBadge result={selected} /> : null}
                 </div>
+                {selected.notInQueueReason ? (
+                  <div className="lib-detail__reason" data-testid="library-detail-queue-reason">
+                    {selected.notInQueueReason}
+                  </div>
+                ) : null}
                 {selected.snippet ? (
                   <div className="refblock" data-testid="library-detail-snippet">
                     {selected.snippet}

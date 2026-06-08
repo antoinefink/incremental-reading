@@ -315,6 +315,7 @@ describe("IPC channels", () => {
         "maintenance:duplicates",
         "maintenance:cardsWithoutSources",
         "maintenance:brokenSources",
+        "maintenance:schedulerConsistency",
         "maintenance:integrity",
         "maintenance:lowValue",
         "maintenance:dedupe",

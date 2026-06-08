@@ -40,6 +40,7 @@ describe("local-db repository factory", () => {
       "occlusionMasks",
       "sourceYield",
       "extractStagnation",
+      "schedulerConsistency",
       "embeddings",
       "semanticSearch",
       "tasks",

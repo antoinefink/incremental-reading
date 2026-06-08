@@ -58,7 +58,9 @@ const h = vi.hoisted(() => {
     dueAt: null,
     scheduler: attentionScheduler,
     due: "soon",
-    dueLabel: "Scheduled",
+    dueLabel: "No return scheduled",
+    queueEligible: false,
+    notInQueueReason: "Not in queue: no return scheduled",
     linkedElementId: null,
     linkedElementType: null,
   };
@@ -76,7 +78,9 @@ const h = vi.hoisted(() => {
     dueAt: null,
     scheduler: attentionScheduler,
     due: "soon",
-    dueLabel: "Scheduled",
+    dueLabel: "No return scheduled",
+    queueEligible: false,
+    notInQueueReason: "Not in queue: no return scheduled",
     linkedElementId: null,
     linkedElementType: null,
   };
@@ -95,6 +99,8 @@ const h = vi.hoisted(() => {
     scheduler: fsrsScheduler,
     due: "today",
     dueLabel: "Due today",
+    queueEligible: true,
+    notInQueueReason: null,
     linkedElementId: null,
     linkedElementType: null,
   };
@@ -113,6 +119,8 @@ const h = vi.hoisted(() => {
     scheduler: attentionScheduler,
     due: "soon",
     dueLabel: "in 1d",
+    queueEligible: false,
+    notInQueueReason: "Not in queue: returns Jun 2",
     linkedElementId: "card-1",
     linkedElementType: "card",
   };
@@ -414,6 +422,7 @@ describe("BrowseScreen", () => {
     const cardGroup = await screen.findByTestId("library-group-card");
     fireEvent.click(within(cardGroup).getByTestId("library-result"));
 
+    expect(h.selectSpy).toHaveBeenCalledWith("card-1");
     const detail = await screen.findByTestId("library-detail");
     // The load-bearing scheduler split (FSRS chip for the card).
     expect(within(detail).getByTestId("scheduler-chip").getAttribute("data-scheduler")).toBe(

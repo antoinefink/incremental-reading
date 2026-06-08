@@ -60,6 +60,8 @@ const h = vi.hoisted(() => {
     protected: false,
     due: "today",
     dueLabel: "Due today",
+    queueEligible: true,
+    notInQueueReason: null,
     ...over,
   });
   const card = mk({
@@ -1609,6 +1611,8 @@ describe("ProcessQueue", () => {
       protected: true,
       due: "today",
       dueLabel: "Due today",
+      queueEligible: true,
+      notInQueueReason: null,
     };
     h.listQueue.mockResolvedValueOnce({
       items: [task],

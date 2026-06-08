@@ -79,7 +79,9 @@ const h = vi.hoisted(() => {
     dueAt: null,
     scheduler: attentionScheduler,
     due: "soon",
-    dueLabel: "Scheduled",
+    dueLabel: "No return scheduled",
+    queueEligible: false,
+    notInQueueReason: "Not in queue: no return scheduled",
   };
   const cardHit: SearchResult = {
     id: "card-1",
@@ -96,6 +98,8 @@ const h = vi.hoisted(() => {
     scheduler: fsrsScheduler,
     due: "today",
     dueLabel: "Due today",
+    queueEligible: true,
+    notInQueueReason: null,
   };
   const sourceBrowseItem: LibraryItem = {
     id: sourceHit.id,
@@ -112,6 +116,8 @@ const h = vi.hoisted(() => {
     scheduler: sourceHit.scheduler,
     due: sourceHit.due,
     dueLabel: sourceHit.dueLabel,
+    queueEligible: sourceHit.queueEligible,
+    notInQueueReason: sourceHit.notInQueueReason,
     linkedElementId: null,
     linkedElementType: null,
   };
@@ -130,6 +136,8 @@ const h = vi.hoisted(() => {
     scheduler: cardHit.scheduler,
     due: cardHit.due,
     dueLabel: cardHit.dueLabel,
+    queueEligible: cardHit.queueEligible,
+    notInQueueReason: cardHit.notInQueueReason,
     linkedElementId: null,
     linkedElementType: null,
   };
@@ -147,7 +155,9 @@ const h = vi.hoisted(() => {
     dueAt: null,
     scheduler: attentionScheduler,
     due: "soon",
-    dueLabel: "Scheduled",
+    dueLabel: "No return scheduled",
+    queueEligible: false,
+    notInQueueReason: "Not in queue: no return scheduled",
     linkedElementId: null,
     linkedElementType: null,
   };
@@ -176,6 +186,7 @@ const h = vi.hoisted(() => {
     browseCounts,
     navigateSpy: vi.fn(),
     routeSearch: {} as Record<string, unknown>,
+    selectSpy: vi.fn(),
     searchQuery: vi.fn(),
     libraryBrowse: vi.fn(),
     listConcepts: vi.fn(),
@@ -190,6 +201,10 @@ const h = vi.hoisted(() => {
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => h.navigateSpy,
   useSearch: () => h.routeSearch,
+}));
+
+vi.mock("../shell/selection", () => ({
+  useSelection: () => ({ selectedId: null, select: h.selectSpy }),
 }));
 
 vi.mock("../lib/appApi", async () => {
@@ -1118,6 +1133,22 @@ describe("LibraryScreen", () => {
       to: "/card/$id",
       params: { id: "card-1" },
     });
+  });
+
+  it("selecting a search result updates local detail and universal inspector selection", async () => {
+    render(<LibraryScreen />);
+    fireEvent.change(screen.getByTestId("library-search-input"), {
+      target: { value: "intelligence" },
+    });
+    await waitFor(() =>
+      expect(h.searchQuery).toHaveBeenCalledWith(expect.objectContaining({ q: "intelligence" })),
+    );
+
+    const sourceGroup = await screen.findByTestId("library-group-source");
+    fireEvent.click(within(sourceGroup).getByTestId("library-result"));
+
+    expect(h.selectSpy).toHaveBeenCalledWith("src-1");
+    expect(await screen.findByTestId("library-detail")).toBeTruthy();
   });
 
   it("shows the scheduler chip + due badge in the selection detail (kit parity)", async () => {
