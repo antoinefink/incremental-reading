@@ -18,6 +18,8 @@
  * consumer here, exactly as the layering rules require.
  */
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -293,16 +295,18 @@ vi.mock("@interleave/editor", () => ({
   }: {
     onChange?: (change: { prosemirrorJson: unknown; plainText: string }) => void;
   }) => (
-    <textarea
-      data-testid="mock-editor"
-      defaultValue="body"
-      onChange={(e) =>
-        onChange?.({
-          prosemirrorJson: { type: "doc", content: [], mockPlainText: e.target.value },
-          plainText: e.target.value,
-        })
-      }
-    />
+    <div className="reader" data-testid="mock-editor-reader">
+      <textarea
+        data-testid="mock-editor"
+        defaultValue="body"
+        onChange={(e) =>
+          onChange?.({
+            prosemirrorJson: { type: "doc", content: [], mockPlainText: e.target.value },
+            plainText: e.target.value,
+          })
+        }
+      />
+    </div>
   ),
   toBlockInputs: () => [],
   toPlainText: (doc: { mockPlainText?: string } | null | undefined) => doc?.mockPlainText ?? "body",
@@ -375,6 +379,12 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function cssRule(css: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = css.match(new RegExp(`${escaped}\\s*\\{(?<body>[^}]*)\\}`, "m"));
+  return match?.groups?.body ?? "";
+}
+
 describe("ExtractView — stage stepper", () => {
   it("renders the three-step stepper for raw → clean → atomic", async () => {
     render(<ExtractView />);
@@ -399,6 +409,41 @@ describe("ExtractView — stage stepper", () => {
     fireEvent.click(step);
     await waitFor(() => expect(h.updateStage).toHaveBeenCalledTimes(1));
     expect(h.updateStage).toHaveBeenCalledWith({ id: "ex_1", stage: "atomic_statement" });
+  });
+});
+
+describe("ExtractView — distillation layout", () => {
+  it("keeps editor prose, footer, actions, and AI assistance in non-overlapping order", async () => {
+    render(<ExtractView />);
+
+    const distill = await screen.findByTestId("extract-distill");
+    const reader = await screen.findByTestId("mock-editor-reader");
+    const meta = screen.getByText("aim for a single, self-contained idea");
+    const actions = screen.getByTestId("extract-trim").closest(".extract-actions");
+    const ai = await screen.findByText(/AI assistance/i).then((node) => node.closest(".ai-assist"));
+    if (!(actions instanceof HTMLElement) || !(ai instanceof HTMLElement)) {
+      throw new Error("extract distillation controls changed structure");
+    }
+
+    expect(distill).toContainElement(reader);
+    expect(distill).toContainElement(meta);
+    expect(distill).toContainElement(actions);
+    expect(distill).toContainElement(ai);
+    expect(reader.compareDocumentPosition(meta) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(meta.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(actions.compareDocumentPosition(ai) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("bounds the extract reader as the scrollable region instead of the action footer", () => {
+    const css = readFileSync(resolve(import.meta.dirname, "extract-view.css"), "utf8");
+
+    expect(cssRule(css, ".extract-distill")).toContain("overflow-y: auto");
+    expect(cssRule(css, ".extract-editor")).toContain("display: flex");
+    expect(cssRule(css, ".extract-editor")).toContain("overflow: hidden");
+    expect(cssRule(css, ".extract-editor .reader")).toContain("overflow-y: auto");
+    expect(cssRule(css, ".extract-editor__meta")).toContain("flex: none");
+    expect(cssRule(css, ".extract-actions")).toContain("flex: none");
+    expect(cssRule(css, ".ai-assist")).toContain("flex: none");
   });
 });
 

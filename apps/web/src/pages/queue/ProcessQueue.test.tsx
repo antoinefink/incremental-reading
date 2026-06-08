@@ -18,6 +18,8 @@
  * is a pure UI consumer.
  */
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -360,7 +362,7 @@ vi.mock("@interleave/editor", async () => {
       }, [onEditorReady]);
       if (h.staleEditorJson) {
         return (
-          <div data-testid="mock-source-editor">
+          <div className="reader" data-testid="mock-source-editor">
             <div
               className="ProseMirror"
               contentEditable
@@ -377,19 +379,21 @@ vi.mock("@interleave/editor", async () => {
         );
       }
       return (
-        <textarea
-          data-testid="mock-source-editor"
-          value={value}
-          onChange={(e) => {
-            const plainText = e.target.value;
-            valueRef.current = plainText;
-            setValue(plainText);
-            onChange?.({
-              prosemirrorJson: { type: "doc", content: [], mockPlainText: plainText },
-              plainText,
-            });
-          }}
-        />
+        <div className="reader">
+          <textarea
+            data-testid="mock-source-editor"
+            value={value}
+            onChange={(e) => {
+              const plainText = e.target.value;
+              valueRef.current = plainText;
+              setValue(plainText);
+              onChange?.({
+                prosemirrorJson: { type: "doc", content: [], mockPlainText: plainText },
+                plainText,
+              });
+            }}
+          />
+        </div>
       );
     },
   };
@@ -501,6 +505,12 @@ function stageMutation(stage: string) {
       parentId: null,
     },
   };
+}
+
+function cssRule(css: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = css.match(new RegExp(`${escaped}\\s*\\{(?<body>[^}]*)\\}`, "m"));
+  return match?.groups?.body ?? "";
 }
 
 async function moveToExtract(): Promise<void> {
@@ -1170,6 +1180,30 @@ describe("ProcessQueue", () => {
     expect(screen.queryByTestId("process-extract-subextract")).not.toBeInTheDocument();
     expect(screen.getByTestId("process-extract-make-qa")).toBeInTheDocument();
     expect(h.navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps the process extract body scroll-contained above normal-flow footer controls", async () => {
+    render(<ProcessQueue />);
+    await moveToExtract();
+
+    const editor = screen.getByTestId("process-extract-editor");
+    const reader = editor.querySelector(".reader");
+    const meta = editor.querySelector(".pq-extract__meta");
+    const tools = screen.getByTestId("process-extract-tools");
+    if (!reader || !meta) throw new Error("process extract editor structure changed");
+    expect(reader.compareDocumentPosition(meta) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(editor.nextElementSibling).toBe(tools);
+
+    const css = readFileSync(resolve(import.meta.dirname, "process-queue.css"), "utf8");
+    expect(cssRule(css, ".pq-extract__editor")).toContain("display: flex");
+    expect(cssRule(css, ".pq-extract__editor")).toContain("flex-direction: column");
+    expect(cssRule(css, ".pq-extract__editor")).toContain("max-height:");
+    expect(cssRule(css, ".pq-extract__editor")).toContain("overflow: hidden");
+    expect(cssRule(css, ".pq-extract__editor .reader")).toContain("flex: 1 1 auto");
+    expect(cssRule(css, ".pq-extract__editor .reader")).toContain("min-height: 0");
+    expect(cssRule(css, ".pq-extract__editor .reader")).toContain("max-height: none");
+    expect(cssRule(css, ".pq-extract__editor .reader")).toContain("overflow-y: auto");
+    expect(cssRule(css, ".pq-extract__editor .reader")).toContain("padding-bottom: var(--s-4)");
   });
 
   it("does not repeat the source quote when it duplicates the inline extract body", async () => {
