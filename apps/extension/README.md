@@ -25,14 +25,17 @@ pnpm --filter @interleave/extension build
 
 This bundles the TS entry points (`background` / `options` / `popup` /
 `sidepanel`) to browser ESM and copies the HTML + `tokens.css` + `manifest.json`
-+ the 16/32/48/128 PNG icons into a **load-unpacked-ready `apps/extension/dist/`**.
+and the 16/32/48/64/128/256 PNG icons into a **load-unpacked-ready
+`apps/extension/dist/`**.
 (Selection reading is injected on demand via `chrome.scripting.executeScript`, so
 there is no standing `content` script in T062 — T063 adds one if it needs to.)
 
 Regenerate the icons with `node apps/extension/scripts/make-icons.mjs` (they are
 committed PNGs downscaled from the canonical brand mark `brand/logo.png` — the
 layered-stack glyph on a transparent ground; a Chrome manifest icon cannot be an
-SVG). Production bundles are **minified** (the worker bundles zod via
+SVG). The manifest consumes the standard 16/32/48/128 sizes; popup/options use
+the larger derivatives through `srcset` so the brand mark stays crisp on high-DPI
+Chrome surfaces. Production bundles are **minified** (the worker bundles zod via
 `@interleave/capture-contract`); `--watch` builds stay unminified for debugging.
 
 ### Permissions (manifest)

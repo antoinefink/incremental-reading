@@ -12,7 +12,8 @@
  *   *.html + tokens.css + manifest.json + icons/ → dist/
  *
  * The zod-only `@interleave/capture-contract` is bundled in (no externals). The
- * build FAILS if the icons are missing (the manifest references real PNGs).
+ * build FAILS if the icons are missing (the manifest and popup/options chrome
+ * reference real PNGs).
  *
  * Pass `--watch` for an incremental dev build.
  */
@@ -55,14 +56,21 @@ function copyStatic() {
     const from = file === "tokens.css" ? path.join(here, "src", file) : path.join(here, file);
     cpSync(from, path.join(distDir, file));
   }
-  // Icons — REQUIRED. Fail loudly if missing (the manifest references real PNGs).
+  // Icons — REQUIRED. Fail loudly if missing.
   const iconsFrom = path.join(here, "icons");
-  const needed = ["icon-16.png", "icon-32.png", "icon-48.png", "icon-128.png"];
+  const needed = [
+    "icon-16.png",
+    "icon-32.png",
+    "icon-48.png",
+    "icon-64.png",
+    "icon-128.png",
+    "icon-256.png",
+  ];
   const present = existsSync(iconsFrom) ? readdirSync(iconsFrom) : [];
   const missing = needed.filter((n) => !present.includes(n));
   if (missing.length > 0) {
     throw new Error(
-      `[extension] missing required icons: ${missing.join(", ")} — run \`node scripts/make-icons.mjs\``,
+      `[extension] missing required icons: ${missing.join(", ")} — run \`node apps/extension/scripts/make-icons.mjs\``,
     );
   }
   cpSync(iconsFrom, path.join(distDir, "icons"), { recursive: true });

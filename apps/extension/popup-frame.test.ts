@@ -1,6 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+function html(file: string): string {
+  return readFileSync(new URL(file, import.meta.url), "utf8");
+}
+
 function cssRule(selector: string): string {
   const css = readFileSync(new URL("./src/tokens.css", import.meta.url), "utf8");
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -18,5 +22,16 @@ describe("extension popup frame styling", () => {
     expect(shell).toContain("border: 0;");
     expect(shell).toContain("border-radius: 0;");
     expect(shell).toContain("box-shadow: none;");
+  });
+
+  it("uses high-density brand images inside popup and options chrome", () => {
+    const brandSrcset =
+      'srcset="icons/icon-64.png 64w, icons/icon-128.png 128w, icons/icon-256.png 256w"';
+
+    expect(html("./popup.html")).toContain(brandSrcset);
+    expect(html("./popup.html")).toContain('sizes="26px"');
+
+    expect(html("./options.html")).toContain(brandSrcset);
+    expect(html("./options.html")).toContain('sizes="34px"');
   });
 });

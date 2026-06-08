@@ -1,6 +1,7 @@
 /**
- * Icon generator (T062) — produces the four raster PNGs the MV3 manifest needs
- * (16 / 32 / 48 / 128) under `apps/extension/icons/`.
+ * Icon generator (T062) — produces the raster PNGs the MV3 manifest needs
+ * (16 / 32 / 48 / 128) plus higher-density UI brand marks (64 / 256) under
+ * `apps/extension/icons/`.
  *
  * A Chrome manifest icon cannot be an SVG, so the committed artifacts are real
  * PNGs. They are derived from the canonical brand mark `brand/logo.png` — the
@@ -211,7 +212,7 @@ function resize(src, srcW, srcH, dstW, dstH) {
 
 const source = decodePng(SOURCE);
 mkdirSync(outDir, { recursive: true });
-for (const size of [16, 32, 48, 128]) {
+for (const size of [16, 32, 48, 64, 128, 256]) {
   const rgba = resize(source.rgba, source.width, source.height, size, size);
   const png = encodePng(size, size, rgba);
   writeFileSync(path.join(outDir, `icon-${size}.png`), png);
