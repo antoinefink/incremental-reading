@@ -13,9 +13,11 @@
  * here through the preload bridge.
  */
 
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { ElementId } from "@interleave/core";
-import { app, BrowserWindow } from "electron";
+import type { NativeImage } from "electron";
+import { app, BrowserWindow, nativeImage } from "electron";
 import { IPC_CHANNELS } from "../shared/channels";
 import {
   registerArticleImageProtocol,
@@ -69,6 +71,42 @@ const rendererDir = app.isPackaged
  */
 const devServerUrl = app.isPackaged ? undefined : process.env.VITE_DEV_SERVER_URL || undefined;
 
+interface DockIconApp {
+  readonly dock?:
+    | {
+        setIcon(image: NativeImage): void;
+      }
+    | undefined;
+}
+
+export function resolveDockIconPath(baseDistDir: string): string | null {
+  const candidates = [
+    // Dev (`apps/desktop/dist/main.cjs`) and packaged unpacked layouts both keep
+    // the release icon beside the desktop package's build metadata.
+    path.resolve(baseDistDir, "..", "build", "icon.icns"),
+    // Source/test fallback: the canonical brand asset is repo-level.
+    path.resolve(baseDistDir, "..", "..", "..", "brand", "icon.png"),
+    path.resolve(baseDistDir, "..", "..", "..", "..", "brand", "icon.png"),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+export function installDockIcon(options: {
+  readonly platform: NodeJS.Platform;
+  readonly app: DockIconApp;
+  readonly distDir: string;
+}): void {
+  if (options.platform !== "darwin" || !options.app.dock) return;
+
+  const iconPath = resolveDockIconPath(options.distDir);
+  if (!iconPath) return;
+
+  const icon = nativeImage.createFromPath(iconPath);
+  if (!icon.isEmpty()) {
+    options.app.dock.setIcon(icon);
+  }
+}
+
 function rendererRouteUrl(routePath: string): string {
   const base = (devServerUrl ?? RENDERER_URL).replace(/\/+$/, "");
   const pathPart = routePath.replace(/^\/+/, "");
@@ -116,6 +154,8 @@ async function openCapturedSource(input: CaptureOpenSourceInput): Promise<Captur
 }
 
 function bootstrap(): void {
+  installDockIcon({ platform: process.platform, app, distDir });
+
   // 1) App data dir + vault skeleton (idempotent).
   const paths = initAppPaths();
 

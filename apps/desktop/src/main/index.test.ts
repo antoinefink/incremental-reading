@@ -9,6 +9,7 @@ interface IndexHarness {
     on: ReturnType<typeof vi.fn>;
     whenReady: ReturnType<typeof vi.fn>;
     getVersion: ReturnType<typeof vi.fn>;
+    dock: { setIcon: ReturnType<typeof vi.fn> };
   };
   callbacks: Map<string, (...args: unknown[]) => unknown>;
   dbService: Record<string, ReturnType<typeof vi.fn> | Record<string, unknown>>;
@@ -28,15 +29,27 @@ interface IndexHarness {
   installApplicationMenu: ReturnType<typeof vi.fn>;
   createMainWindow: ReturnType<typeof vi.fn>;
   setCaptureEnabled: ReturnType<typeof vi.fn>;
+  nativeImage: {
+    createFromPath: ReturnType<typeof vi.fn>;
+    image: { isEmpty: ReturnType<typeof vi.fn> };
+  };
 }
 
 async function loadIndex(options: {
   readonly gotLock: boolean;
   readonly isPackaged?: boolean;
   readonly env?: Record<string, string | undefined>;
+  readonly platform?: NodeJS.Platform;
 }): Promise<IndexHarness> {
   vi.resetModules();
   vi.unstubAllEnvs();
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+  if (options.platform) {
+    Object.defineProperty(process, "platform", {
+      configurable: true,
+      value: options.platform,
+    });
+  }
   for (const [key, value] of Object.entries(options.env ?? {})) {
     if (value === undefined) vi.stubEnv(key, undefined);
     else vi.stubEnv(key, value);
@@ -50,9 +63,14 @@ async function loadIndex(options: {
     on: vi.fn((event: string, fn: (...args: unknown[]) => unknown) => callbacks.set(event, fn)),
     whenReady: vi.fn(() => Promise.resolve()),
     getVersion: vi.fn(() => "0.2.0"),
+    dock: { setIcon: vi.fn() },
   };
   const BrowserWindow = {
     getAllWindows: vi.fn(() => []),
+  };
+  const nativeImage = {
+    image: { isEmpty: vi.fn(() => false) },
+    createFromPath: vi.fn(() => nativeImage.image),
   };
   const elementRepo = {
     findById: vi.fn(),
@@ -107,7 +125,7 @@ async function loadIndex(options: {
     return captureController;
   });
 
-  vi.doMock("electron", () => ({ app, BrowserWindow }));
+  vi.doMock("electron", () => ({ app, BrowserWindow, nativeImage }));
   vi.doMock("./db-service", () => ({
     DbService: vi.fn(function DbService() {
       return dbService;
@@ -163,6 +181,9 @@ async function loadIndex(options: {
 
   await import("./index");
   await Promise.resolve();
+  if (originalPlatform) {
+    Object.defineProperty(process, "platform", originalPlatform);
+  }
 
   return {
     app,
@@ -184,6 +205,7 @@ async function loadIndex(options: {
     installApplicationMenu,
     createMainWindow,
     setCaptureEnabled,
+    nativeImage,
   };
 }
 
@@ -219,6 +241,15 @@ function firstCallOrder(fn: {
 }
 
 describe("main entrypoint", () => {
+  it("sets the checked-in Interleave dock icon on macOS dev launches", async () => {
+    const harness = await loadIndex({ gotLock: true, platform: "darwin" });
+
+    expect(harness.nativeImage.createFromPath).toHaveBeenCalledWith(
+      expect.stringMatching(/brand\/icon\.png$|build\/icon\.icns$/),
+    );
+    expect(harness.app.dock.setIcon).toHaveBeenCalledWith(harness.nativeImage.image);
+  });
+
   it("quits immediately when another instance already owns the SQLite lock", async () => {
     const harness = await loadIndex({ gotLock: false });
 
