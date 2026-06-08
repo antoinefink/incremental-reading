@@ -1,4 +1,4 @@
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
@@ -328,6 +328,65 @@ describe("InboxScreen", () => {
     expect(getByTestId("inbox-count")).toHaveTextContent("2 items awaiting triage");
     expect(getByTestId("mock-balance-banner").parentElement).toHaveClass("px-2");
     expect(getByTestId("mock-balance-banner").parentElement).not.toHaveClass("px-6");
+  });
+
+  it("keeps inbox row metadata on one line with compact character counts", async () => {
+    const longSourceLabel = "very-long-import-source-label-that-should-not-wrap";
+    const longAuthor =
+      "A very long author name that should truncate in the flexible middle metadata slot";
+    h.listInbox.mockResolvedValue({
+      items: [
+        ...items,
+        {
+          id: "src-long",
+          type: "source",
+          status: "inbox",
+          title: "A long source row",
+          srcType: longSourceLabel,
+          author: longAuthor,
+          charCount: 20_971,
+          priority: 0.625,
+          accessedAt: null,
+        },
+      ],
+    });
+
+    const { findByTestId, getAllByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    const rows = getAllByTestId("inbox-row");
+    expect(rows.map((row) => row.textContent)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("1.2k ch"),
+        expect.stringContaining("456 ch"),
+        expect.stringContaining("21k ch"),
+      ]),
+    );
+
+    const row = rows.find((node) => node.getAttribute("data-element-id") === "src-long");
+    if (!row) throw new Error("Expected long inbox row to render");
+
+    const label = within(row).getByText(longSourceLabel);
+    const metadata = label.parentElement;
+    if (!metadata) throw new Error("Expected source label to live inside the metadata row");
+    const author = within(row).getByText(longAuthor);
+    const size = within(row).getByText("21k ch");
+    const separators = Array.from(metadata.children).filter(
+      (child) => child.getAttribute("aria-hidden") === "true",
+    );
+    const priority = row.lastElementChild;
+    if (!priority) throw new Error("Expected inbox row to render a priority chip");
+
+    expect(metadata).toHaveClass("min-w-0", "overflow-hidden", "whitespace-nowrap");
+    expect(label).toHaveClass("shrink-0", "truncate", "whitespace-nowrap");
+    expect(label).toHaveClass("max-w-[calc(var(--s-12)+var(--s-10))]");
+    expect(author).toHaveClass("min-w-0", "flex-1", "truncate", "whitespace-nowrap");
+    expect(size).toHaveClass("shrink-0", "whitespace-nowrap");
+    expect(separators).toHaveLength(2);
+    for (const separator of separators) {
+      expect(separator).toHaveClass("shrink-0");
+    }
+    expect(priority).toHaveClass("shrink-0");
   });
 
   it("focuses the selected inbox row when the balance banner triage action is clicked", async () => {

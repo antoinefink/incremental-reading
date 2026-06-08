@@ -122,6 +122,12 @@ function mediaImportMessage(error: unknown): string {
   return codes[code] ?? "Could not import that media.";
 }
 
+function formatInboxCharCount(charCount: number): string {
+  if (charCount < 1000) return `${charCount} ch`;
+  const compact = Math.round((charCount / 1000) * 10) / 10;
+  return `${Number.isInteger(compact) ? compact.toFixed(0) : compact.toFixed(1)}k ch`;
+}
+
 /** A single left-list row for one inbox source. */
 function InboxRow({
   item,
@@ -148,19 +154,29 @@ function InboxRow({
       <TypeIcon type={item.type} />
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium text-sm text-text">{item.title}</span>
-        <span className="mt-1 flex items-center gap-1.5 text-text-3 text-xs">
-          <span className="rounded bg-surface-2 px-1.5 py-0.5 text-2xs">{item.srcType}</span>
+        <span className="mt-1 flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-text-3 text-xs">
+          <span className="max-w-[calc(var(--s-12)+var(--s-10))] shrink-0 truncate whitespace-nowrap rounded bg-surface-2 px-1.5 py-0.5 text-2xs">
+            {item.srcType}
+          </span>
           {item.author ? (
             <>
-              <span aria-hidden>·</span>
-              <span className="truncate">{item.author}</span>
+              <span aria-hidden className="shrink-0">
+                ·
+              </span>
+              <span className="min-w-0 flex-1 truncate whitespace-nowrap">{item.author}</span>
             </>
           ) : null}
-          <span aria-hidden>·</span>
-          <span className="font-mono">{item.charCount.toLocaleString()} ch</span>
+          <span aria-hidden className="shrink-0">
+            ·
+          </span>
+          <span className="shrink-0 whitespace-nowrap font-mono">
+            {formatInboxCharCount(item.charCount)}
+          </span>
         </span>
       </span>
-      <Prio priority={item.priority} />
+      <span className="shrink-0">
+        <Prio priority={item.priority} />
+      </span>
     </button>
   );
 }
