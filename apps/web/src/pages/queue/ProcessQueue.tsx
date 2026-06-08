@@ -285,7 +285,8 @@ export function ProcessQueue() {
   /** Items left to look at (this one + everything after) — the full mixed deck. */
   const remaining = Math.max(0, total - cursor);
   const isRenderingExtract = !deckLoading && !done && current?.type === "extract";
-  const centerClassName = isRenderingExtract ? "pq-center pq-center--extract" : "pq-center";
+  const isRenderingSource = !deckLoading && !done && current?.type === "source";
+  const centerClassName = `pq-center${isRenderingExtract ? " pq-center--extract" : ""}${isRenderingSource ? " pq-center--source" : ""}`;
   const documentElementId = current && current.type !== "card" ? current.id : null;
   const doc = useDocument(documentElementId);
   const sourceReadPoint = useReadPoint(current?.type === "source" ? current.id : null);
@@ -1324,7 +1325,6 @@ export function ProcessQueue() {
             onSourceSelectionAction={onSourceSelectionAction}
             onSourceEditorReady={onSourceEditorReady}
             onSetSourceReadPoint={() => void setSourceReadPoint()}
-            onCreateSourceExtract={() => void createProcessSourceExtract()}
             extractSelectionPosition={extractSelection.position}
             onExtractSelectionAction={onExtractSelectionAction}
             onExtractEditorReady={onExtractEditorReady}
@@ -1430,7 +1430,6 @@ function ProcessSourceWorkbench({
   onEditorReady,
   onSelectionAction,
   onSetReadPoint,
-  onCreateExtract,
 }: {
   item: QueueItemSummary;
   doc: UseDocumentResult;
@@ -1441,7 +1440,6 @@ function ProcessSourceWorkbench({
   onEditorReady: (editor: Editor | null) => void;
   onSelectionAction: (action: SelectionToolbarAction) => void;
   onSetReadPoint: () => void;
-  onCreateExtract: () => void;
 }) {
   const progress = readPoint.progress(doc.currentDoc);
   const progressPct = readPoint.progressFraction(doc.currentDoc) * 100;
@@ -1519,20 +1517,6 @@ function ProcessSourceWorkbench({
         <div className="pq-extract__meta">
           <span>{wordCount(doc.plainText)} words</span>
         </div>
-      </div>
-
-      <div className="pq-extract__tools" data-testid="process-source-tools">
-        <button
-          type="button"
-          className="pq-btn"
-          data-testid="process-source-extract"
-          disabled={busy}
-          onClick={onCreateExtract}
-        >
-          <Icon name="extract" size={14} />
-          Extract selection
-        </button>
-        <span className="pq-source__hint">Select text to extract, highlight, or copy.</span>
       </div>
 
       <SelectionToolbar
@@ -1757,7 +1741,6 @@ function ProcessCard({
   onSourceSelectionAction,
   onSourceEditorReady,
   onSetSourceReadPoint,
-  onCreateSourceExtract,
   extractSelectionPosition,
   onExtractSelectionAction,
   onExtractEditorReady,
@@ -1793,7 +1776,6 @@ function ProcessCard({
   onSourceSelectionAction: (action: SelectionToolbarAction) => void;
   onSourceEditorReady: (editor: Editor | null) => void;
   onSetSourceReadPoint: () => void;
-  onCreateSourceExtract: () => void;
   extractSelectionPosition: SelectionToolbarPosition | null;
   onExtractSelectionAction: (action: SelectionToolbarAction) => void;
   onExtractEditorReady: (editor: Editor | null) => void;
@@ -1813,7 +1795,7 @@ function ProcessCard({
 
   return (
     <div
-      className={`pq-card fade-up${isWorkbench ? " pq-card--workbench" : ""}${isExtract ? " pq-card--extract" : ""}${extractBuilder ? " pq-card--builder" : ""}`}
+      className={`pq-card fade-up${isWorkbench ? " pq-card--workbench" : ""}${isSource ? " pq-card--source" : ""}${isExtract ? " pq-card--extract" : ""}${extractBuilder ? " pq-card--builder" : ""}`}
       data-testid="process-item"
       data-element-id={item.id}
       data-element-type={item.type}
@@ -1928,7 +1910,6 @@ function ProcessCard({
           onEditorReady={onSourceEditorReady}
           onSelectionAction={onSourceSelectionAction}
           onSetReadPoint={onSetSourceReadPoint}
-          onCreateExtract={onCreateSourceExtract}
         />
       ) : isExtract ? (
         <ProcessExtractWorkbench

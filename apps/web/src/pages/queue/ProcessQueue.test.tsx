@@ -1073,12 +1073,18 @@ describe("ProcessQueue", () => {
     render(<ProcessQueue />);
     await moveToSource();
 
+    expect(screen.getByTestId("process-center")).toHaveClass("pq-center--source");
     expect(screen.getByTestId("process-item")).toHaveClass("pq-card--workbench");
+    expect(screen.getByTestId("process-item")).toHaveClass("pq-card--source");
     expect(screen.getByTestId("process-item")).not.toHaveClass("pq-card--extract");
     expect(screen.getByTestId("process-source-workbench")).toBeInTheDocument();
     expect(screen.getByTestId("process-source-progress")).toHaveTextContent("block 1 of 4");
     expect(screen.getByTestId("process-source-readpoint")).toBeInTheDocument();
-    expect(screen.getByTestId("process-source-extract")).toBeInTheDocument();
+    expect(screen.queryByTestId("process-source-extract")).not.toBeInTheDocument();
+    expect(screen.queryByText("Extract selection")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Select text to extract, highlight, or copy."),
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId("mock-source-editor")).toBeInTheDocument();
     expect(h.navigateSpy).not.toHaveBeenCalled();
   });

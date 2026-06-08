@@ -138,6 +138,12 @@
   justify-content: flex-start;
   overflow: hidden;
 }
+.pq-center--source {
+  align-items: stretch;
+  justify-content: flex-start;
+  overflow: hidden;
+  padding: 0;
+}
 
 .pq-card {
   width: 100%;
@@ -154,6 +160,17 @@
   max-width: 820px;
   gap: var(--s-4);
   min-height: 0;
+}
+.pq-card--source {
+  box-sizing: border-box;
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+  max-width: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: var(--s-4) var(--s-6);
 }
 .pq-card--extract {
   box-sizing: border-box;
@@ -257,6 +274,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .pq-source__top {
   display: flex;
@@ -272,8 +291,7 @@
   gap: 6px;
 }
 .pq-source__progresslabel,
-.pq-source__format,
-.pq-source__hint {
+.pq-source__format {
   color: var(--text-3);
   font-family: var(--font-mono);
   font-size: var(--t-2xs);
@@ -285,11 +303,12 @@
 .pq-source__editor {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface);
-  padding: var(--s-4);
-  min-height: 260px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  flex: 1 1 auto;
+  min-height: 0;
   cursor: text;
 }
 .pq-source__editor .reader {
@@ -298,7 +317,7 @@
   max-width: none;
   margin: 0;
   min-height: 0;
-  max-height: min(520px, 52vh);
+  max-height: none;
   overflow-y: auto;
   font-size: var(--t-base);
   line-height: 1.65;
