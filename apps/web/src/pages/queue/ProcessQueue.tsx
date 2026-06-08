@@ -284,6 +284,8 @@ export function ProcessQueue() {
   const isCard = current?.type === "card";
   /** Items left to look at (this one + everything after) — the full mixed deck. */
   const remaining = Math.max(0, total - cursor);
+  const isRenderingExtract = !deckLoading && !done && current?.type === "extract";
+  const centerClassName = isRenderingExtract ? "pq-center pq-center--extract" : "pq-center";
   const documentElementId = current && current.type !== "card" ? current.id : null;
   const doc = useDocument(documentElementId);
   const sourceReadPoint = useReadPoint(current?.type === "source" ? current.id : null);
@@ -1223,7 +1225,7 @@ export function ProcessQueue() {
         </p>
       ) : null}
 
-      <div className="pq-center">
+      <div className={centerClassName} data-testid="process-center">
         {deckLoading ? (
           <div className="q-panel pq-donepanel" data-testid="process-loading">
             <div className="q-empty">
@@ -1807,10 +1809,11 @@ function ProcessCard({
   const isCard = item.type === "card";
   const isExtract = item.type === "extract";
   const isSource = item.type === "source";
+  const isWorkbench = isExtract || isSource;
 
   return (
     <div
-      className={`pq-card fade-up${isExtract || isSource ? " pq-card--extract" : ""}${extractBuilder ? " pq-card--builder" : ""}`}
+      className={`pq-card fade-up${isWorkbench ? " pq-card--workbench" : ""}${isExtract ? " pq-card--extract" : ""}${extractBuilder ? " pq-card--builder" : ""}`}
       data-testid="process-item"
       data-element-id={item.id}
       data-element-type={item.type}

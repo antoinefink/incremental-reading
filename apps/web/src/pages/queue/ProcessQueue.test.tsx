@@ -536,6 +536,9 @@ describe("ProcessQueue", () => {
     render(<ProcessQueue />);
     await screen.findByTestId("process-item");
     expect(screen.getAllByTestId("process-item")).toHaveLength(1);
+    expect(screen.getByTestId("process-center")).toHaveClass("pq-center");
+    expect(screen.getByTestId("process-center")).not.toHaveClass("pq-center--extract");
+    expect(screen.getByTestId("process-item")).not.toHaveClass("pq-card--extract");
   });
 
   it("shows the progress readout (N / total)", async () => {
@@ -1060,6 +1063,8 @@ describe("ProcessQueue", () => {
     render(<ProcessQueue />);
     await moveToSource();
 
+    expect(screen.getByTestId("process-item")).toHaveClass("pq-card--workbench");
+    expect(screen.getByTestId("process-item")).not.toHaveClass("pq-card--extract");
     expect(screen.getByTestId("process-source-workbench")).toBeInTheDocument();
     expect(screen.getByTestId("process-source-progress")).toHaveTextContent("block 1 of 4");
     expect(screen.getByTestId("process-source-readpoint")).toBeInTheDocument();
@@ -1186,6 +1191,10 @@ describe("ProcessQueue", () => {
     render(<ProcessQueue />);
     await moveToExtract();
 
+    expect(screen.getByTestId("process-center")).toHaveClass("pq-center--extract");
+    expect(screen.getByTestId("process-item")).toHaveClass("pq-card--workbench");
+    expect(screen.getByTestId("process-item")).toHaveClass("pq-card--extract");
+
     const editor = screen.getByTestId("process-extract-editor");
     const reader = editor.querySelector(".reader");
     const meta = editor.querySelector(".pq-extract__meta");
@@ -1195,15 +1204,38 @@ describe("ProcessQueue", () => {
     expect(editor.nextElementSibling).toBe(tools);
 
     const css = readFileSync(resolve(import.meta.dirname, "process-queue.css"), "utf8");
+    expect(cssRule(css, ".pq-center--extract")).toContain("justify-content: flex-start");
+    expect(cssRule(css, ".pq-center--extract")).toContain("overflow: hidden");
+    expect(cssRule(css, ".pq-card--workbench")).toContain("max-width: 820px");
+    expect(cssRule(css, ".pq-card--workbench")).toContain("min-height: 0");
+    expect(cssRule(css, ".pq-card--extract")).toContain("box-sizing: border-box");
+    expect(cssRule(css, ".pq-card--extract")).toContain("flex: 1 1 0");
+    expect(cssRule(css, ".pq-card--extract")).toContain("min-height: 0");
+    expect(cssRule(css, ".pq-card--extract")).toContain("height: auto");
+    expect(cssRule(css, ".pq-card--extract")).toContain("max-height: 100%");
+    expect(cssRule(css, ".pq-card--extract")).toContain("overflow: hidden");
+    expect(cssRule(css, ".pq-card--extract .pq-extract")).toContain("flex: 1 1 auto");
+    expect(cssRule(css, ".pq-card--extract .pq-extract")).toContain("min-height: 0");
+    expect(cssRule(css, ".pq-card--extract .pq-extract")).toContain("overflow: hidden");
+    expect(cssRule(css, ".pq-extract__ref")).toContain("flex: 0 0 auto");
+    expect(cssRule(css, ".pq-extract__ref")).toContain("max-height: none");
+    expect(cssRule(css, ".pq-extract__ref")).toContain("overflow: visible");
     expect(cssRule(css, ".pq-extract__editor")).toContain("display: flex");
     expect(cssRule(css, ".pq-extract__editor")).toContain("flex-direction: column");
-    expect(cssRule(css, ".pq-extract__editor")).toContain("max-height:");
+    expect(cssRule(css, ".pq-extract__editor")).toContain("flex: 1 1 auto");
+    expect(cssRule(css, ".pq-extract__editor")).toContain("min-height: 0");
+    expect(cssRule(css, ".pq-extract__editor")).toContain("max-height: none");
     expect(cssRule(css, ".pq-extract__editor")).toContain("overflow: hidden");
+    expect(cssRule(css, ".pq-extract__editor")).not.toContain("46vh");
     expect(cssRule(css, ".pq-extract__editor .reader")).toContain("flex: 1 1 auto");
     expect(cssRule(css, ".pq-extract__editor .reader")).toContain("min-height: 0");
     expect(cssRule(css, ".pq-extract__editor .reader")).toContain("max-height: none");
     expect(cssRule(css, ".pq-extract__editor .reader")).toContain("overflow-y: auto");
     expect(cssRule(css, ".pq-extract__editor .reader")).toContain("padding-bottom: var(--s-4)");
+    expect(cssRule(css, ".pq-extract__meta")).toContain("flex: 0 0 auto");
+    expect(cssRule(css, ".pq-extract__tools")).toContain("flex: 0 0 auto");
+    expect(cssRule(css, ".pq-card--extract .pq-actions")).toContain("flex: none");
+    expect(cssRule(css, ".pq-card--extract .pq-keys")).toContain("flex: none");
   });
 
   it("does not repeat the source quote when it duplicates the inline extract body", async () => {
@@ -1592,6 +1624,28 @@ describe("ProcessQueue", () => {
 
     expect(h.selectSpy).toHaveBeenCalledWith(null);
     expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/card/$id", params: { id: "card-1" } });
+  });
+
+  it("keeps a mode-reload loading panel centered even when the stale cursor is an extract", async () => {
+    render(<ProcessQueue />);
+    await moveToExtract();
+    expect(screen.getByTestId("process-center")).toHaveClass("pq-center--extract");
+
+    let resolveQueue!: (result: QueueListResult) => void;
+    h.listQueue.mockReturnValueOnce(
+      new Promise<QueueListResult>((resolve) => {
+        resolveQueue = resolve;
+      }),
+    );
+
+    fireEvent.click(screen.getByTestId("process-mode-review"));
+
+    expect(await screen.findByTestId("process-loading")).toHaveTextContent("Loading due queue");
+    expect(screen.getByTestId("process-center")).toHaveClass("pq-center");
+    expect(screen.getByTestId("process-center")).not.toHaveClass("pq-center--extract");
+
+    resolveQueue(h.result);
+    await waitFor(() => expect(screen.queryByTestId("process-loading")).not.toBeInTheDocument());
   });
 
   it("T076: requests queue.list with mode `full` on mount", async () => {
