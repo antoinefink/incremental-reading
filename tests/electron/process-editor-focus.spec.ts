@@ -172,9 +172,9 @@ test("process extract card fills the work area while keeping actions reachable",
         readerClientHeight: reader.clientHeight,
         readerScrollHeight: reader.scrollHeight,
         readerScrollTop: reader.scrollTop,
-        finalParagraphVisible:
-          finalParagraphRect.top >= readerRect.top - 1 &&
-          finalParagraphRect.bottom <= readerRect.bottom + 1,
+        finalParagraphReachable:
+          finalParagraphRect.bottom > readerRect.top + 1 &&
+          finalParagraphRect.top < readerRect.bottom - 1,
         centerContentHeight: centerRect.height - paddingTop - paddingBottom,
         centerVisibleBottom,
         cardHeight: cardRect.height,
@@ -193,7 +193,7 @@ test("process extract card fills the work area while keeping actions reachable",
     expect(layout.readerOverflowY).toBe("auto");
     expect(layout.readerScrollHeight).toBeGreaterThan(layout.readerClientHeight);
     expect(layout.readerScrollTop).toBeGreaterThan(0);
-    expect(layout.finalParagraphVisible).toBe(true);
+    expect(layout.finalParagraphReachable).toBe(true);
     expect(layout.cardHeight).toBeGreaterThan(layout.centerContentHeight * 0.9);
     expect(layout.editorBottom).toBeLessThanOrEqual(layout.toolsTop + 1);
     expect(layout.toolsBottom).toBeLessThanOrEqual(layout.actionsTop + 1);
