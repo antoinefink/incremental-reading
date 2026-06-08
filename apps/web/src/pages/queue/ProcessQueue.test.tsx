@@ -1217,9 +1217,9 @@ describe("ProcessQueue", () => {
     expect(cssRule(css, ".pq-card--extract .pq-extract")).toContain("flex: 1 1 auto");
     expect(cssRule(css, ".pq-card--extract .pq-extract")).toContain("min-height: 0");
     expect(cssRule(css, ".pq-card--extract .pq-extract")).toContain("overflow: hidden");
-    expect(cssRule(css, ".pq-extract__ref")).toContain("flex: 0 0 auto");
-    expect(cssRule(css, ".pq-extract__ref")).toContain("max-height: none");
-    expect(cssRule(css, ".pq-extract__ref")).toContain("overflow: visible");
+    expect(cssRule(css, ".pq-extract__ref")).toContain("flex: 0 1 auto");
+    expect(cssRule(css, ".pq-extract__ref")).toContain("max-height: 160px");
+    expect(cssRule(css, ".pq-extract__ref")).toContain("overflow-y: auto");
     expect(cssRule(css, ".pq-extract__editor")).toContain("display: flex");
     expect(cssRule(css, ".pq-extract__editor")).toContain("flex-direction: column");
     expect(cssRule(css, ".pq-extract__editor")).toContain("flex: 1 1 auto");

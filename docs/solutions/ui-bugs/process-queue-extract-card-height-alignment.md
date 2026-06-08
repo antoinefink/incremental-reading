@@ -119,6 +119,12 @@ Make the extract card a bounded flex frame, then let the extract workbench and e
 Keep footer controls as non-scrolling siblings and add a short-height fallback so wrapped chrome remains reachable on constrained windows:
 
 ```css
+.pq-extract__ref {
+  flex: 0 1 auto;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
 .pq-card--extract .pq-actions,
 .pq-card--extract .pq-keys {
   flex: none;
@@ -145,7 +151,7 @@ process center -> extract card -> extract workbench -> editor -> reader
 
 Each shrinking parent uses flex sizing with `min-height: 0`, so the reader can shrink and scroll instead of forcing ancestors to overflow. The extract center no longer vertically centers the card, so the card can occupy nearly all available work-area height.
 
-Controls stay visible because metadata, tools, actions, and keyboard hints remain normal-flow siblings with fixed flex behavior. Only `.pq-extract__editor .reader` owns unbounded vertical scrolling in normal desktop-height layouts.
+Controls stay visible because metadata, tools, actions, and keyboard hints remain normal-flow siblings with fixed flex behavior. Only `.pq-extract__editor .reader` owns unbounded vertical scrolling in normal desktop-height layouts; source lineage can use bounded internal scrolling so a long reference does not push the editor tools out of view.
 
 The short-height media fallback deliberately relaxes the no-outer-scroll preference only when fixed chrome would otherwise become unreachable. Reachability wins over a strict single-scroll-owner rule on constrained windows.
 
