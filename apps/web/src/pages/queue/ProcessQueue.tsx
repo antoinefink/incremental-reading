@@ -50,6 +50,7 @@ import {
   Prio,
   SchedulerChip,
   Stage,
+  Status,
   stageLabel,
   TypeIcon,
 } from "../../components/inspector/primitives";
@@ -1420,6 +1421,32 @@ function newProcessBlockId(): string {
   return `process_${random}`;
 }
 
+/** A small interpunct dot separator for source metadata rows. */
+function SourceMetaDot() {
+  return <span className="pq-source__dot" aria-hidden />;
+}
+
+function sourceUrlLabel(url: string): string {
+  const trimmed = url.trim();
+  try {
+    const parsed = new URL(trimmed);
+    return `${parsed.host}${parsed.pathname === "/" ? "" : parsed.pathname}`;
+  } catch {
+    return trimmed || url;
+  }
+}
+
+function sourceExternalHref(url: string): string | null {
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
 function ProcessSourceWorkbench({
   item,
   doc,
@@ -1444,18 +1471,90 @@ function ProcessSourceWorkbench({
   const progress = readPoint.progress(doc.currentDoc);
   const progressPct = readPoint.progressFraction(doc.currentDoc) * 100;
   const sourceTitle = inspector?.element.title ?? item.title;
+  const provenance = inspector?.provenance ?? null;
+  const sourceStatus = inspector?.element.status ?? item.status;
+  const sourcePriority = inspector?.element.priority ?? item.priority;
+  const sourceScheduler = inspector?.scheduler ?? chipSignals(item);
+  const sourceFormatLabel =
+    doc.sourceFormat === "pdf"
+      ? "PDF source"
+      : doc.sourceFormat === "video"
+        ? "Media source"
+        : null;
+  const progressLabel =
+    progress.total > 0
+      ? `block ${Math.min(progress.index + 1, progress.total)} of ${progress.total} · ${Math.round(progressPct)}%`
+      : "no readable blocks";
+  const provenanceHref = provenance?.url ? sourceExternalHref(provenance.url) : null;
+  const provenanceLabel = provenance?.url ? sourceUrlLabel(provenance.url) : null;
+  const sourceHeader = (
+    <header className="pq-source__header" data-testid="process-source-header">
+      <h1 className="pq-source__title" data-testid="process-source-title">
+        {sourceTitle}
+      </h1>
+      <div className="pq-source__metarow">
+        {provenance?.author ? (
+          <>
+            <span className="pq-source__meta">
+              <Icon name="user" size={13} /> {provenance.author}
+            </span>
+            <SourceMetaDot />
+          </>
+        ) : null}
+        {provenance?.url ? (
+          <>
+            {provenanceHref ? (
+              <a
+                className="pq-source__meta pq-source__meta--link"
+                href={provenanceHref}
+                target="_blank"
+                rel="noreferrer noopener"
+                data-testid="process-source-url"
+              >
+                <Icon name="globe" size={13} /> {provenanceLabel}
+              </a>
+            ) : (
+              <span className="pq-source__meta" data-testid="process-source-url">
+                <Icon name="globe" size={13} /> {provenance.url}
+              </span>
+            )}
+            <SourceMetaDot />
+          </>
+        ) : null}
+        <Prio priority={sourcePriority} />
+        <Status status={sourceStatus} />
+        <SourceMetaDot />
+        <SchedulerChip scheduler={sourceScheduler} />
+        {sourceFormatLabel ? (
+          <>
+            <SourceMetaDot />
+            <span className="pq-source__format" data-testid="process-source-format">
+              {sourceFormatLabel}
+            </span>
+          </>
+        ) : null}
+      </div>
+      {doc.sourceFormat === null ? (
+        <div className="pq-source__actions">
+          <button
+            type="button"
+            className="pq-btn pq-btn--primary pq-source__readpoint"
+            data-testid="process-source-readpoint"
+            disabled={busy || readPoint.saving}
+            onClick={onSetReadPoint}
+          >
+            <Icon name="bookmark" size={14} />
+            Set read-point <Kbd keys="␣" />
+          </button>
+        </div>
+      ) : null}
+    </header>
+  );
 
   if (doc.sourceFormat === "pdf" || doc.sourceFormat === "video") {
     return (
       <div className="pq-source" data-testid="process-source-workbench">
-        <div className="pq-source__top">
-          <span className="pq-body__src">
-            <Icon name="source" size={13} /> {sourceTitle}
-          </span>
-          <span className="pq-source__format">
-            {doc.sourceFormat === "pdf" ? "PDF source" : "Media source"}
-          </span>
-        </div>
+        {sourceHeader}
         <p className="pq-body__text pq-body__text--empty">
           This source uses a specialized reader. Open it in full to extract from pages, regions, or
           media timestamps.
@@ -1466,55 +1565,42 @@ function ProcessSourceWorkbench({
 
   return (
     <div className="pq-source" data-testid="process-source-workbench">
-      <div className="pq-source__top">
-        <div className="pq-source__progress">
-          <span className="pq-body__src">
-            <Icon name="source" size={13} /> {sourceTitle}
-          </span>
-          <span className="pq-source__progresslabel" data-testid="process-source-progress">
-            {progress.total > 0
-              ? `block ${Math.min(progress.index + 1, progress.total)} of ${progress.total} · ${Math.round(progressPct)}%`
-              : "no readable blocks"}
-          </span>
-          <div className="pbar pq-source__pbar">
-            <div
-              className="pbar__fill"
-              data-testid="process-source-pbar-fill"
-              style={{ width: `${progressPct}%` }}
-            />
-          </div>
-        </div>
-        <button
-          type="button"
-          className="pq-btn pq-btn--primary"
-          data-testid="process-source-readpoint"
-          disabled={busy || readPoint.saving}
-          onClick={onSetReadPoint}
-        >
-          <Icon name="bookmark" size={14} />
-          Set read-point
-        </button>
-      </div>
+      {sourceHeader}
 
-      <div className="pq-source__editor" data-testid="process-source-editor">
-        {doc.status === "loading" ? (
-          <p className="pq-body__text pq-body__text--empty">Loading source…</p>
-        ) : doc.status === "error" ? (
-          <p className="pq-error" data-testid="process-source-error">
-            {doc.error ?? "Failed to load this source."}
-          </p>
-        ) : (
-          <SourceEditor
-            key={`${item.id}:${doc.status}`}
-            initialDoc={doc.initialDoc}
-            editable
-            readerDecorations
-            debounceMs={180}
-            onChange={doc.save}
-            onEditorReady={onEditorReady}
+      <div className="pq-source__rail" data-testid="process-source-rail">
+        <div className="pq-source__railhead">
+          <span className="pq-source__progresslabel" data-testid="process-source-progress">
+            {progressLabel}
+          </span>
+        </div>
+        <div className="pbar pq-source__pbar" data-testid="process-source-pbar">
+          <div
+            className="pbar__fill"
+            data-testid="process-source-pbar-fill"
+            style={{ width: `${progressPct}%` }}
           />
-        )}
-        <div className="pq-extract__meta">
+        </div>
+
+        <div className="pq-source__editor" data-testid="process-source-editor">
+          {doc.status === "loading" ? (
+            <p className="pq-body__text pq-body__text--empty">Loading source…</p>
+          ) : doc.status === "error" ? (
+            <p className="pq-error" data-testid="process-source-error">
+              {doc.error ?? "Failed to load this source."}
+            </p>
+          ) : (
+            <SourceEditor
+              key={`${item.id}:${doc.status}`}
+              initialDoc={doc.initialDoc}
+              editable
+              readerDecorations
+              debounceMs={180}
+              onChange={doc.save}
+              onEditorReady={onEditorReady}
+            />
+          )}
+        </div>
+        <div className="pq-source__foot">
           <span>{wordCount(doc.plainText)} words</span>
         </div>
       </div>
@@ -1802,25 +1888,29 @@ function ProcessCard({
       key={item.id}
     >
       {/* metadata row */}
-      <div className="pq-card__meta">
-        <div className="pq-card__chips">
-          <TypeIcon type={item.type} lg />
-          <Prio priority={item.priority} />
-          {item.type === "extract" ? <Stage stage={item.stage} /> : null}
-          {isCard && cardView?.leech ? (
-            <span className="badge badge--leech" data-testid="process-card-leech">
-              Leech · {cardView.lapses} lapses
-            </span>
-          ) : null}
-        </div>
-        {/* Cards carry the FSRS chip; attention items the attention chip. The
-            two-scheduler split holds in the loop. */}
-        <SchedulerChip
-          scheduler={isCard && cardView ? cardChipSignals(cardView) : chipSignals(item)}
-        />
-      </div>
+      {!isSource ? (
+        <>
+          <div className="pq-card__meta">
+            <div className="pq-card__chips">
+              <TypeIcon type={item.type} lg />
+              <Prio priority={item.priority} />
+              {item.type === "extract" ? <Stage stage={item.stage} /> : null}
+              {isCard && cardView?.leech ? (
+                <span className="badge badge--leech" data-testid="process-card-leech">
+                  Leech · {cardView.lapses} lapses
+                </span>
+              ) : null}
+            </div>
+            {/* Cards carry the FSRS chip; attention items the attention chip. The
+                two-scheduler split holds in the loop. */}
+            <SchedulerChip
+              scheduler={isCard && cardView ? cardChipSignals(cardView) : chipSignals(item)}
+            />
+          </div>
 
-      <h1 className="pq-card__title">{titleFor(item)}</h1>
+          <h1 className="pq-card__title">{titleFor(item)}</h1>
+        </>
+      ) : null}
 
       {isCard ? (
         <div className="pq-cardface" data-testid="process-card-face">

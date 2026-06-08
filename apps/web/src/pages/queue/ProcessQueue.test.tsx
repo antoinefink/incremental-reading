@@ -462,6 +462,13 @@ beforeEach(() => {
     label: "Undid change",
     count: 1,
   });
+  h.getDocument.mockResolvedValue({
+    document: {
+      prosemirrorJson: { type: "doc", content: [], mockPlainText: "Body preview text." },
+      plainText: "Body preview text.",
+    },
+    extractedBlockIds: [],
+  });
   h.getInspectorData.mockResolvedValue({ data: null });
   h.staleEditorJson = false;
   h.selectionLocation.current = null;
@@ -1078,7 +1085,21 @@ describe("ProcessQueue", () => {
     expect(screen.getByTestId("process-item")).toHaveClass("pq-card--source");
     expect(screen.getByTestId("process-item")).not.toHaveClass("pq-card--extract");
     expect(screen.getByTestId("process-source-workbench")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "The Bitter Lesson" })).toHaveLength(1);
+    expect(screen.getByTestId("process-source-header")).toContainElement(
+      screen.getByTestId("process-source-title"),
+    );
+    expect(screen.getByTestId("process-source-header")).toContainElement(
+      screen.getByTestId("process-source-readpoint"),
+    );
+    expect(screen.getByTestId("process-source-rail")).toContainElement(
+      screen.getByTestId("process-source-progress"),
+    );
+    expect(screen.getByTestId("process-source-rail")).toContainElement(
+      screen.getByTestId("process-source-pbar"),
+    );
     expect(screen.getByTestId("process-source-progress")).toHaveTextContent("block 1 of 4");
+    expect(screen.getByTestId("process-source-pbar-fill")).toHaveStyle({ width: "25%" });
     expect(screen.getByTestId("process-source-readpoint")).toBeInTheDocument();
     expect(screen.queryByTestId("process-source-extract")).not.toBeInTheDocument();
     expect(screen.queryByText("Extract selection")).not.toBeInTheDocument();
@@ -1087,6 +1108,139 @@ describe("ProcessQueue", () => {
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("mock-source-editor")).toBeInTheDocument();
     expect(h.navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("renders inspector-backed source metadata with a guarded external URL", async () => {
+    h.getInspectorData.mockImplementation(async ({ id }: { id: string }) => ({
+      data:
+        id === "source-1"
+          ? {
+              element: {
+                id: "source-1",
+                type: "source",
+                status: "scheduled",
+                stage: "raw_source",
+                priority: 0.875,
+                title: "Inspector source title",
+                dueAt: "2026-06-02T12:00:00.000Z",
+              },
+              scheduler: {
+                kind: "attention",
+                retrievability: null,
+                stability: null,
+                difficulty: null,
+                reps: null,
+                lapses: null,
+                fsrsState: null,
+                stage: "raw_source",
+                postponed: 1,
+                lastProcessedAt: "2026-06-01T12:00:00.000Z",
+              },
+              provenance: {
+                title: "Inspector source title",
+                url: "https://example.com/source/path",
+                canonicalUrl: null,
+                originalUrl: null,
+                author: "Source Author",
+                publishedAt: null,
+                accessedAt: null,
+                snapshotKey: null,
+              },
+              source: null,
+              sourceRef: null,
+              location: null,
+              children: [],
+            }
+          : null,
+    }));
+    render(<ProcessQueue />);
+    await moveToSource();
+
+    expect(await screen.findByRole("heading", { name: "Inspector source title" })).toBeVisible();
+    expect(screen.getByText("Source Author")).toBeInTheDocument();
+    expect(screen.getByTestId("process-source-url")).toHaveTextContent("example.com/source/path");
+    expect(screen.getByTestId("process-source-url")).toHaveAttribute(
+      "href",
+      "https://example.com/source/path",
+    );
+    expect(screen.getByTestId("process-source-header")).toHaveTextContent("A");
+    expect(screen.getByTestId("process-source-header")).toHaveTextContent("Scheduled");
+    expect(screen.getByTestId("process-source-header")).toHaveTextContent("postponed ×1");
+  });
+
+  it("renders non-http source URLs as plain metadata instead of broken links", async () => {
+    h.getInspectorData.mockImplementation(async ({ id }: { id: string }) => ({
+      data:
+        id === "source-1"
+          ? {
+              element: {
+                id: "source-1",
+                type: "source",
+                status: "scheduled",
+                stage: "raw_source",
+                priority: 0.625,
+                title: "Manual source",
+                dueAt: null,
+              },
+              scheduler: {
+                kind: "attention",
+                retrievability: null,
+                stability: null,
+                difficulty: null,
+                reps: null,
+                lapses: null,
+                fsrsState: null,
+                stage: "raw_source",
+                postponed: 0,
+                lastProcessedAt: null,
+              },
+              provenance: {
+                title: "Manual source",
+                url: "example.com/source/path",
+                canonicalUrl: null,
+                originalUrl: null,
+                author: null,
+                publishedAt: null,
+                accessedAt: null,
+                snapshotKey: null,
+              },
+              source: null,
+              sourceRef: null,
+              location: null,
+              children: [],
+            }
+          : null,
+    }));
+    render(<ProcessQueue />);
+    await moveToSource();
+
+    const url = await screen.findByTestId("process-source-url");
+    expect(url).toHaveTextContent("example.com/source/path");
+    expect(url.tagName).toBe("SPAN");
+    expect(url).not.toHaveAttribute("href");
+  });
+
+  it("keeps specialized PDF sources out of the inline text reader while preserving header context", async () => {
+    h.getDocument.mockResolvedValue({
+      document: {
+        prosemirrorJson: { type: "doc", content: [], mockPlainText: "PDF body text." },
+        plainText: "PDF body text.",
+      },
+      extractedBlockIds: [],
+      sourceFormat: "pdf",
+    });
+    render(<ProcessQueue />);
+    await screen.findByTestId("process-item");
+    fireEvent.click(screen.getByTestId("process-action-skip"));
+    await waitFor(() => expect(currentItemId()).toBe("source-1"));
+
+    expect(await screen.findByTestId("process-source-workbench")).toBeInTheDocument();
+    expect(screen.getByTestId("process-source-title")).toHaveTextContent("The Bitter Lesson");
+    expect(screen.getByTestId("process-source-format")).toHaveTextContent("PDF source");
+    expect(screen.getByText(/specialized reader/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("process-source-rail")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("mock-source-editor")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("process-source-readpoint")).not.toBeInTheDocument();
   });
 
   it("persists source edits through the document save path", async () => {

@@ -24,6 +24,8 @@ describe("process queue styles", () => {
     const center = cssBlock(".pq-center--source");
     const card = cssBlock(".pq-card--source");
     const source = cssBlock(".pq-source");
+    const header = cssBlock(".pq-source__header");
+    const rail = cssBlock(".pq-source__rail");
 
     expect(center).toContain("align-items: stretch;");
     expect(center).toContain("justify-content: flex-start;");
@@ -37,9 +39,40 @@ describe("process queue styles", () => {
     expect(card).toContain("background: transparent;");
     expect(source).toContain("flex: 1 1 auto;");
     expect(source).toContain("min-height: 0;");
+    expect(header).toContain("border-bottom: 1px solid var(--border);");
+    expect(rail).toContain("flex: 1 1 auto;");
+    expect(rail).toContain("max-width: var(--reader-text-measure);");
+    expect(rail).toContain("margin: 0 auto;");
   });
 
-  it("lets the source editor fill the workbench without its own border", () => {
+  it("keeps source progress in the centered reader rail", () => {
+    const railhead = cssBlock(".pq-source__railhead");
+    const pbar = cssBlock(".pq-source__pbar");
+
+    expect(railhead).toContain("justify-content: flex-start;");
+    expect(railhead).toContain("font-family: var(--font-mono);");
+    expect(pbar).toContain("width: 100%;");
+    expect(pbar).not.toContain("max-width: 320px;");
+  });
+
+  it("uses tokenized source header spacing and a solid reader-style read-point button", () => {
+    const title = cssBlock(".pq-source__title");
+    const metaRow = cssBlock(".pq-source__metarow");
+    const meta = cssBlock(".pq-source__meta");
+    const dot = cssBlock(".pq-source__dot");
+    const readpoint = cssBlock(".pq-source__readpoint");
+
+    expect(title).toContain("margin: 0 0 var(--s-2);");
+    expect(metaRow).toContain("gap: var(--s-2);");
+    expect(meta).toContain("gap: var(--s-1);");
+    expect(dot).toContain("width: var(--s-1);");
+    expect(dot).toContain("height: var(--s-1);");
+    expect(readpoint).toContain("background: var(--accent);");
+    expect(readpoint).toContain("border-color: var(--accent);");
+    expect(readpoint).toContain("color: var(--text-on-accent);");
+  });
+
+  it("lets the source editor fill the rail without its own border", () => {
     const editor = cssBlock(".pq-source__editor");
     const reader = cssBlock(".pq-source__editor .reader");
 
@@ -50,9 +83,8 @@ describe("process queue styles", () => {
     expect(editor).toContain("min-height: 0;");
     expect(reader).toContain("flex: 1 1 auto;");
     expect(reader).toContain("width: 100%;");
-    expect(reader).toContain("max-width: var(--reader-text-measure);");
-    expect(reader).toContain("margin: 0 auto;");
-    expect(reader).not.toContain("max-width: none;");
+    expect(reader).toContain("max-width: none;");
+    expect(reader).toContain("margin: 0;");
     expect(reader).toContain("max-height: none;");
     expect(reader).toContain("overflow-y: auto;");
   });
