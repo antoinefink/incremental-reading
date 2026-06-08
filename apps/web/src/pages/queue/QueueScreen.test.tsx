@@ -16,7 +16,7 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { QueueItemSummary, QueueListResult } from "../../lib/appApi";
+import type { DailyWorkSummaryResult, QueueItemSummary, QueueListResult } from "../../lib/appApi";
 
 const h = vi.hoisted(() => {
   const cardRow: QueueItemSummary = {
@@ -193,6 +193,14 @@ const h = vi.hoisted(() => {
     },
     budget: { used: 4, target: 30 },
   };
+  const dailyWork: DailyWorkSummaryResult = {
+    asOf: "2026-05-30T18:00:00.000Z",
+    dueQueueItems: 4,
+    inboxSources: 0,
+    activeUnscheduledSources: 0,
+    resumeSource: null,
+    recommendedAction: "process_due_queue",
+  };
   return {
     navigateSpy: vi.fn(),
     selectSpy: vi.fn(),
@@ -201,6 +209,7 @@ const h = vi.hoisted(() => {
     // A mutable holder so a test can drive the shell's selected id into the rows.
     selectedId: { current: null as string | null },
     listQueue: vi.fn().mockResolvedValue(result),
+    getDailyWorkSummary: vi.fn().mockResolvedValue(dailyWork),
     actOnQueueItem: vi.fn(),
     getBlockProcessingSummary: vi.fn().mockResolvedValue({
       summary: {
@@ -217,6 +226,7 @@ const h = vi.hoisted(() => {
     }),
     undoQueueAction: vi.fn().mockResolvedValue({ item: extractRow }),
     result,
+    dailyWork,
     sourceRow,
     extractRow,
     topicRow,
@@ -232,6 +242,7 @@ vi.mock("../../lib/appApi", async () => {
     isDesktop: () => true,
     appApi: {
       listQueue: h.listQueue,
+      getDailyWorkSummary: h.getDailyWorkSummary,
       actOnQueueItem: h.actOnQueueItem,
       getBlockProcessingSummary: h.getBlockProcessingSummary,
       undoLast: h.undoLast,
@@ -256,6 +267,7 @@ beforeEach(() => {
   h.selectedId.current = null;
   h.useSearch.mockReturnValue({});
   h.listQueue.mockResolvedValue(h.result);
+  h.getDailyWorkSummary.mockResolvedValue(h.dailyWork);
   h.getBlockProcessingSummary.mockResolvedValue({
     summary: {
       canMarkDoneWithoutConfirmation: true,
@@ -268,6 +280,166 @@ describe("QueueScreen", () => {
   it("renders one qitem per due row", async () => {
     render(<QueueScreen />);
     await waitFor(() => expect(screen.getAllByTestId("queue-item")).toHaveLength(4));
+  });
+
+  it("starts the process route only when daily work has due queue items", async () => {
+    render(<QueueScreen />);
+    await screen.findAllByTestId("queue-item");
+
+    fireEvent.click(screen.getByTestId("queue-start-session"));
+
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/process", search: {} });
+  });
+
+  it("routes the primary CTA to inbox triage when the due queue is empty but imports are waiting", async () => {
+    h.listQueue.mockResolvedValue({
+      items: [],
+      counts: {
+        all: 0,
+        card: 0,
+        source: 0,
+        extract: 0,
+        topic: 0,
+        task: 0,
+        highPriority: 0,
+        overdue: 0,
+        protected: 0,
+      },
+      budget: { used: 0, target: 30 },
+    });
+    h.getDailyWorkSummary.mockResolvedValue({
+      ...h.dailyWork,
+      dueQueueItems: 0,
+      inboxSources: 2,
+      recommendedAction: "triage_inbox",
+    });
+
+    render(<QueueScreen />);
+
+    const empty = await screen.findByTestId("queue-inbox-work");
+    expect(empty).toHaveTextContent("No due items today");
+    expect(empty).toHaveTextContent("2 inbox sources");
+    expect(screen.queryByTestId("queue-empty")).toBeNull();
+    expect(screen.getByTestId("queue-start-session")).toHaveTextContent("Triage inbox");
+
+    fireEvent.click(screen.getByTestId("queue-go-inbox"));
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/inbox" });
+
+    h.navigateSpy.mockClear();
+    fireEvent.click(screen.getByTestId("queue-start-session"));
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/inbox" });
+    expect(h.navigateSpy).not.toHaveBeenCalledWith({ to: "/process", search: {} });
+  });
+
+  it("routes the clear-state primary CTA to inbox rather than an empty process session", async () => {
+    h.listQueue.mockResolvedValue({
+      items: [],
+      counts: {
+        all: 0,
+        card: 0,
+        source: 0,
+        extract: 0,
+        topic: 0,
+        task: 0,
+        highPriority: 0,
+        overdue: 0,
+        protected: 0,
+      },
+      budget: { used: 0, target: 30 },
+    });
+    h.getDailyWorkSummary.mockResolvedValue({
+      ...h.dailyWork,
+      dueQueueItems: 0,
+      inboxSources: 0,
+      activeUnscheduledSources: 0,
+      recommendedAction: "clear",
+    });
+
+    render(<QueueScreen />);
+
+    expect(await screen.findByTestId("queue-empty")).toHaveTextContent("Queue clear for today");
+    expect(screen.getByTestId("queue-start-session")).toHaveTextContent("Open inbox");
+    fireEvent.click(screen.getByTestId("queue-start-session"));
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/inbox" });
+    expect(h.navigateSpy).not.toHaveBeenCalledWith({ to: "/process", search: {} });
+  });
+
+  it("routes the primary CTA to an active unscheduled source when that is the next daily action", async () => {
+    h.listQueue.mockResolvedValue({
+      items: [],
+      counts: {
+        all: 0,
+        card: 0,
+        source: 0,
+        extract: 0,
+        topic: 0,
+        task: 0,
+        highPriority: 0,
+        overdue: 0,
+        protected: 0,
+      },
+      budget: { used: 0, target: 30 },
+    });
+    h.getDailyWorkSummary.mockResolvedValue({
+      ...h.dailyWork,
+      dueQueueItems: 0,
+      inboxSources: 0,
+      activeUnscheduledSources: 1,
+      resumeSource: {
+        id: "source-active",
+        title: "Active source",
+        priority: 0.75,
+        priorityLabel: "B",
+        status: "active",
+        stage: "raw_source",
+        updatedAt: "2026-06-08T09:00:00.000Z",
+        unresolvedBlocks: 2,
+      },
+      recommendedAction: "resume_unscheduled_source",
+    });
+
+    render(<QueueScreen />);
+
+    expect(await screen.findByTestId("queue-resume-source")).toHaveTextContent("Active source");
+    expect(screen.getByTestId("queue-start-session")).toHaveTextContent("Resume source");
+    fireEvent.click(screen.getByTestId("queue-resume-source-button"));
+
+    expect(h.selectSpy).toHaveBeenCalledWith("source-active");
+    expect(h.navigateSpy).toHaveBeenCalledWith({
+      to: "/source/$id",
+      params: { id: "source-active" },
+    });
+
+    h.selectSpy.mockClear();
+    h.navigateSpy.mockClear();
+    fireEvent.click(screen.getByTestId("queue-start-session"));
+
+    expect(h.selectSpy).toHaveBeenCalledWith("source-active");
+    expect(h.navigateSpy).toHaveBeenCalledWith({
+      to: "/source/$id",
+      params: { id: "source-active" },
+    });
+  });
+
+  it("keeps due rows visible but disables the primary CTA if the daily summary read fails", async () => {
+    h.getDailyWorkSummary.mockRejectedValue(new Error("daily work down"));
+    render(<QueueScreen />);
+
+    await waitFor(() => expect(screen.getAllByTestId("queue-item")).toHaveLength(4));
+    expect(screen.getByTestId("queue-error")).toHaveTextContent("daily work down");
+    expect(screen.getByTestId("queue-start-session")).toBeDisabled();
+    expect(screen.queryByTestId("queue-empty")).toBeNull();
+  });
+
+  it("does not render a false clear state when the queue read fails", async () => {
+    h.listQueue.mockRejectedValue(new Error("queue down"));
+    render(<QueueScreen />);
+
+    expect(await screen.findByTestId("queue-error")).toHaveTextContent("queue down");
+    expect(screen.queryByTestId("queue-item")).toBeNull();
+    expect(screen.queryByTestId("queue-empty")).toBeNull();
+    expect(screen.queryByTestId("queue-inbox-work")).toBeNull();
+    expect(screen.queryByTestId("queue-resume-source")).toBeNull();
   });
 
   it("renders the correct SchedulerChip side for a card (FSRS) vs an extract (attention)", async () => {

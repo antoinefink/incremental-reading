@@ -25,9 +25,10 @@
  * ProseMirror selection. The toolbar is presentational and delegates each action to
  * callbacks: Copy/Cancel are renderer-only (clipboard + dismiss), while Highlight
  * (T020), Extract (T021), and Cloze (M6 / T033–T034) are stubs that toast until
- * those tasks land — T019 ships the UI seam only, no persistence. Postpone / Mark
- * done / Lower priority have no scheduling path until M5 (T027–T031); they render
- * disabled with a TODO rather than inventing one.
+ * those tasks land — T019 ships the UI seam only, no persistence. Reader exit
+ * actions reuse the existing queue/priority command paths: schedule return via
+ * `ScheduleMenu` → `queue.schedule`, Mark done/Delete via `queue.act`, and Lower
+ * priority via `elements.setPriority`.
  */
 
 import {
@@ -44,7 +45,8 @@ import { ExternalUrlLink } from "../../components/ExternalUrlLink";
 import { Icon } from "../../components/Icon";
 import { requestInspectorRefresh } from "../../components/inspector/Inspector";
 import { Prio, SchedulerChip, Status } from "../../components/inspector/primitives";
-import { appApi, type InspectorData, isDesktop } from "../../lib/appApi";
+import { ScheduleMenu } from "../../components/queue/ScheduleMenu";
+import { appApi, type InspectorData, isDesktop, type QueueScheduleChoice } from "../../lib/appApi";
 import { SelectionToolbar, type SelectionToolbarAction } from "../../reader/SelectionToolbar";
 import { useTextSelection } from "../../reader/useTextSelection";
 import { useActiveScope } from "../../shell/activeScope";
@@ -171,19 +173,6 @@ export function SourceReader() {
   const { select } = useSelection();
   const navigate = useNavigate();
 
-  /**
-   * Soft-delete this source (T044) — moves it to the Trash (recoverable). Routes
-   * through the typed `queue.act` delete path (`soft_delete_element`, recoverable),
-   * the SAME mutation the queue uses, so no new write path is invented; the renderer
-   * never touches SQLite. Accidental deletion is recoverable from `/trash` or via the
-   * shell's global ⌘Z undo. After deleting we leave the (now-trashed) reader.
-   */
-  const deleteSource = useCallback(async () => {
-    if (!isDesktop()) return;
-    await appApi.actOnQueueItem({ id, action: { kind: "delete" } });
-    void navigate({ to: "/queue" });
-  }, [id, navigate]);
-
   // The reader OWNS its keyboard surface (`E`/`C`/`H` on a selection, `␣` for the
   // read-point); register the reader scope so the global shell handler defers its
   // overlapping single-letter element actions (`o`/`u`/`+`/`-`) while reading —
@@ -201,6 +190,8 @@ export function SourceReader() {
 
   const [inspector, setInspector] = useState<InspectorData | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const [exitActionBusy, setExitActionBusy] = useState(false);
+  const exitActionBusyRef = useRef(false);
   // PDF reading mode (T064): the active page N of M, shown in the rail.
   const [pdfPage, setPdfPage] = useState<{ page: number; total: number }>({ page: 1, total: 0 });
   // The live Tiptap editor instance (for read-point capture/jump + decoration).
@@ -267,6 +258,21 @@ export function SourceReader() {
     setFlash(message);
     setTimeout(() => setFlash(null), 1600);
   }, []);
+
+  const withExitAction = useCallback(
+    async (action: () => Promise<void>) => {
+      if (!desktop || exitActionBusyRef.current) return;
+      exitActionBusyRef.current = true;
+      setExitActionBusy(true);
+      try {
+        await action();
+      } finally {
+        exitActionBusyRef.current = false;
+        setExitActionBusy(false);
+      }
+    },
+    [desktop],
+  );
 
   // Text-selection toolbar (T019). The hook owns the anchor + resolved location;
   // this page owns only the action wiring. Highlight is wired in T020, Extract in
@@ -515,26 +521,83 @@ export function SourceReader() {
   }, [rp, toast]);
 
   const onMarkSourceDone = useCallback(async () => {
-    const summary = proc.summary;
-    if (!summary) return;
-    const confirmUnresolved = !summary.canMarkDoneWithoutConfirmation;
-    if (confirmUnresolved) {
-      const ok = window.confirm(
-        `This source still has ${summary.unresolvedBlocks} unresolved block(s). Mark it done anyway?`,
-      );
-      if (!ok) return;
-    }
+    await withExitAction(async () => {
+      const summary = proc.summary;
+      if (!summary) return;
+      const confirmUnresolved = !summary.canMarkDoneWithoutConfirmation;
+      if (confirmUnresolved) {
+        const ok = window.confirm(
+          `This source still has ${summary.unresolvedBlocks} unresolved block(s). Mark it done anyway?`,
+        );
+        if (!ok) return;
+      }
+      try {
+        await appApi.actOnQueueItem({
+          id,
+          action: { kind: "markDone", confirmUnresolvedBlocks: confirmUnresolved },
+        });
+        requestInspectorRefresh();
+        toast("Source done");
+      } catch {
+        toast("Could not mark source done");
+      }
+    });
+  }, [id, proc.summary, toast, withExitAction]);
+
+  const refreshSourceInspector = useCallback(async () => {
+    requestInspectorRefresh();
     try {
-      await appApi.actOnQueueItem({
-        id,
-        action: { kind: "markDone", confirmUnresolvedBlocks: confirmUnresolved },
-      });
-      requestInspectorRefresh();
-      toast("Source done");
+      const res = await appApi.getInspectorData({ id });
+      setInspector(res.data);
     } catch {
-      toast("Could not mark source done");
+      /* best effort; the shell inspector will still refresh independently */
     }
-  }, [id, proc.summary, toast]);
+  }, [id]);
+
+  const onScheduleReturn = useCallback(
+    async (choice: QueueScheduleChoice) => {
+      await withExitAction(async () => {
+        try {
+          const result = await appApi.scheduleQueueItem({ id, choice });
+          await refreshSourceInspector();
+          toast(`Scheduled return · next ${fmtDate(result.dueAt)}`);
+        } catch {
+          toast("Could not schedule return");
+        }
+      });
+    },
+    [id, refreshSourceInspector, toast, withExitAction],
+  );
+
+  const onLowerPriority = useCallback(async () => {
+    await withExitAction(async () => {
+      try {
+        await appApi.setElementPriority({ id, action: { kind: "lower" } });
+        await refreshSourceInspector();
+        toast("Priority lowered");
+      } catch {
+        toast("Could not lower priority");
+      }
+    });
+  }, [id, refreshSourceInspector, toast, withExitAction]);
+
+  /**
+   * Soft-delete this source (T044) — moves it to the Trash (recoverable). Routes
+   * through the typed `queue.act` delete path (`soft_delete_element`, recoverable),
+   * the SAME mutation the queue uses, so no new write path is invented; the renderer
+   * never touches SQLite. Accidental deletion is recoverable from `/trash` or via the
+   * shell's global ⌘Z undo. After deleting we leave the (now-trashed) reader.
+   */
+  const deleteSource = useCallback(async () => {
+    await withExitAction(async () => {
+      try {
+        await appApi.actOnQueueItem({ id, action: { kind: "delete" } });
+        void navigate({ to: "/queue" });
+      } catch {
+        toast("Could not delete source");
+      }
+    });
+  }, [id, navigate, toast, withExitAction]);
 
   // Keyboard: Space sets the read-point (ignored while typing in a field/modal).
   useEffect(() => {
@@ -590,6 +653,57 @@ export function SourceReader() {
     : progress.total > 0
       ? `block ${Math.min(progress.index + 1, progress.total)} of ${progress.total} · ${Math.round(progressPct)}%`
       : "—";
+  const sourceWorkflowActions = (
+    <>
+      <ScheduleMenu
+        disabled={exitActionBusy}
+        onSchedule={(choice) => void onScheduleReturn(choice)}
+        triggerClassName="reader-btn"
+        triggerIcon="postpone"
+        triggerLabel="Postpone"
+        triggerTestId="reader-postpone"
+        tooltipLabel="Postpone"
+        ariaLabel="Postpone until tomorrow, next week, next month, or a manual date"
+      />
+      <button
+        type="button"
+        className="reader-btn"
+        disabled={exitActionBusy || !blockSummary}
+        title={
+          blockSummary?.canMarkDoneWithoutConfirmation
+            ? "Mark source done"
+            : "Requires confirmation because unresolved blocks remain"
+        }
+        data-testid="reader-mark-done"
+        onClick={() => void onMarkSourceDone()}
+      >
+        <Icon name="checkCircle" size={14} /> Mark done
+      </button>
+      <button
+        type="button"
+        className="reader-btn"
+        disabled={exitActionBusy}
+        title="Lower priority one band"
+        data-testid="reader-lower-priority"
+        onClick={() => void onLowerPriority()}
+      >
+        <Icon name="arrowDown" size={14} /> Lower priority
+      </button>
+    </>
+  );
+  const sourceDeleteAction = (
+    <button
+      type="button"
+      className="reader-btn reader-btn--danger reader-btn--icon"
+      disabled={!desktop || exitActionBusy}
+      title="Delete source (recoverable from Trash · ⌘Z to undo)"
+      aria-label="Delete source"
+      data-testid="reader-delete"
+      onClick={() => void deleteSource()}
+    >
+      <Icon name="trash" size={14} />
+    </button>
+  );
 
   // Media reading mode (T073): a video/audio source reuses the SAME header +
   // inspector, but swaps the editor body for an HTML5 `<video>`/`<audio>` (local,
@@ -612,16 +726,8 @@ export function SourceReader() {
                 <Icon name="external" size={14} /> Open original
               </a>
             ) : null}
-            <button
-              type="button"
-              className="reader-btn reader-btn--danger reader-btn--icon"
-              title="Delete source (recoverable from Trash · ⌘Z to undo)"
-              aria-label="Delete source"
-              data-testid="reader-delete"
-              onClick={() => void deleteSource()}
-            >
-              <Icon name="trash" size={14} />
-            </button>
+            {sourceWorkflowActions}
+            {sourceDeleteAction}
           </div>
         </div>
         <MediaReader
@@ -686,16 +792,8 @@ export function SourceReader() {
                 <Icon name="external" size={14} /> Open original
               </a>
             ) : null}
-            <button
-              type="button"
-              className="reader-btn reader-btn--danger reader-btn--icon"
-              title="Delete source (recoverable from Trash · ⌘Z to undo)"
-              aria-label="Delete source"
-              data-testid="reader-delete"
-              onClick={() => void deleteSource()}
-            >
-              <Icon name="trash" size={14} />
-            </button>
+            {sourceWorkflowActions}
+            {sourceDeleteAction}
           </div>
         </div>
         <div className="pbar" style={{ margin: 0 }}>
@@ -762,38 +860,7 @@ export function SourceReader() {
           >
             <Icon name="bookmark" size={14} /> Set read-point <Kbd keys="␣" />
           </button>
-          <button
-            type="button"
-            className="reader-btn"
-            disabled
-            title="Scheduling lands in M5 (T027–T031)"
-            data-testid="reader-postpone"
-          >
-            <Icon name="postpone" size={14} /> Postpone
-          </button>
-          <button
-            type="button"
-            className="reader-btn"
-            disabled={!blockSummary}
-            title={
-              blockSummary?.canMarkDoneWithoutConfirmation
-                ? "Mark source done"
-                : "Requires confirmation because unresolved blocks remain"
-            }
-            data-testid="reader-mark-done"
-            onClick={() => void onMarkSourceDone()}
-          >
-            <Icon name="checkCircle" size={14} /> Mark done
-          </button>
-          <button
-            type="button"
-            className="reader-btn"
-            disabled
-            title="Priority controls land in M5 (T027)"
-            data-testid="reader-lower-priority"
-          >
-            <Icon name="arrowDown" size={14} /> Lower priority
-          </button>
+          {sourceWorkflowActions}
           {openOriginalUrl ? (
             <a
               className="reader-btn"
@@ -815,17 +882,7 @@ export function SourceReader() {
               <Icon name="external" size={14} /> Open original
             </button>
           )}
-          <button
-            type="button"
-            className="reader-btn reader-btn--danger reader-btn--icon"
-            disabled={!desktop}
-            title="Delete source (recoverable from Trash · ⌘Z to undo)"
-            aria-label="Delete source"
-            data-testid="reader-delete"
-            onClick={() => void deleteSource()}
-          >
-            <Icon name="trash" size={14} />
-          </button>
+          {sourceDeleteAction}
         </div>
       </div>
 

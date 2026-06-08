@@ -65,6 +65,14 @@ function fakeDbService() {
     applyCatchUp: vi.fn(),
     previewVacation: vi.fn(),
     applyVacation: vi.fn(),
+    getDailyWorkSummary: vi.fn(() => ({
+      asOf: "2026-06-08T09:00:00.000Z",
+      dueQueueItems: 0,
+      inboxSources: 0,
+      activeUnscheduledSources: 0,
+      resumeSource: null,
+      recommendedAction: "clear",
+    })),
     importManualSource: vi.fn(),
     search: vi.fn(),
     listInbox: vi.fn(() => ({ items: [] })),
@@ -136,6 +144,25 @@ describe("registerIpcHandlers", () => {
       electron.handlers.get(IPC_CHANNELS.queueAct)?.({}, { id: "el_1", action: { kind: "nope" } }),
     ).toThrow();
     expect(db.actOnQueueItem).not.toHaveBeenCalled();
+  });
+
+  it("validates and forwards daily work summary requests", () => {
+    const db = fakeDbService();
+    registerIpcHandlers(db as never);
+    const asOf = "2026-06-08T09:00:00.000Z";
+    const handler = electron.handlers.get(IPC_CHANNELS.dailyWorkSummary);
+
+    expect(handler?.({}, { asOf })).toMatchObject({ recommendedAction: "clear" });
+    expect(db.getDailyWorkSummary).toHaveBeenCalledWith({ asOf });
+  });
+
+  it("rejects malformed daily work summary clocks before invoking the database service", () => {
+    const db = fakeDbService();
+    registerIpcHandlers(db as never);
+    const handler = electron.handlers.get(IPC_CHANNELS.dailyWorkSummary);
+
+    expect(() => handler?.({}, { asOf: "not-a-date" })).toThrow();
+    expect(db.getDailyWorkSummary).not.toHaveBeenCalled();
   });
 
   it("validates high-risk command payloads before invoking the corresponding DB service", () => {

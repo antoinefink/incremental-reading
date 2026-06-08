@@ -102,6 +102,9 @@ describe("preload bridge", () => {
     await api().queue.list();
     expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.queueList, {});
 
+    await api().dailyWork.summary();
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.dailyWorkSummary, {});
+
     await api().review.sessionNext();
     expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.reviewSessionNext, {});
 

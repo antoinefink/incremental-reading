@@ -300,6 +300,7 @@ describe("IPC channels", () => {
         "analytics:get",
         "analytics:reviewActivity",
         "balance:get",
+        "dailyWork:summary",
         "backups:create",
         "backups:openFolder",
         "backups:list",

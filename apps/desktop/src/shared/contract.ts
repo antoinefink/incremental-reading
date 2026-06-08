@@ -5197,6 +5197,51 @@ export interface BalanceGetResult {
 }
 
 // ---------------------------------------------------------------------------
+// dailyWork.summary()  (T101 — daily workflow routing)
+// ---------------------------------------------------------------------------
+
+/**
+ * The daily workflow read model: one main-side answer for whether the primary
+ * action should process due scheduled work, triage fresh imports, resume an
+ * active unscheduled source, or show a true clear state. It composes the same
+ * queue/inbox predicates the due queue uses; the renderer must not duplicate
+ * those scheduler rules.
+ */
+export const DailyWorkSummaryRequestSchema = z
+  .object({
+    /** The instant to compute the due queue for (ISO-8601); defaults to now. */
+    asOf: IsoTimestampInputSchema.optional(),
+  })
+  .optional();
+export type DailyWorkSummaryRequest = z.infer<typeof DailyWorkSummaryRequestSchema>;
+
+export type DailyWorkRecommendedAction =
+  | "process_due_queue"
+  | "triage_inbox"
+  | "resume_unscheduled_source"
+  | "clear";
+
+export interface DailyWorkResumeSource {
+  readonly id: string;
+  readonly title: string;
+  readonly priority: number;
+  readonly priorityLabel: "A" | "B" | "C" | "D";
+  readonly status: string;
+  readonly stage: string;
+  readonly updatedAt: string;
+  readonly unresolvedBlocks: number | null;
+}
+
+export interface DailyWorkSummaryResult {
+  readonly asOf: string;
+  readonly dueQueueItems: number;
+  readonly inboxSources: number;
+  readonly activeUnscheduledSources: number;
+  readonly resumeSource: DailyWorkResumeSource | null;
+  readonly recommendedAction: DailyWorkRecommendedAction;
+}
+
+// ---------------------------------------------------------------------------
 // sourceYield.list()  (T083 — per-source yield analytics)
 // ---------------------------------------------------------------------------
 
@@ -6143,6 +6188,13 @@ export interface AppApi {
      * Read-only.
      */
     get(request?: BalanceGetRequest): Promise<BalanceGetResult>;
+  };
+  readonly dailyWork: {
+    /**
+     * The primary daily workflow recommendation — due queue first, then inbox
+     * triage, then active unscheduled source resume, then true clear. Read-only.
+     */
+    summary(request?: DailyWorkSummaryRequest): Promise<DailyWorkSummaryResult>;
   };
   readonly sourceYield: {
     /**

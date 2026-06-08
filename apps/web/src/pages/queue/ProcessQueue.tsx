@@ -60,6 +60,7 @@ import "../../components/inspector/inspector.css";
 import {
   appApi,
   type CardKind,
+  type DailyWorkSummaryResult,
   type ExtractStage,
   type InspectorData,
   isDesktop,
@@ -243,6 +244,9 @@ export function ProcessQueue() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [undoState, setUndoState] = useState<ProcessUndoState | null>(null);
+  const [dailyWork, setDailyWork] = useState<DailyWorkSummaryResult | null>(null);
+  const [deckLoading, setDeckLoading] = useState(true);
+  const [deckLoaded, setDeckLoaded] = useState(false);
 
   // --- The inline card-review surface state (lifted here so the keyboard can drive
   // reveal/grade while a card is the current item, exactly like the review session).
@@ -275,7 +279,8 @@ export function ProcessQueue() {
   const current = cursor < total ? order[cursor] : null;
   const currentId = current?.id ?? null;
   const currentType = current?.type ?? null;
-  const done = total === 0 || cursor >= total;
+  const done = deckLoaded && (total === 0 || cursor >= total);
+  const zeroLoad = deckLoaded && total === 0 && processed === 0;
   const isCard = current?.type === "card";
   /** Items left to look at (this one + everything after) — the full mixed deck. */
   const remaining = Math.max(0, total - cursor);
@@ -368,19 +373,47 @@ export function ProcessQueue() {
     async (modeOverride?: SessionMode) => {
       if (!isDesktop()) return;
       const activeMode = modeOverride ?? modeRef.current;
+      setDeckLoading(true);
       try {
-        const next = await appApi.listQueue({
-          ...(asOf ? { asOf } : {}),
-          mode: activeMode,
-        });
-        setError(null);
+        const [queueResult, workResult] = await Promise.allSettled([
+          appApi.listQueue({
+            ...(asOf ? { asOf } : {}),
+            mode: activeMode,
+          }),
+          appApi.getDailyWorkSummary(asOf ? { asOf } : {}),
+        ]);
+        let nextError: string | null = null;
         setUndoState(null);
-        setOrder(jitterOrder(next.items));
-        setCursor(0);
-        setProcessed(0);
-        gradedRef.current = new Set();
+        if (queueResult.status === "fulfilled") {
+          setOrder(jitterOrder(queueResult.value.items));
+          setCursor(0);
+          setProcessed(0);
+          gradedRef.current = new Set();
+          setDeckLoaded(true);
+        } else {
+          setOrder([]);
+          setDeckLoaded(false);
+          nextError =
+            queueResult.reason instanceof Error
+              ? queueResult.reason.message
+              : String(queueResult.reason);
+        }
+        if (workResult.status === "fulfilled") {
+          setDailyWork(workResult.value);
+        } else {
+          setDailyWork(null);
+          nextError =
+            nextError ??
+            (workResult.reason instanceof Error
+              ? workResult.reason.message
+              : String(workResult.reason));
+        }
+        setError(nextError);
       } catch (e) {
+        setDeckLoaded(false);
         setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setDeckLoading(false);
       }
     },
     [asOf],
@@ -473,6 +506,20 @@ export function ProcessQueue() {
     },
     [load],
   );
+
+  const openRecommendedWork = useCallback(() => {
+    if (dailyWork?.recommendedAction === "triage_inbox") {
+      void navigate({ to: "/inbox" });
+      return;
+    }
+    if (dailyWork?.recommendedAction === "resume_unscheduled_source" && dailyWork.resumeSource) {
+      select(dailyWork.resumeSource.id);
+      void navigate({
+        to: "/source/$id",
+        params: { id: dailyWork.resumeSource.id },
+      });
+    }
+  }, [dailyWork, navigate, select]);
 
   /**
    * Apply one in-place action through the SAME typed mutation path as the list
@@ -1172,19 +1219,60 @@ export function ProcessQueue() {
       ) : null}
 
       <div className="pq-center">
-        {done ? (
+        {deckLoading ? (
+          <div className="q-panel pq-donepanel" data-testid="process-loading">
+            <div className="q-empty">
+              <div className="q-empty__icon q-empty__icon--filter">
+                <Icon name="queue" size={24} />
+              </div>
+              <h2 className="q-empty__title">Loading due queue</h2>
+              <p className="q-empty__body">Checking scheduled work for today.</p>
+            </div>
+          </div>
+        ) : done ? (
           <div className="q-panel pq-donepanel" data-testid="process-done">
             <div className="q-empty">
               <div className="q-empty__icon">
                 <Icon name="checkCircle" size={26} />
               </div>
-              <h2 className="q-empty__title">Queue clear</h2>
-              <p className="q-empty__body">
-                You processed {processed} item{processed === 1 ? "" : "s"} one at a time — no list,
-                no detours. Your high-priority items are protected; the rest return when they're
-                due.
-              </p>
+              <h2 className="q-empty__title">{zeroLoad ? "No due items today" : "Queue clear"}</h2>
+              {zeroLoad ? (
+                <p className="q-empty__body">
+                  There are no scheduled queue items due right now.
+                  {dailyWork?.recommendedAction === "triage_inbox"
+                    ? ` ${dailyWork.inboxSources} inbox source${dailyWork.inboxSources === 1 ? "" : "s"} still need triage.`
+                    : dailyWork?.recommendedAction === "resume_unscheduled_source" &&
+                        dailyWork.resumeSource
+                      ? ` ${dailyWork.resumeSource.title} is active without a return date.`
+                      : ""}
+                </p>
+              ) : (
+                <p className="q-empty__body">
+                  You processed {processed} item{processed === 1 ? "" : "s"} one at a time — no
+                  list, no detours. Your high-priority items are protected; the rest return when
+                  they're due.
+                </p>
+              )}
               <div className="pq-done__actions">
+                {zeroLoad &&
+                (dailyWork?.recommendedAction === "triage_inbox" ||
+                  (dailyWork?.recommendedAction === "resume_unscheduled_source" &&
+                    dailyWork.resumeSource)) ? (
+                  <button
+                    type="button"
+                    className="sessionbar__start"
+                    data-testid="process-next-work"
+                    onClick={openRecommendedWork}
+                  >
+                    <Icon
+                      name={dailyWork.recommendedAction === "triage_inbox" ? "inbox" : "source"}
+                      size={14}
+                    />
+                    {dailyWork.recommendedAction === "triage_inbox"
+                      ? "Triage inbox"
+                      : "Resume source"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="pq-btn"

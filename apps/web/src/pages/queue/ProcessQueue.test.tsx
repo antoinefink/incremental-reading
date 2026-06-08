@@ -21,6 +21,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  DailyWorkSummaryResult,
   QueueItemSummary,
   QueueListResult,
   ReviewCardView,
@@ -104,6 +105,14 @@ const h = vi.hoisted(() => {
     },
     budget: { used: 3, target: 30 },
   };
+  const dailyWork: DailyWorkSummaryResult = {
+    asOf: "2026-05-30T18:00:00.000Z",
+    dueQueueItems: 3,
+    inboxSources: 0,
+    activeUnscheduledSources: 0,
+    resumeSource: null,
+    recommendedAction: "process_due_queue",
+  };
   // The full reveal-ready view for card-1 (the answer + source ref ship with the
   // card; the renderer hides them until reveal — exactly like the review session).
   const cardView: ReviewCardView = {
@@ -160,6 +169,7 @@ const h = vi.hoisted(() => {
     navigateSpy: vi.fn(),
     selectSpy: vi.fn(),
     listQueue: vi.fn().mockResolvedValue(result),
+    getDailyWorkSummary: vi.fn().mockResolvedValue(dailyWork),
     actOnQueueItem: vi.fn().mockResolvedValue({ item: null, removed: true, undo: null }),
     getBlockProcessingSummary: vi.fn().mockResolvedValue({
       summary: {
@@ -283,6 +293,8 @@ const h = vi.hoisted(() => {
       },
     }),
     cardView,
+    result,
+    dailyWork,
   };
 });
 
@@ -293,6 +305,7 @@ vi.mock("../../lib/appApi", async () => {
     isDesktop: () => true,
     appApi: {
       listQueue: h.listQueue,
+      getDailyWorkSummary: h.getDailyWorkSummary,
       actOnQueueItem: h.actOnQueueItem,
       getBlockProcessingSummary: h.getBlockProcessingSummary,
       scheduleQueueItem: h.scheduleQueueItem,
@@ -421,7 +434,9 @@ import { ProcessQueue } from "./ProcessQueue";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  h.listQueue.mockResolvedValue(h.result);
   h.actOnQueueItem.mockResolvedValue({ item: null, removed: true, undo: null });
+  h.getDailyWorkSummary.mockResolvedValue(h.dailyWork);
   h.getBlockProcessingSummary.mockResolvedValue({
     summary: {
       canMarkDoneWithoutConfirmation: true,
@@ -753,6 +768,161 @@ describe("ProcessQueue", () => {
     }
     await screen.findByTestId("process-done");
     expect(screen.getByTestId("process-done")).toHaveTextContent(/queue clear/i);
+  });
+
+  it("shows an honest zero-load state and triage action when no due items load but inbox work exists", async () => {
+    h.listQueue.mockResolvedValue({
+      items: [],
+      counts: {
+        all: 0,
+        card: 0,
+        source: 0,
+        extract: 0,
+        topic: 0,
+        task: 0,
+        highPriority: 0,
+        overdue: 0,
+        protected: 0,
+      },
+      budget: { used: 0, target: 30 },
+    });
+    h.getDailyWorkSummary.mockResolvedValue({
+      ...h.dailyWork,
+      dueQueueItems: 0,
+      inboxSources: 2,
+      recommendedAction: "triage_inbox",
+    });
+
+    render(<ProcessQueue />);
+
+    const done = await screen.findByTestId("process-done");
+    expect(done).toHaveTextContent("No due items today");
+    expect(done).not.toHaveTextContent("You processed 0 items");
+    expect(done).toHaveTextContent("2 inbox sources still need triage");
+    expect(screen.getByTestId("process-next-work")).toHaveTextContent("Triage inbox");
+
+    fireEvent.click(screen.getByTestId("process-next-work"));
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/inbox" });
+  });
+
+  it("shows the loading state before the first due queue read settles", async () => {
+    let resolveQueue!: (result: QueueListResult) => void;
+    h.listQueue.mockReturnValue(
+      new Promise<QueueListResult>((resolve) => {
+        resolveQueue = resolve;
+      }),
+    );
+
+    render(<ProcessQueue />);
+
+    expect(await screen.findByTestId("process-loading")).toHaveTextContent("Loading due queue");
+    expect(screen.queryByTestId("process-done")).toBeNull();
+
+    resolveQueue(h.result);
+    await screen.findByTestId("process-item");
+  });
+
+  it("keeps the due session usable if the daily summary read fails", async () => {
+    h.getDailyWorkSummary.mockRejectedValue(new Error("daily work down"));
+
+    render(<ProcessQueue />);
+
+    expect(await screen.findByTestId("process-item")).toHaveTextContent(
+      "What does Chollet define intelligence as?",
+    );
+    expect(screen.getByTestId("process-error")).toHaveTextContent("daily work down");
+    expect(screen.queryByTestId("process-done")).toBeNull();
+  });
+
+  it("does not render a false zero-load clear state when the queue read fails", async () => {
+    h.listQueue.mockRejectedValue(new Error("queue down"));
+
+    render(<ProcessQueue />);
+
+    expect(await screen.findByTestId("process-error")).toHaveTextContent("queue down");
+    expect(screen.queryByTestId("process-item")).toBeNull();
+    expect(screen.queryByTestId("process-done")).toBeNull();
+  });
+
+  it("shows an honest zero-load state and resume action for active unscheduled source work", async () => {
+    h.listQueue.mockResolvedValue({
+      items: [],
+      counts: {
+        all: 0,
+        card: 0,
+        source: 0,
+        extract: 0,
+        topic: 0,
+        task: 0,
+        highPriority: 0,
+        overdue: 0,
+        protected: 0,
+      },
+      budget: { used: 0, target: 30 },
+    });
+    h.getDailyWorkSummary.mockResolvedValue({
+      ...h.dailyWork,
+      dueQueueItems: 0,
+      activeUnscheduledSources: 1,
+      resumeSource: {
+        id: "source-active",
+        title: "Active source",
+        priority: 0.75,
+        priorityLabel: "B",
+        status: "active",
+        stage: "raw_source",
+        updatedAt: "2026-06-08T09:00:00.000Z",
+        unresolvedBlocks: 2,
+      },
+      recommendedAction: "resume_unscheduled_source",
+    });
+
+    render(<ProcessQueue />);
+
+    const done = await screen.findByTestId("process-done");
+    expect(done).toHaveTextContent("No due items today");
+    expect(done).toHaveTextContent("Active source is active without a return date");
+    expect(screen.getByTestId("process-next-work")).toHaveTextContent("Resume source");
+
+    fireEvent.click(screen.getByTestId("process-next-work"));
+    expect(h.selectSpy).toHaveBeenCalledWith("source-active");
+    expect(h.navigateSpy).toHaveBeenCalledWith({
+      to: "/source/$id",
+      params: { id: "source-active" },
+    });
+  });
+
+  it("shows an honest zero-load clear state without a next-work action", async () => {
+    h.listQueue.mockResolvedValue({
+      items: [],
+      counts: {
+        all: 0,
+        card: 0,
+        source: 0,
+        extract: 0,
+        topic: 0,
+        task: 0,
+        highPriority: 0,
+        overdue: 0,
+        protected: 0,
+      },
+      budget: { used: 0, target: 30 },
+    });
+    h.getDailyWorkSummary.mockResolvedValue({
+      ...h.dailyWork,
+      dueQueueItems: 0,
+      inboxSources: 0,
+      activeUnscheduledSources: 0,
+      resumeSource: null,
+      recommendedAction: "clear",
+    });
+
+    render(<ProcessQueue />);
+
+    const done = await screen.findByTestId("process-done");
+    expect(done).toHaveTextContent("No due items today");
+    expect(done).not.toHaveTextContent("You processed 0 items");
+    expect(screen.queryByTestId("process-next-work")).toBeNull();
   });
 
   it("skip advances WITHOUT mutating (no queue.act call)", async () => {

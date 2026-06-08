@@ -122,6 +122,17 @@ function installAppApi(overrides: Partial<AppApi> = {}): AppApi {
         request,
       })),
     },
+    dailyWork: {
+      summary: vi.fn(async (request?: unknown) => ({
+        asOf: "2026-06-08T09:00:00.000Z",
+        dueQueueItems: 0,
+        inboxSources: 1,
+        activeUnscheduledSources: 0,
+        resumeSource: null,
+        recommendedAction: "triage_inbox",
+        request,
+      })),
+    },
     backups: {
       create: vi.fn(async () => ({
         timestamp: "2026-06-07T12-30-00-000Z",
@@ -193,6 +204,11 @@ describe("renderer appApi wrapper", () => {
 
     await appApi.listQueue({ types: ["card"] });
     expect(bridge.queue.list).toHaveBeenCalledWith({ types: ["card"] });
+
+    await appApi.getDailyWorkSummary({ asOf: "2026-06-08T09:00:00.000Z" });
+    expect(bridge.dailyWork.summary).toHaveBeenCalledWith({
+      asOf: "2026-06-08T09:00:00.000Z",
+    });
 
     await appApi.createSynthesisNote({ title: "New note" });
     expect(bridge.synthesis.create).toHaveBeenCalledWith({ title: "New note" });

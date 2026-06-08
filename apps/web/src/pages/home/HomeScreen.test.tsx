@@ -28,7 +28,12 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AnalyticsGetResult, QueueItemSummary, QueueListResult } from "../../lib/appApi";
+import type {
+  AnalyticsGetResult,
+  DailyWorkSummaryResult,
+  QueueItemSummary,
+  QueueListResult,
+} from "../../lib/appApi";
 
 /**
  * The global-undo event name HomeScreen listens on. We use the literal here (rather
@@ -228,11 +233,21 @@ const h = vi.hoisted(() => {
     retired: 0,
     dayStreak: 5,
   };
+  const dailyWork: DailyWorkSummaryResult = {
+    asOf: "2026-05-30T18:00:00.000Z",
+    dueQueueItems: 4,
+    inboxSources: 0,
+    activeUnscheduledSources: 0,
+    resumeSource: null,
+    recommendedAction: "process_due_queue",
+  };
   return {
     queue,
     analytics,
+    dailyWork,
     listQueue: vi.fn(),
     getAnalytics: vi.fn(),
+    getDailyWorkSummary: vi.fn(),
     navigateSpy: vi.fn(),
     selectSpy: vi.fn(),
     // Flipped per-test so the non-desktop fallback can be exercised without a
@@ -258,7 +273,11 @@ vi.mock("../../lib/appApi", async () => {
   return {
     ...actual,
     isDesktop: () => h.isDesktop(),
-    appApi: { listQueue: h.listQueue, getAnalytics: h.getAnalytics },
+    appApi: {
+      listQueue: h.listQueue,
+      getAnalytics: h.getAnalytics,
+      getDailyWorkSummary: h.getDailyWorkSummary,
+    },
   };
 });
 
@@ -274,6 +293,7 @@ beforeEach(() => {
   h.search.mockReturnValue({});
   h.listQueue.mockResolvedValue(h.queue);
   h.getAnalytics.mockResolvedValue(h.analytics);
+  h.getDailyWorkSummary.mockResolvedValue(h.dailyWork);
 });
 
 describe("HomeScreen", () => {
@@ -320,9 +340,120 @@ describe("HomeScreen", () => {
       counts: { ...h.queue.counts, all: 0, overdue: 0, protected: 0 },
       budget: { used: 0, target: 30 },
     });
+    h.getDailyWorkSummary.mockResolvedValue({
+      ...h.dailyWork,
+      dueQueueItems: 0,
+      recommendedAction: "clear",
+    });
     render(<HomeScreen />);
     expect(await screen.findByTestId("home-empty")).toBeTruthy();
     expect(screen.queryByTestId("home-preview")).toBeNull();
+  });
+
+  it("routes the clear-state primary CTA to inbox rather than an empty process session", async () => {
+    h.listQueue.mockResolvedValue({
+      ...h.queue,
+      items: [],
+      counts: { ...h.queue.counts, all: 0, overdue: 0, protected: 0 },
+      budget: { used: 0, target: 30 },
+    });
+    h.getDailyWorkSummary.mockResolvedValue({
+      ...h.dailyWork,
+      dueQueueItems: 0,
+      inboxSources: 0,
+      activeUnscheduledSources: 0,
+      recommendedAction: "clear",
+    });
+
+    render(<HomeScreen />);
+
+    expect(await screen.findByTestId("home-empty")).toBeTruthy();
+    expect(screen.getByTestId("home-start-session")).toHaveTextContent("Open inbox");
+    fireEvent.click(screen.getByTestId("home-start-session"));
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/inbox" });
+    expect(h.navigateSpy).not.toHaveBeenCalledWith({ to: "/process", search: {} });
+  });
+
+  it("routes the primary CTA to inbox triage when due queue is empty but imports are waiting", async () => {
+    h.listQueue.mockResolvedValue({
+      ...h.queue,
+      items: [],
+      counts: { ...h.queue.counts, all: 0, overdue: 0, protected: 0 },
+      budget: { used: 0, target: 30 },
+    });
+    h.getDailyWorkSummary.mockResolvedValue({
+      ...h.dailyWork,
+      dueQueueItems: 0,
+      inboxSources: 3,
+      recommendedAction: "triage_inbox",
+    });
+    render(<HomeScreen />);
+
+    expect(await screen.findByTestId("home-inbox-work")).toHaveTextContent("3 imported sources");
+    expect(screen.getByTestId("home-start-session")).toHaveTextContent("Triage inbox");
+    fireEvent.click(screen.getByTestId("home-go-inbox"));
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/inbox" });
+
+    h.navigateSpy.mockClear();
+    fireEvent.click(screen.getByTestId("home-start-session"));
+    expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/inbox" });
+    expect(h.navigateSpy).not.toHaveBeenCalledWith({ to: "/process", search: {} });
+  });
+
+  it("routes the primary CTA to an active unscheduled source when that is the next daily action", async () => {
+    h.listQueue.mockResolvedValue({
+      ...h.queue,
+      items: [],
+      counts: { ...h.queue.counts, all: 0, overdue: 0, protected: 0 },
+      budget: { used: 0, target: 30 },
+    });
+    h.getDailyWorkSummary.mockResolvedValue({
+      ...h.dailyWork,
+      dueQueueItems: 0,
+      inboxSources: 0,
+      activeUnscheduledSources: 1,
+      resumeSource: {
+        id: "source-active",
+        title: "Active source",
+        priority: 0.75,
+        priorityLabel: "B",
+        status: "active",
+        stage: "raw_source",
+        updatedAt: "2026-06-08T09:00:00.000Z",
+        unresolvedBlocks: 2,
+      },
+      recommendedAction: "resume_unscheduled_source",
+    });
+    render(<HomeScreen />);
+
+    expect(await screen.findByTestId("home-resume-source")).toHaveTextContent("Active source");
+    expect(screen.getByTestId("home-start-session")).toHaveTextContent("Resume source");
+    fireEvent.click(screen.getByTestId("home-resume-source-button"));
+
+    expect(h.selectSpy).toHaveBeenCalledWith("source-active");
+    expect(h.navigateSpy).toHaveBeenCalledWith({
+      to: "/source/$id",
+      params: { id: "source-active" },
+    });
+
+    h.selectSpy.mockClear();
+    h.navigateSpy.mockClear();
+    fireEvent.click(screen.getByTestId("home-start-session"));
+
+    expect(h.selectSpy).toHaveBeenCalledWith("source-active");
+    expect(h.navigateSpy).toHaveBeenCalledWith({
+      to: "/source/$id",
+      params: { id: "source-active" },
+    });
+  });
+
+  it("keeps due queue data visible but disables the primary CTA if the daily summary read fails", async () => {
+    h.getDailyWorkSummary.mockRejectedValue(new Error("daily work down"));
+    render(<HomeScreen />);
+
+    expect(await screen.findByTestId("home-due-today")).toHaveTextContent("4");
+    expect(screen.getByTestId("home-error")).toHaveTextContent("daily work down");
+    expect(screen.getByTestId("home-start-session")).toBeDisabled();
   });
 
   it("hides the streak banner when dayStreak === 0", async () => {
@@ -467,15 +598,16 @@ describe("HomeScreen", () => {
     expect(screen.getByTestId("metric-due").textContent).toContain("0");
   });
 
-  it("forwards the asOf clock to /process and to BOTH reads", async () => {
+  it("forwards the asOf clock to /process and to the daily reads", async () => {
     const asOf = "2031-01-01T12:00:00.000Z";
     h.search.mockReturnValue({ asOf });
     render(<HomeScreen />);
     await screen.findByTestId("home-due-today");
 
-    // Both reads are date-scoped by the same clock the dashboard renders.
+    // All reads are date-scoped by the same clock the dashboard renders.
     expect(h.listQueue).toHaveBeenCalledWith({ asOf });
     expect(h.getAnalytics).toHaveBeenCalledWith({ asOf });
+    expect(h.getDailyWorkSummary).toHaveBeenCalledWith({ asOf });
 
     // Start session carries the clock so the /process loop reads the SAME due set.
     fireEvent.click(screen.getByTestId("home-start-session"));
@@ -488,17 +620,19 @@ describe("HomeScreen", () => {
     expect(h.navigateSpy).toHaveBeenCalledWith({ to: "/process", search: { asOf } });
   });
 
-  it("re-reads both sources when a global undo fires (UNDO_EVENT)", async () => {
+  it("re-reads all daily sources when a global undo fires (UNDO_EVENT)", async () => {
     render(<HomeScreen />);
     await screen.findByTestId("home-due-today");
     // The initial load reads each source once.
     expect(h.listQueue).toHaveBeenCalledTimes(1);
     expect(h.getAnalytics).toHaveBeenCalledTimes(1);
+    expect(h.getDailyWorkSummary).toHaveBeenCalledTimes(1);
 
     // A global undo elsewhere should refresh the live dashboard numbers.
     window.dispatchEvent(new Event(UNDO_EVENT));
     await waitFor(() => expect(h.listQueue).toHaveBeenCalledTimes(2));
     expect(h.getAnalytics).toHaveBeenCalledTimes(2);
+    expect(h.getDailyWorkSummary).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -510,5 +644,6 @@ describe("HomeScreen — non-desktop fallback", () => {
     // The fallback reads nothing through the bridge.
     expect(h.listQueue).not.toHaveBeenCalled();
     expect(h.getAnalytics).not.toHaveBeenCalled();
+    expect(h.getDailyWorkSummary).not.toHaveBeenCalled();
   });
 });

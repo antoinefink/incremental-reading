@@ -36,6 +36,7 @@ import { AutoVirtualList } from "../../components/VirtualList";
 import "../../components/inspector/inspector.css";
 import {
   appApi,
+  type DailyWorkSummaryResult,
   isDesktop,
   type QueueActAction,
   type QueueItemSummary,
@@ -257,6 +258,7 @@ export function QueueScreen() {
   const asOf = typeof search.asOf === "string" ? search.asOf : undefined;
   const concept = typeof search.concept === "string" ? search.concept : undefined;
   const [data, setData] = useState<QueueListResult | null>(null);
+  const [dailyWork, setDailyWork] = useState<DailyWorkSummaryResult | null>(null);
   const [filter, setFilter] = useState<FilterId>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilterId>("all");
   const [error, setError] = useState<string | null>(null);
@@ -273,13 +275,35 @@ export function QueueScreen() {
       // no `statuses` (the full due set). The `concept` param is forwarded too (when
       // present) so the documented T041 filter surface is genuinely wired end-to-end.
       const statuses = STATUS_FILTERS.find((s) => s.id === statusFilter)?.statuses;
-      const next = await appApi.listQueue({
-        ...(asOf ? { asOf } : {}),
-        ...(statuses ? { statuses } : {}),
-        ...(concept ? { concept } : {}),
-      });
-      setData(next);
-      setError(null);
+      const [queueResult, workResult] = await Promise.allSettled([
+        appApi.listQueue({
+          ...(asOf ? { asOf } : {}),
+          ...(statuses ? { statuses } : {}),
+          ...(concept ? { concept } : {}),
+        }),
+        appApi.getDailyWorkSummary(asOf ? { asOf } : {}),
+      ]);
+      let nextError: string | null = null;
+      if (queueResult.status === "fulfilled") {
+        setData(queueResult.value);
+      } else {
+        setData(null);
+        nextError =
+          queueResult.reason instanceof Error
+            ? queueResult.reason.message
+            : String(queueResult.reason);
+      }
+      if (workResult.status === "fulfilled") {
+        setDailyWork(workResult.value);
+      } else {
+        setDailyWork(null);
+        nextError =
+          nextError ??
+          (workResult.reason instanceof Error
+            ? workResult.reason.message
+            : String(workResult.reason));
+      }
+      setError(nextError);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -344,11 +368,26 @@ export function QueueScreen() {
   );
 
   const startSession = useCallback(() => {
-    // The T031 "Process queue" loop lives at /process: one element at a time,
-    // advancing after each action, reusing the same typed mutation path as this
-    // list. Carry the `asOf` clock so the loop reads the SAME due set the list shows.
+    if (!dailyWork) return;
+    if (dailyWork?.recommendedAction === "triage_inbox") {
+      void navigate({ to: "/inbox" });
+      return;
+    }
+    if (dailyWork?.recommendedAction === "resume_unscheduled_source" && dailyWork.resumeSource) {
+      select(dailyWork.resumeSource.id);
+      void navigate({
+        to: "/source/$id",
+        params: { id: dailyWork.resumeSource.id },
+      });
+      return;
+    }
+    if (dailyWork?.recommendedAction === "clear" && (dailyWork.dueQueueItems ?? dueCount) === 0) {
+      void navigate({ to: "/inbox" });
+      return;
+    }
+    // The T031 "Process queue" loop starts only when due scheduled work exists.
     void navigate({ to: "/process", search: asOf ? { asOf } : {} });
-  }, [navigate, asOf]);
+  }, [navigate, select, asOf, dailyWork, dueCount]);
 
   /**
    * Apply one in-place queue action through the SAME typed `appApi` mutation path
@@ -467,6 +506,32 @@ export function QueueScreen() {
     );
   }
 
+  const primaryLabel =
+    dailyWork?.recommendedAction === "triage_inbox"
+      ? "Triage inbox"
+      : dailyWork?.recommendedAction === "resume_unscheduled_source"
+        ? "Resume source"
+        : dailyWork?.recommendedAction === "clear"
+          ? "Open inbox"
+          : "Start session";
+  const primaryIcon =
+    dailyWork?.recommendedAction === "triage_inbox"
+      ? "inbox"
+      : dailyWork?.recommendedAction === "resume_unscheduled_source"
+        ? "source"
+        : dailyWork?.recommendedAction === "clear"
+          ? "inbox"
+          : "play";
+  const sessionNote =
+    dailyWork?.recommendedAction === "triage_inbox"
+      ? `${dailyWork.inboxSources} inbox source${dailyWork.inboxSources === 1 ? "" : "s"} awaiting triage.`
+      : dailyWork?.recommendedAction === "resume_unscheduled_source" && dailyWork.resumeSource
+        ? `Resume ${dailyWork.resumeSource.title}.`
+        : dailyWork?.recommendedAction === "clear"
+          ? "No due queue or inbox work right now."
+          : "Process one item at a time — sorted by priority, then due date.";
+  const hasActiveFilters = filter !== "all" || statusFilter !== "all" || concept !== undefined;
+
   return (
     <div className="q-page" data-testid="route-queue">
       <div className="q-pad">
@@ -539,14 +604,13 @@ export function QueueScreen() {
             className="sessionbar__start"
             data-testid="queue-start-session"
             data-coach="start-session"
+            disabled={!dailyWork}
             onClick={startSession}
           >
-            <Icon name="play" size={14} />
-            Start session
+            <Icon name={primaryIcon} size={14} />
+            {primaryLabel}
           </button>
-          <span className="sessionbar__note">
-            Process one item at a time — sorted by priority, then due date.
-          </span>
+          <span className="sessionbar__note">{sessionNote}</span>
         </div>
 
         {/* filters */}
@@ -633,18 +697,66 @@ export function QueueScreen() {
               />
             )}
           />
-        ) : dueCount === 0 ? (
+        ) : !data ? null : dueCount === 0 && !hasActiveFilters ? (
           <div className="q-panel">
-            <div className="q-empty" data-testid="queue-empty">
-              <div className="q-empty__icon">
-                <Icon name="checkCircle" size={26} />
+            {dailyWork?.recommendedAction === "triage_inbox" ? (
+              <div className="q-empty" data-testid="queue-inbox-work">
+                <div className="q-empty__icon q-empty__icon--filter">
+                  <Icon name="inbox" size={24} />
+                </div>
+                <h2 className="q-empty__title">No due items today</h2>
+                <p className="q-empty__body">
+                  {dailyWork.inboxSources} inbox source
+                  {dailyWork.inboxSources === 1 ? "" : "s"} awaiting triage.
+                </p>
+                <button
+                  type="button"
+                  className="sessionbar__start"
+                  data-testid="queue-go-inbox"
+                  onClick={() => void navigate({ to: "/inbox" })}
+                >
+                  <Icon name="inbox" size={14} />
+                  Triage inbox
+                </button>
               </div>
-              <h2 className="q-empty__title">Queue clear for today</h2>
-              <p className="q-empty__body">
-                You've processed everything due. The next items unlock as they come due — your
-                high-priority sources are protected and won't pile up.
-              </p>
-            </div>
+            ) : dailyWork?.recommendedAction === "resume_unscheduled_source" &&
+              dailyWork.resumeSource ? (
+              <div className="q-empty" data-testid="queue-resume-source">
+                <div className="q-empty__icon q-empty__icon--filter">
+                  <Icon name="source" size={24} />
+                </div>
+                <h2 className="q-empty__title">No due items today</h2>
+                <p className="q-empty__body">
+                  {dailyWork.resumeSource.title} is active without a return date.
+                </p>
+                <button
+                  type="button"
+                  className="sessionbar__start"
+                  data-testid="queue-resume-source-button"
+                  onClick={() => {
+                    const source = dailyWork.resumeSource;
+                    if (!source) return;
+                    const id = source.id;
+                    select(id);
+                    void navigate({ to: "/source/$id", params: { id } });
+                  }}
+                >
+                  <Icon name="source" size={14} />
+                  Resume source
+                </button>
+              </div>
+            ) : (
+              <div className="q-empty" data-testid="queue-empty">
+                <div className="q-empty__icon">
+                  <Icon name="checkCircle" size={26} />
+                </div>
+                <h2 className="q-empty__title">Queue clear for today</h2>
+                <p className="q-empty__body">
+                  You've processed everything due. The next items unlock as they come due — your
+                  high-priority sources are protected and won't pile up.
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <div className="q-panel">

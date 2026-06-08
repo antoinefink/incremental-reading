@@ -3379,6 +3379,40 @@ export interface BalanceGetResult {
 }
 
 // ---------------------------------------------------------------------------
+// dailyWork.*  (T101 — daily workflow routing)
+// ---------------------------------------------------------------------------
+
+export interface DailyWorkSummaryRequest {
+  readonly asOf?: string;
+}
+
+export type DailyWorkRecommendedAction =
+  | "process_due_queue"
+  | "triage_inbox"
+  | "resume_unscheduled_source"
+  | "clear";
+
+export interface DailyWorkResumeSource {
+  readonly id: string;
+  readonly title: string;
+  readonly priority: number;
+  readonly priorityLabel: "A" | "B" | "C" | "D";
+  readonly status: string;
+  readonly stage: string;
+  readonly updatedAt: string;
+  readonly unresolvedBlocks: number | null;
+}
+
+export interface DailyWorkSummaryResult {
+  readonly asOf: string;
+  readonly dueQueueItems: number;
+  readonly inboxSources: number;
+  readonly activeUnscheduledSources: number;
+  readonly resumeSource: DailyWorkResumeSource | null;
+  readonly recommendedAction: DailyWorkRecommendedAction;
+}
+
+// ---------------------------------------------------------------------------
 // sourceYield.*  (T083 — per-source yield analytics)
 // ---------------------------------------------------------------------------
 
@@ -3761,6 +3795,9 @@ export interface AppApi {
   };
   readonly balance: {
     get(request?: BalanceGetRequest): Promise<BalanceGetResult>;
+  };
+  readonly dailyWork: {
+    summary(request?: DailyWorkSummaryRequest): Promise<DailyWorkSummaryResult>;
   };
   readonly sourceYield: {
     list(request?: SourceYieldListRequest): Promise<SourceYieldListResult>;
@@ -4750,6 +4787,13 @@ export const appApi = {
    */
   getBalance(request?: BalanceGetRequest): Promise<BalanceGetResult> {
     return requireAppApi().balance.get(request);
+  },
+  /**
+   * The primary daily workflow recommendation — due queue first, then inbox
+   * triage, then active unscheduled source resume, then true clear. Read-only.
+   */
+  getDailyWorkSummary(request?: DailyWorkSummaryRequest): Promise<DailyWorkSummaryResult> {
+    return requireAppApi().dailyWork.summary(request);
   },
   /**
    * The per-source yield rollup (T083) — for every live source, its read %,

@@ -98,6 +98,12 @@ export {
   type CreateConceptInput,
 } from "./concept-repository";
 export {
+  DailyWorkQuery,
+  type DailyWorkRecommendedAction,
+  type DailyWorkResumeSource,
+  type DailyWorkSummary,
+} from "./daily-work-query";
+export {
   DEFAULT_DEDUP_CLUSTER_LIMIT,
   type DedupReportOptions,
   DedupReportQuery,

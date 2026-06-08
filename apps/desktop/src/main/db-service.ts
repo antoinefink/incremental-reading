@@ -65,6 +65,7 @@ import {
   CardService,
   cardRowToLifetime,
   createRepositories,
+  DailyWorkQuery,
   type DocumentMark,
   ExtractionService,
   ExtractService,
@@ -182,6 +183,8 @@ import type {
   ConceptsMembersResult,
   ConceptsUnassignRequest,
   ConceptsUnassignResult,
+  DailyWorkSummaryRequest,
+  DailyWorkSummaryResult,
   DbStatus,
   DocumentMarkPayload,
   DocumentMarksAddRequest,
@@ -450,6 +453,7 @@ export class DbService {
   private inspector: InspectorQuery | null = null;
   private lineage: LineageQuery | null = null;
   private queue: QueueQuery | null = null;
+  private dailyWork: DailyWorkQuery | null = null;
   private library: LibraryQuery | null = null;
   /** The per-source yield rollup (T083) — read %, extracts/cards/mature/leeches/time, ranked. */
   private sourceYield: SourceYieldQuery | null = null;
@@ -756,6 +760,7 @@ export class DbService {
     this.extractStagnation = new ExtractStagnationQuery(this.handle.db);
     this.queueAction = new QueueActionService(this.handle.db);
     this.blockProcessing = new BlockProcessingService(this.handle.db);
+    this.dailyWork = new DailyWorkQuery(this.repositories, this.blockProcessing);
     // The overload AUTO-POSTPONE apply seam (T077): reads the merged due set + budget,
     // runs the pure `planAutoPostpone`, and applies each victim through its CORRECT
     // scheduler (attention reschedule / FSRS card defer) under one `batchId`.
@@ -813,6 +818,7 @@ export class DbService {
     this.inspector = null;
     this.lineage = null;
     this.queue = null;
+    this.dailyWork = null;
     this.library = null;
     this.queueAction = null;
     this.blockProcessing = null;
@@ -5104,6 +5110,19 @@ export class DbService {
       imbalanced: summary.imbalanced,
       severity: summary.severity,
     };
+  }
+
+  /**
+   * The daily workflow recommendation (T101): due scheduled work first, then
+   * source inbox triage, then an active unscheduled source resume, then a true
+   * clear state. Read-only — it reuses the canonical queue/inbox predicates.
+   */
+  getDailyWorkSummary(request?: DailyWorkSummaryRequest): DailyWorkSummaryResult {
+    if (!this.dailyWork) {
+      throw new Error("DbService: database is not open");
+    }
+    const asOf = (request?.asOf ?? nowIso()) as IsoTimestamp;
+    return this.dailyWork.summary(asOf);
   }
 
   /**

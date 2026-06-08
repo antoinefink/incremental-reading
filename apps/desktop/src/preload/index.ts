@@ -49,6 +49,7 @@ import type {
   ConceptsCreateRequest,
   ConceptsMembersRequest,
   ConceptsUnassignRequest,
+  DailyWorkSummaryRequest,
   DocumentMarksAddRequest,
   DocumentMarksListRequest,
   DocumentMarksRemoveRequest,
@@ -453,6 +454,10 @@ const appApi: AppApi = {
   },
   balance: {
     get: (request?: BalanceGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.balanceGet, request),
+  },
+  dailyWork: {
+    summary: (request?: DailyWorkSummaryRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.dailyWorkSummary, request ?? {}),
   },
   sourceYield: {
     list: (request?: SourceYieldListRequest) =>

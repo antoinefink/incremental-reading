@@ -33,6 +33,7 @@ import "../../components/inspector/inspector.css";
 import {
   type AnalyticsGetResult,
   appApi,
+  type DailyWorkSummaryResult,
   isDesktop,
   type QueueItemSummary,
   type QueueListResult,
@@ -182,6 +183,7 @@ export function HomeScreen() {
   );
   const [queue, setQueue] = useState<QueueListResult | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsGetResult | null>(null);
+  const [dailyWork, setDailyWork] = useState<DailyWorkSummaryResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -191,13 +193,42 @@ export function HomeScreen() {
       return;
     }
     try {
-      const [q, a] = await Promise.all([
+      const [queueResult, analyticsResult, workResult] = await Promise.allSettled([
         appApi.listQueue(asOf ? { asOf } : {}),
         appApi.getAnalytics(asOf ? { asOf } : {}),
+        appApi.getDailyWorkSummary(asOf ? { asOf } : {}),
       ]);
-      setQueue(q);
-      setAnalytics(a);
-      setError(null);
+      let nextError: string | null = null;
+      if (queueResult.status === "fulfilled") {
+        setQueue(queueResult.value);
+      } else {
+        setQueue(null);
+        nextError =
+          queueResult.reason instanceof Error
+            ? queueResult.reason.message
+            : String(queueResult.reason);
+      }
+      if (analyticsResult.status === "fulfilled") {
+        setAnalytics(analyticsResult.value);
+      } else {
+        setAnalytics(null);
+        nextError =
+          nextError ??
+          (analyticsResult.reason instanceof Error
+            ? analyticsResult.reason.message
+            : String(analyticsResult.reason));
+      }
+      if (workResult.status === "fulfilled") {
+        setDailyWork(workResult.value);
+      } else {
+        setDailyWork(null);
+        nextError =
+          nextError ??
+          (workResult.reason instanceof Error
+            ? workResult.reason.message
+            : String(workResult.reason));
+      }
+      setError(nextError);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -225,11 +256,26 @@ export function HomeScreen() {
   );
 
   const startSession = useCallback(() => {
-    // The same destination the Daily Queue's "Start session" uses — the T031
-    // one-at-a-time process loop. Carry the `asOf` clock so the loop reads the SAME
-    // due set this dashboard shows.
+    if (!dailyWork) return;
+    if (dailyWork?.recommendedAction === "triage_inbox") {
+      void navigate({ to: "/inbox" });
+      return;
+    }
+    if (dailyWork?.recommendedAction === "resume_unscheduled_source" && dailyWork.resumeSource) {
+      select(dailyWork.resumeSource.id);
+      void navigate({
+        to: "/source/$id",
+        params: { id: dailyWork.resumeSource.id },
+      });
+      return;
+    }
+    if (dailyWork?.recommendedAction === "clear" && (queue?.counts.all ?? 0) === 0) {
+      void navigate({ to: "/inbox" });
+      return;
+    }
+    // Due scheduled work is the only case that starts the T031 one-at-a-time loop.
     void navigate({ to: "/process", search: asOf ? { asOf } : {} });
-  }, [navigate, asOf]);
+  }, [navigate, select, asOf, dailyWork, queue]);
 
   if (!desktop) {
     return (
@@ -256,6 +302,7 @@ export function HomeScreen() {
   // reads as a real empty queue, which a failed read is NOT).
   const hasQueue = queue !== null;
   const hasAnalytics = analytics !== null;
+  const hasDailyWork = dailyWork !== null;
   /** Render a metric value: the number when its source loaded, else an em-dash. */
   const num = (present: boolean, value: number | undefined): string =>
     present ? String(value ?? 0) : "—";
@@ -278,6 +325,30 @@ export function HomeScreen() {
   const spark = analytics?.reviewsByDay ?? [];
   const sparkMax = spark.reduce((m, d) => Math.max(m, d.count), 0);
   const topDue = (queue?.items ?? []).slice(0, PREVIEW_LIMIT);
+  const primaryLabel =
+    dailyWork?.recommendedAction === "triage_inbox"
+      ? "Triage inbox"
+      : dailyWork?.recommendedAction === "resume_unscheduled_source"
+        ? "Resume source"
+        : dailyWork?.recommendedAction === "clear"
+          ? "Open inbox"
+          : "Start session";
+  const primaryIcon =
+    dailyWork?.recommendedAction === "triage_inbox"
+      ? "inbox"
+      : dailyWork?.recommendedAction === "resume_unscheduled_source"
+        ? "source"
+        : dailyWork?.recommendedAction === "clear"
+          ? "inbox"
+          : "play";
+  const sessionNote =
+    dailyWork?.recommendedAction === "triage_inbox"
+      ? `${dailyWork.inboxSources} inbox source${dailyWork.inboxSources === 1 ? "" : "s"} awaiting triage.`
+      : dailyWork?.recommendedAction === "resume_unscheduled_source" && dailyWork.resumeSource
+        ? `Resume ${dailyWork.resumeSource.title}.`
+        : dailyWork?.recommendedAction === "clear"
+          ? "No due queue or inbox work right now."
+          : "Process one item at a time — sorted by priority, then due date.";
 
   return (
     <div className="q-page" data-testid="route-home">
@@ -355,10 +426,11 @@ export function HomeScreen() {
             type="button"
             className="sessionbar__start"
             data-testid="home-start-session"
+            disabled={!hasDailyWork}
             onClick={startSession}
           >
-            <Icon name="play" size={14} />
-            Start session
+            <Icon name={primaryIcon} size={14} />
+            {primaryLabel}
           </button>
           <button
             type="button"
@@ -384,9 +456,7 @@ export function HomeScreen() {
               Review
             </button>
           ) : null}
-          <span className="sessionbar__note">
-            Process one item at a time — sorted by priority, then due date.
-          </span>
+          <span className="sessionbar__note">{sessionNote}</span>
         </div>
 
         {/* Today's-status metric tiles (analytics chrome). */}
@@ -435,7 +505,73 @@ export function HomeScreen() {
               ))}
             </div>
           </div>
-        ) : hasQueue && dueCount === 0 && !loading ? (
+        ) : hasQueue &&
+          hasDailyWork &&
+          dueCount === 0 &&
+          dailyWork.recommendedAction === "triage_inbox" &&
+          !loading ? (
+          <div className="q-panel">
+            <div className="q-empty" data-testid="home-inbox-work">
+              <div className="q-empty__icon q-empty__icon--filter">
+                <Icon name="inbox" size={24} />
+              </div>
+              <h2 className="q-empty__title">Inbox needs triage</h2>
+              <p className="q-empty__body">
+                {dailyWork.inboxSources} imported source
+                {dailyWork.inboxSources === 1 ? "" : "s"} waiting. Triage them before starting a
+                due-queue session.
+              </p>
+              <button
+                type="button"
+                className="sessionbar__start"
+                data-testid="home-go-inbox"
+                onClick={() => void navigate({ to: "/inbox" })}
+              >
+                <Icon name="inbox" size={14} />
+                Triage inbox
+              </button>
+            </div>
+          </div>
+        ) : hasQueue &&
+          hasDailyWork &&
+          dueCount === 0 &&
+          dailyWork.recommendedAction === "resume_unscheduled_source" &&
+          dailyWork.resumeSource &&
+          !loading ? (
+          <div className="q-panel">
+            <div className="q-empty" data-testid="home-resume-source">
+              <div className="q-empty__icon q-empty__icon--filter">
+                <Icon name="source" size={24} />
+              </div>
+              <h2 className="q-empty__title">Resume unscheduled source</h2>
+              <p className="q-empty__body">
+                {dailyWork.resumeSource.title} is active without a return date.
+              </p>
+              <button
+                type="button"
+                className="sessionbar__start"
+                data-testid="home-resume-source-button"
+                onClick={() => {
+                  const source = dailyWork.resumeSource;
+                  if (!source) return;
+                  const id = source.id;
+                  select(id);
+                  void navigate({
+                    to: "/source/$id",
+                    params: { id },
+                  });
+                }}
+              >
+                <Icon name="source" size={14} />
+                Resume source
+              </button>
+            </div>
+          </div>
+        ) : hasQueue &&
+          hasDailyWork &&
+          dueCount === 0 &&
+          dailyWork.recommendedAction === "clear" &&
+          !loading ? (
           <div className="q-panel">
             <div className="q-empty" data-testid="home-empty">
               <div className="q-empty__icon">

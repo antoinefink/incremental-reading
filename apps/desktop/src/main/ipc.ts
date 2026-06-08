@@ -50,6 +50,7 @@ import {
   ConceptsListRequestSchema,
   ConceptsMembersRequestSchema,
   ConceptsUnassignRequestSchema,
+  DailyWorkSummaryRequestSchema,
   DbStatusRequestSchema,
   DocumentMarksAddRequestSchema,
   DocumentMarksListRequestSchema,
@@ -1318,6 +1319,11 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.balanceGet, (_event, rawRequest: unknown) => {
     const request = BalanceGetRequestSchema.parse(rawRequest);
     return dbService.getBalance(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.dailyWorkSummary, (_event, rawRequest: unknown) => {
+    const request = DailyWorkSummaryRequestSchema.parse(rawRequest);
+    return dbService.getDailyWorkSummary(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.sourceYieldList, (_event, rawRequest: unknown) => {

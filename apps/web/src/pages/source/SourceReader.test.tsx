@@ -9,6 +9,8 @@ const h = vi.hoisted(() => ({
   select: vi.fn(),
   getInspectorData: vi.fn(),
   actOnQueueItem: vi.fn(),
+  scheduleQueueItem: vi.fn(),
+  setElementPriority: vi.fn(),
   createExtraction: vi.fn(),
   refreshInspector: vi.fn(),
   editor: {
@@ -151,6 +153,8 @@ vi.mock("../../lib/appApi", async () => {
     appApi: {
       getInspectorData: h.getInspectorData,
       actOnQueueItem: h.actOnQueueItem,
+      scheduleQueueItem: h.scheduleQueueItem,
+      setElementPriority: h.setElementPriority,
       createExtraction: h.createExtraction,
     },
   };
@@ -279,6 +283,16 @@ const inspectorData = {
   },
 };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 beforeEach(() => {
   h.desktop = true;
   h.routeId = "src-1";
@@ -287,6 +301,8 @@ beforeEach(() => {
   h.select.mockReset();
   h.getInspectorData.mockReset();
   h.actOnQueueItem.mockReset();
+  h.scheduleQueueItem.mockReset();
+  h.setElementPriority.mockReset();
   h.createExtraction.mockReset();
   h.refreshInspector.mockReset();
   h.editor.commands.focus.mockReset();
@@ -354,6 +370,14 @@ beforeEach(() => {
   h.selectionState.dismiss.mockReset();
   h.getInspectorData.mockResolvedValue({ data: inspectorData });
   h.actOnQueueItem.mockResolvedValue({});
+  h.scheduleQueueItem.mockResolvedValue({
+    item: null,
+    dueAt: "2026-06-09T00:00:00.000Z",
+    intervalDays: 1,
+  });
+  h.setElementPriority.mockResolvedValue({
+    element: { ...inspectorData.element, priorityLabel: "B" },
+  });
   h.createExtraction.mockResolvedValue({ id: "ext-1" });
 });
 
@@ -405,6 +429,131 @@ describe("SourceReader", () => {
     expect(h.navigate).toHaveBeenCalledWith({ to: "/queue" });
   });
 
+  it("keeps the reader open and controls usable after a delete failure", async () => {
+    h.actOnQueueItem.mockRejectedValue(new Error("delete failed"));
+    const { getByTestId, findByTestId } = render(<SourceReader />);
+    await findByTestId("mock-source-editor");
+
+    fireEvent.click(getByTestId("reader-delete"));
+
+    await waitFor(() =>
+      expect(getByTestId("reader-flash")).toHaveTextContent("Could not delete source"),
+    );
+    expect(h.navigate).not.toHaveBeenCalledWith({ to: "/queue" });
+    expect(getByTestId("reader-postpone")).not.toBeDisabled();
+    expect(getByTestId("reader-delete")).not.toBeDisabled();
+  });
+
+  it("schedules the source return through the existing schedule queue command", async () => {
+    const { getByTestId, findByTestId } = render(<SourceReader />);
+    await findByTestId("mock-source-editor");
+
+    fireEvent.click(getByTestId("reader-postpone"));
+    fireEvent.click(getByTestId("schedule-nextWeek"));
+
+    await waitFor(() =>
+      expect(h.scheduleQueueItem).toHaveBeenCalledWith({
+        id: "src-1",
+        choice: { kind: "nextWeek" },
+      }),
+    );
+  });
+
+  it("refreshes source metadata after scheduling a return", async () => {
+    const { getByTestId, findByTestId } = render(<SourceReader />);
+    await findByTestId("reader-title");
+    h.getInspectorData.mockClear();
+
+    fireEvent.click(getByTestId("reader-postpone"));
+    fireEvent.click(getByTestId("schedule-nextWeek"));
+
+    await waitFor(() =>
+      expect(h.scheduleQueueItem).toHaveBeenCalledWith({
+        id: "src-1",
+        choice: { kind: "nextWeek" },
+      }),
+    );
+    await waitFor(() => expect(h.getInspectorData).toHaveBeenCalledWith({ id: "src-1" }));
+    expect(h.refreshInspector).toHaveBeenCalled();
+    expect(getByTestId("reader-flash")).toHaveTextContent("Scheduled return");
+  });
+
+  it("keeps reader exit controls usable after a schedule failure", async () => {
+    h.scheduleQueueItem.mockRejectedValue(new Error("schedule failed"));
+    const { getByTestId, findByTestId } = render(<SourceReader />);
+    await findByTestId("mock-source-editor");
+
+    fireEvent.click(getByTestId("reader-postpone"));
+    fireEvent.click(getByTestId("schedule-nextWeek"));
+
+    await waitFor(() =>
+      expect(getByTestId("reader-flash")).toHaveTextContent("Could not schedule return"),
+    );
+    expect(getByTestId("reader-postpone")).not.toBeDisabled();
+    expect(getByTestId("reader-lower-priority")).not.toBeDisabled();
+  });
+
+  it("lowers source priority through the element priority command", async () => {
+    const { getByTestId, findByTestId } = render(<SourceReader />);
+    await findByTestId("mock-source-editor");
+
+    fireEvent.click(getByTestId("reader-lower-priority"));
+
+    await waitFor(() =>
+      expect(h.setElementPriority).toHaveBeenCalledWith({
+        id: "src-1",
+        action: { kind: "lower" },
+      }),
+    );
+  });
+
+  it("keeps reader exit controls usable after a lower-priority failure", async () => {
+    h.setElementPriority.mockRejectedValue(new Error("priority failed"));
+    const { getByTestId, findByTestId } = render(<SourceReader />);
+    await findByTestId("mock-source-editor");
+
+    fireEvent.click(getByTestId("reader-lower-priority"));
+
+    await waitFor(() =>
+      expect(getByTestId("reader-flash")).toHaveTextContent("Could not lower priority"),
+    );
+    expect(getByTestId("reader-postpone")).not.toBeDisabled();
+    expect(getByTestId("reader-lower-priority")).not.toBeDisabled();
+  });
+
+  it("blocks overlapping reader exit mutations while one exit action is pending", async () => {
+    const pending = deferred<{
+      item: null;
+      dueAt: string;
+      intervalDays: number;
+    }>();
+    h.scheduleQueueItem.mockReturnValue(pending.promise);
+    const { getByTestId, findByTestId } = render(<SourceReader />);
+    await findByTestId("mock-source-editor");
+
+    fireEvent.click(getByTestId("reader-postpone"));
+    fireEvent.click(getByTestId("schedule-nextWeek"));
+
+    await waitFor(() => expect(getByTestId("reader-lower-priority")).toBeDisabled());
+    expect(getByTestId("reader-mark-done")).toBeDisabled();
+    expect(getByTestId("reader-delete")).toBeDisabled();
+
+    fireEvent.click(getByTestId("reader-lower-priority"));
+    fireEvent.click(getByTestId("reader-mark-done"));
+    fireEvent.click(getByTestId("reader-delete"));
+
+    expect(h.setElementPriority).not.toHaveBeenCalled();
+    expect(h.actOnQueueItem).not.toHaveBeenCalled();
+
+    pending.resolve({
+      item: null,
+      dueAt: "2026-06-09T00:00:00.000Z",
+      intervalDays: 1,
+    });
+    await waitFor(() => expect(getByTestId("reader-lower-priority")).not.toBeDisabled());
+    expect(h.scheduleQueueItem).toHaveBeenCalledTimes(1);
+  });
+
   it("confirms unresolved blocks before marking the source done", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const { getByTestId, findByTestId } = render(<SourceReader />);
@@ -419,6 +568,37 @@ describe("SourceReader", () => {
       }),
     );
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining("1 unresolved block"));
+    confirm.mockRestore();
+  });
+
+  it("does not mark the source done when unresolved confirmation is cancelled", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { getByTestId, findByTestId } = render(<SourceReader />);
+    await findByTestId("mock-source-editor");
+
+    fireEvent.click(getByTestId("reader-mark-done"));
+
+    await waitFor(() => expect(confirm).toHaveBeenCalled());
+    expect(h.actOnQueueItem).not.toHaveBeenCalled();
+    await waitFor(() => expect(getByTestId("reader-mark-done")).not.toBeDisabled());
+    confirm.mockRestore();
+  });
+
+  it("keeps reader exit controls usable after a mark-done failure", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    h.actOnQueueItem.mockRejectedValue(new Error("mark done failed"));
+    const { getByTestId, findByTestId } = render(<SourceReader />);
+    await findByTestId("mock-source-editor");
+
+    fireEvent.click(getByTestId("reader-mark-done"));
+
+    await waitFor(() =>
+      expect(getByTestId("reader-flash")).toHaveTextContent("Could not mark source done"),
+    );
+    expect(getByTestId("reader-postpone")).not.toBeDisabled();
+    expect(getByTestId("reader-mark-done")).not.toBeDisabled();
+    expect(getByTestId("reader-lower-priority")).not.toBeDisabled();
+    confirm.mockRestore();
   });
 
   it("lifts a selection into an extract and refreshes lineage", async () => {
@@ -464,7 +644,7 @@ describe("SourceReader", () => {
     await waitFor(() =>
       expect(h.highlightsState.add).toHaveBeenCalledWith(h.selectionState.location),
     );
-    expect(getByTestId("reader-flash")).toHaveTextContent("Highlighted");
+    await waitFor(() => expect(getByTestId("reader-flash")).toHaveTextContent("Highlighted"));
 
     fireEvent.click(getByTestId("mock-toolbar-cloze"));
     expect(h.createExtraction).not.toHaveBeenCalled();
@@ -477,6 +657,9 @@ describe("SourceReader", () => {
 
     expect(await findByTestId("mock-pdf-reader")).toHaveTextContent("PDF src-1");
     expect(getByTestId("reader-pdf-progress")).toHaveTextContent("PDF");
+    expect(getByTestId("reader-postpone")).toBeInTheDocument();
+    expect(getByTestId("reader-mark-done")).toBeInTheDocument();
+    expect(getByTestId("reader-lower-priority")).toBeInTheDocument();
 
     fireEvent.click(getByTestId("mock-pdf-page-change"));
     expect(getByTestId("reader-pdf-progress")).toHaveTextContent("page 2 of 4");
@@ -491,6 +674,9 @@ describe("SourceReader", () => {
     const { findByTestId, getByTestId } = render(<SourceReader />);
 
     expect(await findByTestId("mock-media-reader")).toHaveTextContent("Media src-1");
+    expect(getByTestId("reader-postpone")).toBeInTheDocument();
+    expect(getByTestId("reader-mark-done")).toBeInTheDocument();
+    expect(getByTestId("reader-lower-priority")).toBeInTheDocument();
     expect(getByTestId("reader-open-original")).toHaveAttribute(
       "href",
       "https://example.com/source",
