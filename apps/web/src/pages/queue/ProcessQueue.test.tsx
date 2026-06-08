@@ -532,6 +532,14 @@ async function moveToSource(): Promise<void> {
 }
 
 describe("ProcessQueue", () => {
+  it("keeps the centered process card flat instead of shadowed", () => {
+    const css = readFileSync(resolve(import.meta.dirname, "process-queue.css"), "utf8");
+    const card = cssRule(css, ".pq-card");
+
+    expect(card).toContain("border: 1px solid var(--border);");
+    expect(card).not.toMatch(/\bbox-shadow\s*:/);
+  });
+
   it("renders exactly ONE element at a time (the cursor item)", async () => {
     render(<ProcessQueue />);
     await screen.findByTestId("process-item");

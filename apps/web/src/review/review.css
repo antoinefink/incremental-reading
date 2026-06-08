@@ -212,7 +212,6 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-xl);
-  box-shadow: var(--shadow-md);
   width: 100%;
   overflow: hidden;
 }
