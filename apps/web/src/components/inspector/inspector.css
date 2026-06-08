@@ -704,6 +704,7 @@
   gap: 6px;
 }
 .insp-quote {
+  margin: var(--s-2, 6px) 0 0;
   font-family: var(--font-read);
   font-size: var(--t-sm);
   color: var(--text-2);

@@ -59,4 +59,34 @@ describe("source reader CSS", () => {
     expect(processedHover).toContain("background: var(--surface);");
     expect(processedHover).toContain("border-color: var(--border-strong);");
   });
+
+  it("keeps rich article images constrained inside the reading column", () => {
+    const image = cssBlock(".reader img");
+
+    expect(image).toContain("display: block;");
+    expect(image).toContain("max-width: 100%;");
+    expect(image).toContain("max-height: min(72vh, 720px);");
+    expect(image).toContain("height: auto;");
+    expect(image).toContain("margin: 0 auto var(--s-5);");
+    expect(image).toContain("object-fit: contain;");
+    expect(image).toContain("border-radius: var(--r-md);");
+  });
+
+  it("keeps figure-wrapped article images on the same paragraph rhythm", () => {
+    const figure = cssBlock(".reader figure");
+    const figureImage = cssBlock(".reader figure > img");
+
+    expect(figure).toContain("margin: 0 0 var(--s-5);");
+    expect(figureImage).toContain("margin: 0 auto;");
+  });
+
+  it("keeps the reader body as the article scroller with bottom breathing room", () => {
+    const page = cssBlock(".reader-page");
+    const rail = cssBlock(".reader-rail");
+
+    expect(page).toContain("overflow-y: auto;");
+    expect(page).toContain("min-height: 0;");
+    expect(rail).toContain("--reader-bottom-breathing-room: calc(var(--s-8) * 5);");
+    expect(rail).toContain("padding: var(--s-7) 0 var(--reader-bottom-breathing-room);");
+  });
 });

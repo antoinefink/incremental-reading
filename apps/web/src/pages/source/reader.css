@@ -178,6 +178,29 @@
 .reader a:hover {
   text-decoration: underline;
 }
+.reader img {
+  display: block;
+  max-width: 100%;
+  max-height: min(72vh, 720px);
+  height: auto;
+  margin: 0 auto var(--s-5);
+  object-fit: contain;
+  border-radius: var(--r-md);
+}
+.reader figure {
+  margin: 0 0 var(--s-5);
+}
+.reader figure > img {
+  margin: 0 auto;
+}
+.reader figcaption {
+  margin-top: var(--s-2);
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  line-height: var(--lh-snug);
+  color: var(--text-3);
+  text-align: center;
+}
 /* The editor surface focus ring is removed; the reading column owns the look. */
 .reader .ProseMirror:focus {
   outline: none;
@@ -445,9 +468,11 @@ mark.extracted {
   padding: 0 28px;
 }
 .reader-rail {
+  --reader-bottom-breathing-room: calc(var(--s-8) * 5);
+
   max-width: 680px;
   margin: 0 auto;
-  padding: 36px 0 120px;
+  padding: var(--s-7) 0 var(--reader-bottom-breathing-room);
   /* Positioning context for the per-paragraph "mark processed" overlay (T026). */
   position: relative;
 }

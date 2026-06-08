@@ -18,6 +18,11 @@ const DOC = {
   content: [
     {
       type: "paragraph",
+      attrs: { blockId: "blk-intro" },
+      content: [{ type: "text", text: "Intro paragraph." }],
+    },
+    {
+      type: "paragraph",
       attrs: { blockId: "blk-formula" },
       content: [{ type: "math", attrs: { latex: "E=mc^2", display: true } }],
     },
@@ -25,7 +30,7 @@ const DOC = {
       type: "paragraph",
       attrs: { blockId: "blk-inline" },
       content: [
-        { type: "text", text: "energy " },
+        { type: "text", text: "energy ", marks: [{ type: "bold" }] },
         { type: "math", attrs: { latex: "a^2+b^2", display: false } },
       ],
     },
@@ -45,6 +50,11 @@ const DOC = {
         height: 480,
       },
     },
+    {
+      type: "paragraph",
+      attrs: { blockId: "blk-after-image" },
+      content: [{ type: "text", text: "Caption follow-up paragraph." }],
+    },
   ],
 };
 
@@ -62,6 +72,18 @@ describe("SourceEditor rich render (T072 + U1)", () => {
     expect(mathNodes.some((n) => n.getAttribute("data-display") === "true")).toBe(true);
     // KaTeX rendered markup is present.
     expect(document.querySelector(".katex")).not.toBeNull();
+    const boldText = screen.getByText("energy");
+    expect(boldText.closest("strong")).not.toBeNull();
+    const blockOrder = Array.from(document.querySelectorAll("[data-block-id]")).map((node) =>
+      node.getAttribute("data-block-id"),
+    );
+    expect(blockOrder).toEqual([
+      "blk-intro",
+      "blk-formula",
+      "blk-inline",
+      "blk-image",
+      "blk-after-image",
+    ]);
 
     // The code NodeView renders, keeping the editable code text intact.
     await waitFor(() => {

@@ -711,7 +711,7 @@ export function SourceReader() {
   // a timestamp read-point (handled inside `MediaReader`).
   if (doc.sourceFormat === "video") {
     return (
-      <div className="reader-screen" data-testid="route-source">
+      <div className="reader-screen source-reader-screen" data-testid="route-source">
         <SourceHeader data={inspector} />
         <div className="reader-header" style={{ borderBottom: "1px solid var(--border)" }}>
           <div className="reader-actions">
@@ -774,7 +774,7 @@ export function SourceReader() {
   if (doc.sourceFormat === "pdf") {
     const pdfPct = pdfPage.total > 0 ? (pdfPage.page / pdfPage.total) * 100 : 0;
     return (
-      <div className="reader-screen" data-testid="route-source">
+      <div className="reader-screen source-reader-screen" data-testid="route-source">
         <SourceHeader data={inspector} />
         <div className="reader-header" style={{ borderBottom: "1px solid var(--border)" }}>
           <div className="reader-actions">
@@ -846,7 +846,7 @@ export function SourceReader() {
   }
 
   return (
-    <div className="reader-screen" data-testid="route-source">
+    <div className="reader-screen source-reader-screen" data-testid="route-source">
       <SourceHeader data={inspector} />
 
       {/* action bar */}

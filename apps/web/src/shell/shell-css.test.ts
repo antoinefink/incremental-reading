@@ -27,4 +27,10 @@ describe("shell styles", () => {
     expect(page).toContain("min-height: 0;");
     expect(page).toContain("overscroll-behavior: contain;");
   });
+
+  it("lets reader routes own their vertical scroll position", () => {
+    const readerPage = cssBlock(".shell-page:has(.source-reader-screen)");
+
+    expect(readerPage).toContain("overflow-y: hidden;");
+  });
 });

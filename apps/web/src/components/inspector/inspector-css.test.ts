@@ -31,4 +31,10 @@ describe("inspector CSS", () => {
   it("does not depend on queue-row action classes for embedded controls", () => {
     expect(inspectorCss).not.toContain(".insp .qitem__act");
   });
+
+  it("gives full source quotes modest tokenized top spacing", () => {
+    const quote = cssBlock(".insp-quote");
+
+    expect(quote).toContain("margin: var(--s-2, 6px) 0 0;");
+  });
 });

@@ -435,6 +435,9 @@
   overscroll-behavior: contain;
   min-height: 0;
 }
+.shell-page:has(.source-reader-screen) {
+  overflow-y: hidden;
+}
 
 /* bottom status bar */
 .shell-statusbar {
