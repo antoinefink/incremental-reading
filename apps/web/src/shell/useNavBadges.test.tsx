@@ -8,11 +8,13 @@
  *  - Queue reads the full due count, Review reads the due-CARD count;
  *  - Inbox reads the inbox-source count;
  *  - the counts refresh when a command-level undo fires (`UNDO_EVENT`);
+ *  - the counts refresh when another queue surface emits `queueRefresh`;
  *  - outside the desktop shell it queries nothing and returns no counts.
  */
 
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { requestQueueRefresh } from "../components/queue/queueRefresh";
 import { UNDO_EVENT } from "./nav";
 import { useNavBadges } from "./useNavBadges";
 
@@ -91,6 +93,23 @@ describe("useNavBadges", () => {
     await waitFor(() => expect(result.current.queue).toBe(41));
     expect(result.current.review).toBe(27);
     await waitFor(() => expect(result.current.inbox).toBe(5));
+  });
+
+  it("refreshes queue badges on queue refresh events from other surfaces", async () => {
+    h.isDesktop.mockReturnValue(true);
+    h.listQueue.mockResolvedValue(queueResult(1, 0));
+    h.listInbox.mockResolvedValue(inboxResult(4));
+
+    const { result } = renderHook(() => useNavBadges());
+    await waitFor(() => expect(result.current.queue).toBe(1));
+
+    h.listQueue.mockResolvedValue(queueResult(3, 1));
+    act(() => {
+      requestQueueRefresh();
+    });
+
+    await waitFor(() => expect(result.current.queue).toBe(3));
+    expect(result.current.review).toBe(1);
   });
 
   it("queries nothing and returns no counts outside the desktop shell", async () => {
