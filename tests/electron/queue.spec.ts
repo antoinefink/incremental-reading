@@ -298,17 +298,19 @@ test("markDone and dismiss remove a row and it stays gone on a re-read (T030)", 
     const res = await api.queue.list({ asOf });
     return res.items
       .filter((i) => i.type !== "card")
-      .map((i) => ({ id: i.id, status: i.status, dueAt: i.dueAt }));
+      .map((i) => ({ id: i.id, status: i.status, dueAt: i.dueAt, type: i.type }));
   }, AS_OF);
   expect(due.length).toBeGreaterThanOrEqual(2);
   const doneRow = due[0];
   const dismissRowMeta = due[1];
 
-  // markDone → the row leaves the list in place (no navigation).
+  // markDone → the row leaves the list in place (no navigation). A source row opens the
+  // Done intent surface first; pick "Finished" to mark done. Other types act immediately.
   await page
     .locator(`[data-testid="queue-item"][data-element-id="${doneRow.id}"]`)
     .getByTestId("queue-action-markDone")
     .click();
+  if (doneRow.type === "source") await page.getByTestId("done-intent-finished").click();
   await expect(
     page.locator(`[data-testid="queue-item"][data-element-id="${doneRow.id}"]`),
   ).toHaveCount(0);

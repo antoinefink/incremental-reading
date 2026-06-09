@@ -679,7 +679,11 @@ test("the loop reaches the Queue-clear done state when every item is processed",
       break;
     const item = page.getByTestId("process-item");
     if ((await item.count()) === 0) break;
+    // Source items open the Done intent surface; pick "Finished" to mark done. Other
+    // element types still mark done immediately on the action button.
+    const itemType = await item.getAttribute("data-element-type");
     await item.getByTestId("process-action-markDone").click();
+    if (itemType === "source") await page.getByTestId("done-intent-finished").click();
     await page.waitForTimeout(60);
   }
   await expect(page.getByTestId("process-done")).toBeVisible();
