@@ -1,13 +1,14 @@
 /*
  * "Process queue" learning loop styles (T031).
  *
- * The one-at-a-time session surface — a centered process card with a metadata row,
- * the item body (attention items) or the FULL inline FSRS card surface (cards:
- * reveal → answer + source ref + the four grades with interval previews, reusing
- * the review session's `.grades`/`.grade`/`.cloze`/`.refblock`/`.fsrs-stats` from
- * `review.css` + `inspector.css`), and the inline action bar. Chrome (the progress
- * bar, the mode segmented controls, the done state) is framed at the top. Token-only
- * (no hard-coded colors); reuses the `q-panel` / `q-empty` / `sessionbar__start`
+ * The one-at-a-time session surface — the item body (attention items) or the FULL
+ * inline FSRS card surface. Cards render as a three-zone `.pq-rc` card (pinned header /
+ * scrolling body / pinned grade footer) that reveals answer + source ref and grades with
+ * interval previews, reusing the review session's `.grades`/`.grade`/`.cloze`/`.refblock`
+ * from `review.css` + `inspector.css`. The full FSRS three-stat readout lives in the Card
+ * inspector; the card face keeps only a compact `.pq-rc__recall` mono line. Chrome (the
+ * progress bar, the mode segmented controls, the done state) is framed at the top.
+ * Token-only (no hard-coded colors); reuses the `q-panel` / `q-empty` / `sessionbar__start`
  * classes from `queue.css` + the shared `badge`/`prio`/`sched`/`stage`/`tico` from
  * `inspector.css`.
  */
@@ -203,39 +204,230 @@
   line-height: 1.25;
 }
 
-/* ---------- Card prompt / inline reveal + grade surface ---------- */
-.pq-cardface {
+/* ---------- Card review surface — three zones: pinned header / scrolling body / pinned grades ----------
+   Cards swap the centered single-column face for a structured, scroll-contained card that scales from
+   a one-line Q&A to a long answer with a large source excerpt while the grade footer stays reachable.
+   `.pq-card--review` is a borderless full-height layout FRAME (the base `.pq-card` keeps its flat border
+   for attention items); `.pq-rc` is the bordered card box; only `.pq-rc__body` scrolls. Scroll ownership
+   recipe: `min-height: 0` on every ancestor; exactly one `overflow-y: auto` region. */
+
+/* the work area, in review mode, fills height instead of vertically centering */
+.pq-center--review {
+  align-items: stretch;
+  justify-content: flex-start;
+  min-height: 0;
+}
+
+/* layout frame: holds session controls (top) + the card + the action bar (bottom), full work-area width */
+.pq-card--review {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  max-width: none;
+  margin-inline: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  gap: var(--s-5);
+}
+
+/* centers the card when short; bounds + scrolls it when tall */
+.pq-rc-center {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+/* the bordered card box — never exceeds the viewport; the body scrolls instead */
+.pq-rc {
+  width: 100%;
+  max-width: 680px;
+  margin: auto;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-md);
   display: flex;
   flex-direction: column;
-  gap: var(--s-5);
-  align-items: center;
-  text-align: center;
-  padding: var(--s-5) 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
 }
-.pq-card__prompt {
+
+/* ---- pinned identity header ---- */
+.pq-rc__head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-5);
+  padding: var(--s-5) var(--s-6);
+  border-bottom: 1px solid var(--border-faint);
+}
+.pq-rc__ident {
+  display: flex;
+  gap: var(--s-3);
+  min-width: 0;
+}
+.pq-rc__idtext {
+  min-width: 0;
+}
+.pq-rc__kindline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+.pq-rc__kind {
+  font-size: var(--t-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.pq-rc__name {
+  font-size: var(--t-md);
+  color: var(--text-3);
+}
+.pq-rc__sub {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+  flex-wrap: wrap;
+}
+.pq-rc__crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.pq-rc__state {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--s-2);
+}
+.pq-rc__due {
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* ---- scrolling body (the ONLY scroll region) ---- */
+.pq-rc__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
+}
+.pq-rc__eyebrow {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--text-3);
+  margin-bottom: var(--s-3);
+}
+.pq-rc__prompt {
   font-family: var(--font-read);
-  font-size: var(--t-lg);
+  font-size: var(--t-xl);
+  line-height: var(--lh-snug);
   color: var(--text);
   margin: 0;
-  line-height: 1.5;
+  text-wrap: pretty;
 }
-.pq-card__answer {
+.pq-rc__answerwrap {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: var(--s-4);
-  padding-top: var(--s-5);
-  border-top: 1px solid var(--border);
-  width: 100%;
+  gap: var(--s-6);
 }
-.pq-card__answertext {
+.pq-rc__rule {
+  height: 1px;
+  background: var(--border);
+}
+.pq-rc__answer {
   font-family: var(--font-read);
-  font-size: var(--t-lg);
-  line-height: var(--lh-normal);
+  font-size: var(--t-md);
+  line-height: var(--lh-read);
   color: var(--text);
 }
-.pq-reveal {
-  align-self: center;
+.pq-rc__revealwrap {
+  display: flex;
+}
+/* the shared `.pq-reveal` accent CTA stretches full-width inside the body */
+.pq-rc__revealwrap .pq-reveal {
+  flex: 1;
+}
+
+/* ---- bounded source provenance: a large excerpt scrolls inside its own cap ----
+   `overscroll-behavior: contain` keeps wheel/trackpad scroll from chaining out to the
+   body scroller once the excerpt hits its top/bottom. */
+.pq-rc__source {
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ---- pinned grade footer ---- */
+.pq-rc__foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: var(--s-4) var(--s-5) var(--s-5);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+/* card-face grades read left-aligned with the key tucked top-right; the shared `.grade`/`.grades`
+   stay centered for the standalone review session (this override is scoped to the card footer) */
+.pq-rc__foot .grade {
+  position: relative;
+  align-items: flex-start;
+  gap: var(--s-1);
+  padding: var(--s-3) var(--s-4);
+  text-align: left;
+}
+.pq-rc__foot .grade .shell-kbd-group {
+  position: absolute;
+  top: var(--s-2);
+  right: var(--s-2);
+  margin: 0;
+}
+.pq-rc__recall {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+}
+.pq-rc__recall b {
+  font-weight: 600;
+  color: var(--text-2);
+}
+.pq-rc__unit {
+  font-weight: 400;
+  color: var(--text-3);
+}
+.pq-rc__sep {
+  flex: none;
+  width: 3px;
+  height: 3px;
+  border-radius: var(--r-full);
+  background: var(--text-3);
+  opacity: 0.7;
 }
 
 /* ---------- Attention-item body preview ---------- */

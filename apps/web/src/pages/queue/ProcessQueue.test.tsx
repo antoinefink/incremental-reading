@@ -1022,6 +1022,126 @@ describe("ProcessQueue", () => {
     expect(screen.queryByTestId("process-card-answer")).toBeNull();
   });
 
+  it("frames the card as a three-zone .pq-rc surface and drops the duplicated FSRS box + redundant open link", async () => {
+    render(<ProcessQueue />);
+    await screen.findByTestId("process-item");
+    expect(currentItemId()).toBe("card-1");
+
+    // The card gets the review layout frame, not the source/extract workbench modifiers.
+    const item = screen.getByTestId("process-item");
+    const center = screen.getByTestId("process-center");
+    expect(item).toHaveClass("pq-card--review");
+    expect(item).not.toHaveClass("pq-card--extract");
+    expect(center).toHaveClass("pq-center--review");
+
+    // The card face is the bordered .pq-rc box with a pinned header + a scrolling body.
+    const face = screen.getByTestId("process-card-face");
+    expect(face).toHaveClass("pq-rc");
+    expect(face.querySelector(".pq-rc__head")).not.toBeNull();
+    expect(face.querySelector(".pq-rc__body")).not.toBeNull();
+    // Pre-reveal: no pinned footer (grades stay absent so they can't leak the answer).
+    expect(face.querySelector(".pq-rc__foot")).toBeNull();
+    expect(screen.queryByTestId("process-card-grades")).toBeNull();
+
+    // Reveal → the pinned grade footer + the single compact recall readout appear, while the
+    // FSRS triple-stat box and the "Open in review" link stay GONE (de-duplicated; the inspector
+    // owns the full readout, the action bar owns "Open in full").
+    fireEvent.click(screen.getByTestId("process-card-reveal"));
+    await screen.findByTestId("process-card-answer");
+    expect(face.querySelector(".pq-rc__foot")).not.toBeNull();
+    expect(screen.getByTestId("process-card-grades")).toBeInTheDocument();
+    expect(screen.getByTestId("process-card-recall")).toBeInTheDocument();
+    expect(screen.queryByTestId("process-card-review")).toBeNull();
+    expect(screen.queryByTestId("fsrs-stats")).toBeNull();
+  });
+
+  it("renders the compact recall readout with the card's real FSRS values + provenance crumb", async () => {
+    render(<ProcessQueue />);
+    await screen.findByTestId("process-item");
+    fireEvent.click(screen.getByTestId("process-card-reveal"));
+    const recall = await screen.findByTestId("process-card-recall");
+    // The de-duplicated readout must show the card's ACTUAL FSRS values (stability 9.4d,
+    // difficulty 5.1/10, retrievability 82%), not merely exist.
+    expect(recall).toHaveTextContent("9.4d stability");
+    expect(recall).toHaveTextContent("5.1/10 difficulty");
+    expect(recall).toHaveTextContent("82% retrievability");
+    // The prompt lives inside the scrolling body (the scroll-containment contract), and the
+    // header carries the provenance crumb derived from the card's source location.
+    const face = screen.getByTestId("process-card-face");
+    expect(face.querySelector(".pq-rc__body")).toContainElement(
+      screen.getByTestId("process-card-prompt"),
+    );
+    expect(face.querySelector(".pq-rc__crumb")).toHaveTextContent("from extract · ¶ 4");
+  });
+
+  it("shows an em-dash for retrievability when the card is new (null retrievability)", async () => {
+    h.reviewCard.mockResolvedValueOnce({
+      card: {
+        ...h.cardView,
+        schedulerSignals: { ...h.cardView.schedulerSignals, retrievability: null },
+      },
+    });
+    render(<ProcessQueue />);
+    await screen.findByTestId("process-item");
+    fireEvent.click(screen.getByTestId("process-card-reveal"));
+    const recall = await screen.findByTestId("process-card-recall");
+    expect(recall).toHaveTextContent("— retrievability");
+  });
+
+  it("surfaces the leech badge in the card header for a leech card", async () => {
+    h.reviewCard.mockResolvedValueOnce({ card: { ...h.cardView, leech: true, lapses: 5 } });
+    render(<ProcessQueue />);
+    await screen.findByTestId("process-item");
+    // The leech badge rides the header sub-row — it appears once the card view loads, no reveal.
+    const leech = await screen.findByTestId("process-card-leech");
+    expect(leech).toHaveTextContent("5 lapses");
+  });
+
+  it("omits the Source section for a source-less card", async () => {
+    h.reviewCard.mockResolvedValueOnce({ card: { ...h.cardView, sourceRef: null } });
+    render(<ProcessQueue />);
+    await screen.findByTestId("process-item");
+    fireEvent.click(screen.getByTestId("process-card-reveal"));
+    const answer = await screen.findByTestId("process-card-answer");
+    expect(screen.queryByTestId("process-card-refblock")).toBeNull();
+    // No "Source" eyebrow when there is nothing to cite.
+    expect(answer).not.toHaveTextContent("Source");
+  });
+
+  it("omits the provenance crumb when the card has no source location", async () => {
+    h.reviewCard.mockResolvedValueOnce({ card: { ...h.cardView, sourceLocationLabel: null } });
+    render(<ProcessQueue />);
+    await screen.findByTestId("process-item");
+    fireEvent.click(screen.getByTestId("process-card-reveal"));
+    await screen.findByTestId("process-card-answer"); // the card view is now loaded
+    expect(screen.getByTestId("process-card-face").querySelector(".pq-rc__crumb")).toBeNull();
+  });
+
+  it("renders a cloze card in the three-zone surface (Cloze label + cloze answer)", async () => {
+    h.listQueue.mockResolvedValue({
+      ...h.result,
+      items: [{ ...h.result.items[0], cardType: "cloze" }, ...h.result.items.slice(1)],
+    });
+    h.reviewCard.mockResolvedValueOnce({
+      card: {
+        ...h.cardView,
+        kind: "cloze",
+        prompt: "Intelligence is {{c1::skill-acquisition efficiency}}",
+        cloze: "Intelligence is {{c1::skill-acquisition efficiency}}",
+        answer: null,
+      },
+    });
+    render(<ProcessQueue />);
+    await screen.findByTestId("process-item");
+    // The header reflects the cloze kind (not the Q&A default).
+    const face = screen.getByTestId("process-card-face");
+    expect(face.querySelector(".pq-rc__kind")).toHaveTextContent("Cloze");
+    // Reveal → the answer renders via the cloze face (deletion revealed), not CardBody.
+    fireEvent.click(screen.getByTestId("process-card-reveal"));
+    const answer = await screen.findByTestId("process-card-answer");
+    expect(answer).toHaveTextContent("skill-acquisition efficiency");
+  });
+
   it("reveals a card's answer INLINE with the four interval previews (no navigation)", async () => {
     render(<ProcessQueue />);
     await screen.findByTestId("process-item");

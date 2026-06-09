@@ -755,3 +755,104 @@ test("the loop's mutations survive an app restart (postponed items still schedul
 
   await app.close();
 });
+
+// A standalone layout-geometry assertion (own data dir, no shared state), appended to the
+// process-card suite.
+test("keeps the grade footer pinned and reachable while a large card body scrolls (three-zone redesign)", async () => {
+  // The redesigned card is a three-zone surface — pinned header / scrolling body / pinned grade
+  // footer — so a long answer or large source can never push the grades off-screen (the defect
+  // the redesign fixes). jsdom can't catch visual overlap, so prove the geometry in the real app:
+  // force the body to overflow far past the viewport, then assert the grades stay on-screen,
+  // pinned (do not move when the body scrolls), and remain clickable.
+  const freshDir = makeDataDir();
+  const app = await launchApp(freshDir, { seedOnEmpty: true });
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+  const url = new URL(page.url());
+  baseUrl = `${url.protocol}//${url.host}`;
+
+  await openProcess(page, AS_OF);
+  const item = page.getByTestId("process-item");
+  await expect(item).toHaveCount(1);
+
+  // Walk the cursor (Skip) until the CARD surface is current. Bounded.
+  let cardId: string | null = null;
+  for (let i = 0; i < 40; i++) {
+    if (
+      await page
+        .getByTestId("process-done")
+        .isVisible()
+        .catch(() => false)
+    )
+      break;
+    if ((await item.getAttribute("data-element-type")) === "card") {
+      cardId = await item.getAttribute("data-element-id");
+      break;
+    }
+    await item.getByTestId("process-action-skip").click();
+    await page.waitForTimeout(40);
+  }
+  expect(cardId).not.toBeNull();
+  if (!cardId) throw new Error("no card surfaced in the process loop");
+
+  // Cap the card box height AND force a guaranteed-tall answer so the bounded body overflows by a
+  // lot, independent of which seeded card surfaced. Both are CSS-only (a `max-height` cap + an
+  // `::after` spacer) so React can't reconcile them away and nothing leaks into later serial tests.
+  await page.addStyleTag({
+    content:
+      ".pq-rc { max-height: 320px !important; } " +
+      '[data-testid="process-card-face"] .pq-rc__answer::after { content: ""; display: block; height: 1200px; }',
+  });
+
+  // Reveal → the answer body + the pinned grade footer.
+  await page.keyboard.press("Space");
+  await expect(page.getByTestId("process-card-answer")).toBeVisible();
+  await expect(page.getByTestId("process-card-grades")).toBeVisible();
+
+  // The body is the single scroll owner and overflows far past its client height.
+  const overflow = await page.evaluate(() => {
+    const body = document.querySelector(
+      '[data-testid="process-card-face"] .pq-rc__body',
+    ) as HTMLElement;
+    return {
+      scrollH: body.scrollHeight,
+      clientH: body.clientHeight,
+      overflowY: getComputedStyle(body).overflowY,
+    };
+  });
+  expect(overflow.overflowY).toBe("auto");
+  expect(overflow.scrollH).toBeGreaterThan(overflow.clientH + 200);
+
+  // Both the pinned header and the pinned grade footer stay fully on-screen even though the body
+  // overflows — the core regression this redesign fixes.
+  const viewportH = await page.evaluate(() => window.innerHeight);
+  const head = page.locator('[data-testid="process-card-face"] .pq-rc__head');
+  const foot = page.locator('[data-testid="process-card-face"] .pq-rc__foot');
+  const headBox1 = await head.boundingBox();
+  const footBox1 = await foot.boundingBox();
+  if (!headBox1 || !footBox1) throw new Error("no head/foot bounding box");
+  expect(headBox1.y).toBeGreaterThanOrEqual(-1);
+  expect(footBox1.y + footBox1.height).toBeLessThanOrEqual(viewportH + 1);
+  await expect(page.getByTestId("process-grade-good")).toBeVisible();
+
+  // Scrolling the body to its bottom does NOT move the pinned header or footer.
+  await page.evaluate(() => {
+    const body = document.querySelector(
+      '[data-testid="process-card-face"] .pq-rc__body',
+    ) as HTMLElement;
+    body.scrollTop = body.scrollHeight;
+  });
+  const headBox2 = await head.boundingBox();
+  const footBox2 = await foot.boundingBox();
+  if (!headBox2 || !footBox2) throw new Error("no head/foot bounding box after scroll");
+  expect(Math.abs(headBox2.y - headBox1.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(footBox2.y - footBox1.y)).toBeLessThanOrEqual(1);
+  expect(footBox2.y + footBox2.height).toBeLessThanOrEqual(viewportH + 1);
+
+  // And the footer is genuinely reachable: grading Good from it writes a durable log + advances.
+  const before = await cardLogCount(page, cardId);
+  await page.getByTestId("process-grade-good").click();
+  await expect.poll(async () => cardLogCount(page, cardId)).toBe(before + 1);
+
+  await app.close();
+});

@@ -46,7 +46,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "../../components/Icon";
 import { requestInspectorRefresh } from "../../components/inspector/Inspector";
 import {
-  FsrsStats,
   Prio,
   SchedulerChip,
   Stage,
@@ -74,6 +73,7 @@ import {
   type ReviewRating,
   type SchedulerSignals,
 } from "../../lib/appApi";
+import { formatDifficulty, formatStability } from "../../lib/formatFsrs";
 import { CardBody } from "../../review/CardBody";
 import { CardFront } from "../../review/CardFront";
 import { type UseDocumentResult, useDocument } from "../source/useDocument";
@@ -287,7 +287,8 @@ export function ProcessQueue() {
   const remaining = Math.max(0, total - cursor);
   const isRenderingExtract = !deckLoading && !done && current?.type === "extract";
   const isRenderingSource = !deckLoading && !done && current?.type === "source";
-  const centerClassName = `pq-center${isRenderingExtract ? " pq-center--extract" : ""}${isRenderingSource ? " pq-center--source" : ""}`;
+  const isRenderingCard = !deckLoading && !done && current?.type === "card";
+  const centerClassName = `pq-center${isRenderingExtract ? " pq-center--extract" : ""}${isRenderingSource ? " pq-center--source" : ""}${isRenderingCard ? " pq-center--review" : ""}`;
   const documentElementId = current && current.type !== "card" ? current.id : null;
   const doc = useDocument(documentElementId);
   const sourceReadPoint = useReadPoint(current?.type === "source" ? current.id : null);
@@ -1919,10 +1920,13 @@ function ProcessCard({
   const isExtract = item.type === "extract";
   const isSource = item.type === "source";
   const isWorkbench = isExtract || isSource;
+  // FSRS chip signals for the card — derived once, reused by the header chip and the footer
+  // recall readout (falls back to the trimmed queue signals while the card view loads).
+  const cardSig: SchedulerSignals = cardView ? cardChipSignals(cardView) : chipSignals(item);
 
   return (
     <div
-      className={`pq-card fade-up${isWorkbench ? " pq-card--workbench" : ""}${isSource ? " pq-card--source" : ""}${isExtract ? " pq-card--extract" : ""}${extractBuilder ? " pq-card--builder" : ""}`}
+      className={`pq-card fade-up${isWorkbench ? " pq-card--workbench" : ""}${isSource ? " pq-card--source" : ""}${isExtract ? " pq-card--extract" : ""}${isCard ? " pq-card--review" : ""}${extractBuilder ? " pq-card--builder" : ""}`}
       data-testid="process-item"
       data-element-id={item.id}
       data-element-type={item.type}
@@ -1930,25 +1934,18 @@ function ProcessCard({
     >
       <ProcessSessionControls {...sessionControls} />
 
-      {/* metadata row */}
-      {!isSource ? (
+      {/* metadata row — cards carry their identity inside the .pq-rc header instead */}
+      {!isSource && !isCard ? (
         <>
           <div className="pq-card__meta">
             <div className="pq-card__chips">
               <TypeIcon type={item.type} lg />
               <Prio priority={item.priority} />
               {item.type === "extract" ? <Stage stage={item.stage} /> : null}
-              {isCard && cardView?.leech ? (
-                <span className="badge badge--leech" data-testid="process-card-leech">
-                  Leech · {cardView.lapses} lapses
-                </span>
-              ) : null}
             </div>
-            {/* Cards carry the FSRS chip; attention items the attention chip. The
-                two-scheduler split holds in the loop. */}
-            <SchedulerChip
-              scheduler={isCard && cardView ? cardChipSignals(cardView) : chipSignals(item)}
-            />
+            {/* This row only renders for non-card attention items now (cards carry their
+                identity in the .pq-rc header), so the attention chip is the only case. */}
+            <SchedulerChip scheduler={chipSignals(item)} />
           </div>
 
           <h1 className="pq-card__title">{titleFor(item)}</h1>
@@ -1956,81 +1953,159 @@ function ProcessCard({
       ) : null}
 
       {isCard ? (
-        <div className="pq-cardface" data-testid="process-card-face">
-          {/* The card front — the prompt (cloze masked until reveal). */}
-          <p className="pq-card__prompt" data-testid="process-card-prompt">
-            {cardView ? <CardFront card={cardView} revealed={false} /> : maskCloze(item.title)}
-          </p>
-
-          {revealed && cardView ? (
-            <div className="pq-card__answer" data-testid="process-card-answer">
-              <div className="pq-card__answertext">
-                {cardView.kind === "cloze" ? (
-                  <CardFront card={cardView} revealed={true} />
-                ) : (
-                  // T072: render the Q&A answer through the shared body renderer so
-                  // math + highlighted code show here too (same path as ReviewScreen).
-                  <CardBody body={cardView.answer ?? ""} />
-                )}
+        <div className="pq-rc-center">
+          {/* Three-zone review card: pinned header / scrolling body / pinned grade footer.
+              Only `.pq-rc__body` scrolls, so the grades stay reachable at any content size. */}
+          <article className="pq-rc" data-testid="process-card-face">
+            {/* ---- pinned identity header (cards carry their meta here, not in pq-card__meta) ---- */}
+            <header className="pq-rc__head">
+              <div className="pq-rc__ident">
+                <TypeIcon type={item.type} lg />
+                <div className="pq-rc__idtext">
+                  <div className="pq-rc__kindline">
+                    <span className="pq-rc__kind">
+                      {item.cardType === "cloze" ? "Cloze" : "Q&A"}
+                    </span>
+                    <span className="pq-rc__name">· {maskCloze(item.title)}</span>
+                  </div>
+                  <div className="pq-rc__sub">
+                    <Prio priority={item.priority} />
+                    {cardView?.leech ? (
+                      <span className="badge badge--leech" data-testid="process-card-leech">
+                        Leech · {cardView.lapses} lapses
+                      </span>
+                    ) : null}
+                    {cardView?.sourceLocationLabel ? (
+                      <span className="pq-rc__crumb">
+                        <Icon name="extract" size={12} /> from extract ·{" "}
+                        {cardView.sourceLocationLabel}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
               </div>
-              {/* Source reference (T043) — shown ONLY after reveal so it can't leak
-                  the answer. Reuses the shared RefBlock + formatSourceRef. */}
-              {cardView.sourceRef ? (
-                <RefBlock
-                  ref={cardView.sourceRef}
-                  dedupeSnippetAgainst={cardView.kind === "qa" ? cardView.answer : null}
-                  testId="process-card-refblock"
-                  style={{ marginTop: "var(--space-3)" }}
-                />
-              ) : null}
+              {/* Cards carry the FSRS chip; the inspector owns the full three-stat readout. */}
+              <div className="pq-rc__state">
+                <SchedulerChip scheduler={cardSig} />
+                {item.dueLabel ? <span className="pq-rc__due">{item.dueLabel}</span> : null}
+              </div>
+            </header>
 
-              {/* The four FSRS grades with next-interval previews (1–4), exactly as
-                  the review session. Grading records the durable review log + advances. */}
-              <div className="grades" data-testid="process-card-grades">
-                {GRADES.map((g) => (
+            {/* ---- scrolling body (the ONLY scroll region) ---- */}
+            <div className="pq-rc__body">
+              <section>
+                <span className="pq-rc__eyebrow">Prompt</span>
+                <p className="pq-rc__prompt" data-testid="process-card-prompt">
+                  {cardView ? (
+                    <CardFront card={cardView} revealed={false} />
+                  ) : (
+                    maskCloze(item.title)
+                  )}
+                </p>
+              </section>
+
+              {revealed && cardView ? (
+                <div className="pq-rc__answerwrap" data-testid="process-card-answer">
+                  <div className="pq-rc__rule" />
+                  <section>
+                    <span className="pq-rc__eyebrow">Answer</span>
+                    <div className="pq-rc__answer">
+                      {cardView.kind === "cloze" ? (
+                        <CardFront card={cardView} revealed={true} />
+                      ) : (
+                        // T072: render the Q&A answer through the shared body renderer so
+                        // math + highlighted code show here too (same path as ReviewScreen).
+                        <CardBody body={cardView.answer ?? ""} />
+                      )}
+                    </div>
+                  </section>
+
+                  {/* Source provenance (T043) — shown ONLY after reveal so it can't leak the
+                      answer. Bounded section: the excerpt scrolls inside its own cap when large.
+                      Reuses the shared RefBlock + formatSourceRef. */}
+                  {cardView.sourceRef ? (
+                    <section>
+                      <span className="pq-rc__eyebrow">Source</span>
+                      <div className="pq-rc__source">
+                        <RefBlock
+                          ref={cardView.sourceRef}
+                          dedupeSnippetAgainst={cardView.kind === "qa" ? cardView.answer : null}
+                          testId="process-card-refblock"
+                        />
+                      </div>
+                    </section>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="pq-rc__revealwrap">
                   <button
                     type="button"
-                    key={g.rating}
-                    className={`grade grade--${g.rating}`}
-                    data-testid={`process-grade-${g.rating}`}
-                    disabled={busy}
-                    onClick={() => onGrade(g.rating)}
+                    className="sessionbar__start pq-reveal"
+                    data-testid="process-card-reveal"
+                    onClick={onReveal}
                   >
-                    <span className="grade__label">{g.label}</span>
-                    <span className="grade__int" data-testid={`process-interval-${g.rating}`}>
-                      {previews ? previews[g.rating].label : "…"}
-                    </span>
-                    <Kbd keys={g.key} />
+                    <Icon name="eye" size={14} />
+                    Reveal answer <Kbd keys="␣" />
                   </button>
-                ))}
-              </div>
-              <div style={{ marginTop: "var(--space-3)" }}>
-                <FsrsStats scheduler={cardChipSignals(cardView)} />
-              </div>
-
-              {/* "Open in review" stays a SECONDARY affordance — grading inline is
-                  the primary path; this is no longer the only way to grade. */}
-              <button
-                type="button"
-                className="pq-btn pq-cardface__review"
-                data-testid="process-card-review"
-                onClick={onOpen}
-              >
-                <Icon name="brain" size={14} />
-                Open in review
-              </button>
+                </div>
+              )}
             </div>
-          ) : (
-            <button
-              type="button"
-              className="sessionbar__start pq-reveal"
-              data-testid="process-card-reveal"
-              onClick={onReveal}
-            >
-              <Icon name="eye" size={14} />
-              Reveal answer <Kbd keys="␣" />
-            </button>
-          )}
+
+            {/* ---- pinned grade footer (rendered only after reveal so grades can't leak the
+                    answer, and so a short card sizes to content with no footer) ---- */}
+            {revealed && cardView ? (
+              <footer className="pq-rc__foot">
+                {/* The four FSRS grades with next-interval previews (1–4), exactly as the
+                    review session. Grading records the durable review log + advances. */}
+                <div className="grades" data-testid="process-card-grades">
+                  {GRADES.map((g) => (
+                    <button
+                      type="button"
+                      key={g.rating}
+                      className={`grade grade--${g.rating}`}
+                      data-testid={`process-grade-${g.rating}`}
+                      disabled={busy}
+                      onClick={() => onGrade(g.rating)}
+                    >
+                      <span className="grade__label">{g.label}</span>
+                      <span className="grade__int" data-testid={`process-interval-${g.rating}`}>
+                        {previews ? previews[g.rating].label : "…"}
+                      </span>
+                      <Kbd keys={g.key} />
+                    </button>
+                  ))}
+                </div>
+                {/* Compact, de-duplicated recall readout — the FSRS triple-stat box lives in
+                    the Card inspector now; the card face keeps only this single mono line. */}
+                <div className="pq-rc__recall" data-testid="process-card-recall">
+                  <span>
+                    <b>
+                      {formatStability(cardSig.stability ?? 0)}
+                      <span className="pq-rc__unit">d</span>
+                    </b>{" "}
+                    stability
+                  </span>
+                  <span className="pq-rc__sep" />
+                  <span>
+                    <b>
+                      {formatDifficulty(cardSig.difficulty ?? 0)}
+                      <span className="pq-rc__unit">/10</span>
+                    </b>{" "}
+                    difficulty
+                  </span>
+                  <span className="pq-rc__sep" />
+                  <span>
+                    <b>
+                      {cardSig.retrievability === null
+                        ? "—"
+                        : `${Math.round(cardSig.retrievability * 100)}%`}
+                    </b>{" "}
+                    retrievability
+                  </span>
+                </div>
+              </footer>
+            ) : null}
+          </article>
         </div>
       ) : isSource ? (
         <ProcessSourceWorkbench

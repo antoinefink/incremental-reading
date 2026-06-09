@@ -88,6 +88,58 @@ describe("process queue styles", () => {
     expect(readpoint).toContain("color: var(--text-on-accent);");
   });
 
+  it("frames the review card as a three-zone surface where only the body scrolls", () => {
+    const center = cssBlock(".pq-center--review");
+    const frame = cssBlock(".pq-card--review");
+    const cardCenter = cssBlock(".pq-rc-center");
+    const card = cssBlock(".pq-rc");
+    const head = cssBlock(".pq-rc__head");
+    const body = cssBlock(".pq-rc__body");
+    const source = cssBlock(".pq-rc__source");
+    const foot = cssBlock(".pq-rc__foot");
+    const footGrade = cssBlock(".pq-rc__foot .grade");
+
+    // the work area fills height for cards instead of vertically centering
+    expect(center).toContain("align-items: stretch;");
+    expect(center).toContain("justify-content: flex-start;");
+    expect(center).toContain("min-height: 0;");
+
+    // the borderless layout frame holds the chrome; the base .pq-card keeps its flat border
+    expect(frame).toContain("flex: 1 1 0;");
+    expect(frame).toContain("min-height: 0;");
+    expect(frame).toContain("border: 0;");
+    expect(frame).toContain("max-width: none;");
+
+    // the centering wrapper bounds the card so it can scroll internally
+    expect(cardCenter).toContain("min-height: 0;");
+    expect(cardCenter).toContain("overflow: hidden;");
+
+    // the bordered card box never exceeds the viewport — its body scrolls instead
+    expect(card).toContain("display: flex;");
+    expect(card).toContain("flex-direction: column;");
+    expect(card).toContain("min-height: 0;");
+    expect(card).toContain("max-height: 100%;");
+    expect(card).toContain("overflow: hidden;");
+
+    // header + footer are pinned; only the body owns the single overflow-y scroll
+    expect(head).toContain("flex: none;");
+    expect(body).toContain("flex: 1 1 auto;");
+    expect(body).toContain("min-height: 0;");
+    expect(body).toContain("overflow-y: auto;");
+    expect(foot).toContain("flex: none;");
+    expect(foot).toContain("border-top: 1px solid var(--border);");
+
+    // the source excerpt is bounded + scroll-contained so a large quote can't push the
+    // grade footer off-screen, and its wheel scroll doesn't chain out to the body
+    expect(source).toContain("max-height: 280px;");
+    expect(source).toContain("overflow-y: auto;");
+    expect(source).toContain("overscroll-behavior: contain;");
+
+    // card-face grades are left-aligned (the shared review .grade stays centered)
+    expect(footGrade).toContain("align-items: flex-start;");
+    expect(footGrade).toContain("text-align: left;");
+  });
+
   it("lets the source editor fill the rail without its own border", () => {
     const editor = cssBlock(".pq-source__editor");
     const reader = cssBlock(".pq-source__editor .reader");
