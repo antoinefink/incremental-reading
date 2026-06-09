@@ -1092,13 +1092,19 @@ describe("ProcessQueue", () => {
     expect(screen.getByTestId("process-source-header")).toContainElement(
       screen.getByTestId("process-source-readpoint"),
     );
-    expect(screen.getByTestId("process-source-rail")).toContainElement(
+    expect(screen.getByTestId("process-source-header")).toContainElement(
       screen.getByTestId("process-source-progress"),
     );
+    expect(screen.getByTestId("process-source-header")).toContainElement(
+      screen.getByTestId("process-source-words"),
+    );
+    expect(screen.getByTestId("process-source-header")).toHaveTextContent("block 1 of 4");
+    expect(screen.getByTestId("process-source-header")).toHaveTextContent("3 words");
+    expect(screen.getByTestId("process-source-rail")).not.toHaveTextContent("block 1 of 4");
+    expect(screen.getByTestId("process-source-rail")).not.toHaveTextContent("3 words");
     expect(screen.getByTestId("process-source-rail")).toContainElement(
       screen.getByTestId("process-source-pbar"),
     );
-    expect(screen.getByTestId("process-source-progress")).toHaveTextContent("block 1 of 4");
     expect(screen.getByTestId("process-source-pbar-fill")).toHaveStyle({ width: "25%" });
     expect(screen.getByTestId("process-source-readpoint")).toBeInTheDocument();
     expect(screen.queryByTestId("process-source-extract")).not.toBeInTheDocument();
@@ -1220,14 +1226,17 @@ describe("ProcessQueue", () => {
     expect(url).not.toHaveAttribute("href");
   });
 
-  it("keeps specialized PDF sources out of the inline text reader while preserving header context", async () => {
+  it.each([
+    ["pdf", "PDF source"],
+    ["video", "Media source"],
+  ] as const)("keeps specialized %s sources out of the inline text reader while preserving header context", async (sourceFormat, formatLabel) => {
     h.getDocument.mockResolvedValue({
       document: {
-        prosemirrorJson: { type: "doc", content: [], mockPlainText: "PDF body text." },
-        plainText: "PDF body text.",
+        prosemirrorJson: { type: "doc", content: [], mockPlainText: "Specialized body text." },
+        plainText: "Specialized body text.",
       },
       extractedBlockIds: [],
-      sourceFormat: "pdf",
+      sourceFormat,
     });
     render(<ProcessQueue />);
     await screen.findByTestId("process-item");
@@ -1236,7 +1245,9 @@ describe("ProcessQueue", () => {
 
     expect(await screen.findByTestId("process-source-workbench")).toBeInTheDocument();
     expect(screen.getByTestId("process-source-title")).toHaveTextContent("The Bitter Lesson");
-    expect(screen.getByTestId("process-source-format")).toHaveTextContent("PDF source");
+    expect(screen.getByTestId("process-source-format")).toHaveTextContent(formatLabel);
+    expect(screen.queryByTestId("process-source-progress")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("process-source-words")).not.toBeInTheDocument();
     expect(screen.getByText(/specialized reader/i)).toBeInTheDocument();
     expect(screen.queryByTestId("process-source-rail")).not.toBeInTheDocument();
     expect(screen.queryByTestId("mock-source-editor")).not.toBeInTheDocument();

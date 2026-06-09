@@ -279,7 +279,8 @@
 }
 .pq-source__header {
   flex: 0 0 auto;
-  padding: var(--s-3) 0 var(--s-2);
+  margin-inline: calc(var(--s-6) * -1);
+  padding: var(--s-3) var(--s-6) var(--s-2);
   border-bottom: 1px solid var(--border);
 }
 .pq-source__title {
@@ -310,6 +311,11 @@
 .pq-source__meta--link:hover {
   text-decoration: underline;
 }
+.pq-source__meta--mono {
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+}
 .pq-source__dot {
   width: var(--s-1);
   height: var(--s-1);
@@ -334,35 +340,9 @@
   margin: 0 auto;
   padding-top: var(--s-2);
 }
-.pq-source__railhead {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: var(--s-4);
-  margin-bottom: var(--s-2);
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  font-size: var(--t-2xs);
-}
 .pq-source__pbar {
   width: 100%;
   margin: 0 0 var(--s-5);
-}
-.pq-source__foot {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--s-3);
-  flex: 0 0 auto;
-  padding-top: var(--s-3);
-  border-top: 1px solid var(--border);
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  font-size: var(--t-2xs);
-}
-.pq-source__progresslabel {
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  font-size: var(--t-2xs);
 }
 .pq-source__readpoint .kbd {
   margin-left: var(--s-1);
@@ -598,6 +578,10 @@
   flex-wrap: wrap;
   padding-top: var(--s-4);
   border-top: 1px solid var(--border);
+}
+.pq-card--source .pq-actions {
+  margin-inline: calc(var(--s-6) * -1);
+  padding-inline: var(--s-6);
 }
 .pq-actions__spacer {
   flex: 1;

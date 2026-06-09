@@ -1533,6 +1533,24 @@ function ProcessSourceWorkbench({
             </span>
           </>
         ) : null}
+        {doc.sourceFormat === null ? (
+          <>
+            <SourceMetaDot />
+            <span
+              className="pq-source__meta pq-source__meta--mono"
+              data-testid="process-source-progress"
+            >
+              {progressLabel}
+            </span>
+            <SourceMetaDot />
+            <span
+              className="pq-source__meta pq-source__meta--mono"
+              data-testid="process-source-words"
+            >
+              {wordCount(doc.plainText)} words
+            </span>
+          </>
+        ) : null}
       </div>
       {doc.sourceFormat === null ? (
         <div className="pq-source__actions">
@@ -1568,11 +1586,6 @@ function ProcessSourceWorkbench({
       {sourceHeader}
 
       <div className="pq-source__rail" data-testid="process-source-rail">
-        <div className="pq-source__railhead">
-          <span className="pq-source__progresslabel" data-testid="process-source-progress">
-            {progressLabel}
-          </span>
-        </div>
         <div className="pbar pq-source__pbar" data-testid="process-source-pbar">
           <div
             className="pbar__fill"
@@ -1599,9 +1612,6 @@ function ProcessSourceWorkbench({
               onEditorReady={onEditorReady}
             />
           )}
-        </div>
-        <div className="pq-source__foot">
-          <span>{wordCount(doc.plainText)} words</span>
         </div>
       </div>
 

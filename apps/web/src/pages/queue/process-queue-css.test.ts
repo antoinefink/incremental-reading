@@ -26,6 +26,7 @@ describe("process queue styles", () => {
     const source = cssBlock(".pq-source");
     const header = cssBlock(".pq-source__header");
     const rail = cssBlock(".pq-source__rail");
+    const sourceActions = cssBlock(".pq-card--source .pq-actions");
 
     expect(center).toContain("align-items: stretch;");
     expect(center).toContain("justify-content: flex-start;");
@@ -37,20 +38,22 @@ describe("process queue styles", () => {
     expect(card).toContain("border: 0;");
     expect(card).toContain("border-radius: 0;");
     expect(card).toContain("background: transparent;");
+    expect(card).toContain("padding: var(--s-4) var(--s-6);");
     expect(source).toContain("flex: 1 1 auto;");
     expect(source).toContain("min-height: 0;");
+    expect(header).toContain("margin-inline: calc(var(--s-6) * -1);");
+    expect(header).toContain("padding: var(--s-3) var(--s-6) var(--s-2);");
     expect(header).toContain("border-bottom: 1px solid var(--border);");
     expect(rail).toContain("flex: 1 1 auto;");
     expect(rail).toContain("max-width: var(--reader-text-measure);");
     expect(rail).toContain("margin: 0 auto;");
+    expect(sourceActions).toContain("margin-inline: calc(var(--s-6) * -1);");
+    expect(sourceActions).toContain("padding-inline: var(--s-6);");
   });
 
-  it("keeps source progress in the centered reader rail", () => {
-    const railhead = cssBlock(".pq-source__railhead");
+  it("keeps source progress bar in the centered reader rail", () => {
     const pbar = cssBlock(".pq-source__pbar");
 
-    expect(railhead).toContain("justify-content: flex-start;");
-    expect(railhead).toContain("font-family: var(--font-mono);");
     expect(pbar).toContain("width: 100%;");
     expect(pbar).not.toContain("max-width: 320px;");
   });
@@ -59,12 +62,15 @@ describe("process queue styles", () => {
     const title = cssBlock(".pq-source__title");
     const metaRow = cssBlock(".pq-source__metarow");
     const meta = cssBlock(".pq-source__meta");
+    const monoMeta = cssBlock(".pq-source__meta--mono");
     const dot = cssBlock(".pq-source__dot");
     const readpoint = cssBlock(".pq-source__readpoint");
 
     expect(title).toContain("margin: 0 0 var(--s-2);");
     expect(metaRow).toContain("gap: var(--s-2);");
     expect(meta).toContain("gap: var(--s-1);");
+    expect(monoMeta).toContain("font-family: var(--font-mono);");
+    expect(monoMeta).toContain("font-size: var(--t-2xs);");
     expect(dot).toContain("width: var(--s-1);");
     expect(dot).toContain("height: var(--s-1);");
     expect(readpoint).toContain("background: var(--accent);");
