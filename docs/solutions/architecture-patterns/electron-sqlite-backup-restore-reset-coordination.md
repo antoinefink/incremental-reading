@@ -46,7 +46,7 @@ Replace through rollback, not direct deletion. Close the DB, move the current da
 
 Keep the process restart-required after success. Even if the DB can reopen for rollback validation, the running Electron process has stopped lifecycle services and renderer state still represents the old store. A successful restore/reset should block further ordinary DB work until Interleave restarts.
 
-Keep renderer contracts narrow. The renderer should restore by known backup timestamp and exact confirmation phrase, never by arbitrary filesystem path. Results should return display-safe metadata plus a restart/reload requirement.
+Keep renderer contracts narrow. The renderer should restore by known backup timestamp and exact confirmation phrase, never by a renderer-supplied raw path. (A main-owned native picker may hand main a single path that main re-validates as an untrusted archive — see [restore-backup-from-untrusted-file](./restore-backup-from-untrusted-file.md) for that extension and its zip-slip/zip-bomb threat model.) Results should return display-safe metadata plus a restart/reload requirement.
 
 ## Why This Matters
 
