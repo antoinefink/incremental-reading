@@ -1,0 +1,142 @@
+/*
+ * DoneIntentMenu styles — the partial-source "Done" intent popover.
+ *
+ * Token-only (no hard-coded colors/spacing/radii), mirroring schedule-menu.css: the popover
+ * reuses the surface/border/shadow tokens the rest of the queue uses. The trigger is usually
+ * styled by the host (callers pass their existing Done-button class); `.doneintent__trigger`
+ * is only the standalone fallback.
+ */
+
+.doneintent {
+  position: relative;
+  display: inline-flex;
+}
+
+.doneintent__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all var(--fast) var(--ease);
+}
+.doneintent__trigger:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+.doneintent__trigger:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.doneintent__pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  min-width: 248px;
+  max-width: 320px;
+  padding: 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doneintent__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 0;
+}
+.doneintent__count {
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: 600;
+  color: var(--text);
+}
+.doneintent__resume {
+  font-size: 0.75rem;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.doneintent__breakdown {
+  margin: 0;
+  padding: 0 4px;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 0.75rem;
+  color: var(--text-2);
+}
+.doneintent__breakdown li {
+  white-space: nowrap;
+}
+.doneintent__seg-count {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.doneintent__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.doneintent__choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--fast) var(--ease);
+}
+.doneintent__choice:hover:not(:disabled),
+.doneintent__choice:focus-visible {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+  outline: none;
+}
+.doneintent__choice:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.doneintent__choice--danger:hover:not(:disabled),
+.doneintent__choice--danger:focus-visible {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.doneintent__choice-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.doneintent__choice-label {
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: 500;
+  line-height: 1.2;
+}
+.doneintent__choice-hint {
+  font-size: 0.6875rem;
+  color: var(--text-3);
+  line-height: 1.3;
+}
