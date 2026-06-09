@@ -102,7 +102,7 @@ function stageMigrations() {
  * The worker (`src/worker/ocr.ts`) points `tesseract.js` at these LOCAL staged
  * paths (`workerPath`/`corePath`/`langPath`), never `node_modules` or the CDN. This
  * dir is PACKAGED by the existing `dist/**` glob and `asarUnpack`'d (a `.wasm`/data
- * file cannot be read from inside the asar) — see electron-builder.yml.
+ * file cannot be read from inside the asar) — see electron-builder.config.cjs.
  */
 function stageTesseract() {
   const stageDir = path.join(distDir, "resources", "tesseract");
@@ -151,7 +151,7 @@ function stageTesseract() {
  * out as a real `node_modules` so its requires — `onnxruntime-node`, the tokenizer
  * addon — resolve). `embedding-model.ts` loads it from this staged path via a
  * DYNAMIC require. This dir is packaged by the `dist/**` glob and `asarUnpack`'d (a
- * `.node`/`.onnx` cannot be read from inside the asar) — see electron-builder.yml.
+ * `.node`/`.onnx` cannot be read from inside the asar) — see electron-builder.config.cjs.
  *
  * The ~23 MB MiniLM model itself is NOT bundled — `fastembed` downloads it on first
  * enable into the app-data `models/` dir (`INTERLEAVE_MODEL_DIR`) and caches it on

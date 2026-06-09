@@ -39,6 +39,20 @@ exports.default = async function adhocSign(context) {
   // macOS only — no signing concept for the other platforms we don't ship anyway.
   if (context.electronPlatformName !== "darwin") return;
 
+  // RELEASE BUILDS: skip the ad-hoc re-seal entirely. When INTERLEAVE_RELEASE_SIGN=1
+  // (set by `pnpm dist:release`), electron-builder.config.cjs configures a real
+  // Developer ID identity + hardened runtime, and electron-builder signs the bundle
+  // itself AFTER this afterPack hook. An ad-hoc `codesign --force --deep --sign -`
+  // here would just be overwritten — worse, the `--deep` re-seal can leave nested
+  // helpers in a state the inside-out Developer ID signing then has to repair. So we
+  // get out of the way and let electron-builder own signing + notarization.
+  if (process.env.INTERLEAVE_RELEASE_SIGN === "1") {
+    console.log(
+      "[adhoc-sign] release signing active (INTERLEAVE_RELEASE_SIGN=1) — skipping ad-hoc re-seal; electron-builder will sign with the Developer ID identity.",
+    );
+    return;
+  }
+
   const appName = context.packager.appInfo.productFilename; // "Interleave"
   const appPath = path.join(context.appOutDir, `${appName}.app`);
 

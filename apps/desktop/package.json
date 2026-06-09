@@ -16,7 +16,8 @@
     "rebuild:native": "node scripts/vendor-native.mjs",
     "postinstall": "node scripts/vendor-native.mjs",
     "dist": "node scripts/dist.mjs",
-    "dist:pack": "electron-builder --mac --config electron-builder.yml"
+    "dist:pack": "electron-builder --mac --config electron-builder.config.cjs",
+    "dist:release": "op run --env-file=release.op-env -- node scripts/dist.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",

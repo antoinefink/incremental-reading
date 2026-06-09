@@ -71,3 +71,10 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# macOS release signing — kept local/private (personal Apple + 1Password details).
+# The signing CODE (electron-builder.config.cjs, entitlements, scripts) is committed;
+# only the maintainer-specific runbook, credentials env, and plan stay out of the repo.
+apps/desktop/release.op-env
+.claude/skills/release-macos/
+docs/plans/2026-06-09-macos-signing-notarization-plan.md

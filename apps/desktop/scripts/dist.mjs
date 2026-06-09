@@ -12,11 +12,13 @@
  *   4. electron-builder              → apps/desktop/release/*.app + *.dmg
  *
  * electron-builder is packaging-ONLY: it consumes the already-built `dist/` +
- * the vendored native module and produces the installer. Code-signing /
- * notarization are deferred (see electron-builder.yml + RELEASE.md). The native
- * addon is `asarUnpack`ed so `dlopen` finds it at runtime (the #1 better-sqlite3
- * packaging failure mode); `native-binding.ts` rewrites the in-asar path to the
- * `app.asar.unpacked` sibling.
+ * the vendored native module and produces the installer. Signing is driven by
+ * `electron-builder.config.cjs`: a plain `pnpm dist` produces an ad-hoc-signed dev
+ * build, while `pnpm dist:release` (which sets INTERLEAVE_RELEASE_SIGN=1 via
+ * `op run`) produces a Developer ID signed + notarized build. The
+ * native addon is `asarUnpack`ed so `dlopen` finds it at runtime (the #1
+ * better-sqlite3 packaging failure mode); `native-binding.ts` rewrites the in-asar
+ * path to the `app.asar.unpacked` sibling.
  *
  * Set INTERLEAVE_DIST_SKIP_BUILD=1 to skip steps 1–3 (re-package an existing
  * `dist/`), or INTERLEAVE_DIST_DIR_ONLY=1 to produce only the unpacked `.app`
@@ -67,7 +69,7 @@ function main() {
   }
 
   // 4) Package. `--dir` skips the dmg (faster, no hdiutil) for CI/constrained envs.
-  const ebArgs = ["electron-builder", "--mac", "--config", "electron-builder.yml"];
+  const ebArgs = ["electron-builder", "--mac", "--config", "electron-builder.config.cjs"];
   if (dirOnly) ebArgs.push("--dir");
   run("pnpm", ["exec", ...ebArgs]);
 
