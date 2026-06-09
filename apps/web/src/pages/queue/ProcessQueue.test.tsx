@@ -808,6 +808,12 @@ describe("ProcessQueue", () => {
       }),
     );
     await waitFor(() => expect(currentItemId()).toBe("extract-1"));
+
+    // Abandon is destructive — it raises the visible "Source abandoned" Undo snackbar.
+    const snackbar = await screen.findByTestId("queue-snackbar");
+    expect(snackbar).toHaveTextContent("Source abandoned");
+    fireEvent.click(within(snackbar).getByRole("button", { name: /undo/i }));
+    await waitFor(() => expect(currentItemId()).toBe("source-1"));
   });
 
   it("closes the done-intent surface on Escape without mutating", async () => {

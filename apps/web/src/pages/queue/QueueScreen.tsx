@@ -169,6 +169,21 @@ function QueueItem({
     postponed: item.schedulerSignals.postponed,
     lastProcessedAt: null,
   };
+  // Stable per-row callbacks for the source Done intent surface (mirrors the useCallback
+  // wiring at the other two call sites), so DoneIntentMenu's handleTrigger isn't
+  // reconstructed on every parent render.
+  const getDoneSummary = useCallback(
+    () =>
+      appApi
+        .getBlockProcessingSummary({ sourceElementId: item.id })
+        .then((r) => r.summary)
+        .catch(() => null),
+    [item.id],
+  );
+  const handleDoneResolved = useCallback(
+    (intent: DoneIntent) => onResolveDone(item, intent),
+    [item, onResolveDone],
+  );
   // The row is a <div> hosting TWO independent zones (so real action buttons can
   // live in the row without nesting interactive elements, which is invalid HTML):
   //  - `qitem__open` is the click target that selects + OPENS the element (source →
@@ -233,13 +248,8 @@ function QueueItem({
           a.kind === "markDone" && item.type === "source" ? (
             <DoneIntentMenu
               key={a.kind}
-              getSummary={() =>
-                appApi
-                  .getBlockProcessingSummary({ sourceElementId: item.id })
-                  .then((r) => r.summary)
-                  .catch(() => null)
-              }
-              onResolved={(intent) => onResolveDone(item, intent)}
+              getSummary={getDoneSummary}
+              onResolved={handleDoneResolved}
               busy={busy}
               resumeLabel={null}
               triggerClassName="qitem__act"

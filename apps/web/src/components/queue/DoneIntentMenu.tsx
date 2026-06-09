@@ -108,7 +108,14 @@ export function DoneIntentMenu({
   const laterRef = useRef<HTMLButtonElement>(null);
   const submittingRef = useRef(false);
   const fetchingRef = useRef(false);
+  const mountedRef = useRef(true);
   const triggerSignalRef = useRef(triggerSignal);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const handleTrigger = useCallback(async () => {
     // Re-press toggles the popover closed (matches the `d`/click cancel affordance).
@@ -120,6 +127,9 @@ export function DoneIntentMenu({
     fetchingRef.current = true;
     try {
       const s = await getSummary();
+      // The fetch may resolve after the host navigated away (reader Finished/Abandon
+      // unmounts this surface); bail before touching state on a dead component.
+      if (!mountedRef.current) return;
       if (!s) return;
       if (s.canMarkDoneWithoutConfirmation) {
         // Fast path: nothing unresolved — mark done immediately, no surface.
@@ -141,10 +151,18 @@ export function DoneIntentMenu({
     void handleTrigger();
   }, [triggerSignal, handleTrigger]);
 
-  // Reset the in-flight guard whenever the popover closes.
+  // Release the in-flight guards once the host's action has settled (`busy` back to
+  // false). The fast path resolves WITHOUT opening the popover, so the guard can't rely
+  // on an open→close transition; gating on `busy` reliably clears it after the host
+  // mutation succeeds OR fails (e.g. a rejected markDone), so the Done control never
+  // deadlocks and a retry stays possible. `busy` is held while the host action runs, so
+  // the guard still blocks a double-submit during the in-flight window.
   useEffect(() => {
-    if (!open) submittingRef.current = false;
-  }, [open]);
+    if (!busy) {
+      submittingRef.current = false;
+      fetchingRef.current = false;
+    }
+  }, [busy]);
 
   // Focus the default (Return later) on open; close on outside-click / Escape, restoring
   // focus to the trigger on Escape (keyboard-first hygiene; non-modal so no focus trap).

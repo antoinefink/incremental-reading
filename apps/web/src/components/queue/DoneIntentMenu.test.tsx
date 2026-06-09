@@ -153,4 +153,45 @@ describe("DoneIntentMenu", () => {
     await screen.findByTestId("done-intent-pop");
     expect(getSummary).toHaveBeenCalledTimes(1);
   });
+
+  it("releases the in-flight guard after the host settles so a fast-path retry works", async () => {
+    // Regression: the fast path never opens the popover, so the guard must clear on
+    // `busy` settling (not on an open→close transition) or the Done control deadlocks
+    // when the host mutation fails and the component stays mounted on the same item.
+    const onResolved = vi.fn();
+    const getSummary = vi.fn().mockResolvedValue(summary({ canMarkDoneWithoutConfirmation: true }));
+    const { rerender } = render(
+      <DoneIntentMenu getSummary={getSummary} onResolved={onResolved} busy={false} />,
+    );
+    fireEvent.click(screen.getByTestId("done-intent-trigger"));
+    await waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
+    // Host runs the mutation: busy true, then back to false on a failure (no unmount).
+    rerender(<DoneIntentMenu getSummary={getSummary} onResolved={onResolved} busy={true} />);
+    rerender(<DoneIntentMenu getSummary={getSummary} onResolved={onResolved} busy={false} />);
+    // The Done control must still respond.
+    fireEvent.click(screen.getByTestId("done-intent-trigger"));
+    await waitFor(() => expect(onResolved).toHaveBeenCalledTimes(2));
+  });
+
+  it("toggles the popover closed on a re-press without re-fetching", async () => {
+    const getSummary = vi.fn().mockResolvedValue(UNRESOLVED);
+    render(<DoneIntentMenu getSummary={getSummary} onResolved={vi.fn()} />);
+    const trigger = screen.getByTestId("done-intent-trigger");
+    fireEvent.click(trigger);
+    await screen.findByTestId("done-intent-pop");
+    fireEvent.click(trigger);
+    await waitFor(() => expect(screen.queryByTestId("done-intent-pop")).toBeNull());
+    expect(getSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes on an outside click without resolving", async () => {
+    const onResolved = vi.fn();
+    const getSummary = vi.fn().mockResolvedValue(UNRESOLVED);
+    render(<DoneIntentMenu getSummary={getSummary} onResolved={onResolved} />);
+    fireEvent.click(screen.getByTestId("done-intent-trigger"));
+    await screen.findByTestId("done-intent-pop");
+    fireEvent.mouseDown(document.body);
+    await waitFor(() => expect(screen.queryByTestId("done-intent-pop")).toBeNull());
+    expect(onResolved).not.toHaveBeenCalled();
+  });
 });

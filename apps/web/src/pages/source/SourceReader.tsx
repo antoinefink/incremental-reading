@@ -681,10 +681,9 @@ export function SourceReader() {
   // ("block N of M") — the reader has the live read-point, so it shows a real location;
   // `resumeLabel` returns null when there is no read-point/total (a fresh, never-opened
   // source), so the surface simply omits the line.
-  const doneResumeLabel = resumeLabel(
-    progress.total > 0 ? Math.min(progress.index + 1, progress.total) : null,
-    progress.total,
-  );
+  const doneResumeLabel = rp.readPoint
+    ? resumeLabel(Math.min(progress.index + 1, progress.total), progress.total)
+    : null;
   const sourceWorkflowActions = (
     <>
       <ScheduleMenu
