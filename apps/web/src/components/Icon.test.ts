@@ -4,7 +4,7 @@ import { iconNames } from "./Icon";
 /**
  * Unit test (T003) — guards the icon-map wiring without rendering React, so it
  * runs in the default node Vitest environment. Keeps the `apps/web` Vitest
- * project non-empty (so `make test` always has a web test to run) and protects
+ * project non-empty (so `pnpm test` always has a web test to run) and protects
  * the load-bearing scheduler icons + the seven nav route icons from regressing.
  */
 describe("Icon map", () => {

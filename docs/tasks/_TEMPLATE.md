@@ -30,10 +30,11 @@ What capability exists after this task that didn't before. One paragraph, user-f
 ## Done when
 
 - <the roadmap's "Done when" criterion, made concrete and checkable>
-- `make typecheck` passes
-- `make test` passes
-- relevant `make e2e` passes
-- the feature survives page reload
+- `pnpm lint` passes
+- `pnpm typecheck` passes
+- `pnpm test` passes
+- relevant `pnpm e2e` passes
+- persistence-sensitive behavior survives app restart
 - source lineage is preserved
 - no unrelated refactors are included
 
@@ -41,4 +42,3 @@ What capability exists after this task that didn't before. One paragraph, user-f
 
 - <data-migration or backfill notes for risky changes>
 - <decisions deferred, or downstream tasks this affects>
-</content>

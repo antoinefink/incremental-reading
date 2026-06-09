@@ -224,7 +224,9 @@ test("the queue process loop is keyboard-drivable (p postpones via queue.act)", 
   const extractId = await page.evaluate(async (asOf) => {
     const api = window.appApi as unknown as {
       inspector: { list(): Promise<{ elements: { id: string; type: string }[] }> };
-      queue: { schedule(req: { id: string; choice: { kind: "manual"; date: string } }): Promise<unknown> };
+      queue: {
+        schedule(req: { id: string; choice: { kind: "manual"; date: string } }): Promise<unknown>;
+      };
     };
     const { elements } = await api.inspector.list();
     const ex = elements.find((e) => e.type === "extract");

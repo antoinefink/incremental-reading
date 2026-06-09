@@ -4,14 +4,14 @@ import { expect, type Page, test } from "@playwright/test";
  * App-shell E2E (T002 smoke, extended in T003/T004).
  *
  * Verifies the real React + TanStack Router app boots, that every main route
- * renders inside the persistent shell (sidebar / command bar / work area /
- * inspector / status bar), and that the keyboard-first chrome works: every
+ * renders inside the persistent shell (sidebar / work area / inspector /
+ * status bar, with route-owned top chrome where applicable), and that the keyboard-first chrome works: every
  * route is reachable by keyboard, ⌘K opens the command palette, ? opens the
  * cheat sheet, and the shell renders in both light and dark (data-theme).
  *
  * This is the gate the Definition of Done refers to: if the app fails to boot,
  * a route fails to load, the shell is missing, or the keyboard workflow breaks,
- * `make e2e` (and CI) fails.
+ * `pnpm e2e` (and CI) fails.
  */
 
 /** The seven typed routes and their in-page route-content test ids. */
@@ -26,8 +26,10 @@ const ROUTES: ReadonlyArray<[string, string]> = [
 ];
 
 /** Asserts the persistent shell chrome is present on the current page. */
-async function expectShell(page: Page) {
-  await expect(page.getByTestId("command-bar")).toBeVisible();
+async function expectShell(page: Page, options: { commandBar?: boolean } = {}) {
+  if (options.commandBar !== false) {
+    await expect(page.getByTestId("command-bar")).toBeVisible();
+  }
   await expect(page.getByTestId("inspector")).toBeVisible();
   await expect(page.getByTestId("status-bar")).toBeVisible();
   await expect(page.getByTestId("user-chip")).toBeVisible();
@@ -45,7 +47,7 @@ test("every main route renders inside the same shell", async ({ page }) => {
   for (const [url, testId] of ROUTES) {
     await page.goto(url);
     await expect(page.getByTestId(testId)).toBeVisible();
-    await expectShell(page);
+    await expectShell(page, { commandBar: url !== "/queue" });
   }
 });
 

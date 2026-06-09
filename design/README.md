@@ -33,12 +33,11 @@ UI-bearing roadmap task, the result must match this design.
    intended layout/behavior, then rebuild it in our components.
 4. Use `lucide-react` for icons via `icon-map.md`.
 
-## Why this is here, not in `packages/ui` yet
+## Why this stays here
 
-`packages/ui` doesn't exist until the monorepo is scaffolded (roadmap **T001**). Keeping the
-kit here means it's available to every agent from day one. **T002/T003** copy `tokens.css`
-into the app and wire Tailwind; the component library is rebuilt incrementally as each screen
-milestone lands. `kit/` stays as the immutable reference even after the real UI exists.
+`packages/ui` contains the real shared primitives, but this directory remains the visual source of
+truth. `design/tokens.css`, `icon-map.md`, and `kit/` are the reference every UI-bearing task uses
+to keep the app consistent. `kit/` stays immutable even after the real UI exists.
 
 ## Provenance
 
@@ -48,4 +47,3 @@ milestone lands. `kit/` stays as the immutable reference even after the real UI 
   type/status/stage **vocabulary** is present, **lineage is navigable** (`LineageTree`), and
   it adds the distillation **`Pipeline`**, **`BudgetMeter`**, undo **`Snackbar`**, **`CheatSheet`**,
   and **trash / synthesis / task / settings** screens.
-</content>

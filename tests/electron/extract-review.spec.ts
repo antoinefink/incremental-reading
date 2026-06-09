@@ -139,7 +139,7 @@ test("an extract advances raw → clean → atomic, reschedules on attention, an
 
   // (b) POSTPONE reschedules further out + bumps the attention postpone count.
   await page.getByTestId("extract-postpone").click();
-  await expect(page.getByText(/Postponed/)).toBeVisible();
+  await expect(page.locator(".extract-flash__pill").getByText(/Postponed/)).toBeVisible();
   await expect.poll(async () => (await inspect(page, extractId))?.scheduler.postponed).toBe(1);
 
   // (b) MARK DONE sets status done.

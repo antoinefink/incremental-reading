@@ -18,7 +18,7 @@ Read this file first if you are an agent picking up work.
 | [`roadmap.md`](./roadmap.md) | **The task queue.** All 100 steps as a checklist with dependencies and done-criteria. | After every completed task |
 | [`tasks/_TEMPLATE.md`](./tasks/_TEMPLATE.md) | The contract every detailed task spec follows. | Rarely |
 | [`tasks/M*.md`](./tasks/) | Expanded, ready-to-build specs for one milestone at a time. | Per milestone |
-| [`../CLAUDE.md`](../CLAUDE.md) | The engineering charter: invariants, layering, Docker commands, definition of done. | Rarely |
+| [`../AGENTS.md`](../AGENTS.md) | The engineering charter: invariants, scoped instruction map, native pnpm commands, definition of done. | Rarely |
 
 The split is deliberate: an agent rebuilds almost no context per task because the
 stable knowledge lives in the reference docs and only the *next thing to do* lives
@@ -31,17 +31,18 @@ Each unit of work is one roadmap task (`T001`…`T100`). To build one:
 1. **Pick a task.** Choose the lowest-numbered unchecked task in `roadmap.md`
    whose `Depends on` tasks are all checked `[x]`. (Independent tasks may be run
    in parallel by separate agents — see "Parallelism" below.)
-2. **Load context.** Read `CLAUDE.md`, the relevant reference docs, and the task's
+2. **Load context.** Read `AGENTS.md`, the relevant scoped instruction files, the relevant
+   reference docs, and the task's
    detailed spec in `tasks/M*.md` if one exists. If no detailed spec exists yet,
    the roadmap entry (`Goal` + `Done when` + `Depends on`) is the spec.
 3. **Inspect first.** Look at the existing schema, repositories, services, and
    tests touched by the task before writing anything. Do not rewrite unrelated code.
 4. **Build the feature + its tests** in one coherent change.
-5. **Verify in Docker.** Run the checks (`make typecheck`, `make test`, and
-   `make e2e` when relevant — see `CLAUDE.md`). Everything runs in containers; do
-   not rely on host toolchains.
-6. **Confirm the Definition of Done** (see `CLAUDE.md`). A task is not done unless
-   it survives reload and preserves source lineage.
+5. **Verify with native pnpm.** Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, and
+   relevant `pnpm e2e` checks from the repo root. Docker is reserved for the future
+   encrypted-backup server, not desktop app development.
+6. **Confirm the Definition of Done** (see `AGENTS.md`). A persistence-sensitive task is not done
+   unless it survives app restart and preserves source lineage.
 7. **Update the roadmap.** Check the box `[x]`, add the PR/commit reference, and
    note anything that changes downstream tasks.
 8. **Commit** as a single coherent change referencing the task ID
@@ -70,5 +71,3 @@ product values data-integrity and lineage over throughput.
 - `[~]` in progress (note the agent/branch)
 - `[x]` done (note the commit/PR)
 - `[!]` blocked (note the blocker)
-</content>
-</invoke>

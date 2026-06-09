@@ -3022,7 +3022,9 @@ export class DbService {
     }
     const explicitParentId = request.parentId as ElementId | undefined;
     const lineageSourceId =
-      explicitParentId || originElement.type === "source" ? originElementId : originElement.sourceId;
+      explicitParentId || originElement.type === "source"
+        ? originElementId
+        : originElement.sourceId;
     if (!lineageSourceId) {
       throw new Error(`DbService.createExtraction: source ${originElementId} has no lineage root`);
     }
@@ -3033,7 +3035,8 @@ export class DbService {
 
     const { element, location } = this.extractionService.createExtraction({
       sourceElementId: lineageSourceId,
-      parentId: explicitParentId ?? (originElement.type === "source" ? undefined : originElement.id),
+      parentId:
+        explicitParentId ?? (originElement.type === "source" ? undefined : originElement.id),
       selectedText: request.selectedText,
       blockIds: request.blockIds as BlockId[],
       startOffset: request.startOffset,

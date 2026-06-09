@@ -104,4 +104,3 @@ Lucide renamed several icons recently; current names are listed (legacy alias in
 
 If a prototype icon has no exact Lucide match, prefer the closest semantic icon over a custom
 SVG; only hand-roll an icon if Lucide genuinely lacks the concept.
-</content>

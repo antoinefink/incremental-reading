@@ -290,9 +290,9 @@ test("markDone and dismiss remove a row and it stays gone on a re-read (T030)", 
   const due = await page.evaluate(async (asOf) => {
     const api = window.appApi as unknown as {
       queue: {
-        list(req: {
-          asOf: string;
-        }): Promise<{ items: { id: string; status: string; type: string; dueAt: string | null }[] }>;
+        list(req: { asOf: string }): Promise<{
+          items: { id: string; status: string; type: string; dueAt: string | null }[];
+        }>;
       };
     };
     const res = await api.queue.list({ asOf });
