@@ -1176,51 +1176,18 @@ export function ProcessQueue() {
     );
   }
 
+  const sessionControls: ProcessSessionControlsProps = {
+    cursor,
+    total,
+    done,
+    remaining,
+    mode,
+    onModeChange,
+    onEnd: () => navigate({ to: "/queue", search: asOf ? { asOf } : {} }),
+  };
+
   return (
     <div className="pq-shell" data-testid="route-process">
-      {/* session header — progress + presentational mode steering */}
-      <div className="pq-head">
-        <button
-          type="button"
-          className="pq-end"
-          data-testid="process-end"
-          onClick={() => navigate({ to: "/queue", search: asOf ? { asOf } : {} })}
-        >
-          <Icon name="x" size={14} />
-          End session
-        </button>
-        <div className="pq-progress" data-testid="process-progress">
-          <div className="pq-progress__nums">
-            <span>
-              {Math.min(cursor + (done ? 0 : 1), total)} / {total}
-            </span>
-            <span className="pq-progress__est">{done ? "all done" : `${remaining} left`}</span>
-          </div>
-          <div className="pq-progress__bar">
-            <span
-              className="pq-progress__fill"
-              style={{ width: `${total === 0 ? 0 : (Math.min(cursor, total) / total) * 100}%` }}
-            />
-          </div>
-        </div>
-        <div className="pq-modes" data-testid="process-modes">
-          <span className="pq-modes__label">Mode</span>
-          {MODES.map((m) => (
-            <button
-              type="button"
-              key={m.id}
-              data-testid={`process-mode-${m.id}`}
-              aria-pressed={mode === m.id}
-              className={`pq-seg${mode === m.id ? " pq-seg--on" : ""}`}
-              onClick={() => onModeChange(m.id)}
-            >
-              <Icon name={m.icon} size={12} />
-              {m.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {error ? (
         <p className="pq-error" data-testid="process-error">
           {error}
@@ -1230,6 +1197,7 @@ export function ProcessQueue() {
       <div className={centerClassName} data-testid="process-center">
         {deckLoading ? (
           <div className="q-panel pq-donepanel" data-testid="process-loading">
+            <ProcessSessionControls {...sessionControls} />
             <div className="q-empty">
               <div className="q-empty__icon q-empty__icon--filter">
                 <Icon name="queue" size={24} />
@@ -1240,6 +1208,7 @@ export function ProcessQueue() {
           </div>
         ) : done ? (
           <div className="q-panel pq-donepanel" data-testid="process-done">
+            <ProcessSessionControls {...sessionControls} />
             <div className="q-empty">
               <div className="q-empty__icon">
                 <Icon name="checkCircle" size={26} />
@@ -1337,6 +1306,7 @@ export function ProcessQueue() {
             onToast={toast}
             onReveal={() => void reveal()}
             onGrade={(rating) => void grade(rating)}
+            sessionControls={sessionControls}
           />
         ) : null}
       </div>
@@ -1348,6 +1318,65 @@ export function ProcessQueue() {
           </span>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+type ProcessSessionControlsProps = {
+  cursor: number;
+  total: number;
+  done: boolean;
+  remaining: number;
+  mode: SessionMode;
+  onModeChange: (mode: SessionMode) => void;
+  onEnd: () => void;
+};
+
+function ProcessSessionControls({
+  cursor,
+  total,
+  done,
+  remaining,
+  mode,
+  onModeChange,
+  onEnd,
+}: ProcessSessionControlsProps) {
+  return (
+    <div className="pq-session" data-testid="process-session-controls">
+      <div className="pq-progress" data-testid="process-progress">
+        <div className="pq-progress__nums">
+          <span>
+            {Math.min(cursor + (done ? 0 : 1), total)} / {total}
+          </span>
+          <span className="pq-progress__est">{done ? "all done" : `${remaining} left`}</span>
+        </div>
+        <div className="pq-progress__bar">
+          <span
+            className="pq-progress__fill"
+            style={{ width: `${total === 0 ? 0 : (Math.min(cursor, total) / total) * 100}%` }}
+          />
+        </div>
+      </div>
+      <div className="pq-modes" data-testid="process-modes">
+        <span className="pq-modes__label">Mode</span>
+        {MODES.map((m) => (
+          <button
+            type="button"
+            key={m.id}
+            data-testid={`process-mode-${m.id}`}
+            aria-pressed={mode === m.id}
+            className={`pq-seg${mode === m.id ? " pq-seg--on" : ""}`}
+            onClick={() => onModeChange(m.id)}
+          >
+            <Icon name={m.icon} size={12} />
+            {m.label}
+          </button>
+        ))}
+      </div>
+      <button type="button" className="pq-end" data-testid="process-end" onClick={onEnd}>
+        <Icon name="x" size={14} />
+        End session
+      </button>
     </div>
   );
 }
@@ -1848,6 +1877,7 @@ function ProcessCard({
   onToast,
   onReveal,
   onGrade,
+  sessionControls,
 }: {
   item: QueueItemSummary;
   doc: UseDocumentResult;
@@ -1883,6 +1913,7 @@ function ProcessCard({
   onToast: (message: string) => void;
   onReveal: () => void;
   onGrade: (rating: ReviewRating) => void;
+  sessionControls: ProcessSessionControlsProps;
 }) {
   const isCard = item.type === "card";
   const isExtract = item.type === "extract";
@@ -1897,6 +1928,8 @@ function ProcessCard({
       data-element-type={item.type}
       key={item.id}
     >
+      <ProcessSessionControls {...sessionControls} />
+
       {/* metadata row */}
       {!isSource ? (
         <>

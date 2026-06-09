@@ -20,6 +20,16 @@ function cssBlock(selector: string): string {
 }
 
 describe("process queue styles", () => {
+  it("uses inline session controls instead of the removed page header bar", () => {
+    const session = cssBlock(".pq-session");
+    const donePanelSession = cssBlock(".pq-donepanel > .pq-session");
+
+    expect(session).toContain("display: flex;");
+    expect(session).toContain("padding-bottom: var(--s-3);");
+    expect(session).toContain("background: transparent;");
+    expect(donePanelSession).toContain("padding: var(--s-4) var(--s-5) var(--s-3);");
+  });
+
   it("renders source reading as a full-height unframed workbench", () => {
     const center = cssBlock(".pq-center--source");
     const card = cssBlock(".pq-card--source");

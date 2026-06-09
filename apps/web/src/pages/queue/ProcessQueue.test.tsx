@@ -170,6 +170,7 @@ const h = vi.hoisted(() => {
     easy: { dueAt: "2026-06-09T08:00:00.000Z", scheduledDays: 10, label: "10d" },
   };
   return {
+    search: {} as { asOf?: string },
     navigateSpy: vi.fn(),
     selectSpy: vi.fn(),
     listQueue: vi.fn().mockResolvedValue(result),
@@ -419,7 +420,7 @@ vi.mock("../source/useHighlights", () => ({
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => h.navigateSpy,
-  useSearch: () => ({}),
+  useSearch: () => h.search,
 }));
 
 vi.mock("../../shell/selection", () => ({
@@ -470,6 +471,7 @@ beforeEach(() => {
     extractedBlockIds: [],
   });
   h.getInspectorData.mockResolvedValue({ data: null });
+  h.search = {};
   h.staleEditorJson = false;
   h.selectionLocation.current = null;
   h.selectionPosition.current = null;
@@ -562,6 +564,35 @@ describe("ProcessQueue", () => {
     render(<ProcessQueue />);
     await screen.findByTestId("process-progress");
     expect(screen.getByTestId("process-progress")).toHaveTextContent("1 / 3");
+  });
+
+  it("removes the dedicated process header bar without removing session controls", async () => {
+    render(<ProcessQueue />);
+
+    await screen.findByTestId("process-item");
+
+    expect(screen.getByTestId("process-session-controls")).toContainElement(
+      screen.getByTestId("process-progress"),
+    );
+    expect(screen.getByTestId("process-session-controls")).toContainElement(
+      screen.getByTestId("process-modes"),
+    );
+    expect(screen.getByTestId("process-session-controls")).toContainElement(
+      screen.getByTestId("process-end"),
+    );
+  });
+
+  it("ends the process session back to the dated queue when scoped by asOf", async () => {
+    h.search = { asOf: "2026-05-30T18:00:00.000Z" };
+    render(<ProcessQueue />);
+    await screen.findByTestId("process-item");
+
+    fireEvent.click(screen.getByTestId("process-end"));
+
+    expect(h.navigateSpy).toHaveBeenCalledWith({
+      to: "/queue",
+      search: { asOf: "2026-05-30T18:00:00.000Z" },
+    });
   });
 
   it("advances to the next item after an action, using the queue.act path", async () => {
@@ -798,6 +829,12 @@ describe("ProcessQueue", () => {
     }
     await screen.findByTestId("process-done");
     expect(screen.getByTestId("process-done")).toHaveTextContent(/queue clear/i);
+    expect(screen.getByTestId("process-done")).toContainElement(
+      screen.getByTestId("process-session-controls"),
+    );
+    expect(screen.getByTestId("process-session-controls")).toContainElement(
+      screen.getByTestId("process-progress"),
+    );
   });
 
   it("shows an honest zero-load state and triage action when no due items load but inbox work exists", async () => {
@@ -846,6 +883,12 @@ describe("ProcessQueue", () => {
     render(<ProcessQueue />);
 
     expect(await screen.findByTestId("process-loading")).toHaveTextContent("Loading due queue");
+    expect(screen.getByTestId("process-loading")).toContainElement(
+      screen.getByTestId("process-session-controls"),
+    );
+    expect(screen.getByTestId("process-session-controls")).toContainElement(
+      screen.getByTestId("process-end"),
+    );
     expect(screen.queryByTestId("process-done")).toBeNull();
 
     resolveQueue(h.result);
@@ -1100,6 +1143,9 @@ describe("ProcessQueue", () => {
     );
     expect(screen.getByTestId("process-source-header")).toHaveTextContent("block 1 of 4");
     expect(screen.getByTestId("process-source-header")).toHaveTextContent("3 words");
+    expect(screen.getByTestId("process-item")).toContainElement(
+      screen.getByTestId("process-session-controls"),
+    );
     expect(screen.getByTestId("process-source-rail")).not.toHaveTextContent("block 1 of 4");
     expect(screen.getByTestId("process-source-rail")).not.toHaveTextContent("3 words");
     expect(screen.getByTestId("process-source-rail")).toContainElement(
@@ -1372,6 +1418,9 @@ describe("ProcessQueue", () => {
     render(<ProcessQueue />);
     await moveToExtract();
 
+    expect(screen.getByTestId("process-item")).toContainElement(
+      screen.getByTestId("process-session-controls"),
+    );
     expect(screen.getByTestId("process-center")).toHaveClass("pq-center--extract");
     expect(screen.getByTestId("process-item")).toHaveClass("pq-card--workbench");
     expect(screen.getByTestId("process-item")).toHaveClass("pq-card--extract");

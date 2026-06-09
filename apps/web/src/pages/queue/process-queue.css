@@ -19,14 +19,14 @@
   min-height: 0;
 }
 
-/* ---------- Session header ---------- */
-.pq-head {
+/* ---------- Session controls ---------- */
+.pq-session {
   display: flex;
   align-items: center;
-  gap: var(--s-5);
-  padding: var(--s-4) var(--s-6);
+  gap: var(--s-4);
+  padding-bottom: var(--s-3);
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  background: transparent;
 }
 .pq-end {
   display: inline-flex;
@@ -507,7 +507,7 @@
 }
 
 @media (max-width: 1120px) {
-  .pq-head {
+  .pq-session {
     flex-wrap: wrap;
     gap: var(--s-3);
   }
@@ -544,7 +544,7 @@
 }
 
 @media (max-width: 760px) {
-  .pq-head {
+  .pq-session {
     align-items: flex-start;
   }
   .pq-progress {
@@ -582,6 +582,9 @@
 .pq-card--source .pq-actions {
   margin-inline: calc(var(--s-6) * -1);
   padding-inline: var(--s-6);
+}
+.pq-donepanel > .pq-session {
+  padding: var(--s-4) var(--s-5) var(--s-3);
 }
 .pq-actions__spacer {
   flex: 1;
