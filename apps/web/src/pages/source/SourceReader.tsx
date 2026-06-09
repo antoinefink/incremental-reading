@@ -45,6 +45,7 @@ import { ExternalUrlLink } from "../../components/ExternalUrlLink";
 import { Icon } from "../../components/Icon";
 import { requestInspectorRefresh } from "../../components/inspector/Inspector";
 import { Prio, SchedulerChip, Status } from "../../components/inspector/primitives";
+import { type DoneIntent, DoneIntentMenu } from "../../components/queue/DoneIntentMenu";
 import { ScheduleMenu } from "../../components/queue/ScheduleMenu";
 import { appApi, type InspectorData, isDesktop, type QueueScheduleChoice } from "../../lib/appApi";
 import { SelectionToolbar, type SelectionToolbarAction } from "../../reader/SelectionToolbar";
@@ -52,6 +53,7 @@ import { useTextSelection } from "../../reader/useTextSelection";
 import { useActiveScope } from "../../shell/activeScope";
 import { Kbd } from "../../shell/Kbd";
 import { useSelection } from "../../shell/selection";
+import { resumeLabel } from "../queue/doneIntentBreakdown";
 import { MediaReader } from "./MediaReader";
 import { PdfReader } from "./PdfReader";
 import { ProcessedSpanButtons, type ProcessingFilter } from "./ProcessedSpanButtons";
@@ -521,30 +523,6 @@ export function SourceReader() {
     toast(resolved ? "Read-point set here" : "Place the caret in the text first");
   }, [rp, toast]);
 
-  const onMarkSourceDone = useCallback(async () => {
-    await withExitAction(async () => {
-      const summary = proc.summary;
-      if (!summary) return;
-      const confirmUnresolved = !summary.canMarkDoneWithoutConfirmation;
-      if (confirmUnresolved) {
-        const ok = window.confirm(
-          `This source still has ${summary.unresolvedBlocks} unresolved block(s). Mark it done anyway?`,
-        );
-        if (!ok) return;
-      }
-      try {
-        await appApi.actOnQueueItem({
-          id,
-          action: { kind: "markDone", confirmUnresolvedBlocks: confirmUnresolved },
-        });
-        requestInspectorRefresh();
-        toast("Source done");
-      } catch {
-        toast("Could not mark source done");
-      }
-    });
-  }, [id, proc.summary, toast, withExitAction]);
-
   const refreshSourceInspector = useCallback(async () => {
     requestInspectorRefresh();
     try {
@@ -568,6 +546,51 @@ export function SourceReader() {
       });
     },
     [id, refreshSourceInspector, toast, withExitAction],
+  );
+
+  // The "Mark done" surface (DoneIntentMenu) reads the source's live block-processing
+  // summary; a 0-unresolved source marks done immediately (the fast path), otherwise the
+  // surface offers the three intents. The summary read is the surface's authority for the
+  // fast path; a failed read aborts silently (returns null) since nothing has changed.
+  const getDoneSummary = useCallback(
+    () =>
+      appApi
+        .getBlockProcessingSummary({ sourceElementId: id })
+        .then((r) => r.summary)
+        .catch(() => null),
+    [id],
+  );
+
+  // Apply a chosen done-intent (or the 0-unresolved fast path's implicit "finished").
+  // Finished/Abandon exit the source to /queue (staying on a done/dismissed reader is a
+  // dead state — matches `deleteSource`); Return later only reschedules (read-point
+  // untouched — where stays decoupled from when) and refreshes the inspector in place.
+  const onDoneIntentResolved = useCallback(
+    (intent: DoneIntent) => {
+      void withExitAction(async () => {
+        try {
+          if (intent === "finished") {
+            await appApi.actOnQueueItem({
+              id,
+              action: { kind: "markDone", confirmUnresolvedBlocks: true },
+            });
+            toast("Source done — ⌘Z to undo");
+            void navigate({ to: "/queue" });
+          } else if (intent === "abandon") {
+            await appApi.actOnQueueItem({ id, action: { kind: "dismiss" } });
+            toast("Source dismissed");
+            void navigate({ to: "/queue" });
+          } else {
+            await appApi.actOnQueueItem({ id, action: { kind: "postpone" } });
+            await refreshSourceInspector();
+            toast("Returned to the queue");
+          }
+        } catch {
+          toast("Could not mark source done");
+        }
+      });
+    },
+    [id, navigate, refreshSourceInspector, toast, withExitAction],
   );
 
   const onLowerPriority = useCallback(async () => {
@@ -654,6 +677,14 @@ export function SourceReader() {
     : progress.total > 0
       ? `block ${Math.min(progress.index + 1, progress.total)} of ${progress.total} · ${Math.round(progressPct)}%`
       : "—";
+  // The surface's resume line reuses the SAME read-point math behind `blockProgressText`
+  // ("block N of M") — the reader has the live read-point, so it shows a real location;
+  // `resumeLabel` returns null when there is no read-point/total (a fresh, never-opened
+  // source), so the surface simply omits the line.
+  const doneResumeLabel = resumeLabel(
+    progress.total > 0 ? Math.min(progress.index + 1, progress.total) : null,
+    progress.total,
+  );
   const sourceWorkflowActions = (
     <>
       <ScheduleMenu
@@ -666,20 +697,18 @@ export function SourceReader() {
         tooltipLabel="Postpone"
         ariaLabel="Postpone until tomorrow, next week, next month, or a manual date"
       />
-      <button
-        type="button"
-        className="reader-btn"
-        disabled={exitActionBusy || !blockSummary}
-        title={
-          blockSummary?.canMarkDoneWithoutConfirmation
-            ? "Mark source done"
-            : "Requires confirmation because unresolved blocks remain"
-        }
-        data-testid="reader-mark-done"
-        onClick={() => void onMarkSourceDone()}
-      >
-        <Icon name="checkCircle" size={14} /> Mark done
-      </button>
+      <DoneIntentMenu
+        getSummary={getDoneSummary}
+        onResolved={onDoneIntentResolved}
+        busy={exitActionBusy}
+        resumeLabel={doneResumeLabel}
+        triggerClassName="reader-btn"
+        triggerIcon="checkCircle"
+        triggerLabel="Done"
+        triggerTestId="reader-mark-done"
+        tooltipLabel="Mark source done"
+        triggerAriaLabel="Mark source done"
+      />
       <button
         type="button"
         className="reader-btn"

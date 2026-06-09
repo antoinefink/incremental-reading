@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({
   scheduleQueueItem: vi.fn(),
   setElementPriority: vi.fn(),
   createExtraction: vi.fn(),
+  getBlockProcessingSummary: vi.fn(),
   refreshInspector: vi.fn(),
   editor: {
     state: { selection: { empty: true, from: 1 } },
@@ -156,6 +157,7 @@ vi.mock("../../lib/appApi", async () => {
       scheduleQueueItem: h.scheduleQueueItem,
       setElementPriority: h.setElementPriority,
       createExtraction: h.createExtraction,
+      getBlockProcessingSummary: h.getBlockProcessingSummary,
     },
   };
 });
@@ -283,6 +285,41 @@ const inspectorData = {
   },
 };
 
+/**
+ * Build a block-processing summary for the DoneIntentMenu's `getSummary` read. Defaults
+ * to a partially-processed source with 1 unresolved (`unread`) block — `getSummary` then
+ * opens the surface. Pass `canMarkDoneWithoutConfirmation: true` (with zeroed counts) to
+ * exercise the 0-unresolved fast path.
+ */
+function summaryFor(overrides: Record<string, unknown> = {}) {
+  return {
+    sourceElementId: "src-1",
+    totalBlocks: 2,
+    processedBlocks: 1,
+    terminalBlocks: 1,
+    unresolvedBlocks: 1,
+    highPriorityUnresolvedBlocks: 1,
+    extractedBlockCount: 0,
+    extractedOutputCount: 0,
+    ignoredBlocks: 0,
+    ignoredRatio: 0,
+    terminalRatio: 0.5,
+    staleAfterEditBlocks: 0,
+    legacyProjectedBlocks: 0,
+    canMarkDoneWithoutConfirmation: false,
+    stateCounts: {
+      unread: 1,
+      read: 0,
+      extracted: 0,
+      ignored: 0,
+      processed_without_output: 1,
+      needs_later: 0,
+      stale_after_edit: 0,
+    },
+    ...overrides,
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -304,6 +341,7 @@ beforeEach(() => {
   h.scheduleQueueItem.mockReset();
   h.setElementPriority.mockReset();
   h.createExtraction.mockReset();
+  h.getBlockProcessingSummary.mockReset();
   h.refreshInspector.mockReset();
   h.editor.commands.focus.mockReset();
   h.documentState.status = "ready";
@@ -379,6 +417,9 @@ beforeEach(() => {
     element: { ...inspectorData.element, priorityLabel: "B" },
   });
   h.createExtraction.mockResolvedValue({ id: "ext-1" });
+  // The Done surface reads the summary itself (fast-path vs popover); default to the
+  // unresolved summary so pressing Done opens the surface. Fast-path tests override it.
+  h.getBlockProcessingSummary.mockResolvedValue({ summary: summaryFor() });
 });
 
 describe("SourceReader", () => {
@@ -557,12 +598,65 @@ describe("SourceReader", () => {
     expect(h.scheduleQueueItem).toHaveBeenCalledTimes(1);
   });
 
-  it("confirms unresolved blocks before marking the source done", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("marks a 0-unresolved source done immediately, with no intent surface", async () => {
+    const confirm = vi.spyOn(window, "confirm");
+    h.getBlockProcessingSummary.mockResolvedValue({
+      summary: summaryFor({
+        unresolvedBlocks: 0,
+        highPriorityUnresolvedBlocks: 0,
+        processedBlocks: 2,
+        terminalBlocks: 2,
+        terminalRatio: 1,
+        canMarkDoneWithoutConfirmation: true,
+        stateCounts: {
+          unread: 0,
+          read: 0,
+          extracted: 2,
+          ignored: 0,
+          processed_without_output: 0,
+          needs_later: 0,
+          stale_after_edit: 0,
+        },
+      }),
+    });
+    const { getByTestId, findByTestId, queryByTestId } = render(<SourceReader />);
+    await findByTestId("mock-source-editor");
+
+    fireEvent.click(getByTestId("reader-mark-done"));
+
+    // Fast path: mark done + ⌘Z-undo toast + navigate to /queue, no popover.
+    await waitFor(() =>
+      expect(h.actOnQueueItem).toHaveBeenCalledWith({
+        id: "src-1",
+        action: { kind: "markDone", confirmUnresolvedBlocks: true },
+      }),
+    );
+    expect(queryByTestId("done-intent-pop")).not.toBeInTheDocument();
+    expect(h.navigate).toHaveBeenCalledWith({ to: "/queue" });
+    expect(confirm).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it("opens the intent surface (no window.confirm) when unresolved blocks remain", async () => {
+    const confirm = vi.spyOn(window, "confirm");
     const { getByTestId, findByTestId } = render(<SourceReader />);
     await findByTestId("mock-source-editor");
 
     fireEvent.click(getByTestId("reader-mark-done"));
+
+    await waitFor(() => expect(getByTestId("done-intent-pop")).toBeInTheDocument());
+    expect(h.actOnQueueItem).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it("Finished marks the source done with the confirm override and navigates to /queue", async () => {
+    const confirm = vi.spyOn(window, "confirm");
+    const { getByTestId, findByTestId } = render(<SourceReader />);
+    await findByTestId("mock-source-editor");
+
+    fireEvent.click(getByTestId("reader-mark-done"));
+    fireEvent.click(await findByTestId("done-intent-finished"));
 
     await waitFor(() =>
       expect(h.actOnQueueItem).toHaveBeenCalledWith({
@@ -570,37 +664,83 @@ describe("SourceReader", () => {
         action: { kind: "markDone", confirmUnresolvedBlocks: true },
       }),
     );
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("1 unresolved block"));
+    expect(h.navigate).toHaveBeenCalledWith({ to: "/queue" });
+    expect(getByTestId("reader-flash")).toHaveTextContent("Source done — ⌘Z to undo");
+    expect(confirm).not.toHaveBeenCalled();
     confirm.mockRestore();
   });
 
-  it("does not mark the source done when unresolved confirmation is cancelled", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  it("Abandon dismisses the source and navigates to /queue", async () => {
     const { getByTestId, findByTestId } = render(<SourceReader />);
     await findByTestId("mock-source-editor");
 
     fireEvent.click(getByTestId("reader-mark-done"));
+    fireEvent.click(await findByTestId("done-intent-abandon"));
 
-    await waitFor(() => expect(confirm).toHaveBeenCalled());
-    expect(h.actOnQueueItem).not.toHaveBeenCalled();
-    await waitFor(() => expect(getByTestId("reader-mark-done")).not.toBeDisabled());
-    confirm.mockRestore();
+    await waitFor(() =>
+      expect(h.actOnQueueItem).toHaveBeenCalledWith({
+        id: "src-1",
+        action: { kind: "dismiss" },
+      }),
+    );
+    expect(h.navigate).toHaveBeenCalledWith({ to: "/queue" });
+    expect(getByTestId("reader-flash")).toHaveTextContent("Source dismissed");
   });
 
-  it("keeps reader exit controls usable after a mark-done failure", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("Return later postpones, refreshes the inspector, and stays on the reader", async () => {
+    const { getByTestId, findByTestId } = render(<SourceReader />);
+    await findByTestId("reader-title");
+    h.getInspectorData.mockClear();
+
+    fireEvent.click(getByTestId("reader-mark-done"));
+    fireEvent.click(await findByTestId("done-intent-later"));
+
+    await waitFor(() =>
+      expect(h.actOnQueueItem).toHaveBeenCalledWith({
+        id: "src-1",
+        action: { kind: "postpone" },
+      }),
+    );
+    await waitFor(() => expect(h.getInspectorData).toHaveBeenCalledWith({ id: "src-1" }));
+    expect(h.refreshInspector).toHaveBeenCalled();
+    expect(getByTestId("reader-flash")).toHaveTextContent("Returned to the queue");
+    // Return later keeps reading where it is — the read-point/due-date stay decoupled.
+    expect(h.navigate).not.toHaveBeenCalledWith({ to: "/queue" });
+    expect(getByTestId("route-source")).toBeInTheDocument();
+  });
+
+  it("cancels the intent surface on Escape without mutating", async () => {
+    const { getByTestId, findByTestId, queryByTestId } = render(<SourceReader />);
+    await findByTestId("mock-source-editor");
+
+    fireEvent.click(getByTestId("reader-mark-done"));
+    await findByTestId("done-intent-pop");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(queryByTestId("done-intent-pop")).not.toBeInTheDocument());
+    expect(h.actOnQueueItem).not.toHaveBeenCalled();
+    expect(h.navigate).not.toHaveBeenCalledWith({ to: "/queue" });
+    expect(getByTestId("route-source")).toBeInTheDocument();
+  });
+
+  it("keeps reader exit controls usable after a mark-done (Finished) failure", async () => {
+    const confirm = vi.spyOn(window, "confirm");
     h.actOnQueueItem.mockRejectedValue(new Error("mark done failed"));
     const { getByTestId, findByTestId } = render(<SourceReader />);
     await findByTestId("mock-source-editor");
 
     fireEvent.click(getByTestId("reader-mark-done"));
+    fireEvent.click(await findByTestId("done-intent-finished"));
 
     await waitFor(() =>
       expect(getByTestId("reader-flash")).toHaveTextContent("Could not mark source done"),
     );
+    expect(h.navigate).not.toHaveBeenCalledWith({ to: "/queue" });
     expect(getByTestId("reader-postpone")).not.toBeDisabled();
     expect(getByTestId("reader-mark-done")).not.toBeDisabled();
     expect(getByTestId("reader-lower-priority")).not.toBeDisabled();
+    expect(confirm).not.toHaveBeenCalled();
     confirm.mockRestore();
   });
 
