@@ -3600,6 +3600,20 @@ export interface BackupsRestoreResult {
   readonly reloadRequired: true;
 }
 
+/**
+ * What `backups.pickArchive()` returns — ONLY the absolute path the user chose in the
+ * main-owned native open-file dialog, or `{ cancelled: true }`. The renderer hands the
+ * chosen path straight back to `backups.restoreFile`; it never reads the file itself.
+ */
+export type BackupsPickArchiveResult = { readonly path: string } | { readonly cancelled: true };
+
+export interface BackupsRestoreFileRequest {
+  /** The archive path chosen via `backups.pickArchive` (main-owned). */
+  readonly path: string;
+  readonly confirm: true;
+  readonly phrase: typeof RESTORE_BACKUP_CONFIRMATION_PHRASE;
+}
+
 export interface BackupsResetLocalDataRequest {
   readonly confirm: true;
   readonly phrase: typeof RESET_LOCAL_DATA_CONFIRMATION_PHRASE;
@@ -3849,6 +3863,8 @@ export interface AppApi {
     openFolder(): Promise<BackupsOpenFolderResult>;
     list(): Promise<BackupsListResult>;
     restore(request: BackupsRestoreRequest): Promise<BackupsRestoreResult>;
+    pickArchive(): Promise<BackupsPickArchiveResult>;
+    restoreFile(request: BackupsRestoreFileRequest): Promise<BackupsRestoreResult>;
     resetLocalData(request: BackupsResetLocalDataRequest): Promise<BackupsResetLocalDataResult>;
   };
   readonly jobs: {
@@ -4889,6 +4905,23 @@ export const appApi = {
    */
   restoreBackup(request: BackupsRestoreRequest): Promise<BackupsRestoreResult> {
     return requireAppApi().backups.restore(request);
+  },
+  /**
+   * Open the main-owned native open-file dialog (filtered to `.zip`) and return only
+   * the chosen archive path (or `{ cancelled: true }`). The path crossing back to the
+   * renderer originates from the main-owned picker, like the import pickers — the
+   * renderer never reads a file or supplies a path.
+   */
+  pickBackupArchive(): Promise<BackupsPickArchiveResult> {
+    return requireAppApi().backups.pickArchive();
+  },
+  /**
+   * Restore an arbitrary backup `.zip` on disk (chosen via `pickBackupArchive`). The
+   * request carries an exact typed confirmation phrase and the picked path; main
+   * extracts + verifies + installs through the same pipeline as `restoreBackup`.
+   */
+  restoreBackupFromFile(request: BackupsRestoreFileRequest): Promise<BackupsRestoreResult> {
+    return requireAppApi().backups.restoreFile(request);
   },
   /**
    * Start from scratch by resetting the local knowledge store (T055). The request

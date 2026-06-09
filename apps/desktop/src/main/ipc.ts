@@ -22,6 +22,7 @@ import {
   BackupsListRequestSchema,
   BackupsOpenFolderRequestSchema,
   BackupsResetLocalDataRequestSchema,
+  BackupsRestoreFileRequestSchema,
   BackupsRestoreRequestSchema,
   BalanceGetRequestSchema,
   BlockProcessingMarkBlockRequestSchema,
@@ -843,6 +844,29 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
     return result.filePaths;
   }
 
+  /**
+   * Restore-from-file picker. Opens a main-owned native open-file dialog filtered to
+   * `.zip` and returns the chosen path(s) (`[]` on cancel). Mirrors
+   * `pickImportFilePaths`: in an UNPACKAGED build (DEV/E2E) `INTERLEAVE_BACKUP_RESTORE_PATH`
+   * overrides the dialog so Playwright can drive restore-from-file deterministically.
+   * The chosen path is the ONLY backup `.zip` path that crosses to the renderer, and it
+   * always originates here — never a renderer-supplied path.
+   */
+  async function pickBackupArchivePath(event: Electron.IpcMainInvokeEvent): Promise<string[]> {
+    const override = process.env.INTERLEAVE_BACKUP_RESTORE_PATH;
+    if (!app.isPackaged && override && override.length > 0) return [override];
+
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const opts: Electron.OpenDialogOptions = {
+      title: "Restore backup from file",
+      properties: ["openFile"],
+      filters: [{ name: "Backup", extensions: ["zip"] }],
+    };
+    const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
+    if (result.canceled) return [];
+    return result.filePaths;
+  }
+
   ipcMain.handle(IPC_CHANNELS.captureGetPairing, () => {
     CaptureGetPairingRequestSchema.parse(undefined);
     return requireCaptureController().getPairing();
@@ -1405,6 +1429,39 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
       },
     });
     const result = await restoreService.restoreBackup(request.timestamp);
+    return {
+      status: "restored" as const,
+      timestamp: result.timestamp,
+      restoredAt: new Date().toISOString(),
+      reloadRequired: true as const,
+    };
+  });
+
+  // Open the main-owned native open-file dialog and return ONLY the chosen `.zip`
+  // path (or `{ cancelled: true }`). The renderer hands this path straight back to
+  // `backups.restoreFile`; it is never a generic file-read surface.
+  ipcMain.handle(IPC_CHANNELS.backupsPickArchive, async (event) => {
+    const paths = await pickBackupArchivePath(event);
+    if (paths.length === 0) return { cancelled: true as const };
+    return { path: paths[0] as string };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.backupsRestoreFile, async (_event, rawRequest: unknown) => {
+    const request = BackupsRestoreFileRequestSchema.parse(rawRequest);
+    if (!context) {
+      throw new Error("backups.restoreFile: handler registered without filesystem context");
+    }
+    const restoreService = new BackupRestoreService({
+      dbService,
+      paths: context.paths,
+      migrationsDir: context.migrationsDir,
+      nativeBinding: context.nativeBinding,
+      beforeReplaceLocalData: async () => {
+        await context.runner?.stopAndDrain();
+        await context.captureController?.stop();
+      },
+    });
+    const result = await restoreService.restoreBackupFromArchive(request.path);
     return {
       status: "restored" as const,
       timestamp: result.timestamp,

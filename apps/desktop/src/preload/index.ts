@@ -24,6 +24,7 @@ import type {
   AnalyticsReviewActivityRequest,
   AppApi,
   BackupsResetLocalDataRequest,
+  BackupsRestoreFileRequest,
   BackupsRestoreRequest,
   BalanceGetRequest,
   BlockProcessingMarkBlockRequest,
@@ -474,6 +475,9 @@ const appApi: AppApi = {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.backupsList),
     restore: (request: BackupsRestoreRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.backupsRestore, request),
+    pickArchive: () => ipcRenderer.invoke(IPC_CHANNELS.backupsPickArchive),
+    restoreFile: (request: BackupsRestoreFileRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.backupsRestoreFile, request),
     resetLocalData: (request: BackupsResetLocalDataRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.backupsResetLocalData, request),
   },

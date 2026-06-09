@@ -85,6 +85,20 @@ describe("preload bridge", () => {
       phrase: "RESTORE BACKUP",
     });
 
+    await api().backups.pickArchive();
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.backupsPickArchive);
+
+    await api().backups.restoreFile({
+      path: "/backups/2026-06-07.zip",
+      confirm: true,
+      phrase: "RESTORE BACKUP",
+    });
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.backupsRestoreFile, {
+      path: "/backups/2026-06-07.zip",
+      confirm: true,
+      phrase: "RESTORE BACKUP",
+    });
+
     await api().backups.resetLocalData({
       confirm: true,
       phrase: "START FROM SCRATCH",

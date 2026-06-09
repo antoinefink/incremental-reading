@@ -27,12 +27,15 @@ vi.mock("electron", () => ({
   shell: { openPath: electron.openPath },
 }));
 
+import { dialog } from "electron";
 import {
   IPC_CHANNELS,
   RESET_LOCAL_DATA_CONFIRMATION_PHRASE,
   RESTORE_BACKUP_CONFIRMATION_PHRASE,
 } from "../shared/contract";
 import { type IpcHandlerContext, registerIpcHandlers } from "./ipc";
+
+const showOpenDialog = vi.mocked(dialog.showOpenDialog);
 
 function fakeDbService() {
   return {
@@ -104,6 +107,8 @@ beforeEach(() => {
   electron.fromWebContents.mockClear();
   electron.openPath.mockReset();
   electron.openPath.mockResolvedValue("");
+  showOpenDialog.mockReset();
+  delete process.env.INTERLEAVE_BACKUP_RESTORE_PATH;
 });
 
 describe("registerIpcHandlers", () => {
@@ -525,6 +530,75 @@ describe("registerIpcHandlers", () => {
         { confirm: true, phrase: RESET_LOCAL_DATA_CONFIRMATION_PHRASE },
       ) as Promise<unknown>,
     ).rejects.toThrow("backups.resetLocalData: handler registered without filesystem context");
+  });
+
+  it("rejects a malformed restore-from-file payload before constructing the service", async () => {
+    registerIpcHandlers(fakeDbService() as never, fakeIpcContext());
+
+    const restoreFile = electron.handlers.get(IPC_CHANNELS.backupsRestoreFile);
+
+    // missing phrase
+    await expect(
+      restoreFile?.({}, { path: "/backups/2026-06-07.zip", confirm: true }) as Promise<unknown>,
+    ).rejects.toThrow();
+    // confirm:false
+    await expect(
+      restoreFile?.(
+        {},
+        {
+          path: "/backups/2026-06-07.zip",
+          confirm: false,
+          phrase: RESTORE_BACKUP_CONFIRMATION_PHRASE,
+        },
+      ) as Promise<unknown>,
+    ).rejects.toThrow();
+    // empty path
+    await expect(
+      restoreFile?.(
+        {},
+        { path: "", confirm: true, phrase: RESTORE_BACKUP_CONFIRMATION_PHRASE },
+      ) as Promise<unknown>,
+    ).rejects.toThrow();
+  });
+
+  it("restore-from-file throws when no filesystem context is wired", async () => {
+    registerIpcHandlers(fakeDbService() as never);
+
+    const restoreFile = electron.handlers.get(IPC_CHANNELS.backupsRestoreFile);
+
+    await expect(
+      restoreFile?.(
+        {},
+        {
+          path: "/backups/2026-06-07.zip",
+          confirm: true,
+          phrase: RESTORE_BACKUP_CONFIRMATION_PHRASE,
+        },
+      ) as Promise<unknown>,
+    ).rejects.toThrow("backups.restoreFile: handler registered without filesystem context");
+  });
+
+  it("pickArchive returns the env-override path in an unpackaged build", async () => {
+    process.env.INTERLEAVE_BACKUP_RESTORE_PATH = "/backups/override.zip";
+    registerIpcHandlers(fakeDbService() as never, fakeIpcContext());
+
+    const pickArchive = electron.handlers.get(IPC_CHANNELS.backupsPickArchive);
+
+    await expect(pickArchive?.({}) as Promise<unknown>).resolves.toEqual({
+      path: "/backups/override.zip",
+    });
+    // The env override short-circuits the dialog entirely.
+    expect(showOpenDialog).not.toHaveBeenCalled();
+  });
+
+  it("pickArchive returns { cancelled: true } when the dialog is canceled", async () => {
+    showOpenDialog.mockResolvedValue({ canceled: true, filePaths: [] });
+    registerIpcHandlers(fakeDbService() as never, fakeIpcContext());
+
+    const pickArchive = electron.handlers.get(IPC_CHANNELS.backupsPickArchive);
+
+    await expect(pickArchive?.({}) as Promise<unknown>).resolves.toEqual({ cancelled: true });
+    expect(showOpenDialog).toHaveBeenCalledTimes(1);
   });
 
   it("broadcasts runner job updates to live renderer windows and unsubscribes on dispose", () => {

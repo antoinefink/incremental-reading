@@ -17,8 +17,10 @@ import {
   BackupsListRequestSchema,
   type BackupsListResult,
   BackupsOpenFolderRequestSchema,
+  type BackupsPickArchiveResult,
   BackupsResetLocalDataRequestSchema,
   type BackupsResetLocalDataResult,
+  BackupsRestoreFileRequestSchema,
   BackupsRestoreRequestSchema,
   type BackupsRestoreResult,
   BackupTimestampSchema,
@@ -305,6 +307,8 @@ describe("IPC channels", () => {
         "backups:openFolder",
         "backups:list",
         "backups:restore",
+        "backups:pickArchive",
+        "backups:restoreFile",
         "backups:resetLocalData",
         "jobs:list",
         "jobs:updated",
@@ -2637,6 +2641,68 @@ describe("Backup restore/reset schemas (T055)", () => {
         phrase: "RESTORE BACKUP",
       }).success,
     ).toBe(false);
+  });
+
+  it("BackupsRestoreFileRequestSchema requires a non-empty path, confirm:true, and the exact phrase", () => {
+    expect(
+      BackupsRestoreFileRequestSchema.parse({
+        path: "/x.zip",
+        confirm: true,
+        phrase: "RESTORE BACKUP",
+      }),
+    ).toEqual({
+      path: "/x.zip",
+      confirm: true,
+      phrase: "RESTORE BACKUP",
+    });
+    // empty path
+    expect(
+      BackupsRestoreFileRequestSchema.safeParse({
+        path: "",
+        confirm: true,
+        phrase: "RESTORE BACKUP",
+      }).success,
+    ).toBe(false);
+    // missing path
+    expect(
+      BackupsRestoreFileRequestSchema.safeParse({
+        confirm: true,
+        phrase: "RESTORE BACKUP",
+      }).success,
+    ).toBe(false);
+    // confirm:false
+    expect(
+      BackupsRestoreFileRequestSchema.safeParse({
+        path: "/x.zip",
+        confirm: false,
+        phrase: "RESTORE BACKUP",
+      }).success,
+    ).toBe(false);
+    // wrong phrase
+    expect(
+      BackupsRestoreFileRequestSchema.safeParse({
+        path: "/x.zip",
+        confirm: true,
+        phrase: "restore backup",
+      }).success,
+    ).toBe(false);
+    // unknown extra keys rejected (.strict())
+    expect(
+      BackupsRestoreFileRequestSchema.safeParse({
+        path: "/x.zip",
+        confirm: true,
+        phrase: "RESTORE BACKUP",
+        timestamp: "2026-06-07T12-30-00-000Z",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("BackupsPickArchiveResult round-trips both variants as plain JSON without extra surface", () => {
+    const chosen: BackupsPickArchiveResult = { path: "/backups/2026-06-07.zip" };
+    const cancelled: BackupsPickArchiveResult = { cancelled: true };
+
+    expect(JSON.parse(JSON.stringify(chosen))).toEqual(chosen);
+    expect(JSON.parse(JSON.stringify(cancelled))).toEqual(cancelled);
   });
 
   it("BackupsResetLocalDataRequestSchema requires confirm:true and the exact reset phrase", () => {

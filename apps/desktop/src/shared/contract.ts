@@ -5533,6 +5533,32 @@ export interface BackupsRestoreResult {
   readonly reloadRequired: true;
 }
 
+/**
+ * What `backups.pickArchive()` returns — ONLY the absolute path the user chose in
+ * the main-owned native open-file dialog, or `{ cancelled: true }`. This is the one
+ * narrow place a backup `.zip` path crosses into the renderer, and it originates
+ * from a main-owned picker (same trust model as the import pickers), never a generic
+ * filesystem read. The chosen path is then handed straight back to
+ * `backups.restoreFile` for extract → verify → install.
+ */
+export type BackupsPickArchiveResult = { readonly path: string } | { readonly cancelled: true };
+
+/**
+ * `backups.restoreFile()` restores an arbitrary backup `.zip` on disk (one the app
+ * does not manage). `path` is the archive chosen via `backups.pickArchive`; guarded
+ * by `confirm: true` and the SAME `RESTORE BACKUP` phrase as the timestamp restore.
+ * Main re-validates the request and the archive — this is a narrow extract + verify
+ * + install capability, not a generic file-read surface.
+ */
+export const BackupsRestoreFileRequestSchema = z
+  .object({
+    path: z.string().min(1),
+    confirm: z.literal(true),
+    phrase: z.literal(RESTORE_BACKUP_CONFIRMATION_PHRASE),
+  })
+  .strict();
+export type BackupsRestoreFileRequest = z.infer<typeof BackupsRestoreFileRequestSchema>;
+
 export const BackupsResetLocalDataRequestSchema = z
   .object({
     confirm: z.literal(true),
@@ -6289,6 +6315,18 @@ export interface AppApi {
      * the exact phrase `RESTORE BACKUP`; never accepts a renderer-supplied path.
      */
     restore(request: BackupsRestoreRequest): Promise<BackupsRestoreResult>;
+    /**
+     * Open a main-owned native open-file dialog filtered to `.zip` and return ONLY
+     * the chosen archive path (or `{ cancelled: true }`). No renderer-supplied path;
+     * the picker lives entirely in main, like the import pickers.
+     */
+    pickArchive(): Promise<BackupsPickArchiveResult>;
+    /**
+     * Restore an arbitrary backup `.zip` on disk (chosen via `pickArchive`). Extracts
+     * + verifies + installs through the SAME pipeline as `restore`. Guarded by
+     * `confirm: true` and the exact phrase `RESTORE BACKUP`; never a generic file read.
+     */
+    restoreFile(request: BackupsRestoreFileRequest): Promise<BackupsRestoreResult>;
     /**
      * Remove the local knowledge store and recreate an empty migrated vault while
      * preserving sibling backups/exports/models. Guarded by `START FROM SCRATCH`.

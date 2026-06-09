@@ -160,6 +160,13 @@ function installAppApi(overrides: Partial<AppApi> = {}): AppApi {
         restoredAt: "2026-06-07T12:45:00.000Z",
         reloadRequired: true,
       })),
+      pickArchive: vi.fn(async () => ({ path: "/backups/2026-06-07.zip" })),
+      restoreFile: vi.fn(async () => ({
+        status: "restored",
+        timestamp: "2026-06-07T12-30-00-000Z",
+        restoredAt: "2026-06-07T12:45:00.000Z",
+        reloadRequired: true,
+      })),
       resetLocalData: vi.fn(async () => ({
         status: "reset",
         resetAt: "2026-06-07T12:45:00.000Z",
@@ -257,6 +264,23 @@ describe("renderer appApi wrapper", () => {
     });
     expect(bridge.backups.restore).toHaveBeenCalledWith({
       timestamp: "2026-06-07T12-30-00-000Z",
+      confirm: true,
+      phrase: RESTORE_BACKUP_CONFIRMATION_PHRASE,
+    });
+
+    await expect(appApi.pickBackupArchive()).resolves.toEqual({
+      path: "/backups/2026-06-07.zip",
+    });
+    expect(bridge.backups.pickArchive).toHaveBeenCalledTimes(1);
+    expect(bridge.backups.pickArchive).toHaveBeenCalledWith();
+
+    await appApi.restoreBackupFromFile({
+      path: "/backups/2026-06-07.zip",
+      confirm: true,
+      phrase: RESTORE_BACKUP_CONFIRMATION_PHRASE,
+    });
+    expect(bridge.backups.restoreFile).toHaveBeenCalledWith({
+      path: "/backups/2026-06-07.zip",
       confirm: true,
       phrase: RESTORE_BACKUP_CONFIRMATION_PHRASE,
     });

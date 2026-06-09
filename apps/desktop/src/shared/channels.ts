@@ -202,6 +202,13 @@ export const IPC_CHANNELS = {
   backupsOpenFolder: "backups:openFolder",
   backupsList: "backups:list",
   backupsRestore: "backups:restore",
+  // Restore from an arbitrary backup `.zip` on disk. `backups:pickArchive` opens a
+  // main-owned native open-file dialog (filtered to `.zip`) and returns ONLY the
+  // chosen path (or cancelled); `backups:restoreFile` extracts + verifies + installs
+  // that archive through the SAME pipeline as `backups:restore`. The path crossing to
+  // the renderer originates from the main-owned picker — never a generic file read.
+  backupsPickArchive: "backups:pickArchive",
+  backupsRestoreFile: "backups:restoreFile",
   backupsResetLocalData: "backups:resetLocalData",
   // Background-runner observe surface (T058). `jobs:list` reads the current queue.
   // The renderer enqueues ONLY via `sources:importUrl` — there is intentionally NO
