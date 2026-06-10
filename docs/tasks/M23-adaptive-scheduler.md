@@ -1,0 +1,240 @@
+# M23 — The adaptive attention scheduler (T111–T114)
+
+> The flagship gap — the only finding all six ideation frames produced independently (survivor
+> #1; the SuperMemo A-Factor analog). The attention scheduler is a static band lookup
+> (`sourceIntervalDays` returns `{A:1, B:7, C:30, D:90}` forever); `lastSeenAt` is explicitly
+> "RESERVED — deliberately NOT consumed by `nextDueAt` … zero effect on the output today"
+> (`packages/scheduler/src/attention-scheduler.ts:104-112`); the rich yield signals reduce to
+> exactly two binary branches in `adjustForSourceProcessing` (halve when high-priority with >25%
+> unresolved; double + `retirementSuggestion` when dead). `docs/scheduling-and-priority.md` and
+> the package charter promise inputs ("last processed date", "whether the element produced
+> useful children", "stagnation") the engine provably ignores — close the spec-vs-code gap from
+> the code side. `docs/solutions/architecture-patterns/durable-source-block-processing-state.md`
+> names source-yield scheduler inputs as the intended unbuilt seam.
+>
+> **Order is load-bearing:** T104 (value model v2) must be `[x]` before T112 — yield-keyed
+> scheduling on the cards-only value function would punish synthesis-driven reading.
+>
+> **Shared invariants for every task in this file.** Sources/topics/extracts are attention-
+> scheduled ONLY — never touch `review_states` (FSRS is cards-only). Scheduling stays
+> deterministic and unit-testable (pure functions in `packages/scheduler`, composed by
+> `SchedulerService` in `packages/local-db`). Every scheduling change adds drift-diagnostic
+> cases (`docs/solutions/logic-errors/queue-eligibility-inventory-scheduler-state.md`) and
+> respects the explainability bar (no unexplained interval change reaches the UI — that is
+> T113, and T112 must not ship to users without it; build T112 behind a flag if landing
+> separately). Update `docs/scheduling-and-priority.md` as each input becomes real.
+>
+> **Standard gates (inherited by every task below):** `pnpm lint` · `pnpm typecheck` ·
+> `pnpm test` · relevant `pnpm e2e`; persistence survives restart; mutations transactional +
+> op-logged; no unrelated refactors.
+>
+> **File/line references** verified 2026-06-09/10; re-verify with grep before editing.
+
+---
+
+# T111 — Consume recency (`lastSeenAt`)
+
+- **Milestone:** M23 — Adaptive attention scheduler
+- **Status:** `[ ]` not started
+- **Depends on:** T028, T076
+- **Roadmap line:** `lastSeenAt` feeds interval computation so untouched-but-due elements stop
+  interleaving identically with just-processed ones; deterministic, unit-tested, with a
+  drift-diagnostic case.
+
+## Goal
+
+The smallest real scheduler change first: wire the already-reserved recency axis into
+`nextDueAt`. This proves the extension seam end-to-end (descriptor → interval function → due
+write → queue) before the larger multiplier lands, and removes the obvious wart where the
+engine cannot tell "processed yesterday" from "ignored for a month".
+
+## Context to load first
+
+- Existing code: `packages/scheduler/src/attention-scheduler.ts` — the `Schedulable` descriptor,
+  the RESERVED comment block (:104-112), `sourceIntervalDays`, `extractStageIntervalDays`,
+  `postponeIntervalForPriority`; `packages/local-db/src/scheduler-service.ts` — where
+  descriptors are built (confirm `lastSeenAt` is actually populated; if not, populate it from
+  op-log/processing facts in this task); scheduler unit tests as the spec of current behavior.
+- Invariants: pure-function determinism (clock injected, never `Date.now()` inside the math).
+
+## Deliverables
+
+- [ ] Define and document the recency rule in-code (e.g., a damping term so a just-processed
+      element's next return is computed from `lastSeenAt`, not from a band table applied to
+      "now"; an element untouched far past its due gets a bounded freshness boost in queue
+      score, not a punishment). Keep it small — this is one input, not the multiplier.
+- [ ] Ensure `lastSeenAt` is populated correctly for sources, topics, and extracts at every
+      processing action (grep all `SchedulerService` write paths).
+- [ ] Delete/replace the RESERVED comment with the real contract; update
+      `docs/scheduling-and-priority.md` accordingly.
+- [ ] Drift diagnostic: a case detecting `lastSeenAt`-vs-due inconsistency.
+- [ ] Tests: unit table-tests for the new term (boundary: never-seen, just-seen, long-overdue);
+      scheduler-service integration proving writes populate the field.
+
+## Done when
+
+- Two otherwise-identical elements with different `lastSeenAt` get different, correctly-ordered
+  next dues; the RESERVED comment is gone; the doc matches the code; drift case exists.
+- Standard gates pass.
+
+## Notes / risks
+
+- Queue-stability: a one-time global re-sort on upgrade is acceptable but must be boring —
+  verify with a seeded 100k fixture (M20 harness) that the first post-upgrade queue
+  materialization stays performant and sane.
+
+---
+
+# T112 — Yield-adaptive interval multiplier
+
+- **Milestone:** M23 — Adaptive attention scheduler
+- **Status:** `[ ]` not started
+- **Depends on:** T104, T111
+- **Roadmap line:** each source/extract carries a bounded per-element interval multiplier
+  (≈×0.5–×4 of band base) updated on every processed visit from v2 yield, with priority
+  modulating growth — replacing the two binary `adjustForSourceProcessing` branches.
+
+## Goal
+
+The A-Factor analog: productive material returns sooner; exhausted material recedes with
+dignity. A 50-pass A-source that yields ten extracts per visit and one that yields nothing stop
+sharing a cadence, and a maturing collection's attention load finally amortizes instead of
+growing linearly with source count.
+
+## Context to load first
+
+- Existing code: `adjustForSourceProcessing` (the two branches this replaces — keep
+  `retirementSuggestion` emission, T103 consumes it); the v2 value model (T104,
+  `packages/core/src/source-yield.ts`); per-visit yield facts (block-processing service rows,
+  extraction lineage counts); `schedulerSignals` plumbing (T113 will surface reasons — emit the
+  structured reason from day one).
+- Invariants: bounded and monotone-sane (one visit can move the multiplier only one step);
+  deterministic; the multiplier is element state persisted with the schedule (Drizzle migration)
+  and restored by undo preimages like any schedule field.
+
+## Deliverables
+
+- [ ] Multiplier definition in `packages/scheduler` (pure): inputs = v2 yield of the visit
+      (extracts/statements/cards/synthesis produced, honorable fates), unresolved ratio, and
+      priority (higher priority → slower interval growth, mirroring SM's priority↔A-Factor
+      coupling). Bounds ≈ [0.5, 4.0] on the band base; step-limited per visit; documented
+      in-code with the growth table.
+- [ ] Persistence: per-element multiplier column + migration; written transactionally with the
+      schedule on each processed visit; undo preimages logged.
+- [ ] Replace the two binary branches with the graded path (dead-source case still emits
+      `retirementSuggestion`).
+- [ ] Feature flag/setting: "adaptive intervals" default ON only once T113 ships; OFF falls back
+      to band tables (keep the fallback path tested).
+- [ ] Drift diagnostic: multiplier-out-of-bounds and multiplier-vs-history inconsistency cases.
+- [ ] Tests: table-tests across the yield×priority grid (productive A-source shortens; barren
+      C-source lengthens toward retirement; synthesis-only output counts as productive — the
+      T104 regression test); 100k-fixture performance check; e2e — a productive fixture source
+      visibly returns sooner than its band floor after two visits.
+
+## Done when
+
+- The multiplier behaves per the documented table, persists, restores through undo, respects
+  bounds, and the binary branches are gone; with the flag off, behavior is byte-identical to
+  pre-T112 scheduling (snapshot test).
+- Standard gates pass.
+
+## Notes / risks
+
+- Start conservative: narrow bounds and small steps; widening later is cheap, rebuilding trust
+  is not.
+- Do NOT consume raw card lapse data here — that input arrives in T114 with its own caps.
+
+---
+
+# T113 — Schedule explainability
+
+- **Milestone:** M23 — Adaptive attention scheduler
+- **Status:** `[ ]` not started
+- **Depends on:** T112
+- **Roadmap line:** wherever a due date is shown, a learned interval change carries a structured
+  one-line reason via `schedulerSignals`; no unexplained interval change reaches the UI.
+
+## Goal
+
+The trust contract for the adaptive scheduler: every learned deviation from the band base is
+explainable in one plain line — "returning in 3d instead of 7d: last visit produced 6 extracts"
+/ "receding: 3 visits without output". The feed-ranking lesson: decay functions users can't see
+read as the system being broken.
+
+## Context to load first
+
+- Existing code: `schedulerSignals` on queue rows (T112 emits structured reasons), queue row UI
+  + inspector schedule section, DoneIntentMenu breakdown copy style (domain-predicate-derived
+  copy that cannot drift — same discipline here).
+- Invariants: reasons are computed domain-side and carried as structured data (kind + numbers);
+  the renderer formats, never re-derives.
+
+## Deliverables
+
+- [ ] Reason vocabulary (small union: `yield_shortened`, `yield_lengthened`, `recency_damped`,
+      `postpone_recession`, `descendant_lapses` (reserved for T114), `band_base`) carried on
+      schedule reads.
+- [ ] Queue row affordance (hover/inline) + inspector line rendering the reason; band-base
+      schedules show nothing (silence is the default state, not noise).
+- [ ] T112's flag flips to default-ON here (adaptive intervals ship to users only with reasons
+      attached).
+- [ ] Tests: unit (reason emission matches the interval math for each branch); renderer unit
+      (formatting); e2e — productive fixture shows the shortened-reason line.
+
+## Done when
+
+- Every non-band-base due date in queue/inspector carries its reason; copy comes from structured
+  signals; adaptive scheduling is on by default.
+- Standard gates pass.
+
+## Notes / risks
+
+- Keep the union closed and exhaustively switched — a new scheduler input without a reason kind
+  must fail typecheck, not render blank.
+
+---
+
+# T114 — Descendant-health input
+
+- **Milestone:** M23 — Adaptive attention scheduler
+- **Status:** `[ ]` not started
+- **Depends on:** T112
+- **Roadmap line:** descendant-card lapse rate feeds the multiplier (struggling descendants pull
+  the parent source back sooner), capped and explained, with tests proving a lapsing cluster
+  shortens the parent's return interval.
+
+## Goal
+
+The first back-edge from review into attention scheduling: when the cards built from a source
+keep failing, the source itself returns sooner — comprehension debt pulls re-exposure. (The
+full re-reading proposal workflow is M28; this task is only the scheduling input.)
+
+## Context to load first
+
+- Existing code: review_logs lapse data + lineage joins (T040 leech detection has the lapse
+  semantics; M28's T128 will formalize clustering — share the join logic if T128 lands first,
+  otherwise keep this task's query minimal and let T128 absorb it), T112's multiplier inputs,
+  T113's reason union (`descendant_lapses`).
+- Invariants: capped influence (descendant lapses can shorten, never lengthen, and only within
+  the multiplier bounds); cards' own FSRS scheduling is untouched.
+
+## Deliverables
+
+- [ ] Descendant lapse-rate input on the descriptor (windowed, e.g. lapses across live
+      descendants in the last 30d normalized by descendant count), with an explicit cap on its
+      multiplier contribution.
+- [ ] `descendant_lapses` reason emitted when the input bites (T113 renders it).
+- [ ] Tests: unit — a lapsing-cluster fixture shortens the parent's interval within cap; a
+      healthy-descendants fixture is a no-op; e2e — inspector shows the reason on a seeded
+      struggling source.
+
+## Done when
+
+- A source with a struggling descendant cluster returns measurably sooner, capped, with the
+  reason visible; healthy sources are unaffected.
+- Standard gates pass.
+
+## Notes / risks
+
+- Noise control: ignore lapse counts below a floor (1–2 lapses is review noise, not
+  comprehension debt) — align the floor with T128's clustering threshold when both exist.

@@ -352,6 +352,140 @@ Detailed specs: [`tasks/M20-maintenance.md`](./tasks/M20-maintenance.md) (T099) 
 
 ---
 
+# Part III — Close the loops (T101–T134)
+
+Goal: Parts I–II built the gold-standard *mechanics*; Part III makes them *behave*. The 2026-06
+gap analysis ([`ideation/2026-06-09-gold-standard-incremental-reading-ideation.md`](./ideation/2026-06-09-gold-standard-incremental-reading-ideation.md))
+found the system durably records nearly everything that matters — yield, postpone history, block
+deferrals, staleness, per-concept retention targets — and feeds almost none of it back into
+scheduling, routing, or user-visible accountability ("gold-standard sensors, MVP-grade
+actuators"). Part III closes those loops. Almost every task consumes data already captured; new
+surfaces are read models per the house pattern, not new product directions.
+
+> **Direction (authoritative for Part III).**
+>
+> - **Receipts before automation.** The system may act on the user's behalf (trim a day, demote
+>   an extract, propose retirement) only where a ledger + undo trail makes the action visible and
+>   reversible. Read models land before or with the behavior they audit — that is why M22
+>   precedes M23/M24.
+> - **Value model first.** Anything keyed off "yield" uses the v2 value model (T104 — synthesis
+>   output and honorable non-card fates count as productive), never the cards-only definition in
+>   `packages/core/src/source-yield.ts`. T104 blocks T112 and T121 by design.
+> - **Explainability bar.** Any scheduling change driven by learned signals must carry a one-line
+>   UI reason ("returning sooner: last visit produced 6 extracts"). No unexplained interval
+>   changes.
+> - **House patterns hold.** Trusted-side read models behind typed IPC (never parallel analytics
+>   tables); command-shaped transactional mutations appending `operation_log`; queue invariants
+>   (backend-canonical eligibility, transactional schedule clears, undo preimages, new
+>   drift-diagnostic cases per scheduling change); soft delete/undo over destruction; settle
+>   surface ownership before building. Search `docs/solutions/` before each task.
+
+## M21 — Honest exits & the value model (T101–T104)
+Detailed specs: [`tasks/M21-honest-exits.md`](./tasks/M21-honest-exits.md)
+
+- [ ] **T101 — "Save for later" becomes parked, not dismissed** · _deps: T012, T044_
+  Done when: the inbox "Save for later" verb writes a distinct parked state — today `keepForLater` writes `status: "dismissed"`, the same terminal status as Abandon, unreachable by any routing — and parked items are visible/filterable in the library with their parked date, still excluded from inbox/queue/daily-work, distinguishable from dismissed in data and UI, op-logged and undoable.
+- [ ] **T102 — Parked resurfacing sweep** · _deps: T101_
+  Done when: parked items resurface on a schedule (default ~90 days) in a calm review surface offering keep-parked / schedule / let-go per item, with bulk apply and single-batch undo — "later" provably means later, not never.
+- [ ] **T103 — Proactive Done: surface `retirementSuggestion`** · _deps: T028, T083_
+  Done when: the scheduler's already-computed `retirementSuggestion` (threaded through `SchedulerService`, currently consumed by nothing in `apps/web`) surfaces as a calm nudge on queue rows and in the reader — one tap into the existing DoneIntentMenu with Finished/Abandon prefilled — server-authoritative, dismissible, and dismissals remembered.
+- [ ] **T104 — Value model v2: honorable non-card fates** · _deps: T024, T084, T095_
+  Done when: extracts can terminate as reference / synthesized / done-without-card (distinct states, not delete), `synthesis_note` lineage counts as productive output in source-yield, and the stagnation detector, T084 suggestions, and analytics all respect the new fates — synthesis-driven reading stops being scored as failure. Prerequisite for every yield-keyed behavior (T112, T121).
+
+## M22 — Receipts: priority integrity & knowledge maturity (T105–T110)
+Detailed specs: [`tasks/M22-receipts.md`](./tasks/M22-receipts.md)
+
+- [ ] **T105 — Priority-integrity read model** · _deps: T045, T077_
+  Done when: a typed read model reports, per priority band and per topic: due attention serviced vs deferred over a window, cumulative postpone debt, and band-share inflation (warning when one band dominates the collection) — computed from `review_logs` and `reschedule_element`/auto-postpone operation-log facts, no parallel tables, surfaced in analytics.
+- [ ] **T106 — Chronic-postpone reckoning** · _deps: T105_
+  Done when: items postponed ≥N times surface in a decision surface forcing an explicit keep / demote / done / delete per item — no further silent recession past the threshold without one decision — batched, undoable, op-logged, with new drift-diagnostic cases.
+- [ ] **T107 — Fallow: deliberate topic rest** · _deps: T105_
+  Done when: a topic can be rested to a chosen return date — distinct from postpone (no recession growth, excluded from missed-priority accounting) and from abandon (it provably returns) — visible on the topic, reversible, op-logged.
+- [ ] **T108 — Topic knowledge-state read model** · _deps: T079, T083, T104_
+  Done when: per topic/concept, a typed read model reports the funnel as stage-to-stage ratios (read → extracted → distilled → carded → mature), stability distribution, and measured retention trend vs the T079 target, and emits graduation events when thresholds cross.
+- [ ] **T109 — Maturity surfaces** · _deps: T108_
+  Done when: topic pages render the knowledge-state panel, analytics gains the concept-level retention view (replacing the deferred stub noted in `AnalyticsScreen.tsx`), and graduation events appear in the daily summary.
+- [ ] **T110 — Weekly ledger & integrity session** · _deps: T106, T109_
+  Done when: a weekly, dismissible session — itself a scheduled attention element — combines the week's ledger ("N sources → extracts → cards → matured; priorities missed by band") with the integrity sweep (T106 decisions, fallow suggestions, parked resurfacing when due): one ritual, not another dashboard to remember to visit.
+
+## M23 — The adaptive attention scheduler (T111–T114)
+Detailed specs: [`tasks/M23-adaptive-scheduler.md`](./tasks/M23-adaptive-scheduler.md)
+
+- [ ] **T111 — Consume recency (`lastSeenAt`)** · _deps: T028, T076_
+  Done when: `lastSeenAt` — currently marked "RESERVED — deliberately NOT consumed by `nextDueAt`" — feeds interval computation so untouched-but-due elements stop interleaving identically with just-processed ones; deterministic, unit-tested, with a drift-diagnostic case.
+- [ ] **T112 — Yield-adaptive interval multiplier** · _deps: T104, T111_
+  Done when: each source/extract carries a bounded per-element interval multiplier (≈×0.5–×4 of the band base) updated on every processed visit from v2 yield (extracts/statements/cards/synthesis produced, unresolved ratio) with priority modulating growth — replacing the two binary `adjustForSourceProcessing` branches; a 50-pass productive A-source and a barren one no longer share a cadence.
+- [ ] **T113 — Schedule explainability** · _deps: T112_
+  Done when: wherever a due date is shown (queue row, inspector), a learned interval change carries a structured one-line reason via `schedulerSignals`; no unexplained interval change reaches the UI.
+- [ ] **T114 — Descendant-health input** · _deps: T112_
+  Done when: descendant-card lapse rate feeds the multiplier (struggling descendants pull the parent source back sooner), capped and explained, with tests proving a lapsing cluster shortens the parent's return interval.
+
+## M24 — Ambient, time-denominated overload (T115–T118)
+Detailed specs: [`tasks/M24-ambient-overload.md`](./tasks/M24-ambient-overload.md)
+
+- [ ] **T115 — Per-item time-cost model** · _deps: T037, T083_
+  Done when: a typed read model estimates per-item minutes — cards from median graded response times in `review_logs` by card type; sources/extracts from recorded per-format time-spent — with explicit coarse defaults when history is thin, exposed for budget, gauge, and planner consumers.
+- [ ] **T116 — Minutes-denominated daily budget** · _deps: T115_
+  Done when: the daily budget is set in minutes (count setting migrated with a sensible conversion), the queue gauge projects today's real time cost, and over-budget detection compares minutes to minutes — one 6-second cloze and one 90-minute PDF pass stop costing the same "1 item".
+- [ ] **T117 — Standing auto-postpone policy** · _deps: T058, T077, T105_
+  Done when: an opt-in policy (off / suggest / automatic) runs the existing T077 planner main-side at day rollover so the user opens onto a within-budget day; every automatic run writes one `batchId`, a receipt line with one-tap undo appears in the daily summary, and the overload banner remains as the manual override. T105 is a hard dep: sacrifices are ledgered from day one.
+- [ ] **T118 — Session assembly ("what fits in N minutes")** · _deps: T116_
+  Done when: the user can request a session sized to N minutes; composition respects priority order, protection rules, and the T119 quota when present, and states what was left out and why.
+
+## M25 — Extract-pipeline flow control (T119–T122)
+Detailed specs: [`tasks/M25-flow-control.md`](./tasks/M25-flow-control.md)
+
+- [ ] **T119 — Protected distillation quota** · _deps: T076, T115_
+  Done when: day composition guarantees a configurable minimum share for distillation work (extract/statement processing) so conversion throughput never silently drops to zero under card load — the share is visible, and an overloaded fixture provably still surfaces distillation items.
+- [ ] **T120 — Batch conversion sessions** · _deps: T024, T032, T093_
+  Done when: a session view gathers card-ready atomic statements across sources for keyboard-first batch card authoring, with optional AI pre-drafts (existing `ai_suggestions` path, drafts-only invariant, explicit per-session consent); produced cards keep full lineage.
+- [ ] **T121 — Extract aging policy** · _deps: T084, T104_
+  Done when: extracts crossing an age/unproductive-returns threshold auto-demote to a recoverable T104 reference state via batched, op-logged, undoable sweeps — an opt-in policy with preview mirroring the auto-postpone receipt pattern — and age bands are visible wherever extracts list.
+- [ ] **T122 — Shape-aware extract staging** · _deps: T021, T024_
+  Done when: extract creation classifies shape, so card-ready captures (single sentences, definitions, facts) are born `atomic_statement` with a convert-now affordance instead of walking the hardcoded `raw_extract` ladder (three scheduled touches before a card is even possible); misclassification is one keystroke to correct; stage transitions stay op-logged.
+
+## M26 — Lineage integrity (T123–T125)
+Detailed specs: [`tasks/M26-lineage-integrity.md`](./tasks/M26-lineage-integrity.md)
+
+- [ ] **T123 — Stale propagation through the lineage DAG** · _deps: T022, T090_
+  Done when: when reconciliation marks source blocks `stale_after_edit`, the live downstream outputs (extracts → statements → cards anchored to those blocks) gain a queryable needs-reverify flag in the same transaction, and the counts appear in source progress and the Done-intent breakdown — cards built from corrected text stop circulating silently.
+- [ ] **T124 — Re-verify workflow** · _deps: T123_
+  Done when: flagged items resolve as confirm / rebase / detach (rebase re-anchors to current text, hash-diff assisted; detach freezes a provenance snapshot), batched per source and capped per session, op-logged and undoable; resolving clears the flag everywhere it shows.
+- [ ] **T125 — Card-edit write barrier** · _deps: T038, T080_
+  Done when: a substantive card edit (heuristic, always user-overridable) offers keep-schedule vs re-stabilize (demote to a short confirmation interval) — a rewritten card stops inheriting stability its old formulation earned — and the choice + edit linkage land on review logs so T080 optimization can exclude pre-edit history; in-flight review state stays uncorrupted (the original M7 rule's actual intent).
+
+## M27 — Triage at scale (T126–T127)
+Detailed specs: [`tasks/M27-triage-at-scale.md`](./tasks/M27-triage-at-scale.md)
+
+- [ ] **T126 — Bulk inbox triage** · _deps: T012, T069, T099_
+  Done when: the inbox supports multi-select and group-by (origin/domain/type) with keyboard-driven verbs + priority applied to a selection as one batched, op-logged operation with single undo — a 50-item morning (extension + URL + highlight-import feeders) is triageable in a few sweeps, using T101's parked semantics for Save-for-later.
+- [ ] **T127 — Suggested priority & placement** · _deps: T083, T087, T088, T091_
+  Done when: inbox items show a suggested band + topic placement chip with a one-line justification computed from existing signals (semantic neighbors, per-source yield history, source reliability) — accept-or-override, never auto-applied, deterministic-heuristic first.
+
+## M28 — Lapse-driven re-reading (T128–T129)
+Detailed specs: [`tasks/M28-lapse-rereading.md`](./tasks/M28-lapse-rereading.md)
+
+- [ ] **T128 — Lapse-cluster detection** · _deps: T040, T083_
+  Done when: a read model over `review_logs` joined to lineage anchors detects K-lapses-in-window clusters sharing an extract/source-region ancestor — thresholds tuned to stay rare — surfaced in maintenance and on the source page.
+- [ ] **T129 — Re-read proposals** · _deps: T128_
+  Done when: accepting a proposal schedules a re-read attention item targeting the exact source region (via anchors) that arrives with the failing cards attached for context; proposals are capped per week, cheap to dismiss, and dismissals are remembered.
+
+## M29 — Long-form geometry & the re-entry payoff (T130–T134)
+Detailed specs: [`tasks/M29-longform-geometry.md`](./tasks/M29-longform-geometry.md)
+
+- [ ] **T130 — Source re-entry briefing** · _deps: T083_
+  Done when: opening a scheduled source return renders a since-last-visit briefing — read %, new/deferred/stale block counts, descendant card performance, last extraction point — computed from existing block and yield rows, with one-click jump to the next unresolved block.
+- [ ] **T131 — Honor `needs_later`** · _deps: T130_
+  Done when: deferred blocks are reachable via a jump rail (listing `needs_later` and `stale_after_edit` blocks) and un-deferring/resolving updates the durable state — block deferral stops being write-only bookkeeping that is counted at exit and never seen again.
+- [ ] **T132 — PDF block-state parity** · _deps: T064, T065_
+  Done when: PDF sources carry durable per-page/per-region processing state (the existing 7-state vocabulary + reconciliation), feeding source progress, Done-intent breakdowns, yield, and the scheduler exactly as document blocks do — the heaviest formats stop being invisible to honest completion.
+- [ ] **T133 — Media segment states** · _deps: T073, T074_
+  Done when: audio/video sources track per-segment processed state (derived from playback and fragment extraction), feeding the same surfaces — "watched 40%, 2 segments deferred" is durable data, not memory.
+- [ ] **T134 — Structural skim pass** · _deps: T067, T132_
+  Done when: long-form sources (PDF outline/TOC, EPUB chapters, long documents by heading) support a skim pass assigning per-section verdicts — extract-worthy / later / ignore — that bulk-set block states (one batch, one undo) and create per-section scheduling, so deep reading starts where the value is instead of at page 1.
+
+---
+
 ## Progress log
 
 Record notable completions / decisions here as tasks land (newest first).
