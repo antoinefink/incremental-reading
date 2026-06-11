@@ -88,6 +88,7 @@ import type {
   OptimizationApplyRequest,
   OptimizationSuggestRequest,
   PickImportFileRequest,
+  PriorityIntegrityGetRequest,
   QueueActRequest,
   QueueAutoPostponeRequest,
   QueueCatchUpRequest,
@@ -467,6 +468,8 @@ const appApi: AppApi = {
     get: (request?: AnalyticsGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.analyticsGet, request),
     reviewActivity: (request?: AnalyticsReviewActivityRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.analyticsReviewActivity, request),
+    priorityIntegrity: (request?: PriorityIntegrityGetRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.analyticsPriorityIntegrity, request),
   },
   balance: {
     get: (request?: BalanceGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.balanceGet, request),

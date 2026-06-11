@@ -53,6 +53,7 @@ import {
   type MediaRef,
   PARKED_RESURFACE_AFTER_DAYS_MAX,
   PARKED_RESURFACE_AFTER_DAYS_MIN,
+  type PriorityLabel,
   RELIABILITY_TIERS,
   REVIEW_RATINGS,
   type ReliabilityTier,
@@ -84,6 +85,7 @@ export type {
   FactExpiryStatus,
   FactLifetime,
   FactStability,
+  PriorityLabel,
   ReliabilitySummary,
   ReliabilityTier,
   RendererSettings,
@@ -5391,6 +5393,85 @@ export interface BalanceGetResult {
 }
 
 // ---------------------------------------------------------------------------
+// analytics.priorityIntegrity()  (T105 — priority-fidelity read model)
+// ---------------------------------------------------------------------------
+
+/**
+ * Priority-integrity analytics (T105) — a read-only receipt over durable facts:
+ * attention service from `reschedule_element` action ops, FSRS service from
+ * `review_logs`, deferrals from existing postpone markers, and live priority
+ * distribution from `elements`/`cards`. It computes per-band and per-topic
+ * serviced-vs-deferred counts, cumulative postpone debt, and backend threshold
+ * flags. NO mutation, NO `operation_log`, no generic `db.query`.
+ */
+export const PriorityIntegrityGetRequestSchema = z
+  .object({
+    /** The instant to compute the receipt for (ISO-8601); defaults to now. */
+    asOf: IsoTimestampInputSchema.optional(),
+    /** Window length in calendar days (1–365); defaults to 30. */
+    windowDays: z.number().int().min(1).max(365).optional(),
+    /** Max postponed rows returned for the "sacrificed" list (1–50). */
+    sacrificedLimit: z.number().int().min(1).max(50).optional(),
+    /** Max topic/source anchors returned (1–50). */
+    topicLimit: z.number().int().min(1).max(50).optional(),
+  })
+  .optional();
+export type PriorityIntegrityGetRequest = z.infer<typeof PriorityIntegrityGetRequestSchema>;
+
+export interface PriorityIntegrityBandSummary {
+  readonly band: PriorityLabel;
+  readonly attentionServiced: number;
+  readonly fsrsServiced: number;
+  readonly deferred: number;
+  readonly totalEvents: number;
+  readonly serviceRate: number | null;
+  readonly deferRate: number | null;
+  readonly postponeDebtDays: number;
+  readonly liveCount: number;
+  readonly liveShare: number;
+}
+
+export interface PriorityIntegrityTopicSummary {
+  readonly anchorId: string;
+  readonly title: string;
+  readonly type: string;
+  readonly band: PriorityLabel;
+  readonly attentionServiced: number;
+  readonly fsrsServiced: number;
+  readonly deferred: number;
+  readonly postponeDebtDays: number;
+}
+
+export interface PriorityIntegritySacrificedRow {
+  readonly id: string;
+  readonly title: string;
+  readonly type: string;
+  readonly band: PriorityLabel;
+  readonly scheduler: "attention" | "fsrs";
+  readonly postponeCount: number;
+  readonly postponeDebtDays: number;
+  readonly latestDeferredAt: string;
+  readonly topicAnchorId: string | null;
+  readonly topicTitle: string | null;
+}
+
+export interface PriorityIntegrityThresholdFlags {
+  readonly aBandInflation: boolean;
+  readonly aBandDeferredRecently: boolean;
+  readonly postponeDebtHigh: boolean;
+}
+
+export interface PriorityIntegrityGetResult {
+  readonly asOf: string;
+  readonly windowDays: number;
+  readonly priorityAttribution: "current";
+  readonly bands: readonly PriorityIntegrityBandSummary[];
+  readonly topics: readonly PriorityIntegrityTopicSummary[];
+  readonly sacrificed: readonly PriorityIntegritySacrificedRow[];
+  readonly thresholdFlags: PriorityIntegrityThresholdFlags;
+}
+
+// ---------------------------------------------------------------------------
 // dailyWork.summary()  (T101 — daily workflow routing)
 // ---------------------------------------------------------------------------
 
@@ -6433,6 +6514,11 @@ export interface AppApi {
     reviewActivity(
       request?: AnalyticsReviewActivityRequest,
     ): Promise<AnalyticsReviewActivityResult>;
+    /**
+     * Priority-fidelity receipt (T105): serviced/deferred/debt by band/topic and
+     * threshold flags over the durable logs. Read-only.
+     */
+    priorityIntegrity(request?: PriorityIntegrityGetRequest): Promise<PriorityIntegrityGetResult>;
   };
   readonly balance: {
     /**

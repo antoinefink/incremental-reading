@@ -190,6 +190,7 @@ export const IPC_CHANNELS = {
   undoLast: "undo:last",
   analyticsGet: "analytics:get",
   analyticsReviewActivity: "analytics:reviewActivity",
+  analyticsPriorityIntegrity: "analytics:priorityIntegrity",
   balanceGet: "balance:get",
   dailyWorkSummary: "dailyWork:summary",
   // Per-source yield analytics (T083) — a READ-ONLY ranked rollup (read %,

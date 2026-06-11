@@ -88,6 +88,7 @@ import {
   MaintenanceReportRequestSchema,
   MediaRefSchema,
   PickImportFileRequestSchema,
+  PriorityIntegrityGetRequestSchema,
   QueueActRequestSchema,
   QueueAutoPostponeRequestSchema,
   QueueCatchUpRequestSchema,
@@ -311,6 +312,7 @@ describe("IPC channels", () => {
         "undo:last",
         "analytics:get",
         "analytics:reviewActivity",
+        "analytics:priorityIntegrity",
         "balance:get",
         "dailyWork:summary",
         "backups:create",
@@ -347,6 +349,42 @@ describe("IPC channels", () => {
     // T058: the renderer enqueues ONLY via `sources:importUrl` — there is no
     // generic `jobs:enqueue` channel.
     expect(Object.values(IPC_CHANNELS)).not.toContain("jobs:enqueue");
+  });
+});
+
+describe("PriorityIntegrityGetRequestSchema (T105)", () => {
+  it("accepts an omitted or empty request", () => {
+    expect(PriorityIntegrityGetRequestSchema.parse(undefined)).toBeUndefined();
+    expect(PriorityIntegrityGetRequestSchema.parse({})).toEqual({});
+  });
+
+  it("accepts bounded request options and rejects malformed clocks or limits", () => {
+    expect(
+      PriorityIntegrityGetRequestSchema.parse({
+        asOf: "2026-06-08T09:00:00.000Z",
+        windowDays: 14,
+        sacrificedLimit: 5,
+        topicLimit: 6,
+      }),
+    ).toEqual({
+      asOf: "2026-06-08T09:00:00.000Z",
+      windowDays: 14,
+      sacrificedLimit: 5,
+      topicLimit: 6,
+    });
+
+    for (const asOf of ["", "not-a-date"]) {
+      expect(() => PriorityIntegrityGetRequestSchema.parse({ asOf })).toThrow();
+    }
+    for (const windowDays of [0, 366, 1.5]) {
+      expect(() => PriorityIntegrityGetRequestSchema.parse({ windowDays })).toThrow();
+    }
+    for (const sacrificedLimit of [0, 51, 1.5]) {
+      expect(() => PriorityIntegrityGetRequestSchema.parse({ sacrificedLimit })).toThrow();
+    }
+    for (const topicLimit of [0, 51, 1.5]) {
+      expect(() => PriorityIntegrityGetRequestSchema.parse({ topicLimit })).toThrow();
+    }
   });
 });
 

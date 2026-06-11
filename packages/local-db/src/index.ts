@@ -275,6 +275,20 @@ export {
   type ParkedResurfacingSkipReason,
 } from "./parked-resurfacing-service";
 export {
+  A_BAND_SHARE_WARN_THRESHOLD,
+  DEFAULT_PRIORITY_INTEGRITY_SACRIFICED_LIMIT,
+  DEFAULT_PRIORITY_INTEGRITY_TOPIC_LIMIT,
+  DEFAULT_PRIORITY_INTEGRITY_WINDOW_DAYS,
+  POSTPONE_DEBT_HIGH_DAYS,
+  type PriorityIntegrityBandSummary,
+  type PriorityIntegrityOptions,
+  PriorityIntegrityQuery,
+  type PriorityIntegritySacrificedRow,
+  type PriorityIntegritySummary,
+  type PriorityIntegrityThresholdFlags,
+  type PriorityIntegrityTopicSummary,
+} from "./priority-integrity-query";
+export {
   CARD_DEFER_DAYS,
   type QueueActionKind,
   type QueueActionResult,
@@ -477,6 +491,8 @@ export interface Repositories {
    * one `batchId`, revalidated before write.
    */
   readonly parkedResurfacing: import("./parked-resurfacing-service").ParkedResurfacingService;
+  /** Priority-fidelity read model (T105): serviced/deferred/debt by band/topic. Read-only. */
+  readonly priorityIntegrity: import("./priority-integrity-query").PriorityIntegrityQuery;
   /** Dismissible source retirement nudges (T103) — visible signal + op-logged dismissal. */
   readonly retirementSuggestions: import("./retirement-suggestion-repository").RetirementSuggestionRepository;
   /** The on-device semantic-search vector store (T087) — `sqlite-vec` KNN, NO op-log. */
@@ -531,6 +547,7 @@ import { OcrPagesRepository } from "./ocr-pages-repository";
 import { OperationLogRepository } from "./operation-log-repository";
 import { ParkedResurfacingQuery } from "./parked-resurfacing-query";
 import { ParkedResurfacingService } from "./parked-resurfacing-service";
+import { PriorityIntegrityQuery } from "./priority-integrity-query";
 import { QueueRepository } from "./queue-repository";
 import { RelatedService } from "./related-service";
 import { RetirementSuggestionRepository } from "./retirement-suggestion-repository";
@@ -600,6 +617,7 @@ export function createRepositories(
     schedulerConsistency: new SchedulerConsistencyQuery(db),
     parkedResurfacingQuery: new ParkedResurfacingQuery(db),
     parkedResurfacing: new ParkedResurfacingService(db),
+    priorityIntegrity: new PriorityIntegrityQuery(db),
     retirementSuggestions: new RetirementSuggestionRepository(db),
     embeddings,
     semanticSearch: new SemanticSearchRepository(search, embeddings),

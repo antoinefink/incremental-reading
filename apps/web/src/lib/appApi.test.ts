@@ -116,6 +116,20 @@ function installAppApi(overrides: Partial<AppApi> = {}): AppApi {
         totalReviews: 2,
         request,
       })),
+      priorityIntegrity: vi.fn(async (request?: unknown) => ({
+        asOf: "2026-06-07T12:00:00.000Z",
+        windowDays: 30,
+        priorityAttribution: "current",
+        bands: [],
+        topics: [],
+        sacrificed: [],
+        thresholdFlags: {
+          aBandInflation: false,
+          aBandDeferredRecently: false,
+          postponeDebtHigh: false,
+        },
+        request,
+      })),
     },
     balance: {
       get: vi.fn(async (request?: unknown) => ({
@@ -328,6 +342,22 @@ describe("renderer appApi wrapper", () => {
       asOf: "2026-06-07T12:00:00.000Z",
       year: 2026,
     });
+  });
+
+  it("forwards priority integrity requests to the analytics bridge surface", async () => {
+    const bridge = installAppApi();
+    const request = {
+      asOf: "2026-06-07T12:00:00.000Z",
+      windowDays: 14,
+      sacrificedLimit: 5,
+      topicLimit: 6,
+    };
+
+    await expect(appApi.getPriorityIntegrity(request)).resolves.toMatchObject({
+      asOf: "2026-06-07T12:00:00.000Z",
+      priorityAttribution: "current",
+    });
+    expect(bridge.analytics.priorityIntegrity).toHaveBeenCalledWith(request);
   });
 
   it("forwards the fixed backups folder command without a payload", async () => {

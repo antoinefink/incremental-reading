@@ -15,7 +15,11 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AnalyticsGetResult, AnalyticsReviewActivityResult } from "../lib/appApi";
+import type {
+  AnalyticsGetResult,
+  AnalyticsReviewActivityResult,
+  PriorityIntegrityGetResult,
+} from "../lib/appApi";
 
 const h = vi.hoisted(() => {
   const summary: AnalyticsGetResult = {
@@ -82,14 +86,78 @@ const h = vi.hoisted(() => {
     });
     return { promise, resolve, reject };
   };
+  const priorityIntegrity: PriorityIntegrityGetResult = {
+    asOf: summary.asOf,
+    windowDays: 30,
+    priorityAttribution: "current",
+    bands: [
+      {
+        band: "A",
+        attentionServiced: 0,
+        fsrsServiced: 0,
+        deferred: 0,
+        totalEvents: 0,
+        serviceRate: null,
+        deferRate: null,
+        postponeDebtDays: 0,
+        liveCount: 0,
+        liveShare: 0,
+      },
+      {
+        band: "B",
+        attentionServiced: 0,
+        fsrsServiced: 0,
+        deferred: 0,
+        totalEvents: 0,
+        serviceRate: null,
+        deferRate: null,
+        postponeDebtDays: 0,
+        liveCount: 0,
+        liveShare: 0,
+      },
+      {
+        band: "C",
+        attentionServiced: 0,
+        fsrsServiced: 0,
+        deferred: 0,
+        totalEvents: 0,
+        serviceRate: null,
+        deferRate: null,
+        postponeDebtDays: 0,
+        liveCount: 0,
+        liveShare: 0,
+      },
+      {
+        band: "D",
+        attentionServiced: 0,
+        fsrsServiced: 0,
+        deferred: 0,
+        totalEvents: 0,
+        serviceRate: null,
+        deferRate: null,
+        postponeDebtDays: 0,
+        liveCount: 0,
+        liveShare: 0,
+      },
+    ],
+    topics: [],
+    sacrificed: [],
+    thresholdFlags: {
+      aBandInflation: false,
+      aBandDeferredRecently: false,
+      postponeDebtHigh: false,
+    },
+  };
   return {
     summary,
+    priorityIntegrity,
     activityForYear,
     deferredActivity,
     getAnalytics: vi.fn(),
     getReviewActivity: vi.fn(),
     getSourceYield: vi.fn(),
     getExtractStagnation: vi.fn(),
+    getPriorityIntegrity: vi.fn(),
     navigateSpy: vi.fn(),
   };
 });
@@ -108,6 +176,7 @@ vi.mock("../lib/appApi", async () => {
       getReviewActivity: h.getReviewActivity,
       getSourceYield: h.getSourceYield,
       getExtractStagnation: h.getExtractStagnation,
+      getPriorityIntegrity: h.getPriorityIntegrity,
     },
   };
 });
@@ -130,6 +199,7 @@ beforeEach(() => {
   h.getSourceYield.mockResolvedValue({ asOf: h.summary.asOf, rows: [], lowYieldCount: 0 });
   // …and the stagnant-extract count (T084) for its banner.
   h.getExtractStagnation.mockResolvedValue({ asOf: h.summary.asOf, rows: [], stagnantCount: 0 });
+  h.getPriorityIntegrity.mockResolvedValue(h.priorityIntegrity);
 });
 
 describe("AnalyticsScreen", () => {
@@ -314,6 +384,91 @@ describe("AnalyticsScreen", () => {
     expect(screen.getByTestId("metric-reviews").textContent).toContain("124");
     expect(await screen.findByTestId("review-activity-error")).toHaveTextContent(
       "activity read failed",
+    );
+    expect(screen.queryByTestId("analytics-error")).toBeNull();
+  });
+
+  it("renders the priority-integrity panel from the backend receipt", async () => {
+    render(<AnalyticsScreen />);
+
+    const panel = await screen.findByTestId("priority-integrity");
+    expect(panel).toHaveTextContent("No priority-debt threshold crossed");
+    expect(screen.getByTestId("priority-integrity-bands").textContent).toContain("A");
+    expect(screen.getByTestId("priority-integrity-bands").textContent).toContain("D");
+    expect(panel).toHaveTextContent("No topic-level priority debt.");
+    expect(panel).toHaveTextContent("No deferred rows in this window.");
+  });
+
+  it("renders backend priority-integrity flags, topics, and sacrificed rows", async () => {
+    h.getPriorityIntegrity.mockResolvedValue({
+      ...h.priorityIntegrity,
+      thresholdFlags: {
+        aBandInflation: true,
+        aBandDeferredRecently: true,
+        postponeDebtHigh: true,
+      },
+      bands: h.priorityIntegrity.bands.map((band) =>
+        band.band === "A"
+          ? {
+              ...band,
+              attentionServiced: 2,
+              deferred: 1,
+              totalEvents: 3,
+              serviceRate: 2 / 3,
+              deferRate: 1 / 3,
+              postponeDebtDays: 15,
+              liveCount: 8,
+              liveShare: 0.5,
+            }
+          : band,
+      ),
+      topics: [
+        {
+          anchorId: "source-1",
+          title: "Important source",
+          type: "source",
+          band: "A",
+          attentionServiced: 2,
+          fsrsServiced: 1,
+          deferred: 1,
+          postponeDebtDays: 15,
+        },
+      ],
+      sacrificed: [
+        {
+          id: "extract-1",
+          title: "Deferred extract",
+          type: "extract",
+          band: "A",
+          scheduler: "attention",
+          postponeCount: 2,
+          postponeDebtDays: 15,
+          latestDeferredAt: h.summary.asOf,
+          topicAnchorId: "source-1",
+          topicTitle: "Important source",
+        },
+      ],
+    });
+    render(<AnalyticsScreen />);
+
+    const panel = await screen.findByTestId("priority-integrity");
+    expect(panel).toHaveTextContent("A-band share is high");
+    expect(panel).toHaveTextContent("A-band work was deferred");
+    expect(panel).toHaveTextContent("Postpone debt is high");
+    expect(screen.getByTestId("priority-integrity-topics")).toHaveTextContent("Important source");
+    expect(screen.getByTestId("priority-integrity-sacrificed")).toHaveTextContent(
+      "Deferred extract",
+    );
+  });
+
+  it("keeps existing metrics visible when priority integrity loading fails", async () => {
+    h.getPriorityIntegrity.mockRejectedValue(new Error("priority read failed"));
+    render(<AnalyticsScreen />);
+
+    expect(await screen.findByTestId("analytics-body")).toBeTruthy();
+    expect(screen.getByTestId("metric-reviews").textContent).toContain("124");
+    expect(await screen.findByTestId("priority-integrity-error")).toHaveTextContent(
+      "priority read failed",
     );
     expect(screen.queryByTestId("analytics-error")).toBeNull();
   });

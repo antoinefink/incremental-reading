@@ -50,6 +50,76 @@
   padding: var(--s-6);
 }
 
+.q-priority {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  margin-bottom: var(--s-4);
+  padding: var(--s-4);
+  border: 1px solid color-mix(in oklch, var(--warn) 42%, var(--border));
+  border-radius: var(--r-md);
+  background: var(--warn-soft);
+  color: var(--text);
+}
+.q-priority__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  color: var(--warn);
+}
+.q-priority__body {
+  min-width: 0;
+  flex: 1;
+}
+.q-priority__title {
+  font-size: var(--t-sm);
+  font-weight: 650;
+}
+.q-priority__text {
+  margin-top: 2px;
+  color: var(--text-2);
+  font-size: var(--t-xs);
+}
+.q-priority__error {
+  margin-top: var(--s-1);
+  color: var(--danger);
+  font-size: var(--t-xs);
+}
+.q-priority__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: none;
+}
+.q-priority__button,
+.q-priority__icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.q-priority__button {
+  gap: var(--s-2);
+  padding: 0 var(--s-3);
+  font-size: var(--t-xs);
+  font-weight: 650;
+}
+.q-priority__icon-button {
+  width: 30px;
+}
+.q-priority__button:hover,
+.q-priority__icon-button:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
 /* the overload-management strip (BudgetMeter + at-risk metrics) */
 .q-overload {
   display: grid;

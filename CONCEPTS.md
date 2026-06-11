@@ -120,6 +120,12 @@ A read-only advisory signal that compares how much material the user has importe
 
 Import/process balance can be analytically imbalanced even when no due queue work exists. UI actions from this signal should route only to surfaces that currently contain work, such as inbox triage or the due queue.
 
+### Priority integrity
+
+Priority integrity is the advisory measure of whether recently serviced, deferred, and live work still reflects the user's declared priorities rather than letting high-priority material drift behind lower-priority processing.
+
+It is a read-only receipt: it explains drift from existing review, attention, and scheduling facts, but it does not reschedule, demote, or mutate work by itself.
+
 ### Article image
 
 An image discovered while importing a web article and copied into the local Asset vault so the source remains readable without hotlinking the original remote image.

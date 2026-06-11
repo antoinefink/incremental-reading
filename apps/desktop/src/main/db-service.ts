@@ -242,6 +242,8 @@ import type {
   OptimizationApplyResult,
   OptimizationSuggestRequest,
   OptimizationSuggestResult,
+  PriorityIntegrityGetRequest,
+  PriorityIntegrityGetResult,
   QueueActRequest,
   QueueActResult,
   QueueAutoPostponeRequest,
@@ -5263,6 +5265,32 @@ export class DbService {
       nextYear: activity.nextYear,
       days: activity.days,
       totalReviews: activity.reviewsTotal,
+    };
+  }
+
+  /**
+   * Priority-integrity receipt (T105) via {@link PriorityIntegrityQuery}: reads
+   * existing `operation_log`, `review_logs`, `elements`, and `cards` facts to show
+   * serviced vs deferred work by priority band/topic. Read-only — no mutation, no
+   * `operation_log`.
+   */
+  getPriorityIntegrity(request?: PriorityIntegrityGetRequest): PriorityIntegrityGetResult {
+    const asOf = (request?.asOf ?? nowIso()) as IsoTimestamp;
+    const summary = this.repos.priorityIntegrity.compute(asOf, {
+      ...(request?.windowDays !== undefined ? { windowDays: request.windowDays } : {}),
+      ...(request?.sacrificedLimit !== undefined
+        ? { sacrificedLimit: request.sacrificedLimit }
+        : {}),
+      ...(request?.topicLimit !== undefined ? { topicLimit: request.topicLimit } : {}),
+    });
+    return {
+      asOf: summary.asOf,
+      windowDays: summary.windowDays,
+      priorityAttribution: summary.priorityAttribution,
+      bands: summary.bands,
+      topics: summary.topics,
+      sacrificed: summary.sacrificed,
+      thresholdFlags: summary.thresholdFlags,
     };
   }
 

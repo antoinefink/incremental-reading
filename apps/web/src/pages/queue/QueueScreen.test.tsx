@@ -16,7 +16,12 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DailyWorkSummaryResult, QueueItemSummary, QueueListResult } from "../../lib/appApi";
+import type {
+  DailyWorkSummaryResult,
+  PriorityIntegrityGetResult,
+  QueueItemSummary,
+  QueueListResult,
+} from "../../lib/appApi";
 
 const h = vi.hoisted(() => {
   const cardRow: QueueItemSummary = {
@@ -216,6 +221,68 @@ const h = vi.hoisted(() => {
     resumeSource: null,
     recommendedAction: "process_due_queue",
   };
+  const priorityIntegrity: PriorityIntegrityGetResult = {
+    asOf: "2026-05-30T18:00:00.000Z",
+    windowDays: 30,
+    priorityAttribution: "current",
+    bands: [
+      {
+        band: "A",
+        attentionServiced: 0,
+        fsrsServiced: 0,
+        deferred: 3,
+        totalEvents: 3,
+        serviceRate: 0,
+        deferRate: 1,
+        postponeDebtDays: 3,
+        liveCount: 8,
+        liveShare: 0.5,
+      },
+      {
+        band: "B",
+        attentionServiced: 0,
+        fsrsServiced: 0,
+        deferred: 0,
+        totalEvents: 0,
+        serviceRate: null,
+        deferRate: null,
+        postponeDebtDays: 0,
+        liveCount: 0,
+        liveShare: 0,
+      },
+      {
+        band: "C",
+        attentionServiced: 0,
+        fsrsServiced: 0,
+        deferred: 0,
+        totalEvents: 0,
+        serviceRate: null,
+        deferRate: null,
+        postponeDebtDays: 0,
+        liveCount: 0,
+        liveShare: 0,
+      },
+      {
+        band: "D",
+        attentionServiced: 0,
+        fsrsServiced: 0,
+        deferred: 0,
+        totalEvents: 0,
+        serviceRate: null,
+        deferRate: null,
+        postponeDebtDays: 0,
+        liveCount: 0,
+        liveShare: 0,
+      },
+    ],
+    topics: [],
+    sacrificed: [],
+    thresholdFlags: {
+      aBandInflation: false,
+      aBandDeferredRecently: false,
+      postponeDebtHigh: false,
+    },
+  };
   return {
     navigateSpy: vi.fn(),
     selectSpy: vi.fn(),
@@ -241,8 +308,12 @@ const h = vi.hoisted(() => {
       count: 1,
     }),
     undoQueueAction: vi.fn().mockResolvedValue({ item: extractRow }),
+    getPriorityIntegrity: vi.fn().mockResolvedValue(priorityIntegrity),
+    getSettings: vi.fn().mockResolvedValue({ settings: { "ui.noticeDismissals": {} } }),
+    updateSetting: vi.fn().mockResolvedValue({ key: "ui.noticeDismissals", value: {} }),
     result,
     dailyWork,
+    priorityIntegrity,
     sourceRow,
     extractRow,
     topicRow,
@@ -264,6 +335,9 @@ vi.mock("../../lib/appApi", async () => {
       dismissSourceRetirementSuggestion: h.dismissSourceRetirementSuggestion,
       undoLast: h.undoLast,
       undoQueueAction: h.undoQueueAction,
+      getPriorityIntegrity: h.getPriorityIntegrity,
+      getSettings: h.getSettings,
+      updateSetting: h.updateSetting,
     },
   };
 });
@@ -296,6 +370,9 @@ beforeEach(() => {
     stale: false,
     suggestion: null,
   });
+  h.getPriorityIntegrity.mockResolvedValue(h.priorityIntegrity);
+  h.getSettings.mockResolvedValue({ settings: { "ui.noticeDismissals": {} } });
+  h.updateSetting.mockResolvedValue({ key: "ui.noticeDismissals", value: {} });
 });
 
 describe("QueueScreen", () => {
@@ -462,6 +539,147 @@ describe("QueueScreen", () => {
     expect(screen.queryByTestId("queue-empty")).toBeNull();
     expect(screen.queryByTestId("queue-inbox-work")).toBeNull();
     expect(screen.queryByTestId("queue-resume-source")).toBeNull();
+  });
+
+  it("hides the priority-integrity queue warning when backend flags are healthy", async () => {
+    render(<QueueScreen />);
+    await screen.findAllByTestId("queue-item");
+
+    expect(screen.queryByTestId("queue-priority-integrity")).toBeNull();
+  });
+
+  it("forwards route asOf to the priority integrity read", async () => {
+    h.useSearch.mockReturnValue({ asOf: "2026-06-06T12:00:00.000Z" });
+
+    render(<QueueScreen />);
+    await screen.findAllByTestId("queue-item");
+
+    expect(h.getPriorityIntegrity).toHaveBeenCalledWith({
+      asOf: "2026-06-06T12:00:00.000Z",
+    });
+  });
+
+  it("renders the priority-integrity queue warning from backend flags and links to analytics", async () => {
+    h.getPriorityIntegrity.mockResolvedValue({
+      ...h.priorityIntegrity,
+      thresholdFlags: {
+        aBandInflation: false,
+        aBandDeferredRecently: true,
+        postponeDebtHigh: false,
+      },
+    });
+    render(<QueueScreen />);
+
+    const warning = await screen.findByTestId("queue-priority-integrity");
+    expect(warning).toHaveTextContent("A-priority work was deferred");
+
+    fireEvent.click(screen.getByTestId("queue-priority-view-analytics"));
+    expect(h.navigateSpy).toHaveBeenCalledWith({
+      to: "/analytics",
+      hash: "priority-integrity",
+    });
+  });
+
+  it("suppresses the priority-integrity queue warning while its dismissal is still active", async () => {
+    h.getPriorityIntegrity.mockResolvedValue({
+      ...h.priorityIntegrity,
+      thresholdFlags: {
+        aBandInflation: true,
+        aBandDeferredRecently: false,
+        postponeDebtHigh: false,
+      },
+    });
+    h.getSettings.mockResolvedValue({
+      settings: {
+        "ui.noticeDismissals": {
+          "priorityIntegrity.queue": { until: "2099-01-01T00:00:00.000Z" },
+        },
+      },
+    });
+
+    render(<QueueScreen />);
+    await screen.findAllByTestId("queue-item");
+
+    expect(screen.queryByTestId("queue-priority-integrity")).toBeNull();
+  });
+
+  it("shows the priority-integrity queue warning after a stored dismissal expires", async () => {
+    h.getPriorityIntegrity.mockResolvedValue({
+      ...h.priorityIntegrity,
+      thresholdFlags: {
+        aBandInflation: true,
+        aBandDeferredRecently: false,
+        postponeDebtHigh: false,
+      },
+    });
+    h.getSettings.mockResolvedValue({
+      settings: {
+        "ui.noticeDismissals": {
+          "priorityIntegrity.queue": { until: "2000-01-01T00:00:00.000Z" },
+        },
+      },
+    });
+
+    render(<QueueScreen />);
+
+    expect(await screen.findByTestId("queue-priority-integrity")).toHaveTextContent(
+      "A-priority items are taking a large share",
+    );
+  });
+
+  it("persists a one-week priority-integrity queue warning dismissal", async () => {
+    h.getPriorityIntegrity.mockResolvedValue({
+      ...h.priorityIntegrity,
+      thresholdFlags: {
+        aBandInflation: true,
+        aBandDeferredRecently: false,
+        postponeDebtHigh: false,
+      },
+    });
+    render(<QueueScreen />);
+    await screen.findByTestId("queue-priority-integrity");
+
+    fireEvent.click(screen.getByTestId("queue-priority-hide-week"));
+
+    await waitFor(() =>
+      expect(h.updateSetting).toHaveBeenCalledWith({
+        key: "ui.noticeDismissals",
+        value: expect.objectContaining({
+          "priorityIntegrity.queue": expect.objectContaining({ until: expect.any(String) }),
+        }),
+      }),
+    );
+    expect(screen.queryByTestId("queue-priority-integrity")).toBeNull();
+  });
+
+  it("keeps the priority-integrity queue warning visible if dismissal persistence fails", async () => {
+    h.getPriorityIntegrity.mockResolvedValue({
+      ...h.priorityIntegrity,
+      thresholdFlags: {
+        aBandInflation: true,
+        aBandDeferredRecently: false,
+        postponeDebtHigh: false,
+      },
+    });
+    h.updateSetting.mockRejectedValue(new Error("settings down"));
+    render(<QueueScreen />);
+    await screen.findByTestId("queue-priority-integrity");
+
+    fireEvent.click(screen.getByTestId("queue-priority-hide-week"));
+
+    expect(await screen.findByTestId("queue-priority-dismiss-error")).toHaveTextContent(
+      "Could not save",
+    );
+    expect(screen.getByTestId("queue-priority-integrity")).toBeInTheDocument();
+  });
+
+  it("keeps queue rows visible if priority integrity loading fails", async () => {
+    h.getPriorityIntegrity.mockRejectedValue(new Error("priority read failed"));
+    render(<QueueScreen />);
+
+    await waitFor(() => expect(screen.getAllByTestId("queue-item")).toHaveLength(4));
+    expect(screen.queryByTestId("queue-error")).toBeNull();
+    expect(screen.queryByTestId("queue-priority-integrity")).toBeNull();
   });
 
   it("renders the correct SchedulerChip side for a card (FSRS) vs an extract (attention)", async () => {

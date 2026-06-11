@@ -101,6 +101,7 @@ import {
   OptimizationSuggestRequestSchema,
   PickImportFileRequestSchema,
   type PickImportFileResult,
+  PriorityIntegrityGetRequestSchema,
   QueueActRequestSchema,
   QueueAutoPostponeRequestSchema,
   QueueCatchUpRequestSchema,
@@ -1365,6 +1366,11 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.analyticsReviewActivity, (_event, rawRequest: unknown) => {
     const request = AnalyticsReviewActivityRequestSchema.parse(rawRequest);
     return dbService.getReviewActivity(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.analyticsPriorityIntegrity, (_event, rawRequest: unknown) => {
+    const request = PriorityIntegrityGetRequestSchema.parse(rawRequest);
+    return dbService.getPriorityIntegrity(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.balanceGet, (_event, rawRequest: unknown) => {

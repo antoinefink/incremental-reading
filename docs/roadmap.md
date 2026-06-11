@@ -397,8 +397,9 @@ Detailed specs: [`tasks/M21-honest-exits.md`](./tasks/M21-honest-exits.md)
 ## M22 — Receipts: priority integrity & knowledge maturity (T105–T110)
 Detailed specs: [`tasks/M22-receipts.md`](./tasks/M22-receipts.md)
 
-- [ ] **T105 — Priority-integrity read model** · _deps: T045, T077_
+- [x] **T105 — Priority-integrity read model** · _deps: T045, T077_
   Done when: a typed read model reports, per priority band and per topic: due attention serviced vs deferred over a window, cumulative postpone debt, and band-share inflation (warning when one band dominates the collection) — computed from `review_logs` and `reschedule_element`/auto-postpone operation-log facts, no parallel tables, surfaced in analytics.
+  Completed in `feat: T105 priority-integrity read model`. Verification: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm e2e -- tests/electron/analytics.spec.ts tests/electron/queue.spec.ts`. Learning captured in [`docs/solutions/architecture-patterns/priority-integrity-read-model.md`](./solutions/architecture-patterns/priority-integrity-read-model.md).
 - [ ] **T106 — Chronic-postpone reckoning** · _deps: T105_
   Done when: items postponed ≥N times surface in a decision surface forcing an explicit keep / demote / done / delete per item — no further silent recession past the threshold without one decision — batched, undoable, op-logged, with new drift-diagnostic cases.
 - [ ] **T107 — Fallow: deliberate topic rest** · _deps: T105_

@@ -3528,6 +3528,70 @@ export interface BalanceGetResult {
 }
 
 // ---------------------------------------------------------------------------
+// analytics.priorityIntegrity()  (T105 — priority-fidelity receipt)
+// ---------------------------------------------------------------------------
+
+export interface PriorityIntegrityGetRequest {
+  readonly asOf?: string;
+  readonly windowDays?: number;
+  readonly sacrificedLimit?: number;
+  readonly topicLimit?: number;
+}
+
+export interface PriorityIntegrityBandSummary {
+  readonly band: PriorityLabel;
+  readonly attentionServiced: number;
+  readonly fsrsServiced: number;
+  readonly deferred: number;
+  readonly totalEvents: number;
+  readonly serviceRate: number | null;
+  readonly deferRate: number | null;
+  readonly postponeDebtDays: number;
+  readonly liveCount: number;
+  readonly liveShare: number;
+}
+
+export interface PriorityIntegrityTopicSummary {
+  readonly anchorId: string;
+  readonly title: string;
+  readonly type: string;
+  readonly band: PriorityLabel;
+  readonly attentionServiced: number;
+  readonly fsrsServiced: number;
+  readonly deferred: number;
+  readonly postponeDebtDays: number;
+}
+
+export interface PriorityIntegritySacrificedRow {
+  readonly id: string;
+  readonly title: string;
+  readonly type: string;
+  readonly band: PriorityLabel;
+  readonly scheduler: "attention" | "fsrs";
+  readonly postponeCount: number;
+  readonly postponeDebtDays: number;
+  readonly latestDeferredAt: string;
+  readonly topicAnchorId: string | null;
+  readonly topicTitle: string | null;
+}
+
+export interface PriorityIntegrityThresholdFlags {
+  readonly aBandInflation: boolean;
+  readonly aBandDeferredRecently: boolean;
+  readonly postponeDebtHigh: boolean;
+}
+
+export interface PriorityIntegrityGetResult {
+  readonly asOf: string;
+  readonly windowDays: number;
+  readonly priorityAttribution: "current";
+  readonly bands: readonly PriorityIntegrityBandSummary[];
+  readonly topics: readonly PriorityIntegrityTopicSummary[];
+  readonly sacrificed: readonly PriorityIntegritySacrificedRow[];
+  readonly thresholdFlags: PriorityIntegrityThresholdFlags;
+}
+
+// ---------------------------------------------------------------------------
 // dailyWork.*  (T101 — daily workflow routing)
 // ---------------------------------------------------------------------------
 
@@ -3975,6 +4039,7 @@ export interface AppApi {
     reviewActivity(
       request?: AnalyticsReviewActivityRequest,
     ): Promise<AnalyticsReviewActivityResult>;
+    priorityIntegrity(request?: PriorityIntegrityGetRequest): Promise<PriorityIntegrityGetResult>;
   };
   readonly balance: {
     get(request?: BalanceGetRequest): Promise<BalanceGetResult>;
@@ -4996,6 +5061,13 @@ export const appApi = {
     request?: AnalyticsReviewActivityRequest,
   ): Promise<AnalyticsReviewActivityResult> {
     return requireAppApi().analytics.reviewActivity(request);
+  },
+  /**
+   * Priority-fidelity receipt (T105): serviced/deferred/debt by band/topic and
+   * backend threshold flags over the durable logs. Read-only.
+   */
+  getPriorityIntegrity(request?: PriorityIntegrityGetRequest): Promise<PriorityIntegrityGetResult> {
+    return requireAppApi().analytics.priorityIntegrity(request);
   },
   /**
    * The import/process balance snapshot (T046) — the week's sources imported /

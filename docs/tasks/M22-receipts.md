@@ -30,7 +30,7 @@
 # T105 — Priority-integrity read model
 
 - **Milestone:** M22 — Receipts
-- **Status:** `[ ]` not started
+- **Status:** `[x]` complete
 - **Depends on:** T045, T077
 - **Roadmap line:** a typed read model reports, per band and per topic: due attention serviced
   vs deferred over a window, cumulative postpone debt, and band-share inflation — computed from
@@ -52,24 +52,38 @@ is quietly losing my library", and priority inflation becomes measurable instead
 
 ## Deliverables
 
-- [ ] `PriorityIntegrityQuery` in `packages/local-db`: per band (and per topic where linkable):
+- [x] `PriorityIntegrityQuery` in `packages/local-db`: per band (and per topic where linkable):
       due-days serviced vs deferred over a rolling window, postpone debt (items × cumulative
       recession), band share of the live collection with an inflation threshold (e.g. warn when
       A > 35–40%), and a "sacrificed recently" list (most-postponed items, with counts).
-- [ ] Typed IPC surface (`channels.ts`/`contract.ts`/`ipc.ts`/preload/`appApi.ts`) + an
+- [x] Typed IPC surface (`channels.ts`/`contract.ts`/`ipc.ts`/preload/`appApi.ts`) + an
       analytics panel ("Priority integrity") rendering it calmly — numbers and a short list, not
       a dashboard wall.
-- [ ] A quiet queue-header indicator when fidelity degrades past thresholds (durably dismissible
+- [x] A quiet queue-header indicator when fidelity degrades past thresholds (durably dismissible
       per the balance-banner precedent).
-- [ ] Tests: unit with seeded op-log/review-log fixtures proving the math (serviced vs deferred,
+- [x] Tests: unit with seeded op-log/review-log fixtures proving the math (serviced vs deferred,
       debt accumulation, inflation trigger); contract tests.
+
+## Completion notes
+
+- Implemented `PriorityIntegrityQuery` as a read-only local-db model over `operation_log`,
+  `review_logs`, live `elements`, and `cards.is_retired`; it uses current priority attribution,
+  suppresses strong A-band defer warnings when an in-window priority edit occurred, and ignores
+  deferred markers for ineligible/not-yet-due rows.
+- Added the typed `analytics.priorityIntegrity` IPC/preload surface and renderer wrapper.
+- Added the Analytics "Priority integrity" panel and a quiet Queue warning driven only by backend
+  threshold flags; queue dismissal is persisted under `ui.noticeDismissals.priorityIntegrity.queue`.
+- Verification before landing: focused `priority-integrity-query`, `AnalyticsScreen`, and
+  `QueueScreen` tests; full standard gates recorded in the roadmap entry.
+- Reusable implementation learning captured in
+  [`docs/solutions/architecture-patterns/priority-integrity-read-model.md`](../solutions/architecture-patterns/priority-integrity-read-model.md).
 
 ## Done when
 
-- With a fixture collection containing postponed A/B/C material, the read model reports
+- [x] With a fixture collection containing postponed A/B/C material, the read model reports
   serviced/deferred shares per band, debt, and an inflation warning exactly as seeded; the
   analytics panel renders it; nothing mutates.
-- Standard gates pass.
+- [x] Standard gates pass.
 
 ## Notes / risks
 

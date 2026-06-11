@@ -21,9 +21,15 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BalanceBanner } from "../components/BalanceBanner";
 import { Icon } from "../components/Icon";
-import { type AnalyticsGetResult, appApi, isDesktop } from "../lib/appApi";
+import {
+  type AnalyticsGetResult,
+  appApi,
+  isDesktop,
+  type PriorityIntegrityGetResult,
+} from "../lib/appApi";
 import { UNDO_EVENT } from "../shell/nav";
 import "./analytics.css";
+import { PriorityIntegrityPanel } from "./PriorityIntegrityPanel";
 import { ReviewActivityHeatmap, type ReviewActivityResult } from "./ReviewActivityHeatmap";
 
 /** Format a `[0,1]` retention fraction as a percentage string, or "—" when null. */
@@ -52,28 +58,59 @@ export function AnalyticsScreen() {
   const [activity, setActivity] = useState<ReviewActivityResult | null>(null);
   const [activityLoading, setActivityLoading] = useState(true);
   const [activityError, setActivityError] = useState<string | null>(null);
+  const [priorityIntegrity, setPriorityIntegrity] = useState<PriorityIntegrityGetResult | null>(
+    null,
+  );
+  const [priorityIntegrityError, setPriorityIntegrityError] = useState<string | null>(null);
+  const loadRequestId = useRef(0);
   const activityRequestId = useRef(0);
+  const priorityIntegrityRef = useRef<HTMLElement>(null);
 
   const load = useCallback(async () => {
     if (!isDesktop()) {
       setLoading(false);
       return;
     }
-    try {
-      const [res, yield_, stagnation] = await Promise.all([
+    const requestId = loadRequestId.current + 1;
+    loadRequestId.current = requestId;
+    setLoading(true);
+    const [analyticsResult, yieldResult, stagnationResult, priorityResult] =
+      await Promise.allSettled([
         appApi.getAnalytics(),
         appApi.getSourceYield(),
         appApi.getExtractStagnation(),
+        appApi.getPriorityIntegrity(),
       ]);
-      setData(res);
-      setLowYieldCount(yield_.lowYieldCount);
-      setStagnantCount(stagnation.stagnantCount);
+    if (loadRequestId.current !== requestId) return;
+
+    if (analyticsResult.status === "fulfilled") {
+      setData(analyticsResult.value);
       setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
+    } else {
+      setData(null);
+      setError(
+        analyticsResult.reason instanceof Error
+          ? analyticsResult.reason.message
+          : String(analyticsResult.reason),
+      );
     }
+
+    setLowYieldCount(yieldResult.status === "fulfilled" ? yieldResult.value.lowYieldCount : 0);
+    setStagnantCount(
+      stagnationResult.status === "fulfilled" ? stagnationResult.value.stagnantCount : 0,
+    );
+    if (priorityResult.status === "fulfilled") {
+      setPriorityIntegrity(priorityResult.value);
+      setPriorityIntegrityError(null);
+    } else {
+      setPriorityIntegrity(null);
+      setPriorityIntegrityError(
+        priorityResult.reason instanceof Error
+          ? priorityResult.reason.message
+          : String(priorityResult.reason),
+      );
+    }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -108,6 +145,13 @@ export function AnalyticsScreen() {
   useEffect(() => {
     void loadActivity();
   }, [loadActivity]);
+
+  useEffect(() => {
+    if (!priorityIntegrity) return;
+    if (window.location.hash !== "#priority-integrity") return;
+    priorityIntegrityRef.current?.scrollIntoView({ block: "start" });
+    priorityIntegrityRef.current?.focus();
+  }, [priorityIntegrity]);
 
   // Re-read after a global undo (⌘Z) reverts a mutation elsewhere so the numbers
   // stay live without a manual refresh.
@@ -225,6 +269,12 @@ export function AnalyticsScreen() {
             loading={activityLoading}
             error={activityError}
             onYearSelect={(year) => void loadActivity(year)}
+          />
+
+          <PriorityIntegrityPanel
+            ref={priorityIntegrityRef}
+            data={priorityIntegrity}
+            error={priorityIntegrityError}
           />
 
           {/* Reviews per day spark */}

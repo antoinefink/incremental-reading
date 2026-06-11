@@ -94,6 +94,19 @@ describe("preload bridge", () => {
       year: 2026,
     });
 
+    await api().analytics.priorityIntegrity({
+      asOf: "2026-06-07T12:00:00.000Z",
+      windowDays: 14,
+      sacrificedLimit: 5,
+      topicLimit: 6,
+    });
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.analyticsPriorityIntegrity, {
+      asOf: "2026-06-07T12:00:00.000Z",
+      windowDays: 14,
+      sacrificedLimit: 5,
+      topicLimit: 6,
+    });
+
     await api().library.parkedAction({ id: "src-1", action: { kind: "queueSoon" } });
     expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.libraryParkedAction, {
       id: "src-1",

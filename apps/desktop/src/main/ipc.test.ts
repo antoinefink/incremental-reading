@@ -79,6 +79,20 @@ function fakeDbService() {
       resumeSource: null,
       recommendedAction: "clear",
     })),
+    getPriorityIntegrity: vi.fn((request?: unknown) => ({
+      asOf: "2026-06-08T09:00:00.000Z",
+      windowDays: 30,
+      priorityAttribution: "current",
+      bands: [],
+      topics: [],
+      sacrificed: [],
+      thresholdFlags: {
+        aBandInflation: false,
+        aBandDeferredRecently: false,
+        postponeDebtHigh: false,
+      },
+      request,
+    })),
     importManualSource: vi.fn(),
     search: vi.fn(),
     listInbox: vi.fn(() => ({ items: [] })),
@@ -171,6 +185,30 @@ describe("registerIpcHandlers", () => {
 
     expect(() => handler?.({}, { asOf: "not-a-date" })).toThrow();
     expect(db.getDailyWorkSummary).not.toHaveBeenCalled();
+  });
+
+  it("validates and forwards priority integrity requests", () => {
+    const db = fakeDbService();
+    registerIpcHandlers(db as never);
+    const request = {
+      asOf: "2026-06-08T09:00:00.000Z",
+      windowDays: 14,
+      sacrificedLimit: 5,
+      topicLimit: 6,
+    };
+    const handler = electron.handlers.get(IPC_CHANNELS.analyticsPriorityIntegrity);
+
+    expect(handler?.({}, request)).toMatchObject({ priorityAttribution: "current" });
+    expect(db.getPriorityIntegrity).toHaveBeenCalledWith(request);
+  });
+
+  it("rejects malformed priority integrity clocks before invoking the database service", () => {
+    const db = fakeDbService();
+    registerIpcHandlers(db as never);
+    const handler = electron.handlers.get(IPC_CHANNELS.analyticsPriorityIntegrity);
+
+    expect(() => handler?.({}, { asOf: "not-a-date" })).toThrow();
+    expect(db.getPriorityIntegrity).not.toHaveBeenCalled();
   });
 
   it("rejects direct synthesized extract fate before invoking the database service", () => {

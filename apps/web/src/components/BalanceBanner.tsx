@@ -23,43 +23,19 @@
 
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { appApi, type BalanceGetResult, isDesktop, type SettingValue } from "../lib/appApi";
+import { appApi, type BalanceGetResult, isDesktop } from "../lib/appApi";
 import { UNDO_EVENT } from "../shell/nav";
 import { Icon } from "./Icon";
+import {
+  dismissNoticeUntil,
+  isNoticeDismissed,
+  NOTICE_DISMISSALS_KEY,
+  type NoticeDismissals,
+  ONE_WEEK_NOTICE_DISMISSAL_MS,
+  parseNoticeDismissals,
+} from "./noticeDismissals";
 
-const NOTICE_DISMISSALS_KEY = "ui.noticeDismissals";
 const BALANCE_NOTICE_ID = "balance.importProcess";
-const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-
-interface NoticeDismissal {
-  readonly until?: string;
-}
-
-type NoticeDismissals = Record<string, NoticeDismissal>;
-
-function isSettingObject(value: SettingValue | undefined): value is Record<string, SettingValue> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parseNoticeDismissals(value: SettingValue | undefined): NoticeDismissals {
-  if (!isSettingObject(value)) return {};
-
-  const dismissals: NoticeDismissals = {};
-  for (const [id, raw] of Object.entries(value)) {
-    if (!isSettingObject(raw)) continue;
-    const until = typeof raw.until === "string" ? raw.until : undefined;
-    if (until) dismissals[id] = { until };
-  }
-  return dismissals;
-}
-
-function isNoticeDismissed(dismissals: NoticeDismissals, id: string, now = Date.now()): boolean {
-  const dismissal = dismissals[id];
-  if (!dismissal) return false;
-  if (!dismissal.until) return false;
-  const untilMs = Date.parse(dismissal.until);
-  return Number.isFinite(untilMs) && untilMs > now;
-}
 
 export interface BalanceBannerProps {
   /** Optional instant to compute the snapshot for (ISO-8601); defaults to "now". */
@@ -170,8 +146,8 @@ export function BalanceBanner({
   }, [navigate, onTriageInbox]);
 
   const hideForWeek = useCallback(async () => {
-    const until = new Date(Date.now() + ONE_WEEK_MS).toISOString();
-    const next = { ...dismissals, [BALANCE_NOTICE_ID]: { until } };
+    const until = new Date(Date.now() + ONE_WEEK_NOTICE_DISMISSAL_MS).toISOString();
+    const next = dismissNoticeUntil(dismissals, BALANCE_NOTICE_ID, until);
     try {
       await appApi.updateSetting({ key: NOTICE_DISMISSALS_KEY, value: next });
       setDismissals(next);

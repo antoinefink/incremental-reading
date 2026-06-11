@@ -24,9 +24,17 @@
  */
 
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon, type IconName } from "../../components/Icon";
 import { Prio, SchedulerChip, TypeIcon } from "../../components/inspector/primitives";
+import {
+  dismissNoticeUntil,
+  isNoticeDismissed,
+  NOTICE_DISMISSALS_KEY,
+  type NoticeDismissals,
+  ONE_WEEK_NOTICE_DISMISSAL_MS,
+  parseNoticeDismissals,
+} from "../../components/noticeDismissals";
 import { BudgetMeter } from "../../components/queue/BudgetMeter";
 import { type DoneIntent, DoneIntentMenu } from "../../components/queue/DoneIntentMenu";
 import { QueueSnackbar } from "../../components/queue/QueueSnackbar";
@@ -39,6 +47,7 @@ import {
   appApi,
   type DailyWorkSummaryResult,
   isDesktop,
+  type PriorityIntegrityGetResult,
   type QueueActAction,
   type QueueActUndo,
   type QueueItemSummary,
@@ -114,6 +123,8 @@ const STATUS_FILTERS: readonly {
   { id: "active", label: "Active", statuses: ["active", "pending", "inbox"] },
   { id: "scheduled", label: "Scheduled", statuses: ["scheduled"] },
 ];
+
+const PRIORITY_INTEGRITY_QUEUE_NOTICE_ID = "priorityIntegrity.queue";
 
 /** Map a {@link DoneIntent} to the existing `queue.act` mutation for a source row. */
 function actionForDoneIntent(intent: DoneIntent): QueueActAction {
@@ -334,6 +345,12 @@ export function QueueScreen() {
   const concept = typeof search.concept === "string" ? search.concept : undefined;
   const [data, setData] = useState<QueueListResult | null>(null);
   const [dailyWork, setDailyWork] = useState<DailyWorkSummaryResult | null>(null);
+  const [priorityIntegrity, setPriorityIntegrity] = useState<PriorityIntegrityGetResult | null>(
+    null,
+  );
+  const [priorityDismissals, setPriorityDismissals] = useState<NoticeDismissals>({});
+  const [priorityDismissed, setPriorityDismissed] = useState(false);
+  const [priorityDismissError, setPriorityDismissError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterId>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilterId>("all");
   const [error, setError] = useState<string | null>(null);
@@ -352,23 +369,29 @@ export function QueueScreen() {
     message: string;
     undo: QueueActUndo;
   } | null>(null);
+  const refreshRequestId = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!isDesktop()) return;
     try {
+      const requestId = refreshRequestId.current + 1;
+      refreshRequestId.current = requestId;
       // The active status filter is passed THROUGH to the read so the narrowing
       // happens main-side (`QueueQuery.matchesFilters`), never in React. `all` sends
       // no `statuses` (the full due set). The `concept` param is forwarded too (when
       // present) so the documented T041 filter surface is genuinely wired end-to-end.
       const statuses = STATUS_FILTERS.find((s) => s.id === statusFilter)?.statuses;
-      const [queueResult, workResult] = await Promise.allSettled([
+      const [queueResult, workResult, priorityResult, noticeResult] = await Promise.allSettled([
         appApi.listQueue({
           ...(asOf ? { asOf } : {}),
           ...(statuses ? { statuses } : {}),
           ...(concept ? { concept } : {}),
         }),
         appApi.getDailyWorkSummary(asOf ? { asOf } : {}),
+        appApi.getPriorityIntegrity(asOf ? { asOf } : undefined),
+        appApi.getSettings({ key: NOTICE_DISMISSALS_KEY }),
       ]);
+      if (refreshRequestId.current !== requestId) return;
       let nextError: string | null = null;
       if (queueResult.status === "fulfilled") {
         setData(queueResult.value);
@@ -389,11 +412,40 @@ export function QueueScreen() {
             ? workResult.reason.message
             : String(workResult.reason));
       }
+      if (priorityResult.status === "fulfilled") {
+        setPriorityIntegrity(priorityResult.value);
+      } else {
+        setPriorityIntegrity(null);
+      }
+      if (noticeResult.status === "fulfilled") {
+        const parsedDismissals = parseNoticeDismissals(
+          noticeResult.value.settings[NOTICE_DISMISSALS_KEY],
+        );
+        setPriorityDismissals(parsedDismissals);
+        setPriorityDismissed(
+          isNoticeDismissed(parsedDismissals, PRIORITY_INTEGRITY_QUEUE_NOTICE_ID),
+        );
+      }
       setError(nextError);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [asOf, statusFilter, concept]);
+
+  useEffect(() => {
+    if (!priorityDismissed) return;
+    const until = priorityDismissals[PRIORITY_INTEGRITY_QUEUE_NOTICE_ID]?.until;
+    if (!until) return;
+    const untilMs = Date.parse(until);
+    if (!Number.isFinite(untilMs)) return;
+    const delay = untilMs - Date.now();
+    if (delay <= 0) {
+      void refresh();
+      return;
+    }
+    const timer = window.setTimeout(() => void refresh(), delay + 100);
+    return () => window.clearTimeout(timer);
+  }, [priorityDismissed, priorityDismissals, refresh]);
 
   useEffect(() => {
     void refresh();
@@ -648,6 +700,23 @@ export function QueueScreen() {
     [refresh],
   );
 
+  const viewPriorityIntegrity = useCallback(() => {
+    void navigate({ to: "/analytics", hash: "priority-integrity" });
+  }, [navigate]);
+
+  const hidePriorityIntegrityForWeek = useCallback(async () => {
+    const until = new Date(Date.now() + ONE_WEEK_NOTICE_DISMISSAL_MS).toISOString();
+    const next = dismissNoticeUntil(priorityDismissals, PRIORITY_INTEGRITY_QUEUE_NOTICE_ID, until);
+    try {
+      await appApi.updateSetting({ key: NOTICE_DISMISSALS_KEY, value: next });
+      setPriorityDismissals(next);
+      setPriorityDismissed(true);
+      setPriorityDismissError(null);
+    } catch {
+      setPriorityDismissError("Could not save that dismissal.");
+    }
+  }, [priorityDismissals]);
+
   if (!desktop) {
     return (
       <div
@@ -691,6 +760,18 @@ export function QueueScreen() {
           ? "No due queue or inbox work right now."
           : "Process one item at a time — sorted by priority, then due date.";
   const hasActiveFilters = filter !== "all" || statusFilter !== "all" || concept !== undefined;
+  const priorityFlags = priorityIntegrity?.thresholdFlags;
+  const showPriorityIntegrityWarning =
+    Boolean(
+      priorityFlags?.aBandInflation ||
+        priorityFlags?.aBandDeferredRecently ||
+        priorityFlags?.postponeDebtHigh,
+    ) && !priorityDismissed;
+  const priorityReason = priorityFlags?.aBandDeferredRecently
+    ? "A-priority work was deferred in this window."
+    : priorityFlags?.postponeDebtHigh
+      ? "Postponed work has accumulated priority debt."
+      : "A-priority items are taking a large share of the live queue.";
 
   return (
     <div className="q-page" data-testid="route-queue">
@@ -710,6 +791,43 @@ export function QueueScreen() {
           <p className="q-sub" data-testid="queue-error" style={{ color: "var(--danger)" }}>
             {error}
           </p>
+        ) : null}
+
+        {showPriorityIntegrityWarning ? (
+          <div className="q-priority" data-testid="queue-priority-integrity">
+            <div className="q-priority__icon">
+              <Icon name="warning" size={15} />
+            </div>
+            <div className="q-priority__body">
+              <div className="q-priority__title">Priority integrity needs attention</div>
+              <div className="q-priority__text">{priorityReason}</div>
+              {priorityDismissError ? (
+                <div className="q-priority__error" data-testid="queue-priority-dismiss-error">
+                  {priorityDismissError}
+                </div>
+              ) : null}
+            </div>
+            <div className="q-priority__actions">
+              <button
+                type="button"
+                className="q-priority__button"
+                data-testid="queue-priority-view-analytics"
+                onClick={viewPriorityIntegrity}
+              >
+                <Icon name="analytics" size={13} />
+                View analytics
+              </button>
+              <button
+                type="button"
+                className="q-priority__icon-button"
+                data-testid="queue-priority-hide-week"
+                aria-label="Hide priority integrity warning for a week"
+                onClick={hidePriorityIntegrityForWeek}
+              >
+                <Icon name="x" size={13} />
+              </button>
+            </div>
+          </div>
         ) : null}
 
         {/* overload-management strip: budget meter + at-risk metrics */}
