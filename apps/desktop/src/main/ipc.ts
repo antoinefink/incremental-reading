@@ -170,6 +170,8 @@ import {
   TasksGenerateFromExpiryRequestSchema,
   TasksListRequestSchema,
   TasksPostponeRequestSchema,
+  TopicFallowRequestSchema,
+  TopicUnfallowRequestSchema,
   TrashEmptyRequestSchema,
   TrashListRequestSchema,
   TrashPurgeRequestSchema,
@@ -342,6 +344,16 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.queueVacationApply, (_event, rawRequest: unknown) => {
     const request = QueueVacationRequestSchema.parse(rawRequest);
     return dbService.applyVacation(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.topicsFallow, (_event, rawRequest: unknown) => {
+    const request = TopicFallowRequestSchema.parse(rawRequest);
+    return dbService.fallowTopic(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.topicsUnfallow, (_event, rawRequest: unknown) => {
+    const request = TopicUnfallowRequestSchema.parse(rawRequest);
+    return dbService.unfallowTopic(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.lineageGet, (_event, rawRequest: unknown) => {

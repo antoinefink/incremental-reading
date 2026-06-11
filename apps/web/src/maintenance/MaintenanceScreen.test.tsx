@@ -13,7 +13,7 @@
  * SQLite/IPC — the renderer is a pure UI consumer here.
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -323,6 +323,116 @@ describe("MaintenanceScreen", () => {
     await waitFor(() =>
       expect(screen.getByTestId("maintenance-snackbar-undo")).toBeInTheDocument(),
     );
+  });
+
+  it("offers chronic fallow only for topic rows and sends a return date", async () => {
+    h.chronicPostpones.mockResolvedValueOnce({
+      rows: [
+        {
+          element: {
+            id: "topic-chronic",
+            type: "topic",
+            title: "Restable topic",
+            priority: 0.5,
+            priorityLabel: "B",
+            status: "scheduled",
+            dueAt: "2026-08-01T00:00:00.000Z",
+            createdAt: "",
+          },
+          scheduler: "attention",
+          postponeCount: 7,
+        },
+        {
+          element: {
+            id: "source-chronic",
+            type: "source",
+            title: "Source stays non-restable",
+            priority: 0.5,
+            priorityLabel: "B",
+            status: "scheduled",
+            dueAt: "2026-08-01T00:00:00.000Z",
+            createdAt: "",
+          },
+          scheduler: "attention",
+          postponeCount: 7,
+        },
+      ],
+      totalDue: 2,
+      threshold: 5,
+      limit: 50,
+    });
+    render(<MaintenanceScreen />);
+    await waitFor(() => expect(screen.getByTestId("maintenance-grid")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("metric-chronic-toggle"));
+    await waitFor(() => expect(screen.getByTestId("chronic-panel")).toBeInTheDocument());
+
+    const topicRow = screen
+      .getAllByTestId("chronic-row")
+      .find((row) => row.getAttribute("data-element-id") === "topic-chronic");
+    const sourceRow = screen
+      .getAllByTestId("chronic-row")
+      .find((row) => row.getAttribute("data-element-id") === "source-chronic");
+    expect(topicRow).toBeTruthy();
+    expect(sourceRow).toBeTruthy();
+    expect(
+      within(topicRow as HTMLElement).getByTestId("chronic-decision-fallow"),
+    ).toHaveTextContent("Rest");
+    expect(within(sourceRow as HTMLElement).queryByTestId("chronic-decision-fallow")).toBeNull();
+
+    fireEvent.click(within(topicRow as HTMLElement).getByTestId("chronic-decision-fallow"));
+    const dateInput = within(topicRow as HTMLElement).getByTestId("chronic-fallow-date");
+    expect(dateInput).toBeInTheDocument();
+    fireEvent.change(dateInput, { target: { value: "2099-07-15" } });
+    fireEvent.click(screen.getByTestId("chronic-apply"));
+
+    await waitFor(() =>
+      expect(h.chronicPostponesApply).toHaveBeenCalledWith({
+        decisions: [
+          {
+            id: "topic-chronic",
+            kind: "fallow",
+            fallowUntil: "2099-07-15T00:00:00.000Z",
+            fallowReason: "Rested from chronic-postpone reckoning",
+          },
+        ],
+      }),
+    );
+  });
+
+  it("disables chronic fallow apply until the selected return date is future-valid", async () => {
+    h.chronicPostpones.mockResolvedValueOnce({
+      rows: [
+        {
+          element: {
+            id: "topic-chronic",
+            type: "topic",
+            title: "Restable topic",
+            priority: 0.5,
+            priorityLabel: "B",
+            status: "scheduled",
+            dueAt: "2026-08-01T00:00:00.000Z",
+            createdAt: "",
+          },
+          scheduler: "attention",
+          postponeCount: 7,
+        },
+      ],
+      totalDue: 1,
+      threshold: 5,
+      limit: 50,
+    });
+    render(<MaintenanceScreen />);
+    await waitFor(() => expect(screen.getByTestId("maintenance-grid")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("metric-chronic-toggle"));
+    await waitFor(() => expect(screen.getByTestId("chronic-panel")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("chronic-decision-fallow"));
+    fireEvent.change(screen.getByTestId("chronic-fallow-date"), {
+      target: { value: "2000-01-01" },
+    });
+
+    expect(screen.getByTestId("chronic-apply")).toBeDisabled();
+    expect(h.chronicPostponesApply).not.toHaveBeenCalled();
   });
 
   it("shows chronic skipped reasons and keeps Undo only for applied mutations", async () => {

@@ -403,8 +403,9 @@ Detailed specs: [`tasks/M22-receipts.md`](./tasks/M22-receipts.md)
 - [x] **T106 — Chronic-postpone reckoning** · _deps: T105_
   Done when: items postponed ≥N times surface in a decision surface forcing an explicit keep / demote / done / delete per item — no further silent recession past the threshold without one decision — batched, undoable, op-logged, with new drift-diagnostic cases.
   Completed in this commit. Verification: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm e2e tests/electron/maintenance.spec.ts`. Learning captured in [`docs/solutions/architecture-patterns/chronic-postpone-reckoning-from-operation-log-reset-markers.md`](./solutions/architecture-patterns/chronic-postpone-reckoning-from-operation-log-reset-markers.md). Downstream: T110 can compose the chronic reckoning panel into the weekly ledger; T107 remains the next available M22 task.
-- [ ] **T107 — Fallow: deliberate topic rest** · _deps: T105_
+- [x] **T107 — Fallow: deliberate topic rest** · _deps: T105_
   Done when: a topic can be rested to a chosen return date — distinct from postpone (no recession growth, excluded from missed-priority accounting) and from abandon (it provably returns) — visible on the topic, reversible, op-logged.
+  Completed in this commit. Verification: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm e2e -- tests/electron/fallow-topic.spec.ts`. Learning captured in [`docs/solutions/architecture-patterns/topic-fallow-rest-operation-log-preimages.md`](./solutions/architecture-patterns/topic-fallow-rest-operation-log-preimages.md). Downstream: T108 can treat fallowed topics as deliberate rest context rather than missed-priority debt; T110 can compose resting topics into the weekly ledger.
 - [ ] **T108 — Topic knowledge-state read model** · _deps: T079, T083, T104_
   Done when: per topic/concept, a typed read model reports the funnel as stage-to-stage ratios (read → extracted → distilled → carded → mature), stability distribution, and measured retention trend vs the T079 target, and emits graduation events when thresholds cross.
 - [ ] **T109 — Maturity surfaces** · _deps: T108_

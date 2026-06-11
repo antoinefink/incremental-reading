@@ -142,6 +142,7 @@ const h = vi.hoisted(() => {
     ],
     topics: [],
     sacrificed: [],
+    resting: [],
     thresholdFlags: {
       aBandInflation: false,
       aBandDeferredRecently: false,

@@ -14,6 +14,8 @@ const h = vi.hoisted(() => ({
   getLineage: vi.fn(),
   setElementPriority: vi.fn(),
   scheduleQueueItem: vi.fn(),
+  fallowTopic: vi.fn(),
+  unfallowTopic: vi.fn(),
   semanticRelated: vi.fn(),
   listTasks: vi.fn(),
   createTask: vi.fn(),
@@ -55,6 +57,8 @@ vi.mock("../../lib/appApi", async () => {
       getLineage: h.getLineage,
       setElementPriority: h.setElementPriority,
       scheduleQueueItem: h.scheduleQueueItem,
+      fallowTopic: h.fallowTopic,
+      unfallowTopic: h.unfallowTopic,
       semanticRelated: h.semanticRelated,
       listTasks: h.listTasks,
       createTask: h.createTask,
@@ -320,6 +324,10 @@ beforeEach(() => {
     dueAt: "2026-06-08T12:00:00.000Z",
     intervalDays: 1,
   });
+  h.fallowTopic.mockReset();
+  h.fallowTopic.mockResolvedValue({ applied: 1, skipped: [], batchId: "batch-fallow" });
+  h.unfallowTopic.mockReset();
+  h.unfallowTopic.mockResolvedValue({ applied: 1, skipped: [], batchId: "batch-fallow" });
   h.semanticRelated.mockReset();
   h.semanticRelated.mockResolvedValue({
     similar: [],
@@ -434,6 +442,52 @@ describe("Inspector", () => {
     );
     expect(screen.queryByTestId("provenance-canonical-url")).not.toBeInTheDocument();
     expect(screen.queryByText("Canonical URL")).not.toBeInTheDocument();
+  });
+
+  it("renders topic rest controls and applies fallow through the typed app API", async () => {
+    h.selectedId = "topic-1";
+    h.getInspectorData.mockResolvedValue({ data: topicData("Topic one") });
+
+    render(<Inspector />);
+
+    expect(await screen.findByTestId("fallow-section")).toHaveTextContent("Not resting");
+    fireEvent.change(screen.getByTestId("fallow-date"), {
+      target: { value: "2099-07-01" },
+    });
+    fireEvent.change(screen.getByTestId("fallow-reason"), {
+      target: { value: "Let this rest" },
+    });
+    fireEvent.click(screen.getByTestId("fallow-apply"));
+
+    await waitFor(() =>
+      expect(h.fallowTopic).toHaveBeenCalledWith({
+        topicId: "topic-1",
+        fallowUntil: "2099-07-01T00:00:00.000Z",
+        fallowReason: "Let this rest",
+      }),
+    );
+  });
+
+  it("clears existing topic rest through the typed app API", async () => {
+    h.selectedId = "topic-1";
+    const data = topicData("Topic one");
+    h.getInspectorData.mockResolvedValue({
+      data: {
+        ...data,
+        element: {
+          ...data.element,
+          fallowUntil: "2099-07-01T00:00:00.000Z",
+          fallowReason: "Let this rest",
+        },
+      },
+    });
+
+    render(<Inspector />);
+
+    expect(await screen.findByTestId("fallow-section")).toHaveTextContent("Resting");
+    fireEvent.click(screen.getByTestId("fallow-clear"));
+
+    await waitFor(() => expect(h.unfallowTopic).toHaveBeenCalledWith({ topicId: "topic-1" }));
   });
 
   it("shows Markdown exports as written to Downloads", async () => {

@@ -560,4 +560,61 @@ describe("QueueQuery", () => {
       [...full.items].map((i) => i.id).sort(),
     );
   });
+
+  it("surfaces backend fallow reason on inventory summaries while due reads stay date-based", () => {
+    const topic = repos.elements.create({
+      type: "topic",
+      status: "scheduled",
+      stage: "rough_topic",
+      priority: PRIORITY_LABEL_VALUE.B,
+      title: "Rested topic",
+      dueAt: iso("2026-05-29T06:00:00.000Z"),
+    });
+    const extract = repos.elements.create({
+      type: "extract",
+      status: "scheduled",
+      stage: "raw_extract",
+      priority: PRIORITY_LABEL_VALUE.B,
+      title: "Rested extract",
+      parentId: topic.id,
+      dueAt: iso("2026-05-29T06:00:00.000Z"),
+    });
+
+    repos.fallow.fallowTopic({
+      topicId: topic.id,
+      fallowUntil: iso("2026-06-15T00:00:00.000Z"),
+      fallowReason: "Let the thread cool off",
+      now: NOW,
+    });
+
+    expect(queue.list({ asOf: NOW }).items.map((item) => item.id)).not.toContain(extract.id);
+    const rested = queue.summaryFor(extract.id, NOW);
+    expect(rested).toMatchObject({
+      queueEligible: false,
+      notInQueueReason: "fallow",
+      fallowState: "active",
+      fallowUntil: "2026-06-15T00:00:00.000Z",
+      fallowReason: "Let the thread cool off",
+      fallowTopicId: topic.id,
+    });
+    expect(rested?.dueLabel).toBe("Resting until Jun 15");
+
+    const returned = queue.summaryFor(extract.id, iso("2026-06-15T00:00:00.000Z"));
+    expect(returned).toMatchObject({
+      queueEligible: true,
+      notInQueueReason: null,
+      fallowState: "returned",
+    });
+    expect(returned?.dueLabel).toBe("Due today");
+
+    const returnedDueRow = queue
+      .list({ asOf: iso("2026-06-15T00:00:00.000Z") })
+      .items.find((item) => item.id === extract.id);
+    expect(returnedDueRow).toMatchObject({
+      fallowState: "returned",
+      fallowUntil: "2026-06-15T00:00:00.000Z",
+      fallowReason: "Let the thread cool off",
+      fallowTopicId: topic.id,
+    });
+  });
 });

@@ -105,6 +105,18 @@ function fakeDbService() {
       batchId: "batch-1",
       request,
     })),
+    fallowTopic: vi.fn((request?: unknown) => ({
+      applied: 2,
+      skipped: [],
+      batchId: "batch-fallow",
+      request,
+    })),
+    unfallowTopic: vi.fn((request?: unknown) => ({
+      applied: 2,
+      skipped: [],
+      batchId: "batch-fallow",
+      request,
+    })),
     importManualSource: vi.fn(),
     search: vi.fn(),
     listInbox: vi.fn(() => ({ items: [] })),
@@ -221,6 +233,55 @@ describe("registerIpcHandlers", () => {
 
     expect(() => handler?.({}, { asOf: "not-a-date" })).toThrow();
     expect(db.getPriorityIntegrity).not.toHaveBeenCalled();
+  });
+
+  it("validates and forwards topic fallow commands", () => {
+    const db = fakeDbService();
+    registerIpcHandlers(db as never);
+    const fallowRequest = {
+      topicId: "topic-1",
+      fallowUntil: "2026-07-01T00:00:00.000Z",
+      fallowReason: "Seasonal pause",
+    };
+    const unfallowRequest = { topicId: "topic-1" };
+
+    expect(electron.handlers.get(IPC_CHANNELS.topicsFallow)?.({}, fallowRequest)).toMatchObject({
+      applied: 2,
+      batchId: "batch-fallow",
+    });
+    expect(db.fallowTopic).toHaveBeenCalledWith(fallowRequest);
+    expect(electron.handlers.get(IPC_CHANNELS.topicsUnfallow)?.({}, unfallowRequest)).toMatchObject(
+      {
+        applied: 2,
+        batchId: "batch-fallow",
+      },
+    );
+    expect(db.unfallowTopic).toHaveBeenCalledWith(unfallowRequest);
+  });
+
+  it("rejects malformed topic fallow commands before invoking the database service", () => {
+    const db = fakeDbService();
+    registerIpcHandlers(db as never);
+
+    expect(() =>
+      electron.handlers.get(IPC_CHANNELS.topicsFallow)?.(
+        {},
+        { topicId: "topic-1", fallowUntil: "not-a-date" },
+      ),
+    ).toThrow();
+    expect(() =>
+      electron.handlers.get(IPC_CHANNELS.topicsFallow)?.(
+        {},
+        {
+          topicId: "topic-1",
+          fallowUntil: "2026-07-01T00:00:00.000Z",
+          now: "2000-01-01T00:00:00.000Z",
+        },
+      ),
+    ).toThrow();
+    expect(() => electron.handlers.get(IPC_CHANNELS.topicsUnfallow)?.({}, {})).toThrow();
+    expect(db.fallowTopic).not.toHaveBeenCalled();
+    expect(db.unfallowTopic).not.toHaveBeenCalled();
   });
 
   it("validates and forwards chronic postpone maintenance requests", () => {

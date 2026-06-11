@@ -7,24 +7,32 @@
  * share one `batchId`, so `UndoService.undoLast` reverses the whole batch.
  */
 
-import type { ElementId, ElementStatus } from "@interleave/core";
+import type { ElementId, ElementStatus, IsoTimestamp } from "@interleave/core";
 import { lowerPriority } from "@interleave/core";
 import { cards, elements, type InterleaveDatabase, reviewStates } from "@interleave/db";
 import { eq } from "drizzle-orm";
 import { BlockProcessingService } from "./block-processing-service";
 import { CHRONIC_POSTPONE_TYPES } from "./chronic-postpone-query";
 import { ElementRepository } from "./element-repository";
+import { FallowService } from "./fallow-service";
 import { newRowId } from "./ids";
 import { OperationLogRepository } from "./operation-log-repository";
 import { isQueueActionableStatus } from "./queue-repository";
 import type { DbClient } from "./types";
 
-export type ChronicPostponeDecisionKind = "keep" | "demote" | "done" | "delete";
+export type ChronicPostponeDecisionKind = "keep" | "demote" | "done" | "delete" | "fallow";
 
-export interface ChronicPostponeDecision {
-  readonly id: ElementId;
-  readonly kind: ChronicPostponeDecisionKind;
-}
+export type ChronicPostponeDecision =
+  | {
+      readonly id: ElementId;
+      readonly kind: Exclude<ChronicPostponeDecisionKind, "fallow">;
+    }
+  | {
+      readonly id: ElementId;
+      readonly kind: "fallow";
+      readonly fallowUntil: IsoTimestamp;
+      readonly fallowReason?: string | null;
+    };
 
 export type ChronicPostponeSkipReason =
   | "missing"
@@ -34,6 +42,7 @@ export type ChronicPostponeSkipReason =
   | "retired-card"
   | "below-threshold"
   | "already-lowest"
+  | "invalid-return"
   | "source-unresolved-blocks";
 
 export interface ChronicPostponeSkippedDecision {
@@ -57,10 +66,12 @@ type SupportedType = (typeof CHRONIC_POSTPONE_TYPES)[number];
 export class ChronicPostponeService {
   private readonly elements: ElementRepository;
   private readonly blockProcessing: BlockProcessingService;
+  private readonly fallow: FallowService;
 
   constructor(private readonly db: InterleaveDatabase) {
     this.elements = new ElementRepository(db);
     this.blockProcessing = new BlockProcessingService(db);
+    this.fallow = new FallowService(db);
   }
 
   apply(options: ChronicPostponeApplyOptions): ChronicPostponeApplyResult {
@@ -123,6 +134,32 @@ export class ChronicPostponeService {
           case "delete":
             this.elements.softDeleteWithin(tx, decision.id, { batchId });
             break;
+          case "fallow": {
+            if (validation.row.type !== "topic") {
+              skipped.push({ id: decision.id, reason: "unsupported-type" });
+              continue;
+            }
+            const result = this.fallow.fallowTopicWithin(tx, {
+              topicId: decision.id,
+              fallowUntil: decision.fallowUntil,
+              ...(decision.fallowReason !== undefined
+                ? { fallowReason: decision.fallowReason }
+                : {}),
+              batchId,
+              action: "chronicPostpone:fallow",
+              resetChronicPostpones: true,
+              prevEffectivePostponeCount: validation.postponeCount,
+            });
+            if (result.applied <= 0) {
+              skipped.push({
+                id: decision.id,
+                reason:
+                  result.skipped[0]?.reason === "invalid-return" ? "invalid-return" : "missing",
+              });
+              continue;
+            }
+            break;
+          }
         }
         applied += 1;
       }

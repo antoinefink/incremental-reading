@@ -32,6 +32,17 @@ function source(title: string, priority = priorityFromLabel("B")): ElementId {
     .id;
 }
 
+function topic(title: string): ElementId {
+  return repos.elements.create({
+    type: "topic",
+    title,
+    status: "scheduled",
+    stage: "rough_topic",
+    priority: priorityFromLabel("B"),
+    dueAt: "2026-06-01T00:00:00.000Z" as IsoTimestamp,
+  }).id;
+}
+
 function card(title: string): ElementId {
   return repos.review.createCard({
     kind: "qa",
@@ -106,6 +117,95 @@ describe("ChronicPostponeService.apply", () => {
       batchId: null,
     });
     expect(repos.elements.findById(id)?.priority).toBe(priorityFromLabel("D"));
+    expect(log.countPostpones(id)).toBe(5);
+  });
+
+  it("fallow rests topic rows and resets the effective count in the same batch", () => {
+    const id = topic("Topic to rest");
+    postpone(id, 5);
+
+    const result = service.apply({
+      threshold: 5,
+      decisions: [
+        {
+          id,
+          kind: "fallow",
+          fallowUntil: "2026-07-01T00:00:00.000Z" as IsoTimestamp,
+          fallowReason: "Seasonal pause",
+        },
+      ],
+    });
+
+    expect(result.applied).toBe(1);
+    expect(result.skipped).toEqual([]);
+    expect(repos.elements.findById(id)).toMatchObject({
+      dueAt: "2026-07-01T00:00:00.000Z",
+      fallowUntil: "2026-07-01T00:00:00.000Z",
+      fallowReason: "Seasonal pause",
+      fallowBatchId: result.batchId,
+    });
+    expect(log.countPostpones(id)).toBe(0);
+
+    const undone = undo.undoLast();
+    expect(undone.undone).toBe(true);
+    expect(repos.elements.findById(id)).toMatchObject({
+      dueAt: "2026-06-01T00:00:00.000Z",
+      fallowUntil: null,
+      fallowReason: null,
+      fallowBatchId: null,
+    });
+    expect(log.countPostpones(id)).toBe(5);
+  });
+
+  it("skips fallow decisions for non-topic chronic rows", () => {
+    const id = source("Not a topic");
+    postpone(id, 5);
+
+    const result = service.apply({
+      threshold: 5,
+      decisions: [
+        {
+          id,
+          kind: "fallow",
+          fallowUntil: "2026-07-01T00:00:00.000Z" as IsoTimestamp,
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      applied: 0,
+      skipped: [{ id, reason: "unsupported-type" }],
+      batchId: null,
+    });
+    expect(repos.elements.findById(id)?.fallowUntil).toBeNull();
+    expect(log.countPostpones(id)).toBe(5);
+  });
+
+  it("skips fallow decisions with parseable but non-canonical return dates", () => {
+    const id = topic("Impossible date topic");
+    postpone(id, 5);
+
+    const result = service.apply({
+      threshold: 5,
+      decisions: [
+        {
+          id,
+          kind: "fallow",
+          fallowUntil: "2027-02-31T00:00:00.000Z" as IsoTimestamp,
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      applied: 0,
+      skipped: [{ id, reason: "invalid-return" }],
+      batchId: null,
+    });
+    expect(repos.elements.findById(id)).toMatchObject({
+      dueAt: "2026-06-01T00:00:00.000Z",
+      fallowUntil: null,
+      fallowBatchId: null,
+    });
     expect(log.countPostpones(id)).toBe(5);
   });
 

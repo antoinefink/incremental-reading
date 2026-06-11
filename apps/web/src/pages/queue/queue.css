@@ -407,6 +407,17 @@
   background: var(--text-3);
   flex: none;
 }
+.qitem__fallow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent-text);
+  font-size: var(--t-xs);
+}
 
 /* concept tag (T041 populates these) */
 .concept-tag {

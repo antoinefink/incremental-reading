@@ -187,6 +187,8 @@ export interface ElementSummary {
   readonly priority: number;
   readonly title: string;
   readonly dueAt: string | null;
+  readonly fallowUntil?: string | null;
+  readonly fallowReason?: string | null;
   readonly extractFate: ExtractFate | null;
 }
 
@@ -456,6 +458,36 @@ export interface ElementsSetPriorityResult {
 }
 
 // ---------------------------------------------------------------------------
+// topics.fallow() / topics.unfallow()  (T107 — deliberate topic rest)
+// ---------------------------------------------------------------------------
+
+export interface TopicFallowRequest {
+  readonly topicId: string;
+  readonly fallowUntil: string;
+  readonly fallowReason?: string | null;
+}
+
+export interface TopicUnfallowRequest {
+  readonly topicId: string;
+}
+
+export type TopicFallowSkipReason =
+  | "missing"
+  | "deleted"
+  | "not-topic"
+  | "not-actionable"
+  | "invalid-return"
+  | "not-fallowed"
+  | "missing-fallow-batch"
+  | "schedule-changed";
+
+export interface TopicFallowResult {
+  readonly applied: number;
+  readonly skipped: readonly { readonly id: string; readonly reason: TopicFallowSkipReason }[];
+  readonly batchId: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // queue.list()  (T029 — the unified, sorted, filtered due queue)
 // ---------------------------------------------------------------------------
 
@@ -522,6 +554,10 @@ export interface QueueItemSummary {
   readonly queueEligible: boolean;
   /** Human explanation when an inventory row has scheduler history but is not in Queue. */
   readonly notInQueueReason: string | null;
+  readonly fallowState: "active" | "returned" | null;
+  readonly fallowUntil: string | null;
+  readonly fallowReason: string | null;
+  readonly fallowTopicId: string | null;
 }
 
 /** Per-type counts over the unfiltered due set + the at-risk counts. */
@@ -1601,12 +1637,19 @@ export interface MaintenanceChronicPostponesResult {
   readonly limit: number | null;
 }
 
-export type ChronicPostponeDecisionKind = "keep" | "demote" | "done" | "delete";
+export type ChronicPostponeDecisionKind = "keep" | "demote" | "done" | "delete" | "fallow";
 
-export interface ChronicPostponeDecisionInput {
-  readonly id: string;
-  readonly kind: ChronicPostponeDecisionKind;
-}
+export type ChronicPostponeDecisionInput =
+  | {
+      readonly id: string;
+      readonly kind: Exclude<ChronicPostponeDecisionKind, "fallow">;
+    }
+  | {
+      readonly id: string;
+      readonly kind: "fallow";
+      readonly fallowUntil: string;
+      readonly fallowReason?: string | null;
+    };
 
 export interface MaintenanceChronicPostponesApplyRequest {
   readonly decisions: readonly ChronicPostponeDecisionInput[];
@@ -1624,7 +1667,8 @@ export interface MaintenanceChronicPostponesApplyResult {
       | "retired-card"
       | "below-threshold"
       | "already-lowest"
-      | "source-unresolved-blocks";
+      | "source-unresolved-blocks"
+      | "invalid-return";
   }[];
   readonly batchId: string | null;
 }
@@ -2462,6 +2506,13 @@ export interface ReviewCardExpiry {
   readonly softwareVersion: string | null;
 }
 
+export interface ReviewFallowContext {
+  readonly topicId: string;
+  readonly topicTitle: string;
+  readonly fallowUntil: string;
+  readonly fallowReason: string | null;
+}
+
 export interface ReviewCardView {
   readonly id: string;
   readonly kind: string;
@@ -2501,6 +2552,7 @@ export interface ReviewCardView {
    * `session.next` can bury the group (T039); it never computes sibling links.
    */
   readonly siblingGroupId: string | null;
+  readonly fallowContext: ReviewFallowContext | null;
   /**
    * Image-occlusion render data (T071) — present ONLY for an `image_occlusion`
    * card, `null` otherwise. The review face loads the base image bytes via
@@ -3630,6 +3682,14 @@ export interface PriorityIntegritySacrificedRow {
   readonly topicTitle: string | null;
 }
 
+export interface PriorityIntegrityRestingTopic {
+  readonly topicId: string;
+  readonly title: string;
+  readonly band: PriorityLabel;
+  readonly fallowUntil: string;
+  readonly fallowReason: string | null;
+}
+
 export interface PriorityIntegrityThresholdFlags {
   readonly aBandInflation: boolean;
   readonly aBandDeferredRecently: boolean;
@@ -3643,6 +3703,7 @@ export interface PriorityIntegrityGetResult {
   readonly bands: readonly PriorityIntegrityBandSummary[];
   readonly topics: readonly PriorityIntegrityTopicSummary[];
   readonly sacrificed: readonly PriorityIntegritySacrificedRow[];
+  readonly resting: readonly PriorityIntegrityRestingTopic[];
   readonly thresholdFlags: PriorityIntegrityThresholdFlags;
 }
 
@@ -3888,6 +3949,10 @@ export interface AppApi {
   };
   readonly elements: {
     setPriority(request: ElementsSetPriorityRequest): Promise<ElementsSetPriorityResult>;
+  };
+  readonly topics: {
+    fallow(request: TopicFallowRequest): Promise<TopicFallowResult>;
+    unfallow(request: TopicUnfallowRequest): Promise<TopicFallowResult>;
   };
   readonly queue: {
     list(request?: QueueListRequest): Promise<QueueListResult>;
@@ -4248,6 +4313,14 @@ export const appApi = {
    */
   setElementPriority(request: ElementsSetPriorityRequest): Promise<ElementsSetPriorityResult> {
     return requireAppApi().elements.setPriority(request);
+  },
+  /** Rest a topic and eligible attention descendants until a deliberate return date. */
+  fallowTopic(request: TopicFallowRequest): Promise<TopicFallowResult> {
+    return requireAppApi().topics.fallow(request);
+  },
+  /** Manually return a fallowed topic from the active fallow batch. */
+  unfallowTopic(request: TopicUnfallowRequest): Promise<TopicFallowResult> {
+    return requireAppApi().topics.unfallow(request);
   },
   /**
    * The unified, sorted, filtered due queue (T029) — due cards (FSRS) AND due

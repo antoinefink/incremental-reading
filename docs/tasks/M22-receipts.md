@@ -158,7 +158,7 @@ decision point.
 # T107 — Fallow: deliberate topic rest
 
 - **Milestone:** M22 — Receipts
-- **Status:** `[ ]` not started
+- **Status:** `[x]` completed in this commit
 - **Depends on:** T105
 - **Roadmap line:** a topic can be rested to a chosen return date — distinct from postpone (no
   recession growth, excluded from missed-priority accounting) and from abandon (it provably
@@ -180,15 +180,15 @@ not abandoned land. It also keeps T105's ledger honest: fallowed work is not "mi
 
 ## Deliverables
 
-- [ ] Domain: fallow state on a topic with `fallowUntil` + reason; entering it reschedules the
+- [x] Domain: fallow state on a topic with `fallowUntil` + reason; entering it reschedules the
       topic's attention-scheduled descendants past the date in one transaction (op-logged,
       undoable); exiting (manually or on date) restores normal cadence.
-- [ ] T105 integration: fallowed items excluded from missed/deferred accounting, listed in their
+- [x] T105 integration: fallowed items excluded from missed/deferred accounting, listed in their
       own ledger line ("resting: 2 topics, back 2026-03-01").
-- [ ] UI: fallow/unfallow verbs on the topic (and from the reckoning surface as a fifth option
+- [x] UI: fallow/unfallow verbs on the topic (and from the reckoning surface as a fifth option
       where the item is a topic), visible state on topic pages and queue inventory
       (`notInQueueReason: "fallow"` per the backend-canonical-eligibility pattern).
-- [ ] Tests: unit (transactional reschedule + restore, accounting exclusion); e2e — fallow a
+- [x] Tests: unit (transactional reschedule + restore, accounting exclusion); e2e — fallow a
       topic, queue empties of it, returns on date, cards kept reviewing throughout.
 
 ## Done when
@@ -202,6 +202,37 @@ not abandoned land. It also keeps T105's ledger honest: fallowed work is not "mi
 
 - Eligibility surface: every row hidden by fallow must carry the reason — no read-side filter
   hiding without explanation (the queue-eligibility lesson).
+
+## Completion notes
+
+- Added nullable fallow fields to `elements` and the core `Element` model, plus migration coverage
+  for upgraded databases.
+- Added `FallowService` as the transactional owner of topic rest. It reschedules the topic and
+  eligible attention descendants, leaves descendant FSRS `review_states` untouched, records
+  command-shaped fallow operations, and supports undo/direct clear-rest semantics.
+- Scoped unfallow restoration by both topic id and fallow batch, preserving original pre-rest
+  schedules across refallow and skipping descendants with newer manual schedule intent.
+- Added typed `topics.fallow` / `topics.unfallow` IPC, preload, and renderer API surfaces with
+  canonical UTC ISO timestamp validation at IPC and service boundaries.
+- Surfaced rest state in the Inspector, queue inventory, review context, chronic-postpone reckoning
+  as a topic-only fifth decision, and priority-integrity resting-topic receipts.
+
+## Verification
+
+- `pnpm lint`
+- `pnpm typecheck`
+- `pnpm test`
+- `pnpm e2e -- tests/electron/fallow-topic.spec.ts`
+
+## Learning
+
+- Captured in
+  [`docs/solutions/architecture-patterns/topic-fallow-rest-operation-log-preimages.md`](../solutions/architecture-patterns/topic-fallow-rest-operation-log-preimages.md).
+
+## Downstream notes
+
+- T108 should treat fallow metadata as deliberate topic rest context, not maturity failure.
+- T110 can compose priority-integrity resting-topic rows into the weekly ledger.
 
 ---
 

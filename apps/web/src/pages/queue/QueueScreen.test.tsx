@@ -24,6 +24,12 @@ import type {
 } from "../../lib/appApi";
 
 const h = vi.hoisted(() => {
+  const noFallow = {
+    fallowState: null,
+    fallowUntil: null,
+    fallowReason: null,
+    fallowTopicId: null,
+  } as const;
   const cardRow: QueueItemSummary = {
     id: "card-1",
     type: "card",
@@ -56,6 +62,7 @@ const h = vi.hoisted(() => {
     dueLabel: "Overdue",
     queueEligible: true,
     notInQueueReason: null,
+    ...noFallow,
   };
   const extractRow: QueueItemSummary = {
     id: "extract-1",
@@ -89,6 +96,7 @@ const h = vi.hoisted(() => {
     dueLabel: "Due today",
     queueEligible: true,
     notInQueueReason: null,
+    ...noFallow,
   };
   const sourceRow: QueueItemSummary = {
     id: "source-1",
@@ -122,6 +130,7 @@ const h = vi.hoisted(() => {
     dueLabel: "Overdue",
     queueEligible: true,
     notInQueueReason: null,
+    ...noFallow,
   };
   const topicRow: QueueItemSummary = {
     id: "topic-1",
@@ -155,6 +164,7 @@ const h = vi.hoisted(() => {
     dueLabel: "Due today",
     queueEligible: true,
     notInQueueReason: null,
+    ...noFallow,
   };
   // A verification TASK (T092) linked to the source above — opening it must JUMP TO
   // the protected source's reader, not open the task in /process.
@@ -190,6 +200,7 @@ const h = vi.hoisted(() => {
     dueLabel: "Overdue",
     queueEligible: true,
     notInQueueReason: null,
+    ...noFallow,
   };
   const cardTaskRow: QueueItemSummary = {
     ...taskRow,
@@ -277,6 +288,7 @@ const h = vi.hoisted(() => {
     ],
     topics: [],
     sacrificed: [],
+    resting: [],
     thresholdFlags: {
       aBandInflation: false,
       aBandDeferredRecently: false,

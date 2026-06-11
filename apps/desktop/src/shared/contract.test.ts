@@ -159,6 +159,8 @@ import {
   TasksGenerateFromExpiryRequestSchema,
   TasksListRequestSchema,
   TasksPostponeRequestSchema,
+  TopicFallowRequestSchema,
+  TopicUnfallowRequestSchema,
   VaultCollectOrphansRequestSchema,
   type VaultCollectOrphansResult,
   type VaultOrphansResult,
@@ -180,6 +182,8 @@ describe("IPC channels", () => {
         "inspector:list",
         "inspector:get",
         "elements:setPriority",
+        "topics:fallow",
+        "topics:unfallow",
         "queue:list",
         "queue:act",
         "queue:schedule",
@@ -1599,7 +1603,17 @@ describe("IsoTimestampInputSchema (asOf clock guard)", () => {
   });
 
   it("rejects empty, whitespace, and unparseable values", () => {
-    for (const bad of ["", "   ", "now", "yesterday", "not-a-date", "2027-13-99"]) {
+    for (const bad of [
+      "",
+      "   ",
+      "now",
+      "yesterday",
+      "not-a-date",
+      "2027-13-99",
+      "2027-02-31T00:00:00.000Z",
+      "2027-06-01T12:00:00Z",
+      "2027-06-01T12:00:00.000+00:00",
+    ]) {
       expect(() => IsoTimestampInputSchema.parse(bad)).toThrow();
     }
   });
@@ -2599,6 +2613,7 @@ describe("AnalyticsGetRequestSchema (T045)", () => {
     expect(() => AnalyticsGetRequestSchema.parse({ windowDays: 400 })).toThrow();
     expect(() => AnalyticsGetRequestSchema.parse({ windowDays: 1.5 })).toThrow();
     expect(() => AnalyticsGetRequestSchema.parse({ asOf: "" })).toThrow();
+    expect(() => AnalyticsGetRequestSchema.parse({ asOf: "2027-02-31T00:00:00.000Z" })).toThrow();
   });
 });
 
@@ -2637,6 +2652,7 @@ describe("BalanceGetRequestSchema (T046)", () => {
     expect(() => BalanceGetRequestSchema.parse({ windowDays: 0 })).toThrow();
     expect(() => BalanceGetRequestSchema.parse({ windowDays: 400 })).toThrow();
     expect(() => BalanceGetRequestSchema.parse({ asOf: "" })).toThrow();
+    expect(() => BalanceGetRequestSchema.parse({ asOf: "2027-02-31T00:00:00.000Z" })).toThrow();
   });
 });
 
@@ -2659,6 +2675,9 @@ describe("SourceYieldListRequestSchema (T083)", () => {
     expect(() => SourceYieldListRequestSchema.parse({ limit: 1.5 })).toThrow();
     expect(() => SourceYieldListRequestSchema.parse({ offset: -1 })).toThrow();
     expect(() => SourceYieldListRequestSchema.parse({ asOf: "" })).toThrow();
+    expect(() =>
+      SourceYieldListRequestSchema.parse({ asOf: "2027-02-31T00:00:00.000Z" }),
+    ).toThrow();
   });
 });
 
@@ -2681,6 +2700,9 @@ describe("ExtractStagnationListRequestSchema (T084)", () => {
     expect(() => ExtractStagnationListRequestSchema.parse({ limit: 1.5 })).toThrow();
     expect(() => ExtractStagnationListRequestSchema.parse({ offset: -1 })).toThrow();
     expect(() => ExtractStagnationListRequestSchema.parse({ asOf: "" })).toThrow();
+    expect(() =>
+      ExtractStagnationListRequestSchema.parse({ asOf: "2027-02-31T00:00:00.000Z" }),
+    ).toThrow();
   });
 });
 
@@ -3261,9 +3283,20 @@ describe("Maintenance schemas (T099)", () => {
           { id: "e2", kind: "demote" },
           { id: "e3", kind: "done" },
           { id: "e4", kind: "delete" },
+          {
+            id: "e5",
+            kind: "fallow",
+            fallowUntil: "2026-07-01T00:00:00.000Z",
+            fallowReason: "Seasonal pause",
+          },
         ],
       }).decisions.map((decision) => decision.kind),
-    ).toEqual(["keep", "demote", "done", "delete"]);
+    ).toEqual(["keep", "demote", "done", "delete", "fallow"]);
+    expect(
+      MaintenanceChronicPostponesApplyRequestSchema.safeParse({
+        decisions: [{ id: "e1", kind: "fallow" }],
+      }).success,
+    ).toBe(false);
     expect(MaintenanceChronicPostponesApplyRequestSchema.safeParse({ decisions: [] }).success).toBe(
       false,
     );
@@ -3278,6 +3311,40 @@ describe("Maintenance schemas (T099)", () => {
           id: `e${index}`,
           kind: "keep",
         })),
+      }).success,
+    ).toBe(false);
+  });
+
+  it("topic fallow commands require bounded ISO payloads", () => {
+    expect(
+      TopicFallowRequestSchema.parse({
+        topicId: "topic-1",
+        fallowUntil: "  2026-07-01T00:00:00.000Z  ",
+        fallowReason: "  Let this rest  ",
+      }),
+    ).toEqual({
+      topicId: "topic-1",
+      fallowUntil: "2026-07-01T00:00:00.000Z",
+      fallowReason: "Let this rest",
+    });
+    expect(TopicUnfallowRequestSchema.parse({ topicId: "topic-1" })).toEqual({
+      topicId: "topic-1",
+    });
+    expect(
+      TopicFallowRequestSchema.safeParse({ topicId: "topic-1", fallowUntil: "bad-date" }).success,
+    ).toBe(false);
+    expect(
+      TopicFallowRequestSchema.safeParse({
+        topicId: "topic-1",
+        fallowUntil: "2026-07-01T00:00:00.000Z",
+        fallowReason: "x".repeat(241),
+      }).success,
+    ).toBe(false);
+    expect(
+      TopicFallowRequestSchema.safeParse({
+        topicId: "topic-1",
+        fallowUntil: "2026-07-01T00:00:00.000Z",
+        now: "2000-01-01T00:00:00.000Z",
       }).success,
     ).toBe(false);
   });

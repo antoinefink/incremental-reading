@@ -15,6 +15,15 @@ function formatRate(value: number | null): string {
   return `${Math.round(value * 100)}%`;
 }
 
+function formatDate(iso: string): string {
+  const timestamp = Date.parse(iso);
+  if (Number.isNaN(timestamp)) return iso;
+  const date = new Date(timestamp);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    date.getUTCDate(),
+  ).padStart(2, "0")}`;
+}
+
 function activeFlagLabels(data: PriorityIntegrityGetResult): readonly string[] {
   const labels: string[] = [];
   if (data.thresholdFlags.aBandInflation) labels.push("A-band share is high");
@@ -31,6 +40,7 @@ export interface PriorityIntegrityPanelProps {
 export const PriorityIntegrityPanel = forwardRef<HTMLElement, PriorityIntegrityPanelProps>(
   function PriorityIntegrityPanel({ data, error }, ref) {
     const flags = data ? activeFlagLabels(data) : [];
+    const resting = data?.resting ?? [];
 
     return (
       <section
@@ -147,6 +157,30 @@ export const PriorityIntegrityPanel = forwardRef<HTMLElement, PriorityIntegrityP
                   </div>
                 ) : (
                   <p className="an-priority__empty">No deferred rows in this window.</p>
+                )}
+              </div>
+
+              <div>
+                <div className="an-priority__subhead">Resting topics</div>
+                {resting.length > 0 ? (
+                  <div className="an-priority__list" data-testid="priority-integrity-resting">
+                    {resting.map((topic) => (
+                      <div key={topic.topicId} className="an-priority__row">
+                        <div className="an-priority__row-title">
+                          <span className={`an-priority__prio an-priority__prio--${topic.band}`}>
+                            {topic.band}
+                          </span>
+                          <span>{topic.title}</span>
+                        </div>
+                        <span>
+                          back {formatDate(topic.fallowUntil)} ·{" "}
+                          {topic.fallowReason || "no reason recorded"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="an-priority__empty">No topics deliberately resting.</p>
                 )}
               </div>
             </div>

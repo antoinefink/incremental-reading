@@ -306,6 +306,10 @@ export interface ElementSummary {
   readonly priority: number;
   readonly title: string;
   readonly dueAt: string | null;
+  /** Topic-rest return timestamp when this element is the fallowed topic. */
+  readonly fallowUntil?: string | null;
+  /** Optional user-visible reason for the active/rested topic. */
+  readonly fallowReason?: string | null;
   /** Extract-only honorable terminal fate; `null` for active extracts and all non-extracts. */
   readonly extractFate: ExtractFate | null;
 }
@@ -520,9 +524,15 @@ export const IsoTimestampInputSchema = z
   .trim()
   .min(1)
   .max(64)
-  .refine((value) => !Number.isNaN(Date.parse(value)), {
-    message: "must be a parseable ISO-8601 timestamp",
+  .refine((value) => isCanonicalUtcIsoTimestamp(value), {
+    message: "must be a canonical UTC ISO-8601 timestamp",
   });
+
+function isCanonicalUtcIsoTimestamp(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) && date.toISOString() === value;
+}
 
 /**
  * The four coarse priority labels the UI exposes (numeric mapping lives in core).
@@ -597,6 +607,49 @@ export interface ElementsSetPriorityResult {
         readonly priorityLabel: PriorityLabelInput;
       })
     | null;
+}
+
+// ---------------------------------------------------------------------------
+// topics.fallow() / topics.unfallow()  (T107 — deliberate topic rest)
+// ---------------------------------------------------------------------------
+
+/** Bound for a short, user-visible topic-rest reason. Kept in sync with local-db. */
+export const TOPIC_FALLOW_REASON_MAX = 240;
+
+export const TopicFallowRequestSchema = z
+  .object({
+    /** The live topic whose attention subtree should rest until `fallowUntil`. */
+    topicId: ElementIdSchema,
+    /** Future return timestamp for the topic and eligible attention descendants. */
+    fallowUntil: IsoTimestampInputSchema,
+    /** Optional reason shown in queue/inventory/review context. */
+    fallowReason: z.string().trim().max(TOPIC_FALLOW_REASON_MAX).optional().nullable(),
+  })
+  .strict();
+export type TopicFallowRequest = z.infer<typeof TopicFallowRequestSchema>;
+
+export const TopicUnfallowRequestSchema = z
+  .object({
+    /** The fallowed topic to restore from its active fallow batch. */
+    topicId: ElementIdSchema,
+  })
+  .strict();
+export type TopicUnfallowRequest = z.infer<typeof TopicUnfallowRequestSchema>;
+
+export type TopicFallowSkipReason =
+  | "missing"
+  | "deleted"
+  | "not-topic"
+  | "not-actionable"
+  | "invalid-return"
+  | "not-fallowed"
+  | "missing-fallow-batch"
+  | "schedule-changed";
+
+export interface TopicFallowResult {
+  readonly applied: number;
+  readonly skipped: readonly { readonly id: string; readonly reason: TopicFallowSkipReason }[];
+  readonly batchId: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -695,6 +748,14 @@ export interface QueueItemSummary {
   readonly queueEligible: boolean;
   /** Human explanation when an inventory row has scheduler history but is not in Queue. */
   readonly notInQueueReason: string | null;
+  /** Topic rest state explaining this row, when a parent/self topic has fallow metadata. */
+  readonly fallowState: "active" | "returned" | null;
+  /** Return timestamp for the fallow context, when present. */
+  readonly fallowUntil: string | null;
+  /** User-visible topic-rest reason, when present. */
+  readonly fallowReason: string | null;
+  /** The topic whose fallow state explains this row, when present. */
+  readonly fallowTopicId: string | null;
 }
 
 /**
@@ -2393,10 +2454,18 @@ export interface MaintenanceChronicPostponesResult {
   readonly limit: number | null;
 }
 
-export const ChronicPostponeDecisionSchema = z.object({
-  id: ElementIdSchema,
-  kind: z.enum(["keep", "demote", "done", "delete"]),
-});
+export const ChronicPostponeDecisionSchema = z.discriminatedUnion("kind", [
+  z.object({ id: ElementIdSchema, kind: z.literal("keep") }),
+  z.object({ id: ElementIdSchema, kind: z.literal("demote") }),
+  z.object({ id: ElementIdSchema, kind: z.literal("done") }),
+  z.object({ id: ElementIdSchema, kind: z.literal("delete") }),
+  z.object({
+    id: ElementIdSchema,
+    kind: z.literal("fallow"),
+    fallowUntil: IsoTimestampInputSchema,
+    fallowReason: z.string().trim().max(TOPIC_FALLOW_REASON_MAX).optional().nullable(),
+  }),
+]);
 export type ChronicPostponeDecisionInput = z.infer<typeof ChronicPostponeDecisionSchema>;
 
 /** `maintenance.chronicPostponesApply({ decisions })` — one undoable reckoning batch. */
@@ -2418,7 +2487,8 @@ export interface MaintenanceChronicPostponesApplyResult {
       | "retired-card"
       | "below-threshold"
       | "already-lowest"
-      | "source-unresolved-blocks";
+      | "source-unresolved-blocks"
+      | "invalid-return";
   }[];
   readonly batchId: string | null;
 }
@@ -3801,6 +3871,8 @@ export interface ReviewCardView {
    * renderer never computes sibling relationships itself.
    */
   readonly siblingGroupId: string | null;
+  /** Active ancestor topic rest context; cards still review while attention work rests. */
+  readonly fallowContext: ReviewFallowContext | null;
   /**
    * Image-occlusion render data (T071) — present ONLY for an `image_occlusion`
    * card, `null` otherwise. The review face reads the base image bytes through the
@@ -3849,6 +3921,13 @@ export interface ReviewCardExpiry {
   readonly jurisdiction: string | null;
   /** Free-text software version context shown beside the banner, or `null`. */
   readonly softwareVersion: string | null;
+}
+
+export interface ReviewFallowContext {
+  readonly topicId: string;
+  readonly topicTitle: string;
+  readonly fallowUntil: string;
+  readonly fallowReason: string | null;
 }
 
 /** The image-occlusion data a review face needs (T071). */
@@ -5315,7 +5394,7 @@ export interface UndoLastResult {
 export const AnalyticsGetRequestSchema = z
   .object({
     /** The instant to compute the snapshot for (ISO-8601); defaults to now. */
-    asOf: z.string().min(1).optional(),
+    asOf: IsoTimestampInputSchema.optional(),
     /** Window length in calendar days (1–365); defaults to 30. */
     windowDays: z.number().int().min(1).max(365).optional(),
   })
@@ -5423,7 +5502,7 @@ export interface AnalyticsGetResult {
 export const BalanceGetRequestSchema = z
   .object({
     /** The instant to compute the balance for (ISO-8601); defaults to now. */
-    asOf: z.string().min(1).optional(),
+    asOf: IsoTimestampInputSchema.optional(),
     /** Window length in calendar days (1–365); defaults to 7. */
     windowDays: z.number().int().min(1).max(365).optional(),
   })
@@ -5520,6 +5599,14 @@ export interface PriorityIntegritySacrificedRow {
   readonly topicTitle: string | null;
 }
 
+export interface PriorityIntegrityRestingTopic {
+  readonly topicId: string;
+  readonly title: string;
+  readonly band: PriorityLabel;
+  readonly fallowUntil: string;
+  readonly fallowReason: string | null;
+}
+
 export interface PriorityIntegrityThresholdFlags {
   readonly aBandInflation: boolean;
   readonly aBandDeferredRecently: boolean;
@@ -5533,6 +5620,7 @@ export interface PriorityIntegrityGetResult {
   readonly bands: readonly PriorityIntegrityBandSummary[];
   readonly topics: readonly PriorityIntegrityTopicSummary[];
   readonly sacrificed: readonly PriorityIntegritySacrificedRow[];
+  readonly resting: readonly PriorityIntegrityRestingTopic[];
   readonly thresholdFlags: PriorityIntegrityThresholdFlags;
 }
 
@@ -5603,7 +5691,7 @@ export interface DailyWorkSummaryResult {
 export const SourceYieldListRequestSchema = z
   .object({
     /** The instant to compute the snapshot for (ISO-8601); defaults to now. */
-    asOf: z.string().min(1).optional(),
+    asOf: IsoTimestampInputSchema.optional(),
     /** Cap the row count (1–1000); defaults to 200. */
     limit: z.number().int().min(1).max(1000).optional(),
     /** Skip the first `offset` rows (after the lowest-yield sort). */
@@ -5691,7 +5779,7 @@ export interface SourceYieldListResult {
 export const ExtractStagnationListRequestSchema = z
   .object({
     /** The instant to compute the scan for (ISO-8601); defaults to now. */
-    asOf: z.string().min(1).optional(),
+    asOf: IsoTimestampInputSchema.optional(),
     /** Cap the row count (1–1000); defaults to 200. */
     limit: z.number().int().min(1).max(1000).optional(),
     /** Skip the first `offset` rows (after the most-stagnant-first sort). */
@@ -5926,6 +6014,12 @@ export interface AppApi {
      * the numeric value + logs `update_element` in one transaction.
      */
     setPriority(request: ElementsSetPriorityRequest): Promise<ElementsSetPriorityResult>;
+  };
+  readonly topics: {
+    /** Deliberately rest a topic and eligible attention descendants until a return date. */
+    fallow(request: TopicFallowRequest): Promise<TopicFallowResult>;
+    /** Manually return a fallowed topic, restoring schedules still owned by its fallow batch. */
+    unfallow(request: TopicUnfallowRequest): Promise<TopicFallowResult>;
   };
   readonly queue: {
     /**

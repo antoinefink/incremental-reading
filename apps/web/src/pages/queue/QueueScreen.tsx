@@ -237,6 +237,19 @@ function QueueItem({
             ) : null}
             {hasLeadingMeta ? <span className="dot-sep" /> : null}
             <SchedulerChip scheduler={chip} />
+            {item.fallowState ? (
+              <>
+                <span className="dot-sep" />
+                <span
+                  className={`qitem__fallow qitem__fallow--${item.fallowState}`}
+                  data-testid="queue-fallow-badge"
+                >
+                  <Icon name="pause" size={12} />
+                  {item.fallowState === "active" ? "Resting" : "Returned"}
+                  {item.fallowReason ? ` · ${item.fallowReason}` : ""}
+                </span>
+              </>
+            ) : null}
           </span>
         </span>
         <span className="qitem__action">

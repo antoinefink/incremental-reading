@@ -65,6 +65,7 @@ import {
   CardRemediationService,
   CardRetirementService,
   CardService,
+  type ChronicPostponeDecision,
   cardRowToLifetime,
   createRepositories,
   DailyWorkQuery,
@@ -238,6 +239,7 @@ import type {
   LibraryParkedActionResult,
   LineageGetResult,
   LocationSummary,
+  MaintenanceChronicPostponesApplyRequest,
   OptimizationApplyRequest,
   OptimizationApplyResult,
   OptimizationSuggestRequest,
@@ -361,6 +363,9 @@ import type {
   TasksListResult,
   TasksPostponeRequest,
   TasksPostponeResult,
+  TopicFallowRequest,
+  TopicFallowResult,
+  TopicUnfallowRequest,
   TrashEmptyResult,
   TrashListResult,
   TrashPurgeRequest,
@@ -1255,6 +1260,20 @@ export class DbService {
     return { item: null, dueAt: element.dueAt as string, intervalDays };
   }
 
+  /** Deliberately rest a topic and eligible attention descendants until a return date. */
+  fallowTopic(request: TopicFallowRequest): TopicFallowResult {
+    return this.repos.fallow.fallowTopic({
+      topicId: request.topicId as ElementId,
+      fallowUntil: request.fallowUntil as IsoTimestamp,
+      ...(request.fallowReason !== undefined ? { fallowReason: request.fallowReason } : {}),
+    });
+  }
+
+  /** Manually return a fallowed topic, restoring schedules still owned by the fallow batch. */
+  unfallowTopic(request: TopicUnfallowRequest): TopicFallowResult {
+    return this.repos.fallow.unfallowTopic({ topicId: request.topicId as ElementId });
+  }
+
   /**
    * Undo a removing queue action (T030) — the snackbar's "Undo" — through the
    * {@link QueueActionService}. `restore` brings a soft-deleted row back via
@@ -1659,17 +1678,22 @@ export class DbService {
   }
 
   /** Chronic-postpone decisions — one undoable batch with stale-row skips. */
-  maintenanceChronicPostponesApply(request: {
-    decisions: readonly {
-      readonly id: string;
-      readonly kind: "keep" | "demote" | "done" | "delete";
-    }[];
-  }): ReturnType<MaintenanceService["chronicPostponesApply"]> {
+  maintenanceChronicPostponesApply(
+    request: MaintenanceChronicPostponesApplyRequest,
+  ): ReturnType<MaintenanceService["chronicPostponesApply"]> {
+    const decisions: ChronicPostponeDecision[] = request.decisions.map((decision) => {
+      if (decision.kind === "fallow") {
+        return {
+          id: decision.id as ElementId,
+          kind: decision.kind,
+          fallowUntil: decision.fallowUntil as IsoTimestamp,
+          ...(decision.fallowReason !== undefined ? { fallowReason: decision.fallowReason } : {}),
+        };
+      }
+      return { id: decision.id as ElementId, kind: decision.kind };
+    });
     return this.maintenanceService.chronicPostponesApply({
-      decisions: request.decisions.map((decision) => ({
-        id: decision.id as ElementId,
-        kind: decision.kind,
-      })),
+      decisions,
     });
   }
 
@@ -4166,6 +4190,7 @@ export class DbService {
       // The card's sibling group (T039) — the renderer threads it forward so the
       // next `session.next` can bury it. `null` when the card has no siblings.
       siblingGroupId: this.reviewSessionService.siblingGroupOf(element.id),
+      fallowContext: this.activeFallowContextFor(element, asOfMs),
       // Image-occlusion render data (T071) — null for non-occlusion cards.
       occlusion,
       // Audio-card render data (T075) — null for non-audio cards. The clip window +
@@ -4203,6 +4228,30 @@ export class DbService {
    */
   private conceptForElement(id: ElementId): string | null {
     return this.repos.concepts.firstConceptName(id);
+  }
+
+  private activeFallowContextFor(
+    element: Element,
+    asOfMs: number,
+  ): ReviewCardView["fallowContext"] {
+    let parentId = element.parentId;
+    while (parentId) {
+      const parent = this.repos.elements.findById(parentId);
+      if (!parent || parent.deletedAt) return null;
+      if (parent.type === "topic" && parent.fallowUntil) {
+        const untilMs = Date.parse(parent.fallowUntil);
+        if (Number.isFinite(untilMs) && untilMs > asOfMs) {
+          return {
+            topicId: parent.id,
+            topicTitle: parent.title,
+            fallowUntil: parent.fallowUntil,
+            fallowReason: parent.fallowReason,
+          };
+        }
+      }
+      parentId = parent.parentId;
+    }
+    return null;
   }
 
   /**
@@ -5312,6 +5361,7 @@ export class DbService {
       bands: summary.bands,
       topics: summary.topics,
       sacrificed: summary.sacrificed,
+      resting: summary.resting,
       thresholdFlags: summary.thresholdFlags,
     };
   }

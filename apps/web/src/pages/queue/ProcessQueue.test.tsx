@@ -63,6 +63,10 @@ const h = vi.hoisted(() => {
     dueLabel: "Due today",
     queueEligible: true,
     notInQueueReason: null,
+    fallowState: null,
+    fallowUntil: null,
+    fallowReason: null,
+    fallowTopicId: null,
     ...over,
   });
   const card = mk({
@@ -160,6 +164,7 @@ const h = vi.hoisted(() => {
     lapses: 0,
     flagged: false,
     siblingGroupId: null,
+    fallowContext: null,
     occlusion: null,
     mediaRef: null,
     mediaSource: null,
@@ -2170,6 +2175,10 @@ describe("ProcessQueue", () => {
       dueLabel: "Due today",
       queueEligible: true,
       notInQueueReason: null,
+      fallowState: null,
+      fallowUntil: null,
+      fallowReason: null,
+      fallowTopicId: null,
     };
     h.listQueue.mockResolvedValueOnce({
       items: [task],

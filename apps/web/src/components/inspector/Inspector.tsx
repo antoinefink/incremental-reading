@@ -47,6 +47,9 @@ import {
   type SourceTypeInput,
   type TaskSummary,
   type TaskType,
+  type TopicFallowRequest,
+  type TopicFallowResult,
+  type TopicUnfallowRequest,
 } from "../../lib/appApi";
 import { useNavigateToLocation } from "../../reader/navigateToLocation";
 import { ReviewModeButton } from "../../review/ReviewModeButton";
@@ -101,6 +104,20 @@ function fmtDate(iso: string | null): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(
     d.getUTCDate(),
   ).padStart(2, "0")}`;
+}
+
+function defaultFallowDate(current?: string | null): string {
+  if (current) {
+    const t = Date.parse(current);
+    if (!Number.isNaN(t)) return new Date(t).toISOString().slice(0, 10);
+  }
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + 14);
+  return date.toISOString().slice(0, 10);
+}
+
+function dateInputToIso(date: string): string {
+  return `${date}T00:00:00.000Z`;
 }
 
 /**
@@ -271,6 +288,145 @@ function PriorityControl({
       >
         <Icon name="arrowDown" size={14} />
       </button>
+    </div>
+  );
+}
+
+function FallowSection({
+  element,
+  busy,
+  onFallow,
+  onUnfallow,
+}: {
+  element: ElementSummary;
+  busy: boolean;
+  onFallow: (request: TopicFallowRequest) => Promise<TopicFallowResult>;
+  onUnfallow: (request: TopicUnfallowRequest) => Promise<TopicFallowResult>;
+}) {
+  const [date, setDate] = useState(() => defaultFallowDate(element.fallowUntil));
+  const [reason, setReason] = useState(element.fallowReason ?? "");
+  const [message, setMessage] = useState<string | null>(null);
+  const fallowUntil = element.fallowUntil ?? null;
+  const untilMs = fallowUntil ? Date.parse(fallowUntil) : Number.NaN;
+  const state = fallowUntil
+    ? Number.isFinite(untilMs) && untilMs > Date.now()
+      ? "active"
+      : "returned"
+    : "none";
+  const requestedIso = date ? dateInputToIso(date) : "";
+  const requestedMs = requestedIso ? Date.parse(requestedIso) : Number.NaN;
+  const canSubmit = Number.isFinite(requestedMs) && requestedMs > Date.now() && !busy;
+
+  useEffect(() => {
+    setDate(defaultFallowDate(element.fallowUntil));
+    setReason(element.fallowReason ?? "");
+    setMessage(null);
+  }, [element.fallowUntil, element.fallowReason]);
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setMessage(null);
+    try {
+      const result = await onFallow({
+        topicId: element.id,
+        fallowUntil: requestedIso,
+        fallowReason: reason.trim() || null,
+      });
+      setMessage(
+        result.skipped.length > 0
+          ? `Rest skipped: ${result.skipped.map((skip) => skip.reason).join(", ")}`
+          : "Topic resting.",
+      );
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const clear = async () => {
+    if (busy) return;
+    setMessage(null);
+    try {
+      const result = await onUnfallow({ topicId: element.id });
+      setMessage(
+        result.skipped.length > 0
+          ? `Clear skipped: ${result.skipped.map((skip) => skip.reason).join(", ")}`
+          : "Topic returned.",
+      );
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  return (
+    <div className="insp-sec" data-testid="fallow-section">
+      <div className="insp-sec__title">
+        <span>Topic rest</span>
+        <span className={`insp-fallow__state insp-fallow__state--${state}`}>
+          {state === "active" ? "Resting" : state === "returned" ? "Returned" : "Not resting"}
+        </span>
+      </div>
+      <div className="insp-fallow">
+        {fallowUntil ? (
+          <div className="insp-fallow__current" data-testid="fallow-current">
+            <Icon name="pause" size={14} />
+            <span>Back {fmtDate(fallowUntil)}</span>
+            {element.fallowReason ? <span>{element.fallowReason}</span> : null}
+          </div>
+        ) : null}
+        <div className="insp-fallow__form">
+          <label className="insp-fallow__field">
+            <span>Return</span>
+            <input
+              type="date"
+              value={date}
+              disabled={busy}
+              data-testid="fallow-date"
+              onChange={(event) => setDate(event.currentTarget.value)}
+            />
+          </label>
+          <label className="insp-fallow__field">
+            <span>Reason</span>
+            <input
+              type="text"
+              maxLength={240}
+              value={reason}
+              disabled={busy}
+              data-testid="fallow-reason"
+              onChange={(event) => setReason(event.currentTarget.value)}
+            />
+          </label>
+        </div>
+        <div className="insp-fallow__actions">
+          <button
+            type="button"
+            className="insp-fallow__btn"
+            disabled={!canSubmit}
+            data-testid="fallow-apply"
+            onClick={() => void submit()}
+          >
+            <Icon name="calendar" size={13} />
+            Rest topic
+          </button>
+          {state !== "none" ? (
+            <button
+              type="button"
+              className="insp-fallow__btn"
+              disabled={busy}
+              data-testid="fallow-clear"
+              onClick={() => void clear()}
+            >
+              <Icon name="return" size={13} />
+              Clear rest
+            </button>
+          ) : null}
+        </div>
+        <p className="insp-fallow__note">Card reviews continue while attention work rests.</p>
+        {message ? (
+          <p className="insp-fallow__message" data-testid="fallow-message">
+            {message}
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -1949,6 +2105,8 @@ function InspectorBody({
   onPickLineageNode,
   onJumpToLocation,
   onSetPriority,
+  onFallowTopic,
+  onUnfallowTopic,
   onScheduleAttention,
   onOrganizeChanged,
   priorityBusy,
@@ -1963,6 +2121,8 @@ function InspectorBody({
   onPickLineageNode: (node: LineageNode) => void;
   onJumpToLocation: (location: NonNullable<InspectorData["location"]>) => void;
   onSetPriority: (action: ElementsSetPriorityAction) => void;
+  onFallowTopic: (request: TopicFallowRequest) => Promise<TopicFallowResult>;
+  onUnfallowTopic: (request: TopicUnfallowRequest) => Promise<TopicFallowResult>;
   onScheduleAttention: (elementId: string, choice: QueueScheduleChoice) => void;
   onOrganizeChanged: () => void;
   priorityBusy: boolean;
@@ -2036,6 +2196,16 @@ function InspectorBody({
           </MetaRow>
         </div>
       </div>
+
+      {element.type === "topic" ? (
+        <FallowSection
+          key={element.id}
+          element={element}
+          busy={scheduleBusy}
+          onFallow={onFallowTopic}
+          onUnfallow={onUnfallowTopic}
+        />
+      ) : null}
 
       {/* Scheduler — the FSRS vs attention split, surfaced explicitly. */}
       <div className="insp-sec" data-testid="scheduler-section">
@@ -2429,6 +2599,52 @@ export function Inspector() {
     [scheduleBusy],
   );
 
+  const onFallowTopic = useCallback(
+    async (request: TopicFallowRequest): Promise<TopicFallowResult> => {
+      if (!isDesktop() || scheduleBusy) return { applied: 0, skipped: [], batchId: null };
+      setScheduleBusy(true);
+      try {
+        const result = await appApi.fallowTopic(request);
+        const res = await appApi.getInspectorData({ id: request.topicId });
+        if (selectedIdRef.current === request.topicId) setData(res.data);
+        requestQueueRefresh();
+        requestInspectorRefresh();
+        setError(null);
+        return result;
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        setError(message);
+        throw e;
+      } finally {
+        setScheduleBusy(false);
+      }
+    },
+    [scheduleBusy],
+  );
+
+  const onUnfallowTopic = useCallback(
+    async (request: TopicUnfallowRequest): Promise<TopicFallowResult> => {
+      if (!isDesktop() || scheduleBusy) return { applied: 0, skipped: [], batchId: null };
+      setScheduleBusy(true);
+      try {
+        const result = await appApi.unfallowTopic(request);
+        const res = await appApi.getInspectorData({ id: request.topicId });
+        if (selectedIdRef.current === request.topicId) setData(res.data);
+        requestQueueRefresh();
+        requestInspectorRefresh();
+        setError(null);
+        return result;
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        setError(message);
+        throw e;
+      } finally {
+        setScheduleBusy(false);
+      }
+    },
+    [scheduleBusy],
+  );
+
   // Clicking a lineage node navigates BOTH directions (T023): re-select the node
   // (driving the inspector) and open its dedicated page — a source/topic opens its
   // reader at `/source/$id`, an extract opens its review view at `/extract/$id`
@@ -2494,6 +2710,8 @@ export function Inspector() {
             onPickLineageNode={onPickLineageNode}
             onJumpToLocation={navigateToLocation}
             onSetPriority={onSetPriority}
+            onFallowTopic={onFallowTopic}
+            onUnfallowTopic={onUnfallowTopic}
             onScheduleAttention={onScheduleAttention}
             onOrganizeChanged={onOrganizeChanged}
             priorityBusy={priorityBusy}

@@ -107,6 +107,21 @@ describe("preload bridge", () => {
       topicLimit: 6,
     });
 
+    await api().topics.fallow({
+      topicId: "topic-1",
+      fallowUntil: "2026-07-01T00:00:00.000Z",
+      fallowReason: "Seasonal pause",
+    });
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.topicsFallow, {
+      topicId: "topic-1",
+      fallowUntil: "2026-07-01T00:00:00.000Z",
+      fallowReason: "Seasonal pause",
+    });
+    await api().topics.unfallow({ topicId: "topic-1" });
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.topicsUnfallow, {
+      topicId: "topic-1",
+    });
+
     await api().library.parkedAction({ id: "src-1", action: { kind: "queueSoon" } });
     expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.libraryParkedAction, {
       id: "src-1",

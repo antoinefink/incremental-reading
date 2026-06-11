@@ -25,6 +25,7 @@ import { AutoVirtualList } from "../components/VirtualList";
 import {
   appApi,
   type BrokenSourceRowSummary,
+  type ChronicPostponeDecisionInput,
   type ChronicPostponeDecisionKind,
   type ChronicPostponeRowSummary,
   type DuplicateReportResult,
@@ -70,6 +71,20 @@ function formatChronicSkipReason(reason: string | undefined): string {
     default:
       return "stale row";
   }
+}
+
+function defaultChronicFallowDate(): string {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + 30);
+  return date.toISOString().slice(0, 10);
+}
+
+function chronicFallowDateToIso(dateValue: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) return null;
+  const iso = `${dateValue}T00:00:00.000Z`;
+  const parsed = new Date(iso);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== iso) return null;
+  return parsed.getTime() > Date.now() ? iso : null;
 }
 
 /** Which report card is expanded (one at a time). */
@@ -236,9 +251,7 @@ export function MaintenanceScreen() {
   );
 
   const runChronicPostpones = useCallback(
-    async (
-      decisions: readonly { readonly id: string; readonly kind: ChronicPostponeDecisionKind }[],
-    ) => {
+    async (decisions: readonly ChronicPostponeDecisionInput[]) => {
       setBusy(true);
       setError(null);
       try {
@@ -975,11 +988,10 @@ function ChronicPanel({
 }: {
   rows: readonly ChronicPostponeRowSummary[] | null;
   busy: boolean;
-  onApply: (
-    decisions: readonly { readonly id: string; readonly kind: ChronicPostponeDecisionKind }[],
-  ) => void;
+  onApply: (decisions: readonly ChronicPostponeDecisionInput[]) => void;
 }) {
   const [decisions, setDecisions] = useState<Record<string, ChronicPostponeDecisionKind>>({});
+  const [fallowDates, setFallowDates] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!rows) return;
@@ -991,26 +1003,51 @@ function ChronicPanel({
       }
       return next;
     });
+    setFallowDates((prev) => {
+      const activeIds = new Set(rows.map((row) => row.element.id));
+      const next: Record<string, string> = {};
+      for (const [id, date] of Object.entries(prev)) {
+        if (activeIds.has(id)) next[id] = date;
+      }
+      return next;
+    });
   }, [rows]);
 
   if (!rows) return <p className="mt-muted">Loading…</p>;
   if (rows.length === 0) return <EmptyRow message="No chronically postponed items." />;
 
-  const selected = rows
-    .map((row) => {
-      const kind = decisions[row.element.id];
-      return kind ? { id: row.element.id, kind } : null;
-    })
-    .filter(
-      (decision): decision is { readonly id: string; readonly kind: ChronicPostponeDecisionKind } =>
-        Boolean(decision),
-    );
+  const selected: ChronicPostponeDecisionInput[] = [];
+  let hasInvalidFallowDate = false;
+  for (const row of rows) {
+    const kind = decisions[row.element.id];
+    if (!kind) continue;
+    if (kind === "fallow") {
+      const fallowUntil = chronicFallowDateToIso(fallowDates[row.element.id] ?? "");
+      if (!fallowUntil) {
+        hasInvalidFallowDate = true;
+        continue;
+      }
+      selected.push({
+        id: row.element.id,
+        kind,
+        fallowUntil,
+        fallowReason: "Rested from chronic-postpone reckoning",
+      });
+    } else {
+      selected.push({ id: row.element.id, kind });
+    }
+  }
 
-  const setDecision = (id: string, kind: ChronicPostponeDecisionKind) =>
+  const setDecision = (id: string, kind: ChronicPostponeDecisionKind) => {
     setDecisions((prev) => ({ ...prev, [id]: kind }));
+    if (kind === "fallow") {
+      setFallowDates((prev) => (prev[id] ? prev : { ...prev, [id]: defaultChronicFallowDate() }));
+    }
+  };
 
   const renderRowContent = (row: ChronicPostponeRowSummary) => {
     const current = decisions[row.element.id] ?? null;
+    const fallowDate = fallowDates[row.element.id] ?? defaultChronicFallowDate();
     return (
       <>
         <span className="badge badge--soft">{row.element.priorityLabel}</span>
@@ -1066,7 +1103,38 @@ function ChronicPanel({
           >
             Delete
           </button>
+          {row.element.type === "topic" ? (
+            <button
+              type="button"
+              className="mt-segment__btn"
+              data-active={current === "fallow"}
+              data-testid="chronic-decision-fallow"
+              aria-pressed={current === "fallow"}
+              disabled={busy}
+              onClick={() => setDecision(row.element.id, "fallow")}
+            >
+              Rest
+            </button>
+          ) : null}
         </fieldset>
+        {current === "fallow" ? (
+          <label className="mt-fallow-date">
+            <span>Return</span>
+            <input
+              type="date"
+              value={fallowDate}
+              data-testid="chronic-fallow-date"
+              disabled={busy}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setFallowDates((prev) => ({
+                  ...prev,
+                  [row.element.id]: value,
+                }));
+              }}
+            />
+          </label>
+        ) : null}
       </>
     );
   };
@@ -1090,7 +1158,7 @@ function ChronicPanel({
           type="button"
           className="rv-repair__btn"
           data-testid="chronic-apply"
-          disabled={busy || selected.length === 0}
+          disabled={busy || selected.length === 0 || hasInvalidFallowDate}
           onClick={() => onApply(selected)}
         >
           <Icon name="check" size={13} />

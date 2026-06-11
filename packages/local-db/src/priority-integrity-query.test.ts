@@ -403,4 +403,51 @@ describe("PriorityIntegrityQuery.compute", () => {
     expect(summary.bands.find((band) => band.band === "A")?.deferred).toBe(1);
     expect(summary.thresholdFlags.aBandDeferredRecently).toBe(false);
   });
+
+  it("excludes fallow reschedules from service/defer metrics and lists resting topics", () => {
+    const asOf = localInstant(2026, 5, 11, 18);
+    const topicId = seedElement("Fallowed topic", "B", {
+      type: "topic",
+      dueAt: localInstant(2026, 5, 10),
+    });
+    const extractId = seedElement("Fallowed extract", "B", {
+      sourceId: topicId,
+      dueAt: localInstant(2026, 5, 10),
+    });
+    repo.update(topicId, {
+      fallowUntil: localInstant(2026, 6, 1, 0),
+      fallowReason: "Seasonal pause",
+      fallowBatchId: "batch-fallow",
+      dueAt: localInstant(2026, 6, 1, 0),
+    });
+    appendOp(
+      extractId,
+      "reschedule_element",
+      {
+        id: extractId,
+        fallow: true,
+        prevDueAt: localInstant(2026, 5, 10),
+        dueAt: localInstant(2026, 6, 1, 0),
+      },
+      localInstant(2026, 5, 11, 10),
+    );
+
+    const summary = new PriorityIntegrityQuery(handle.db).compute(asOf);
+
+    expect(summary.bands.find((band) => band.band === "B")).toMatchObject({
+      attentionServiced: 0,
+      deferred: 0,
+      postponeDebtDays: 0,
+    });
+    expect(summary.sacrificed).toEqual([]);
+    expect(summary.resting).toEqual([
+      {
+        topicId,
+        title: "Fallowed topic",
+        band: "B",
+        fallowUntil: localInstant(2026, 6, 1, 0),
+        fallowReason: "Seasonal pause",
+      },
+    ]);
+  });
 });

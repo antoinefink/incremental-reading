@@ -35,6 +35,10 @@ function queueItem(overrides: Partial<QueueItemSummary>): QueueItemSummary {
     dueLabel: "Due today",
     queueEligible: true,
     notInQueueReason: null,
+    fallowState: null,
+    fallowUntil: null,
+    fallowReason: null,
+    fallowTopicId: null,
     ...overrides,
   };
 }

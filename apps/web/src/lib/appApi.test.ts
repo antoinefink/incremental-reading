@@ -24,6 +24,20 @@ function installAppApi(overrides: Partial<AppApi> = {}): AppApi {
       get: vi.fn(async (request: unknown) => ({ data: request })),
     },
     elements: { setPriority: vi.fn(async (request: unknown) => request) },
+    topics: {
+      fallow: vi.fn(async (request: unknown) => ({
+        applied: 1,
+        skipped: [],
+        batchId: "batch-1",
+        request,
+      })),
+      unfallow: vi.fn(async (request: unknown) => ({
+        applied: 1,
+        skipped: [],
+        batchId: "batch-1",
+        request,
+      })),
+    },
     search: {
       query: vi.fn(async () => ({
         results: [],
@@ -123,6 +137,7 @@ function installAppApi(overrides: Partial<AppApi> = {}): AppApi {
         bands: [],
         topics: [],
         sacrificed: [],
+        resting: [],
         thresholdFlags: {
           aBandInflation: false,
           aBandDeferredRecently: false,
@@ -315,6 +330,20 @@ describe("renderer appApi wrapper", () => {
 
     await appApi.reactivateExtractFate({ id: "ex-1" });
     expect(bridge.extracts.reactivateFate).toHaveBeenCalledWith({ id: "ex-1" });
+
+    await appApi.fallowTopic({
+      topicId: "topic-1",
+      fallowUntil: "2026-07-01T00:00:00.000Z",
+      fallowReason: "Seasonal pause",
+    });
+    expect(bridge.topics.fallow).toHaveBeenCalledWith({
+      topicId: "topic-1",
+      fallowUntil: "2026-07-01T00:00:00.000Z",
+      fallowReason: "Seasonal pause",
+    });
+
+    await appApi.unfallowTopic({ topicId: "topic-1" });
+    expect(bridge.topics.unfallow).toHaveBeenCalledWith({ topicId: "topic-1" });
 
     await appApi.libraryParkedAction({ id: "src-1", action: { kind: "queueSoon" } });
     expect(bridge.library.parkedAction).toHaveBeenCalledWith({

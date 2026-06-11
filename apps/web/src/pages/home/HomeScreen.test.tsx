@@ -44,6 +44,12 @@ import type {
 const UNDO_EVENT = "interleave:undo";
 
 const h = vi.hoisted(() => {
+  const noFallow = {
+    fallowState: null,
+    fallowUntil: null,
+    fallowReason: null,
+    fallowTopicId: null,
+  } as const;
   const sourceRow: QueueItemSummary = {
     id: "source-1",
     type: "source",
@@ -76,6 +82,7 @@ const h = vi.hoisted(() => {
     dueLabel: "Overdue",
     queueEligible: true,
     notInQueueReason: null,
+    ...noFallow,
   };
   const extractRow: QueueItemSummary = {
     id: "extract-1",
@@ -109,6 +116,7 @@ const h = vi.hoisted(() => {
     dueLabel: "Due today",
     queueEligible: true,
     notInQueueReason: null,
+    ...noFallow,
   };
   // A due TOPIC — an attention-scheduled element. Clicking it must route into the
   // one-at-a-time /process loop (NOT the FSRS /review session, which has no card to
@@ -145,6 +153,7 @@ const h = vi.hoisted(() => {
     dueLabel: "Due today",
     queueEligible: true,
     notInQueueReason: null,
+    ...noFallow,
   };
   // A due CARD — an FSRS-scheduled element. Clicking it must route into direct
   // card detail, while batch review stays behind the dedicated /review affordances.
@@ -180,6 +189,7 @@ const h = vi.hoisted(() => {
     dueLabel: "Overdue",
     queueEligible: true,
     notInQueueReason: null,
+    ...noFallow,
   };
   const queue: QueueListResult = {
     items: [sourceRow, extractRow, topicRow, cardRow],
@@ -228,6 +238,7 @@ const h = vi.hoisted(() => {
     dueLabel: "Overdue",
     queueEligible: true,
     notInQueueReason: null,
+    ...noFallow,
   };
   const analytics: AnalyticsGetResult = {
     asOf: "2026-05-30T18:00:00.000Z",

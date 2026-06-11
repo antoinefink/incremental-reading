@@ -51,6 +51,12 @@ export interface Element {
   dueAt: IsoTimestamp | null;
   /** When this element was deliberately parked for later; `null` unless status is `parked`. */
   parkedAt: IsoTimestamp | null;
+  /** Until when this topic is deliberately resting; `null` unless the topic is fallowed. */
+  fallowUntil: IsoTimestamp | null;
+  /** User-entered reason for deliberate topic rest; `null` when absent or not fallowed. */
+  fallowReason: string | null;
+  /** Latest active fallow operation batch, used to restore schedules on manual unfallow. */
+  fallowBatchId: string | null;
   /** Honorable terminal fate for extracts that are done without a card; `null` otherwise. */
   extractFate: ExtractFate | null;
   title: string;

@@ -59,6 +59,9 @@ export interface CreateElementInput {
   readonly priority: Priority;
   readonly title: string;
   readonly dueAt?: IsoTimestamp | null;
+  readonly fallowUntil?: IsoTimestamp | null;
+  readonly fallowReason?: string | null;
+  readonly fallowBatchId?: string | null;
   readonly parentId?: ElementId | null;
   readonly sourceId?: ElementId | null;
   /** Optional explicit id (e.g. when a side-table is created first). */
@@ -73,6 +76,9 @@ export interface UpdateElementInput {
   readonly title?: string;
   readonly dueAt?: IsoTimestamp | null;
   readonly parkedAt?: IsoTimestamp | null;
+  readonly fallowUntil?: IsoTimestamp | null;
+  readonly fallowReason?: string | null;
+  readonly fallowBatchId?: string | null;
   readonly extractFate?: ExtractFate | null;
 }
 
@@ -118,6 +124,9 @@ export class ElementRepository {
       priority: input.priority,
       dueAt: input.dueAt ?? null,
       parkedAt: null,
+      fallowUntil: input.fallowUntil ?? null,
+      fallowReason: input.fallowReason ?? null,
+      fallowBatchId: input.fallowBatchId ?? null,
       extractFate: null,
       title: input.title,
       parentId: input.parentId ?? null,
@@ -135,6 +144,9 @@ export class ElementRepository {
         priority: element.priority,
         dueAt: element.dueAt,
         parkedAt: element.parkedAt,
+        fallowUntil: element.fallowUntil,
+        fallowReason: element.fallowReason,
+        fallowBatchId: element.fallowBatchId,
         extractFate: element.extractFate,
         title: element.title,
         parentId: element.parentId,
@@ -244,6 +256,9 @@ export class ElementRepository {
     if (patch.title !== undefined) prev.title = before.title;
     if (patch.dueAt !== undefined) prev.dueAt = before.dueAt;
     if (patch.parkedAt !== undefined) prev.parkedAt = before.parkedAt;
+    if (patch.fallowUntil !== undefined) prev.fallowUntil = before.fallowUntil;
+    if (patch.fallowReason !== undefined) prev.fallowReason = before.fallowReason;
+    if (patch.fallowBatchId !== undefined) prev.fallowBatchId = before.fallowBatchId;
     if (patch.extractFate !== undefined) prev.extractFate = before.extractFate;
 
     const updatedAt = nowIso();
@@ -254,6 +269,9 @@ export class ElementRepository {
     if (patch.title !== undefined) set.title = patch.title;
     if (patch.dueAt !== undefined) set.dueAt = patch.dueAt;
     if (patch.parkedAt !== undefined) set.parkedAt = patch.parkedAt;
+    if (patch.fallowUntil !== undefined) set.fallowUntil = patch.fallowUntil;
+    if (patch.fallowReason !== undefined) set.fallowReason = patch.fallowReason;
+    if (patch.fallowBatchId !== undefined) set.fallowBatchId = patch.fallowBatchId;
     if (patch.extractFate !== undefined) set.extractFate = patch.extractFate;
 
     tx.update(elements).set(set).where(eq(elements.id, id)).run();

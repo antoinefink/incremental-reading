@@ -784,6 +784,18 @@
 .rv-fade {
   animation: rvFadeUp var(--med, 0.22s) var(--ease, ease) both;
 }
+.rv-fallow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--accent-soft-bd);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: var(--t-xs);
+}
 @keyframes rvFadeUp {
   from {
     opacity: 0;

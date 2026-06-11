@@ -46,6 +46,7 @@ describe("local-db repository factory", () => {
       "priorityIntegrity",
       "chronicPostpone",
       "chronicPostponeService",
+      "fallow",
       "retirementSuggestions",
       "embeddings",
       "semanticSearch",

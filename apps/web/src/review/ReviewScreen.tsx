@@ -85,6 +85,15 @@ function clockLabel(ms: number): string {
   return `${mm}:${ss}`;
 }
 
+function shortDate(iso: string): string {
+  const timestamp = Date.parse(iso);
+  if (Number.isNaN(timestamp)) return iso;
+  const date = new Date(timestamp);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    date.getUTCDate(),
+  ).padStart(2, "0")}`;
+}
+
 /** A live mm:ss session clock (ticks every second). */
 function SessionClock({ startMs }: { startMs: number }) {
   const [now, setNow] = useState(() => Date.now());
@@ -800,6 +809,16 @@ export function ReviewScreen() {
                 <HelpLink slug="two-schedulers" />
               </span>
             </div>
+
+            {card.fallowContext ? (
+              <div className="rv-fallow" data-testid="review-fallow-context">
+                <Icon name="pause" size={14} />
+                <span>
+                  {card.fallowContext.topicTitle} is resting until{" "}
+                  {shortDate(card.fallowContext.fallowUntil)}; card review continues.
+                </span>
+              </div>
+            ) : null}
 
             {card.leech ? (
               <div className="banner" data-testid="review-leech-banner">

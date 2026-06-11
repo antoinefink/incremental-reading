@@ -52,6 +52,8 @@ export interface ElementSummary {
   readonly priority: number;
   readonly title: string;
   readonly dueAt: string | null;
+  readonly fallowUntil: string | null;
+  readonly fallowReason: string | null;
   readonly extractFate: Element["extractFate"];
 }
 
@@ -223,6 +225,8 @@ function toSummary(el: Element): ElementSummary {
     priority: el.priority,
     title: el.title,
     dueAt: el.dueAt,
+    fallowUntil: el.fallowUntil,
+    fallowReason: el.fallowReason,
     extractFate: el.extractFate,
   };
 }

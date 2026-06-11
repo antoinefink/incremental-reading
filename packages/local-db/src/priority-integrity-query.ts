@@ -69,6 +69,14 @@ export interface PriorityIntegritySacrificedRow {
   readonly topicTitle: string | null;
 }
 
+export interface PriorityIntegrityRestingTopic {
+  readonly topicId: string;
+  readonly title: string;
+  readonly band: PriorityLabel;
+  readonly fallowUntil: string;
+  readonly fallowReason: string | null;
+}
+
 export interface PriorityIntegrityThresholdFlags {
   readonly aBandInflation: boolean;
   readonly aBandDeferredRecently: boolean;
@@ -82,6 +90,7 @@ export interface PriorityIntegritySummary {
   readonly bands: readonly PriorityIntegrityBandSummary[];
   readonly topics: readonly PriorityIntegrityTopicSummary[];
   readonly sacrificed: readonly PriorityIntegritySacrificedRow[];
+  readonly resting: readonly PriorityIntegrityRestingTopic[];
   readonly thresholdFlags: PriorityIntegrityThresholdFlags;
 }
 
@@ -93,6 +102,8 @@ interface ElementInfo {
   readonly band: PriorityLabel;
   readonly sourceId: string | null;
   readonly parentId: string | null;
+  readonly fallowUntil: string | null;
+  readonly fallowReason: string | null;
   readonly accountable: boolean;
   readonly eventEligible: boolean;
   readonly scheduler: "attention" | "fsrs";
@@ -279,6 +290,7 @@ export class PriorityIntegrityQuery {
       const element = info.get(op.elementId);
       if (!element?.eventEligible) continue;
       const payload = safePayload(op.payload);
+      if (payload?.fallow === true) continue;
       const band = bands.get(element.band);
       if (!band) continue;
 
@@ -367,6 +379,7 @@ export class PriorityIntegrityQuery {
           ...row,
           postponeDebtDays: Math.round(row.postponeDebtDays * 10) / 10,
         })),
+      resting: this.restingTopics(info, asOf).slice(0, topicLimit),
       thresholdFlags,
     };
   }
@@ -388,6 +401,8 @@ export class PriorityIntegrityQuery {
         priority: elements.priority,
         sourceId: elements.sourceId,
         parentId: elements.parentId,
+        fallowUntil: elements.fallowUntil,
+        fallowReason: elements.fallowReason,
         deletedAt: elements.deletedAt,
       })
       .from(elements)
@@ -408,6 +423,8 @@ export class PriorityIntegrityQuery {
         band,
         sourceId: row.sourceId,
         parentId: row.parentId,
+        fallowUntil: row.fallowUntil,
+        fallowReason: row.fallowReason,
         scheduler,
         accountable: notDeleted && queueActionable && notRetired,
         eventEligible: notDeleted && notRetired && (queueActionable || status === "done"),
@@ -444,5 +461,26 @@ export class PriorityIntegrityQuery {
     if (element.sourceId && info.has(element.sourceId)) return info.get(element.sourceId) ?? null;
     if (element.parentId && info.has(element.parentId)) return info.get(element.parentId) ?? null;
     return null;
+  }
+
+  private restingTopics(
+    info: Map<string, ElementInfo>,
+    asOf: string,
+  ): PriorityIntegrityRestingTopic[] {
+    const asOfMs = Date.parse(asOf);
+    return [...info.values()]
+      .filter((element) => {
+        if (element.type !== "topic" || !element.accountable || !element.fallowUntil) return false;
+        const untilMs = Date.parse(element.fallowUntil);
+        return Number.isFinite(untilMs) && Number.isFinite(asOfMs) && untilMs > asOfMs;
+      })
+      .sort((a, b) => String(a.fallowUntil).localeCompare(String(b.fallowUntil)))
+      .map((element) => ({
+        topicId: element.id,
+        title: element.title,
+        band: element.band,
+        fallowUntil: element.fallowUntil as string,
+        fallowReason: element.fallowReason,
+      }));
   }
 }

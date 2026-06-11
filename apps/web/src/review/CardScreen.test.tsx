@@ -94,6 +94,7 @@ const QA_CARD: ReviewCardView = {
   lapses: 0,
   flagged: false,
   siblingGroupId: null,
+  fallowContext: null,
   occlusion: null,
   mediaRef: null,
   mediaSource: null,

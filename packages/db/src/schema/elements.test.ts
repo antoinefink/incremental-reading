@@ -15,6 +15,9 @@ describe("element schema", () => {
       "priority",
       "dueAt",
       "parkedAt",
+      "fallowUntil",
+      "fallowReason",
+      "fallowBatchId",
       "extractFate",
       "title",
       "parentId",
@@ -25,6 +28,9 @@ describe("element schema", () => {
     ]);
     expect(columns.parentId.name).toBe("parent_id");
     expect(columns.sourceId.name).toBe("source_id");
+    expect(columns.fallowUntil.name).toBe("fallow_until");
+    expect(columns.fallowReason.name).toBe("fallow_reason");
+    expect(columns.fallowBatchId.name).toBe("fallow_batch_id");
     expect(columns.extractFate.name).toBe("extract_fate");
     expect(columns.deletedAt.name).toBe("deleted_at");
   });

@@ -49,6 +49,12 @@ export const elements = sqliteTable(
     dueAt: text("due_at"),
     /** ISO-8601 UTC timestamp for when the user deliberately parked the element. */
     parkedAt: text("parked_at"),
+    /** ISO-8601 UTC timestamp for when a deliberate topic rest returns. */
+    fallowUntil: text("fallow_until"),
+    /** Optional user-entered reason for deliberate topic rest. */
+    fallowReason: text("fallow_reason"),
+    /** Latest active fallow operation batch id, used for manual unfallow restoration. */
+    fallowBatchId: text("fallow_batch_id"),
     /** Honorable terminal fate for extract rows that exit without a card. */
     extractFate: text("extract_fate"),
     title: text("title").notNull(),

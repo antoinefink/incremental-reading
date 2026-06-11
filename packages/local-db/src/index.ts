@@ -185,6 +185,16 @@ export {
   rawExtractIntervalDays,
 } from "./extraction-service";
 export {
+  FALLOW_REASON_MAX,
+  type FallowApplyResult,
+  FallowService,
+  type FallowSkippedRow,
+  type FallowSkipReason,
+  type FallowTopicOptions,
+  type FallowTopicWithinOptions,
+  type UnfallowTopicOptions,
+} from "./fallow-service";
+export {
   newAssetId,
   newBlockId,
   newElementId,
@@ -514,6 +524,8 @@ export interface Repositories {
   readonly chronicPostpone: import("./chronic-postpone-query").ChronicPostponeQuery;
   /** Undoable chronic-postpone keep/demote/done/delete batches (T106). */
   readonly chronicPostponeService: import("./chronic-postpone-service").ChronicPostponeService;
+  /** Deliberate topic rest (T107): attention-only fallow/unfallow batches. */
+  readonly fallow: import("./fallow-service").FallowService;
   /** Dismissible source retirement nudges (T103) — visible signal + op-logged dismissal. */
   readonly retirementSuggestions: import("./retirement-suggestion-repository").RetirementSuggestionRepository;
   /** The on-device semantic-search vector store (T087) — `sqlite-vec` KNN, NO op-log. */
@@ -563,6 +575,7 @@ import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
 import { EmbeddingRepository } from "./embedding-repository";
 import { ExtractStagnationQuery } from "./extract-stagnation-query";
+import { FallowService } from "./fallow-service";
 import { JobsRepository } from "./jobs-repository";
 import { LineageGapQuery } from "./lineage-gap-query";
 import { OcclusionMasksRepository } from "./occlusion-masks-repository";
@@ -643,6 +656,7 @@ export function createRepositories(
     priorityIntegrity: new PriorityIntegrityQuery(db),
     chronicPostpone: new ChronicPostponeQuery(db),
     chronicPostponeService: new ChronicPostponeService(db),
+    fallow: new FallowService(db),
     retirementSuggestions: new RetirementSuggestionRepository(db),
     embeddings,
     semanticSearch: new SemanticSearchRepository(search, embeddings),

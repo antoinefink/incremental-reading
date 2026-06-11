@@ -1040,3 +1040,99 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* ---------- Topic rest / fallow (T107) ---------- */
+.insp-fallow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.insp-fallow__state {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--r-sm);
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  color: var(--text-2);
+}
+.insp-fallow__state--active {
+  color: var(--accent);
+  border-color: var(--accent-soft-bd);
+  background: var(--accent-soft);
+}
+.insp-fallow__current {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-size: var(--t-xs);
+  color: var(--text-2);
+}
+.insp-fallow__current > :first-child {
+  color: var(--accent);
+}
+.insp-fallow__form {
+  display: grid;
+  gap: 8px;
+}
+.insp-fallow__field {
+  display: grid;
+  gap: 4px;
+  font-size: var(--t-xs);
+  color: var(--text-3);
+}
+.insp-fallow__field input {
+  min-width: 0;
+  height: 30px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 8px;
+  font: inherit;
+}
+.insp-fallow__field input:focus {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.insp-fallow__actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.insp-fallow__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 9px;
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+.insp-fallow__btn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+.insp-fallow__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.insp-fallow__note,
+.insp-fallow__message {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--text-3);
+}
+.insp-fallow__message {
+  color: var(--text-2);
+}

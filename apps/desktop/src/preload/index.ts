@@ -154,6 +154,8 @@ import type {
   TasksGenerateFromExpiryRequest,
   TasksListRequest,
   TasksPostponeRequest,
+  TopicFallowRequest,
+  TopicUnfallowRequest,
   TrashPurgeRequest,
   TrashRestoreRequest,
   VaultCollectOrphansRequest,
@@ -185,6 +187,11 @@ const appApi: AppApi = {
   elements: {
     setPriority: (request: ElementsSetPriorityRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.elementsSetPriority, request),
+  },
+  topics: {
+    fallow: (request: TopicFallowRequest) => ipcRenderer.invoke(IPC_CHANNELS.topicsFallow, request),
+    unfallow: (request: TopicUnfallowRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.topicsUnfallow, request),
   },
   queue: {
     list: (request?: QueueListRequest) => ipcRenderer.invoke(IPC_CHANNELS.queueList, request ?? {}),

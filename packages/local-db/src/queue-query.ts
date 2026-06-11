@@ -143,6 +143,14 @@ export interface QueueItemSummary {
   readonly queueEligible: boolean;
   /** Human explanation when an inventory row has scheduler history but is not in Queue. */
   readonly notInQueueReason: string | null;
+  /** Topic-rest state for this row or an ancestor topic. */
+  readonly fallowState: "active" | "returned" | null;
+  /** Return timestamp for the active/returned topic rest, when present. */
+  readonly fallowUntil: string | null;
+  /** User-entered topic-rest reason, when present. */
+  readonly fallowReason: string | null;
+  /** The topic whose fallow state explains this row, when present. */
+  readonly fallowTopicId: string | null;
 }
 
 /** The filters a queue read accepts. All optional; absent = no narrowing. */
@@ -300,13 +308,22 @@ function inventoryDueLabelFor(
   state: QueueDueState,
   asOfMs: number,
   queueEligible: boolean,
+  fallow: FallowContext | null = null,
 ): string {
   if (queueEligible) return dueLabelFor(dueAt, state, asOfMs);
+  if (fallow?.state === "active") return `Resting until ${formatReturnDate(fallow.until)}`;
   if (!isQueueActionableStatus(element.status)) return statusLabel(element.status);
   if (!dueAt) return "No return scheduled";
   const due = Date.parse(dueAt);
   if (!Number.isNaN(due) && due > asOfMs) return `Returns ${formatReturnDate(dueAt)}`;
   return "No return scheduled";
+}
+
+interface FallowContext {
+  readonly topicId: string;
+  readonly until: string;
+  readonly reason: string | null;
+  readonly state: "active" | "returned";
 }
 
 /**
@@ -435,7 +452,7 @@ export class QueueQuery {
     // SECOND PASS (T100): now that the list is scored, filtered, and LIMITED, decorate
     // ONLY the surviving ≤limit rows with the expensive display-only fields (source
     // title/author, card kind, attention postpone count) — at most `limit` (≈50) reads.
-    rows = rows.map((r) => this.decorateDisplay(r));
+    rows = rows.map((r) => this.decorateDisplay(r, asOfMs));
 
     // The budget gauge counts the items the user actually faces today — the FULL filtered
     // due set (so a status/concept filter narrows the gauge with the list).
@@ -576,6 +593,7 @@ export class QueueQuery {
     const queueEligibility = batch
       ? { eligible: true, reason: null }
       : queueEligibilityFor(element, dueAt, asOfMs, cardRetired);
+    const fallow = batch ? null : this.fallowContextFor(element, asOfMs);
     const sourceId = element.type === "source" ? element.id : element.sourceId;
     const siblingGroupId =
       (batch ? batch.siblingGroups.get(element.id) : this.siblingGroupOf(element.id)) ?? null;
@@ -616,9 +634,23 @@ export class QueueQuery {
       linkedElementType: null,
       protected: priorityToLabel(element.priority) === "A",
       due,
-      dueLabel: inventoryDueLabelFor(element, dueAt, due, asOfMs, queueEligibility.eligible),
+      dueLabel: inventoryDueLabelFor(
+        element,
+        dueAt,
+        due,
+        asOfMs,
+        queueEligibility.eligible,
+        fallow,
+      ),
       queueEligible: queueEligibility.eligible,
-      notInQueueReason: queueEligibility.reason,
+      notInQueueReason:
+        fallow?.state === "active" && !queueEligibility.eligible
+          ? "fallow"
+          : queueEligibility.reason,
+      fallowState: fallow?.state ?? null,
+      fallowUntil: fallow?.until ?? null,
+      fallowReason: fallow?.reason ?? null,
+      fallowTopicId: fallow?.topicId ?? null,
     };
   }
 
@@ -637,6 +669,7 @@ export class QueueQuery {
     const queueEligibility = batch
       ? { eligible: true, reason: null }
       : queueEligibilityFor(element, element.dueAt, asOfMs);
+    const fallow = batch ? null : this.fallowContextFor(element, asOfMs);
     const sourceId = element.type === "source" ? element.id : element.sourceId;
     const ctx = batch ? null : this.sourceContext(element);
     const concept = batch
@@ -690,9 +723,17 @@ export class QueueQuery {
         due,
         asOfMs,
         queueEligibility.eligible,
+        fallow,
       ),
       queueEligible: queueEligibility.eligible,
-      notInQueueReason: queueEligibility.reason,
+      notInQueueReason:
+        fallow?.state === "active" && !queueEligibility.eligible
+          ? "fallow"
+          : queueEligibility.reason,
+      fallowState: fallow?.state ?? null,
+      fallowUntil: fallow?.until ?? null,
+      fallowReason: fallow?.reason ?? null,
+      fallowTopicId: fallow?.topicId ?? null,
     };
   }
 
@@ -703,16 +744,30 @@ export class QueueQuery {
    * on ONLY the ≤limit rows that survive the score+filter+limit, so these per-row
    * reads run at most `limit` times instead of once per due element.
    */
-  private decorateDisplay(row: QueueItemSummary): QueueItemSummary {
+  private decorateDisplay(row: QueueItemSummary, asOfMs: number): QueueItemSummary {
     const element = this.repos.elements.findById(row.id as ElementId);
     if (!element) return row;
     const { sourceTitle, author } = this.sourceContext(element);
+    const fallow = this.fallowContextFor(element, asOfMs);
+    const fallowFields = {
+      fallowState: fallow?.state ?? null,
+      fallowUntil: fallow?.until ?? null,
+      fallowReason: fallow?.reason ?? null,
+      fallowTopicId: fallow?.topicId ?? null,
+    };
     if (row.scheduler === "fsrs") {
       const card = this.repos.review.findCardById(row.id as ElementId);
-      return { ...row, sourceTitle, author, cardType: card?.card.kind ?? null };
+      return {
+        ...row,
+        ...fallowFields,
+        sourceTitle,
+        author,
+        cardType: card?.card.kind ?? null,
+      };
     }
     return {
       ...row,
+      ...fallowFields,
       sourceTitle,
       author,
       schedulerSignals: {
@@ -724,6 +779,27 @@ export class QueueQuery {
             : null,
       },
     };
+  }
+
+  private fallowContextFor(element: Element, asOfMs: number): FallowContext | null {
+    const seen = new Set<string>();
+    let current: Element | null = element;
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      if (current.type === "topic" && current.fallowUntil) {
+        const untilMs = Date.parse(current.fallowUntil);
+        if (Number.isFinite(untilMs)) {
+          return {
+            topicId: current.id,
+            until: current.fallowUntil,
+            reason: current.fallowReason,
+            state: untilMs > asOfMs ? "active" : "returned",
+          };
+        }
+      }
+      current = current.parentId ? this.repos.elements.findById(current.parentId) : null;
+    }
+    return null;
   }
 
   /**
