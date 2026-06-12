@@ -40,7 +40,12 @@
  */
 
 import type { ElementId, FactExpiryStatus, Priority, TaskType } from "@interleave/core";
-import { deriveExpiryStatus, isTaskType, PRIORITY_LABEL_VALUE } from "@interleave/core";
+import {
+  deriveExpiryStatus,
+  isSystemTaskType,
+  isTaskType,
+  PRIORITY_LABEL_VALUE,
+} from "@interleave/core";
 import {
   cards as cardsTable,
   elements as elementsTable,
@@ -136,6 +141,11 @@ export class TaskService {
     }
     if (!isTaskType(input.taskType)) {
       throw new Error(`TaskService.createTask: unknown taskType ${String(input.taskType)}`);
+    }
+    if (isSystemTaskType(input.taskType)) {
+      throw new Error(
+        `TaskService.createTask: ${input.taskType} is system-owned; use its dedicated service`,
+      );
     }
     const linkedElementId = input.linkedElementId ?? null;
     const note = normalizeNote(input.note);

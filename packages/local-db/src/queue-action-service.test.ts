@@ -186,6 +186,25 @@ describe("QueueActionService.act", () => {
     expect(res.undo?.previousDueAt).toBe(priorDueAt);
   });
 
+  it("rejects generic queue actions for system-owned weekly review tasks", () => {
+    const repos = createRepositories(handle.db);
+    repos.sources.create({
+      title: "Weekly material",
+      priority: 0.875,
+      status: "active",
+    });
+    const weekly = repos.weeklyReview.summary("2026-06-12T12:00:00.000Z" as IsoTimestamp);
+    const id = weekly.session?.id;
+    if (!id) throw new Error("expected weekly review task");
+
+    const service = new QueueActionService(handle.db);
+    expect(() => service.act(id, "dismiss")).toThrow(/system-owned/i);
+    expect(() => service.act(id, "delete")).toThrow(/system-owned/i);
+    expect(repos.weeklyReview.summary("2026-06-12T12:00:00.000Z" as IsoTimestamp).session?.id).toBe(
+      id,
+    );
+  });
+
   it("markDone on a card clears element due and FSRS due, then undo restores both", () => {
     const id = seedCard(handle);
     const service = new QueueActionService(handle.db);

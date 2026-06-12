@@ -163,6 +163,10 @@ import type {
   VaultCollectOrphansRequest,
   VaultFindOrphansRequest,
   VaultVerifyRequest,
+  WeeklyReviewCompleteRequest,
+  WeeklyReviewDismissRequest,
+  WeeklyReviewProgressPatch,
+  WeeklyReviewSummaryRequest,
   WorkloadSimulateRequest,
 } from "../shared/contract";
 
@@ -492,6 +496,16 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.dailyWorkSummary, request ?? {}),
     ackGraduationEvents: (request?: DailyWorkGraduationAckRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.dailyWorkAckGraduationEvents, request ?? {}),
+  },
+  weeklyReview: {
+    summary: (request?: WeeklyReviewSummaryRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.weeklyReviewSummary, request ?? {}),
+    updateProgress: (request: WeeklyReviewProgressPatch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.weeklyReviewUpdateProgress, request),
+    complete: (request: WeeklyReviewCompleteRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.weeklyReviewComplete, request),
+    dismiss: (request: WeeklyReviewDismissRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.weeklyReviewDismiss, request),
   },
   sourceYield: {
     list: (request?: SourceYieldListRequest) =>

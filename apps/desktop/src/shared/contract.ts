@@ -70,6 +70,8 @@ import {
   TASK_TYPES,
   type TaskType,
   THEMES,
+  WEEKLY_REVIEW_CADENCE_DAYS_MAX,
+  WEEKLY_REVIEW_CADENCE_DAYS_MIN,
 } from "@interleave/core";
 import { z } from "zod";
 
@@ -238,6 +240,12 @@ export const SettingsPatchSchema = z
       .int()
       .min(CHRONIC_POSTPONE_THRESHOLD_MIN)
       .max(CHRONIC_POSTPONE_THRESHOLD_MAX),
+    weeklyReviewEnabled: z.boolean(),
+    weeklyReviewCadenceDays: z
+      .number()
+      .int()
+      .min(WEEKLY_REVIEW_CADENCE_DAYS_MIN)
+      .max(WEEKLY_REVIEW_CADENCE_DAYS_MAX),
     importBalanceFactor: z.number().min(IMPORT_BALANCE_FACTOR_MIN).max(IMPORT_BALANCE_FACTOR_MAX),
     keyboardLayout: z.enum(KEYBOARD_LAYOUTS),
     theme: z.enum(THEMES),
@@ -730,6 +738,8 @@ export interface QueueItemSummary {
   readonly sourceId: string | null;
   /** Card kind (`qa`/`cloze`); null for non-cards. */
   readonly cardType: string | null;
+  /** Task kind for `task` rows, or null for non-tasks. */
+  readonly taskType: TaskType | null;
   /**
    * The element a `task`-type row protects (its `tasks.linked_element_id`), or `null` —
    * lets the queue/process "Open" affordance JUMP TO the protected card/source/extract's
@@ -5805,6 +5815,107 @@ export interface DailyWorkGraduationAckResult {
 }
 
 // ---------------------------------------------------------------------------
+// weeklyReview.*  (T110 — weekly ledger & integrity session)
+// ---------------------------------------------------------------------------
+
+export const WeeklyReviewSummaryRequestSchema = z
+  .object({
+    /** The instant to compute the weekly session for (ISO-8601); defaults to now. */
+    asOf: IsoTimestampInputSchema.optional(),
+  })
+  .optional();
+export type WeeklyReviewSummaryRequest = z.infer<typeof WeeklyReviewSummaryRequestSchema>;
+
+export const WeeklyReviewSectionStateSchema = z.enum(["pending", "done", "skipped"]);
+export type WeeklyReviewSectionState = z.infer<typeof WeeklyReviewSectionStateSchema>;
+export type WeeklyReviewSectionId = "ledger" | "integrity" | "parked" | "chronic" | "fallow";
+
+export const WeeklyReviewProgressPatchSchema = z.object({
+  taskId: ElementIdSchema,
+  sections: z
+    .object({
+      ledger: WeeklyReviewSectionStateSchema,
+      integrity: WeeklyReviewSectionStateSchema,
+      parked: WeeklyReviewSectionStateSchema,
+      chronic: WeeklyReviewSectionStateSchema,
+      fallow: WeeklyReviewSectionStateSchema,
+    })
+    .partial()
+    .strict(),
+});
+export type WeeklyReviewProgressPatch = z.infer<typeof WeeklyReviewProgressPatchSchema>;
+
+export interface WeeklyReviewProgress {
+  readonly taskId: string;
+  readonly windowStart: string;
+  readonly windowEnd: string;
+  readonly sections: Readonly<Record<WeeklyReviewSectionId, WeeklyReviewSectionState>>;
+}
+
+export interface WeeklyReviewWindow {
+  readonly start: string;
+  readonly end: string;
+  readonly days: number;
+}
+
+export interface WeeklyReviewPriorityMiss {
+  readonly band: PriorityLabel;
+  readonly deferred: number;
+  readonly postponeDebtDays: number;
+}
+
+export interface WeeklyReviewLedger {
+  readonly sources: number;
+  readonly extracts: number;
+  readonly cards: number;
+  readonly maturedCards: number;
+  readonly priorityMisses: readonly WeeklyReviewPriorityMiss[];
+}
+
+export interface WeeklyReviewFallowSuggestion {
+  readonly topicId: string;
+  readonly title: string;
+  readonly band: PriorityLabel;
+  readonly deferred: number;
+  readonly postponeDebtDays: number;
+}
+
+export interface WeeklyReviewSummaryResult {
+  readonly asOf: string;
+  readonly enabled: boolean;
+  readonly cadenceDays: number;
+  readonly session: TaskSummary | null;
+  readonly due: boolean;
+  readonly window: WeeklyReviewWindow;
+  readonly progress: WeeklyReviewProgress | null;
+  readonly ledger: WeeklyReviewLedger;
+  readonly integrity: PriorityIntegrityGetResult;
+  readonly decisions: {
+    readonly parked: MaintenanceParkedResurfacingResult;
+    readonly chronic: MaintenanceChronicPostponesResult;
+    readonly fallowSuggestions: readonly WeeklyReviewFallowSuggestion[];
+  };
+}
+
+export const WeeklyReviewCompleteRequestSchema = z.object({
+  taskId: ElementIdSchema,
+  asOf: IsoTimestampInputSchema.optional(),
+});
+export type WeeklyReviewCompleteRequest = z.infer<typeof WeeklyReviewCompleteRequestSchema>;
+
+export const WeeklyReviewDismissRequestSchema = z.object({
+  taskId: ElementIdSchema,
+  asOf: IsoTimestampInputSchema.optional(),
+  snoozeDays: z.number().int().min(1).max(WEEKLY_REVIEW_CADENCE_DAYS_MAX).optional(),
+});
+export type WeeklyReviewDismissRequest = z.infer<typeof WeeklyReviewDismissRequestSchema>;
+
+export interface WeeklyReviewLifecycleResult {
+  readonly task: TaskSummary | null;
+  readonly progress: WeeklyReviewProgress | null;
+}
+
+// ---------------------------------------------------------------------------
 // sourceYield.list()  (T083 — per-source yield analytics)
 // ---------------------------------------------------------------------------
 
@@ -6843,6 +6954,16 @@ export interface AppApi {
     ackGraduationEvents(
       request?: DailyWorkGraduationAckRequest,
     ): Promise<DailyWorkGraduationAckResult>;
+  };
+  readonly weeklyReview: {
+    /** Weekly ledger/integrity session summary. May create/suppress the system task. */
+    summary(request?: WeeklyReviewSummaryRequest): Promise<WeeklyReviewSummaryResult>;
+    /** Persist section progress so a dismissed/partial session resumes. */
+    updateProgress(request: WeeklyReviewProgressPatch): Promise<WeeklyReviewProgress>;
+    /** Mark the current session complete and schedule the next cadence. */
+    complete(request: WeeklyReviewCompleteRequest): Promise<WeeklyReviewLifecycleResult>;
+    /** Snooze the current session while preserving section progress. */
+    dismiss(request: WeeklyReviewDismissRequest): Promise<WeeklyReviewLifecycleResult>;
   };
   readonly sourceYield: {
     /**

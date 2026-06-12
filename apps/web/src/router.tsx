@@ -7,6 +7,7 @@
  *   /inbox               import & triage
  *   /queue               due queue
  *   /process             focused one-at-a-time process session (T031)
+ *   /weekly              weekly ledger & integrity session (T110)
  *   /source/$id          source reader (typed dynamic param)
  *   /extract/$id         extract review mode (T024 — typed dynamic param)
  *   /card/$id            card detail/edit surface (typed dynamic param)
@@ -53,6 +54,7 @@ import { Shell } from "./shell/Shell";
 import { SynthesisCreate } from "./synthesis/SynthesisCreate";
 import { SynthesisNote } from "./synthesis/SynthesisNote";
 import { TrashScreen } from "./trash/TrashScreen";
+import { WeeklyReviewScreen } from "./weekly/WeeklyReviewScreen";
 
 const rootRoute = createRootRoute({ component: Shell });
 
@@ -94,6 +96,12 @@ const processRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/process",
   component: ProcessQueue,
+});
+
+const weeklyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/weekly",
+  component: WeeklyReviewScreen,
 });
 
 const sourceRoute = createRoute({
@@ -329,6 +337,7 @@ const routeTree = rootRoute.addChildren([
   inboxRoute,
   queueRoute,
   processRoute,
+  weeklyRoute,
   sourceRoute,
   extractRoute,
   cardRoute,

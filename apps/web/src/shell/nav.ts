@@ -277,6 +277,13 @@ const GO_TO_COMMAND_ITEMS: readonly CommandItem[] = [
   },
   {
     group: "Go to",
+    icon: "calendar",
+    label: "Weekly review",
+    to: "/weekly",
+    keywords: ["weekly", "ledger", "integrity", "review", "/weekly"],
+  },
+  {
+    group: "Go to",
     icon: "inbox",
     label: "Inbox triage",
     to: "/inbox",

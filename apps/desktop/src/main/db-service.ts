@@ -382,6 +382,13 @@ import type {
   VaultCollectOrphansResult,
   VaultOrphansResult,
   VaultVerifyResult,
+  WeeklyReviewCompleteRequest,
+  WeeklyReviewDismissRequest,
+  WeeklyReviewLifecycleResult,
+  WeeklyReviewProgress,
+  WeeklyReviewProgressPatch,
+  WeeklyReviewSummaryRequest,
+  WeeklyReviewSummaryResult,
   WorkloadSimulateRequest,
   WorkloadSimulateResult,
 } from "../shared/contract";
@@ -827,6 +834,9 @@ export class DbService {
     // The general, command-level undo (T044): inverts the last operation_log op via
     // the existing repository write paths. Distinct from the queue's recipe undo (T030).
     this.undoService = new UndoService(this.handle.db);
+    if (!this.localDataReplacementMessage) {
+      this.repositories.weeklyReviewService.initializeSession(nowIso() as IsoTimestamp);
+    }
     this.migrated = true;
   }
 
@@ -1044,6 +1054,13 @@ export class DbService {
    */
   updateAppSettings(patch: Readonly<Record<string, unknown>>): SettingsUpdateManyResult {
     const result = this.repos.settings.updateAppSettings(patch);
+    if (Object.hasOwn(patch, "weeklyReviewEnabled")) {
+      if (result.weeklyReviewEnabled) {
+        this.repos.weeklyReviewService.initializeSession(nowIso() as IsoTimestamp);
+      } else {
+        this.repos.weeklyReviewService.disable(nowIso() as IsoTimestamp);
+      }
+    }
     // T093: when an AI enable/key/provider setting changes, re-fork the worker so the
     // new `INTERLEAVE_AI_API_KEY`/`INTERLEAVE_AI_PROVIDER` env takes effect (the worker
     // bakes env at construction; there is no per-job env channel). The re-fork is gated
@@ -5431,6 +5448,32 @@ export class DbService {
     }
     const asOf = (request?.asOf ?? nowIso()) as IsoTimestamp;
     return this.dailyWork.summary(asOf);
+  }
+
+  getWeeklyReviewSummary(request?: WeeklyReviewSummaryRequest): WeeklyReviewSummaryResult {
+    const asOf = (request?.asOf ?? nowIso()) as IsoTimestamp;
+    return this.repos.weeklyReview.summary(asOf);
+  }
+
+  updateWeeklyReviewProgress(patch: WeeklyReviewProgressPatch): WeeklyReviewProgress {
+    return this.repos.weeklyReviewService.updateProgress({
+      taskId: patch.taskId as ElementId,
+      sections: patch.sections,
+    });
+  }
+
+  completeWeeklyReview(request: WeeklyReviewCompleteRequest): WeeklyReviewLifecycleResult {
+    return this.repos.weeklyReviewService.completeSession(
+      request.taskId as ElementId,
+      (request.asOf ?? nowIso()) as IsoTimestamp,
+    );
+  }
+
+  dismissWeeklyReview(request: WeeklyReviewDismissRequest): WeeklyReviewLifecycleResult {
+    return this.repos.weeklyReviewService.dismissSession(request.taskId as ElementId, {
+      ...(request.asOf !== undefined ? { asOf: request.asOf as IsoTimestamp } : {}),
+      ...(request.snoozeDays !== undefined ? { snoozeDays: request.snoozeDays } : {}),
+    });
   }
 
   ackDailyWorkGraduationEvents(

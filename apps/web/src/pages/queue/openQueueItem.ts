@@ -3,6 +3,7 @@ import type { NavigateFn } from "@tanstack/react-router";
 export interface OpenableItem {
   readonly id: string;
   readonly type: string | null;
+  readonly taskType?: string | null;
   readonly linkedElementId?: string | null;
   readonly linkedElementType?: string | null;
 }
@@ -52,6 +53,12 @@ function routeToElement(
  * they protect, while unlinked tasks stay in the process loop.
  */
 export function openQueueItem({ item, navigate, select, asOf }: OpenQueueItemOptions): void {
+  if (item.type === "task" && item.taskType === "weekly_review") {
+    select(item.id);
+    void navigate({ to: "/weekly", search: asOf ? { asOf } : {} });
+    return;
+  }
+
   if (item.type === "task" && item.linkedElementId) {
     select(item.linkedElementType === "card" ? null : item.linkedElementId);
     routeToElement(item.linkedElementType ?? null, item.linkedElementId, navigate, asOf, {

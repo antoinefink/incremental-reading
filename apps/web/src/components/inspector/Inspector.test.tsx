@@ -528,12 +528,14 @@ describe("Inspector", () => {
     render(<Inspector />);
 
     expect(await screen.findByTestId("fallow-section")).toHaveTextContent("Not resting");
-    fireEvent.change(screen.getByTestId("fallow-date"), {
+    const fallowDate = screen.getByTestId("fallow-date");
+    fireEvent.change(fallowDate, {
       target: { value: "2099-07-01" },
     });
     fireEvent.change(screen.getByTestId("fallow-reason"), {
       target: { value: "Let this rest" },
     });
+    await waitFor(() => expect(fallowDate).toHaveValue("2099-07-01"));
     fireEvent.click(screen.getByTestId("fallow-apply"));
 
     await waitFor(() =>

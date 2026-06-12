@@ -20,6 +20,7 @@ function queueItem(overrides: Partial<QueueItemSummary>): QueueItemSummary {
     siblingGroupId: null,
     sourceId: null,
     cardType: null,
+    taskType: null,
     linkedElementId: null,
     linkedElementType: null,
     protected: false,

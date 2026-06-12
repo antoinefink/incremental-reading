@@ -96,6 +96,9 @@ const settings = {
   trashRetentionDays: 30,
   balanceWarnings: true,
   parkedResurfaceAfterDays: 90,
+  chronicPostponeThreshold: 5,
+  weeklyReviewEnabled: true,
+  weeklyReviewCadenceDays: 7,
   importBalanceFactor: 1.5,
   keyboardLayout: "qwerty",
   theme: "dark",
@@ -240,6 +243,21 @@ describe("Settings", () => {
       }),
     );
     expect(getByTestId("setting-parked-resurface")).toHaveValue(120);
+
+    fireEvent.change(getByTestId("setting-weekly-cadence"), { target: { value: "14" } });
+    await waitFor(() =>
+      expect(h.updateAppSettings).toHaveBeenCalledWith({
+        patch: { weeklyReviewCadenceDays: 14 },
+      }),
+    );
+    expect(getByTestId("setting-weekly-cadence")).toHaveValue(14);
+
+    fireEvent.click(getByTestId("setting-weekly-review"));
+    await waitFor(() =>
+      expect(h.updateAppSettings).toHaveBeenCalledWith({
+        patch: { weeklyReviewEnabled: false },
+      }),
+    );
   });
 
   it("persists the system theme preference from the theme segmented control", async () => {

@@ -325,6 +325,10 @@ describe("IPC channels", () => {
         "balance:get",
         "dailyWork:summary",
         "dailyWork:ackGraduationEvents",
+        "weeklyReview:summary",
+        "weeklyReview:updateProgress",
+        "weeklyReview:complete",
+        "weeklyReview:dismiss",
         "backups:create",
         "backups:openFolder",
         "backups:list",
@@ -1783,11 +1787,15 @@ describe("SettingsPatchSchema (T011)", () => {
       dailyReviewBudget: 60,
       theme: "system",
       chronicPostponeThreshold: 6,
+      weeklyReviewEnabled: false,
+      weeklyReviewCadenceDays: 14,
     });
     expect(parsed).toEqual({
       dailyReviewBudget: 60,
       theme: "system",
       chronicPostponeThreshold: 6,
+      weeklyReviewEnabled: false,
+      weeklyReviewCadenceDays: 14,
     });
   });
 
@@ -1815,12 +1823,19 @@ describe("SettingsPatchSchema (T011)", () => {
     expect(() => SettingsPatchSchema.parse({ defaultTopicIntervalDays: 0 })).toThrow();
     expect(() => SettingsPatchSchema.parse({ chronicPostponeThreshold: 1 })).toThrow();
     expect(() => SettingsPatchSchema.parse({ chronicPostponeThreshold: 501 })).toThrow();
+    expect(() => SettingsPatchSchema.parse({ weeklyReviewCadenceDays: 0 })).toThrow();
+    expect(() => SettingsPatchSchema.parse({ weeklyReviewCadenceDays: 91 })).toThrow();
+    expect(() => SettingsPatchSchema.parse({ weeklyReviewCadenceDays: 7.5 })).toThrow();
   });
 
   it("accepts a boolean burySiblings, rejects a non-boolean (T039)", () => {
     expect(SettingsPatchSchema.parse({ burySiblings: false })).toEqual({ burySiblings: false });
     expect(SettingsPatchSchema.parse({ burySiblings: true })).toEqual({ burySiblings: true });
     expect(() => SettingsPatchSchema.parse({ burySiblings: "no" })).toThrow();
+    expect(SettingsPatchSchema.parse({ weeklyReviewEnabled: false })).toEqual({
+      weeklyReviewEnabled: false,
+    });
+    expect(() => SettingsPatchSchema.parse({ weeklyReviewEnabled: "no" })).toThrow();
   });
 
   it("accepts a display name, rejects an over-long one (shell identity)", () => {

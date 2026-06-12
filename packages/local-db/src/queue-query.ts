@@ -34,6 +34,7 @@ import type {
   IsoTimestamp,
   ReviewState,
   SiblingGroupId,
+  TaskType,
 } from "@interleave/core";
 import { priorityToLabel } from "@interleave/core";
 import {
@@ -120,6 +121,8 @@ export interface QueueItemSummary {
   readonly sourceId: string | null;
   /** Card kind (`qa`/`cloze`), for the card meta line; null for non-cards. */
   readonly cardType: string | null;
+  /** Task kind for `task` rows, or null for non-tasks. */
+  readonly taskType: TaskType | null;
   /**
    * The element a `task`-type row protects (its `tasks.linked_element_id`), or `null` —
    * lets the queue/process "Open" affordance JUMP TO the protected card/source/extract's
@@ -629,6 +632,7 @@ export class QueueQuery {
       siblingGroupId,
       sourceId: sourceId ?? null,
       cardType: card?.card.kind ?? null,
+      taskType: null,
       // A card is the FSRS leaf — it protects nothing else, never a verification task.
       linkedElementId: null,
       linkedElementType: null,
@@ -679,10 +683,8 @@ export class QueueQuery {
     // `tasks.linked_element_id` (+ type) ONCE so the "Open" affordance jumps to that
     // card/source's reader. Every other attention type resolves to `null`. This is a
     // task-only read (rare), so it stays inline even when batched.
-    const linked =
-      element.type === "task"
-        ? (this.repos.tasks.findTask(element.id)?.linkedElement ?? null)
-        : null;
+    const task = element.type === "task" ? this.repos.tasks.findTask(element.id) : null;
+    const linked = task?.linkedElement ?? null;
     return {
       id: element.id,
       type: element.type,
@@ -713,6 +715,7 @@ export class QueueQuery {
       siblingGroupId: null,
       sourceId: sourceId ?? null,
       cardType: null,
+      taskType: task?.taskType ?? null,
       linkedElementId: linked?.id ?? null,
       linkedElementType: linked?.type ?? null,
       protected: priorityToLabel(element.priority) === "A",

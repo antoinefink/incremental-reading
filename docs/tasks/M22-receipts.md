@@ -364,7 +364,7 @@ for graduation moments.
 # T110 — Weekly ledger & integrity session
 
 - **Milestone:** M22 — Receipts
-- **Status:** `[ ]` not started
+- **Status:** `[x]` complete
 - **Depends on:** T106, T109
 - **Roadmap line:** a weekly, dismissible session — itself a scheduled attention element —
   combines the week's ledger with the integrity sweep (T106 decisions, fallow suggestions,
@@ -387,15 +387,15 @@ week, what did the system sacrifice on my behalf, and what needs a decision from
 
 ## Deliverables
 
-- [ ] A `weekly_review` scheduled element (attention scheduler, default weekly, configurable/
+- [x] A `weekly_review` scheduled element (attention scheduler, default weekly, configurable/
       disableable in settings) that routes through normal queue/daily-work surfacing.
-- [ ] Session surface composing: the week's ledger (sources read → extracts → cards → matured;
+- [x] Session surface composing: the week's ledger (sources read → extracts → cards → matured;
       priorities-missed by band from T105; graduations from T108), then the decision queue
       (T106 chronic items, T102 parked-resurfacing batch when due, fallow suggestions for
       starved topics), each section skippable.
-- [ ] Completing/dismissing reschedules the element; partial completion resumes (the decision
+- [x] Completing/dismissing reschedules the element; partial completion resumes (the decision
       queue remembers what was decided).
-- [ ] Tests: unit (session composition read model); e2e — fixture week, open session, make
+- [x] Tests: unit (session composition read model); e2e — fixture week, open session, make
       decisions in two sections, dismiss, element reschedules, decisions persisted.
 
 ## Done when
@@ -408,3 +408,12 @@ week, what did the system sacrifice on my behalf, and what needs a decision from
 
 - Surface-ownership rule: the session COMPOSES T102/T106/T107 surfaces; those remain usable
   standalone in maintenance. One implementation, two hosts — do not fork the logic.
+- Completed in this commit. Implementation added the system-owned `weekly_review` task type,
+  weekly settings, a singleton weekly lifecycle service, typed IPC/preload/appApi methods, queue
+  routing to `/weekly`, and a weekly session surface that composes ledger, priority, parked,
+  chronic, and fallow receipt sections. Generic task creation and queue actions reject
+  system-owned weekly tasks; `/process` filters the weekly task so the dedicated route owns the
+  ritual lifecycle.
+- Verification: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm e2e`.
+- Learning captured in
+  [`docs/solutions/architecture-patterns/system-owned-recurring-tasks.md`](../solutions/architecture-patterns/system-owned-recurring-tasks.md).

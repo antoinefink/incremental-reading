@@ -28,6 +28,8 @@ import {
   SETTINGS_KEYS,
   settingsPatchToStored,
   sourcePriorityFromLabel,
+  WEEKLY_REVIEW_CADENCE_DAYS_MAX,
+  WEEKLY_REVIEW_CADENCE_DAYS_MIN,
 } from "./settings";
 
 describe("AppSettings defaults", () => {
@@ -46,6 +48,8 @@ describe("AppSettings defaults", () => {
       balanceWarnings: "balance.warnings",
       parkedResurfaceAfterDays: "parked.resurfaceAfterDays",
       chronicPostponeThreshold: "scheduler.chronicPostponeThreshold",
+      weeklyReviewEnabled: "weeklyReview.enabled",
+      weeklyReviewCadenceDays: "weeklyReview.cadenceDays",
       importBalanceFactor: "balance.importFactor",
       keyboardLayout: "ui.keyboardLayout",
       theme: "ui.theme",
@@ -75,6 +79,11 @@ describe("AppSettings defaults", () => {
 
   it("buries siblings by default", () => {
     expect(DEFAULT_APP_SETTINGS.burySiblings).toBe(true);
+  });
+
+  it("enables the weekly ledger session on a seven-day cadence by default", () => {
+    expect(DEFAULT_APP_SETTINGS.weeklyReviewEnabled).toBe(true);
+    expect(DEFAULT_APP_SETTINGS.weeklyReviewCadenceDays).toBe(7);
   });
 });
 
@@ -185,6 +194,24 @@ describe("coerceSettingValue", () => {
     );
   });
 
+  it("keeps weekly review enabled as a real boolean and clamps cadence (T110)", () => {
+    expect(coerceSettingValue("weeklyReviewEnabled", false)).toBe(false);
+    expect(coerceSettingValue("weeklyReviewEnabled", true)).toBe(true);
+    expect(coerceSettingValue("weeklyReviewEnabled", "false")).toBe(
+      DEFAULT_APP_SETTINGS.weeklyReviewEnabled,
+    );
+    expect(coerceSettingValue("weeklyReviewCadenceDays", 14)).toBe(14);
+    expect(coerceSettingValue("weeklyReviewCadenceDays", 6.6)).toBe(7);
+    expect(coerceSettingValue("weeklyReviewCadenceDays", 0.2)).toBe(WEEKLY_REVIEW_CADENCE_DAYS_MIN);
+    expect(coerceSettingValue("weeklyReviewCadenceDays", 999)).toBe(WEEKLY_REVIEW_CADENCE_DAYS_MAX);
+    expect(coerceSettingValue("weeklyReviewCadenceDays", 0)).toBe(
+      DEFAULT_APP_SETTINGS.weeklyReviewCadenceDays,
+    );
+    expect(coerceSettingValue("weeklyReviewCadenceDays", "nope")).toBe(
+      DEFAULT_APP_SETTINGS.weeklyReviewCadenceDays,
+    );
+  });
+
   it("coerces the per-band retention map: clamp present bands, drop unknown labels (T079)", () => {
     // In-bounds bands kept; out-of-range clamped; unknown labels + non-numbers dropped.
     expect(
@@ -232,6 +259,8 @@ describe("stored ↔ model round-trip", () => {
       [SETTINGS_KEYS.balanceWarnings]: false,
       [SETTINGS_KEYS.parkedResurfaceAfterDays]: 120,
       [SETTINGS_KEYS.chronicPostponeThreshold]: 6,
+      [SETTINGS_KEYS.weeklyReviewEnabled]: false,
+      [SETTINGS_KEYS.weeklyReviewCadenceDays]: 14,
       [SETTINGS_KEYS.importBalanceFactor]: 2.5,
       [SETTINGS_KEYS.keyboardLayout]: "dvorak",
       [SETTINGS_KEYS.theme]: "system",
@@ -247,6 +276,8 @@ describe("stored ↔ model round-trip", () => {
       balanceWarnings: false,
       parkedResurfaceAfterDays: 120,
       chronicPostponeThreshold: 6,
+      weeklyReviewEnabled: false,
+      weeklyReviewCadenceDays: 14,
       importBalanceFactor: 2.5,
       keyboardLayout: "dvorak",
       theme: "system",
@@ -275,12 +306,16 @@ describe("stored ↔ model round-trip", () => {
       dailyReviewBudget: 100,
       parkedResurfaceAfterDays: 120,
       chronicPostponeThreshold: 6,
+      weeklyReviewEnabled: false,
+      weeklyReviewCadenceDays: 14,
       theme: "system",
     });
     expect(stored).toEqual({
       [SETTINGS_KEYS.dailyReviewBudget]: 100,
       [SETTINGS_KEYS.parkedResurfaceAfterDays]: 120,
       [SETTINGS_KEYS.chronicPostponeThreshold]: 6,
+      [SETTINGS_KEYS.weeklyReviewEnabled]: false,
+      [SETTINGS_KEYS.weeklyReviewCadenceDays]: 14,
       [SETTINGS_KEYS.theme]: "system",
     });
   });
@@ -296,6 +331,8 @@ describe("stored ↔ model round-trip", () => {
       balanceWarnings: false,
       parkedResurfaceAfterDays: 45,
       chronicPostponeThreshold: 7,
+      weeklyReviewEnabled: true,
+      weeklyReviewCadenceDays: 10,
       importBalanceFactor: 2,
       keyboardLayout: "vim" as const,
       theme: "system" as const,

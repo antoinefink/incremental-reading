@@ -299,6 +299,8 @@ export {
   sourcePriorityFromLabel,
   THEMES,
   TOPIC_INTERVAL_OPTIONS,
+  WEEKLY_REVIEW_CADENCE_DAYS_MAX,
+  WEEKLY_REVIEW_CADENCE_DAYS_MIN,
 } from "./settings";
 // Source provenance + editable document body + durable block-processing vocabulary (./source).
 export type {
@@ -357,9 +359,16 @@ export {
   YIELD_WEIGHT_EXTRACT,
   YIELD_WEIGHT_MATURE_CARD,
 } from "./source-yield";
-// Verification-task vocabulary (T092) — the closed `task` kinds + their labels.
-export type { TaskType } from "./task";
-export { isTaskType, TASK_TYPE_LABEL, TASK_TYPES, taskTypeLabel } from "./task";
+// Task vocabulary (T092/T110) — the closed `task` kinds + their labels.
+export type { SystemTaskType, TaskType } from "./task";
+export {
+  isSystemTaskType,
+  isTaskType,
+  SYSTEM_TASK_TYPES,
+  TASK_TYPE_LABEL,
+  TASK_TYPES,
+  taskTypeLabel,
+} from "./task";
 // URL canonicalization for provenance/duplicate detection — pure, fetch-free (./url).
 export { canonicalizeUrl } from "./url";
 // Desktop pivot: filesystem asset vault vocabulary (./vault).

@@ -164,6 +164,12 @@ describe("createTask", () => {
       }),
     ).toThrow(/not found/);
   });
+
+  it("rejects system-owned weekly review tasks from generic creation", () => {
+    expect(() => svc.createTask({ taskType: "weekly_review", title: "Weekly review" })).toThrow(
+      /system-owned/,
+    );
+  });
 });
 
 describe("completeTask / postponeTask", () => {

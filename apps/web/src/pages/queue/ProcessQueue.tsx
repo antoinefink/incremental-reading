@@ -118,6 +118,10 @@ const MODES: readonly { id: SessionMode; label: string; icon: IconName }[] = [
   { id: "read", label: "Reading-only", icon: "bookmark" },
 ];
 
+function processableQueueItems(items: readonly QueueItemSummary[]): QueueItemSummary[] {
+  return items.filter((item) => item.taskType !== "weekly_review");
+}
+
 /** The four FSRS ratings in display + keyboard order (1–4), matching the review session. */
 const GRADES: readonly { rating: ReviewRating; label: string; key: string }[] = [
   { rating: "again", label: "Again", key: "1" },
@@ -398,7 +402,7 @@ export function ProcessQueue() {
         setUndoState(null);
         setDoneIntentSnackbar(null);
         if (queueResult.status === "fulfilled") {
-          setOrder(jitterOrder(queueResult.value.items));
+          setOrder(jitterOrder(processableQueueItems(queueResult.value.items)));
           setCursor(0);
           setProcessed(0);
           gradedRef.current = new Set();

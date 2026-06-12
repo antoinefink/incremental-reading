@@ -736,6 +736,8 @@ describe("DbService", () => {
       importBalanceFactor: 1.5,
       parkedResurfaceAfterDays: 90,
       chronicPostponeThreshold: 5,
+      weeklyReviewEnabled: true,
+      weeklyReviewCadenceDays: 7,
       keyboardLayout: "dvorak",
       theme: "light",
       displayName: "",

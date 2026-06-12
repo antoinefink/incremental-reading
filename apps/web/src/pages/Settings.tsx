@@ -75,6 +75,8 @@ const FALLBACK_SETTINGS: RendererSettings = {
   balanceWarnings: true,
   parkedResurfaceAfterDays: 90,
   chronicPostponeThreshold: 5,
+  weeklyReviewEnabled: true,
+  weeklyReviewCadenceDays: 7,
   importBalanceFactor: 1.5,
   keyboardLayout: "qwerty",
   theme: "dark",
@@ -1413,6 +1415,31 @@ export function Settings() {
             checked={s.balanceWarnings}
             onChange={(value) => void patch({ balanceWarnings: value })}
           />
+        </SettingRow>
+
+        <SettingRow
+          label="Weekly review"
+          hint="Schedule the ledger and integrity ritual as a system attention task."
+        >
+          <div className="flex items-center gap-3">
+            <Toggle
+              name="setting-weekly-review"
+              checked={s.weeklyReviewEnabled}
+              onChange={(value) => void patch({ weeklyReviewEnabled: value })}
+            />
+            <input
+              type="number"
+              min={1}
+              max={90}
+              step={1}
+              value={s.weeklyReviewCadenceDays}
+              data-testid="setting-weekly-cadence"
+              disabled={!s.weeklyReviewEnabled}
+              onChange={(e) => void patch({ weeklyReviewCadenceDays: Number(e.target.value) })}
+              className="w-20 rounded-md border border-border bg-surface px-2 py-1 text-right font-mono font-semibold text-sm text-text disabled:opacity-50"
+            />
+            <span className="text-sm text-text-3">days</span>
+          </div>
         </SettingRow>
       </SectionPanel>
 

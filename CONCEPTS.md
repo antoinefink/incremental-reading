@@ -132,6 +132,18 @@ The currently actionable processing set: due active-recall cards plus due attent
 
 Due queue work is distinct from inbox sources, which still need triage, and from future review load, which may be forecast without being actionable yet.
 
+### System-owned task
+
+A scheduled Task element created and maintained by Interleave itself for a product ritual or integrity workflow, not by generic user task creation.
+
+System-owned tasks can appear in the Due queue for discoverability, but their lifecycle belongs to a dedicated service because generic queue actions cannot safely preserve singleton, cadence, mirror-row, or progress invariants.
+
+### Weekly review
+
+The recurring system-owned task that brings the weekly ledger, priority-integrity receipt, and maintenance decision prompts into one resumable session.
+
+Weekly review is a ritual surface, not a dashboard: it arrives through attention scheduling, opens on its dedicated route, composes existing read models and maintenance commands, and reschedules itself after completion or dismissal.
+
 ### Queue eligibility
 
 The backend-owned decision that an element belongs in the current Due queue at a specific read clock.

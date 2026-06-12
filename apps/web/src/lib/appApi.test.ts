@@ -235,6 +235,58 @@ function installAppApi(overrides: Partial<AppApi> = {}): AppApi {
         observedSubjectCount: 0,
       })),
     },
+    weeklyReview: {
+      summary: vi.fn(async (request?: unknown) => ({
+        asOf: "2026-06-08T09:00:00.000Z",
+        enabled: true,
+        cadenceDays: 7,
+        session: null,
+        due: false,
+        window: {
+          start: "2026-06-02T00:00:00.000Z",
+          end: "2026-06-08T09:00:00.000Z",
+          days: 7,
+        },
+        progress: null,
+        ledger: { sources: 0, extracts: 0, cards: 0, maturedCards: 0, priorityMisses: [] },
+        integrity: {
+          asOf: "2026-06-08T09:00:00.000Z",
+          windowDays: 7,
+          priorityAttribution: "current",
+          bands: [],
+          topics: [],
+          sacrificed: [],
+          resting: [],
+          thresholdFlags: {
+            aBandInflation: false,
+            aBandDeferredRecently: false,
+            postponeDebtHigh: false,
+          },
+        },
+        decisions: {
+          parked: { rows: [], totalDue: 0, limit: 8, asOf: "2026-06-08T09:00:00.000Z" },
+          chronic: { rows: [], totalDue: 0, threshold: 5, limit: 8 },
+          fallowSuggestions: [],
+        },
+        request,
+      })),
+      updateProgress: vi.fn(
+        async (request: { taskId: string; sections: Record<string, string> }) => ({
+          taskId: request.taskId,
+          windowStart: "2026-06-02T00:00:00.000Z",
+          windowEnd: "2026-06-08T09:00:00.000Z",
+          sections: {
+            ledger: "done",
+            integrity: "pending",
+            parked: "pending",
+            chronic: "pending",
+            fallow: "pending",
+          },
+        }),
+      ),
+      complete: vi.fn(async () => ({ task: null, progress: null })),
+      dismiss: vi.fn(async () => ({ task: null, progress: null })),
+    },
     library: {
       browse: vi.fn(async (request?: unknown) => ({ items: [], counts: {}, request })),
       parkedAction: vi.fn(async (request: unknown) => ({ item: null, request })),
@@ -392,6 +444,20 @@ describe("renderer appApi wrapper", () => {
     expect(bridge.dailyWork.ackGraduationEvents).toHaveBeenCalledWith({
       asOf: "2026-06-08T09:00:00.000Z",
       eventIds: ["topic:topic-1:graduated:v1"],
+    });
+
+    await appApi.getWeeklyReviewSummary({ asOf: "2026-06-08T09:00:00.000Z" });
+    expect(bridge.weeklyReview.summary).toHaveBeenCalledWith({
+      asOf: "2026-06-08T09:00:00.000Z",
+    });
+
+    await appApi.updateWeeklyReviewProgress({
+      taskId: "weekly-1",
+      sections: { ledger: "done" },
+    });
+    expect(bridge.weeklyReview.updateProgress).toHaveBeenCalledWith({
+      taskId: "weekly-1",
+      sections: { ledger: "done" },
     });
 
     await appApi.createSynthesisNote({ title: "New note" });

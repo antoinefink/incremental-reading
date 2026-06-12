@@ -246,6 +246,13 @@
       "when": 1781266800000,
       "tag": "0034_repair_lineage_links",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1781270400000,
+      "tag": "0035_quiet_network",
+      "breakpoints": true
     }
   ]
 }

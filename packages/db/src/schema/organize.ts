@@ -140,6 +140,15 @@ export const tasks = sqliteTable(
     uniqueIndex("tasks_open_link_type_uq")
       .on(table.linkedElementId, table.taskType)
       .where(sql`status NOT IN ('done', 'parked', 'dismissed', 'deleted')`),
+    // T110 system-session singleton: only ONE open weekly review task may exist at a
+    // time. `linked_element_id` is intentionally null for the weekly session, so the
+    // generic open-link unique index above cannot enforce this (SQLite treats NULLs as
+    // distinct in UNIQUE indexes).
+    uniqueIndex("tasks_open_weekly_review_uq")
+      .on(table.taskType)
+      .where(
+        sql`task_type = 'weekly_review' AND status NOT IN ('done', 'parked', 'dismissed', 'deleted')`,
+      ),
   ],
 );
 

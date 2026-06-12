@@ -23,6 +23,7 @@ const VALID_ROUTES = new Set([
   "/inbox",
   "/queue",
   "/process",
+  "/weekly",
   "/review",
   "/maintenance",
   "/maintenance/leeches",
@@ -138,6 +139,7 @@ describe("shell nav config", () => {
   it("exposes route-only sections that are not sidebar entries", () => {
     expect(COMMAND_ITEMS.find((c) => c.label === "Search")?.to).toBe("/search");
     expect(COMMAND_ITEMS.find((c) => c.label === "Process queue")?.to).toBe("/process");
+    expect(COMMAND_ITEMS.find((c) => c.label === "Weekly review")?.to).toBe("/weekly");
     expect(COMMAND_ITEMS.find((c) => c.label === "Retired cards")?.to).toBe("/maintenance/retired");
   });
 

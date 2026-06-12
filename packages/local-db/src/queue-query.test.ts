@@ -251,12 +251,37 @@ describe("QueueQuery", () => {
     expect(row).toBeDefined();
     expect(row?.type).toBe("task");
     expect(row?.scheduler).toBe("attention");
+    expect(row?.taskType).toBe("verify_claim");
     expect(row?.linkedElementId).toBe(sourceId);
     expect(row?.linkedElementType).toBe("source");
 
     // Non-task rows never carry a link (the source/extract/card rows stay null).
+    expect(items.find((i) => i.id === sourceId)?.taskType).toBeNull();
     expect(items.find((i) => i.id === sourceId)?.linkedElementId).toBeNull();
     expect(items.find((i) => i.id === sourceId)?.linkedElementType).toBeNull();
+  });
+
+  it("carries taskType for the system-owned weekly review task without a protected link", () => {
+    const weekly = repos.elements.create({
+      type: "task",
+      status: "scheduled",
+      stage: "rough_topic",
+      priority: PRIORITY_LABEL_VALUE.A,
+      title: "Weekly review",
+      dueAt: iso("2026-05-29T08:00:00.000Z"),
+    });
+    handle.sqlite
+      .prepare(
+        `INSERT INTO tasks (element_id, task_type, due_at, status, linked_element_id, note)
+         VALUES (?, 'weekly_review', ?, 'scheduled', NULL, NULL)`,
+      )
+      .run(weekly.id, weekly.dueAt);
+
+    const row = queue.list({ asOf: NOW }).items.find((i) => i.id === weekly.id);
+    expect(row).toBeDefined();
+    expect(row?.taskType).toBe("weekly_review");
+    expect(row?.linkedElementId).toBeNull();
+    expect(row?.linkedElementType).toBeNull();
   });
 
   it("surfaces a scheduled synthesis note as an attention row (T095)", () => {

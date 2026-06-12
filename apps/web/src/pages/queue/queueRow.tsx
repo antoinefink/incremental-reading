@@ -106,6 +106,9 @@ export function actionFor(item: QueueItemSummary): { icon: IconName; label: stri
   if (item.type === "card") return { icon: "brain", label: "Review" };
   if (item.type === "source") return { icon: "eye", label: "Continue reading from read point" };
   if (item.type === "extract") return { icon: "extract", label: "Process" };
+  if (item.type === "task" && item.taskType === "weekly_review") {
+    return { icon: "calendar", label: "Weekly review" };
+  }
   // A verification task LINKED to a protected element opens that element's reader (T092),
   // so the affordance reads "Verify" — a free-standing (unlinked) task reads "Open".
   if (item.type === "task" && item.linkedElementId) return { icon: "eye", label: "Verify" };

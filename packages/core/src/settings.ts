@@ -63,6 +63,9 @@ export type ThemePreference = (typeof THEMES)[number];
  * - `chronicPostponeThreshold` — how many effective postpones put an item into the
  *   chronic-postpone reckoning list (T106). The count is folded from operation-log
  *   postpone/reset markers, not stored as a mutable column.
+ * - `weeklyReviewEnabled` — whether the scheduled weekly ledger/integrity session
+ *   is active (T110). Turning it off suppresses the system-owned weekly task.
+ * - `weeklyReviewCadenceDays` — the attention cadence for the weekly session (T110).
  * - `importBalanceFactor` — how lopsided imports-vs-processing must be before the
  *   balance warning fires (T046): imports must exceed processed output by this
  *   multiple. Higher = less sensitive. Read by the pure `judgeBalance` rule.
@@ -84,6 +87,8 @@ export interface AppSettings {
   readonly balanceWarnings: boolean;
   readonly parkedResurfaceAfterDays: number;
   readonly chronicPostponeThreshold: number;
+  readonly weeklyReviewEnabled: boolean;
+  readonly weeklyReviewCadenceDays: number;
   readonly importBalanceFactor: number;
   readonly keyboardLayout: KeyboardLayout;
   readonly theme: ThemePreference;
@@ -261,6 +266,8 @@ export const SETTINGS_KEYS = {
   balanceWarnings: "balance.warnings",
   parkedResurfaceAfterDays: "parked.resurfaceAfterDays",
   chronicPostponeThreshold: "scheduler.chronicPostponeThreshold",
+  weeklyReviewEnabled: "weeklyReview.enabled",
+  weeklyReviewCadenceDays: "weeklyReview.cadenceDays",
   importBalanceFactor: "balance.importFactor",
   keyboardLayout: "ui.keyboardLayout",
   theme: "ui.theme",
@@ -334,6 +341,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   balanceWarnings: true,
   parkedResurfaceAfterDays: 90,
   chronicPostponeThreshold: 5,
+  weeklyReviewEnabled: true,
+  weeklyReviewCadenceDays: 7,
   importBalanceFactor: DEFAULT_IMPORT_BALANCE_FACTOR,
   keyboardLayout: "qwerty",
   theme: "dark",
@@ -414,6 +423,10 @@ export const PARKED_RESURFACE_AFTER_DAYS_MAX = 3650;
 /** Inclusive bounds for chronic-postpone reckoning threshold (T106). */
 export const CHRONIC_POSTPONE_THRESHOLD_MIN = 2;
 export const CHRONIC_POSTPONE_THRESHOLD_MAX = 50;
+
+/** Inclusive bounds for the weekly ledger/integrity cadence (T110). */
+export const WEEKLY_REVIEW_CADENCE_DAYS_MIN = 1;
+export const WEEKLY_REVIEW_CADENCE_DAYS_MAX = 90;
 
 /**
  * Inclusive bounds for the import-balance factor (T046). Re-exported from
@@ -519,6 +532,14 @@ export function coerceSettingValue<K extends keyof AppSettings>(
       return (
         isFiniteNumber(raw) && raw > 0
           ? clampInt(raw, CHRONIC_POSTPONE_THRESHOLD_MIN, CHRONIC_POSTPONE_THRESHOLD_MAX)
+          : fallback
+      ) as AppSettings[K];
+    case "weeklyReviewEnabled":
+      return (typeof raw === "boolean" ? raw : fallback) as AppSettings[K];
+    case "weeklyReviewCadenceDays":
+      return (
+        isFiniteNumber(raw) && raw > 0
+          ? clampInt(raw, WEEKLY_REVIEW_CADENCE_DAYS_MIN, WEEKLY_REVIEW_CADENCE_DAYS_MAX)
           : fallback
       ) as AppSettings[K];
     case "importBalanceFactor":
@@ -630,6 +651,14 @@ export function appSettingsFromStored(stored: Readonly<Record<string, unknown>>)
     chronicPostponeThreshold: coerceSettingValue(
       "chronicPostponeThreshold",
       stored[SETTINGS_KEYS.chronicPostponeThreshold],
+    ),
+    weeklyReviewEnabled: coerceSettingValue(
+      "weeklyReviewEnabled",
+      stored[SETTINGS_KEYS.weeklyReviewEnabled],
+    ),
+    weeklyReviewCadenceDays: coerceSettingValue(
+      "weeklyReviewCadenceDays",
+      stored[SETTINGS_KEYS.weeklyReviewCadenceDays],
     ),
     importBalanceFactor: coerceSettingValue(
       "importBalanceFactor",

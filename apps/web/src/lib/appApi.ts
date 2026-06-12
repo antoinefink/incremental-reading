@@ -89,6 +89,10 @@ export interface AppSettings {
   readonly parkedResurfaceAfterDays: number;
   /** Effective postpone count that forces an item into the Maintenance reckoning list (T106). */
   readonly chronicPostponeThreshold: number;
+  /** Whether the system-owned weekly ledger/integrity session is active (T110). */
+  readonly weeklyReviewEnabled: boolean;
+  /** Attention cadence, in days, for the weekly ledger/integrity session (T110). */
+  readonly weeklyReviewCadenceDays: number;
   /** How lopsided imports-vs-processing must be before the balance warning fires (T046). */
   readonly importBalanceFactor: number;
   readonly keyboardLayout: KeyboardLayout;
@@ -538,6 +542,8 @@ export interface QueueItemSummary {
   readonly sourceId: string | null;
   /** Card kind (`qa`/`cloze`); null for non-cards. */
   readonly cardType: string | null;
+  /** Task kind for `task` rows, or null for non-tasks. */
+  readonly taskType: TaskType | null;
   /**
    * The element a `task`-type row protects (its `tasks.linked_element_id`), or `null` —
    * lets the queue/process "Open" affordance JUMP TO the protected card/source/extract's
@@ -2834,12 +2840,13 @@ export interface ConceptsMembersResult {
 // tasks.*  (T092 — verification tasks: scheduled `task`-type elements)
 // ---------------------------------------------------------------------------
 
-/** The closed verification-task kinds (mirrors the core TASK_TYPES tuple). */
+/** The closed task kinds (mirrors the core TASK_TYPES tuple). */
 export type TaskType =
   | "verify_claim"
   | "find_better_source"
   | "update_outdated_card"
   | "check_current_version"
+  | "weekly_review"
   | "custom";
 
 /** A flat verification-task summary — the inspector/queue read shape. */
@@ -3854,6 +3861,90 @@ export interface DailyWorkGraduationAckResult {
 }
 
 // ---------------------------------------------------------------------------
+// weeklyReview.*  (T110 — weekly ledger & integrity session)
+// ---------------------------------------------------------------------------
+
+export interface WeeklyReviewSummaryRequest {
+  readonly asOf?: string;
+}
+
+export type WeeklyReviewSectionState = "pending" | "done" | "skipped";
+export type WeeklyReviewSectionId = "ledger" | "integrity" | "parked" | "chronic" | "fallow";
+
+export interface WeeklyReviewProgressPatch {
+  readonly taskId: string;
+  readonly sections: Partial<Record<WeeklyReviewSectionId, WeeklyReviewSectionState>>;
+}
+
+export interface WeeklyReviewProgress {
+  readonly taskId: string;
+  readonly windowStart: string;
+  readonly windowEnd: string;
+  readonly sections: Readonly<Record<WeeklyReviewSectionId, WeeklyReviewSectionState>>;
+}
+
+export interface WeeklyReviewWindow {
+  readonly start: string;
+  readonly end: string;
+  readonly days: number;
+}
+
+export interface WeeklyReviewPriorityMiss {
+  readonly band: PriorityLabel;
+  readonly deferred: number;
+  readonly postponeDebtDays: number;
+}
+
+export interface WeeklyReviewLedger {
+  readonly sources: number;
+  readonly extracts: number;
+  readonly cards: number;
+  readonly maturedCards: number;
+  readonly priorityMisses: readonly WeeklyReviewPriorityMiss[];
+}
+
+export interface WeeklyReviewFallowSuggestion {
+  readonly topicId: string;
+  readonly title: string;
+  readonly band: PriorityLabel;
+  readonly deferred: number;
+  readonly postponeDebtDays: number;
+}
+
+export interface WeeklyReviewSummaryResult {
+  readonly asOf: string;
+  readonly enabled: boolean;
+  readonly cadenceDays: number;
+  readonly session: TaskSummary | null;
+  readonly due: boolean;
+  readonly window: WeeklyReviewWindow;
+  readonly progress: WeeklyReviewProgress | null;
+  readonly ledger: WeeklyReviewLedger;
+  readonly integrity: PriorityIntegrityGetResult;
+  readonly decisions: {
+    readonly parked: MaintenanceParkedResurfacingResult;
+    readonly chronic: MaintenanceChronicPostponesResult;
+    readonly fallowSuggestions: readonly WeeklyReviewFallowSuggestion[];
+  };
+}
+
+export interface WeeklyReviewCompleteRequest {
+  readonly taskId: string;
+  readonly asOf?: string;
+}
+
+export interface WeeklyReviewDismissRequest {
+  readonly taskId: string;
+  readonly asOf?: string;
+  readonly snoozeDays?: number;
+}
+
+export interface WeeklyReviewLifecycleResult {
+  readonly task: TaskSummary | null;
+  readonly progress: WeeklyReviewProgress | null;
+}
+
+// ---------------------------------------------------------------------------
 // sourceYield.*  (T083 — per-source yield analytics)
 // ---------------------------------------------------------------------------
 
@@ -4284,6 +4375,12 @@ export interface AppApi {
     ackGraduationEvents(
       request?: DailyWorkGraduationAckRequest,
     ): Promise<DailyWorkGraduationAckResult>;
+  };
+  readonly weeklyReview: {
+    summary(request?: WeeklyReviewSummaryRequest): Promise<WeeklyReviewSummaryResult>;
+    updateProgress(request: WeeklyReviewProgressPatch): Promise<WeeklyReviewProgress>;
+    complete(request: WeeklyReviewCompleteRequest): Promise<WeeklyReviewLifecycleResult>;
+    dismiss(request: WeeklyReviewDismissRequest): Promise<WeeklyReviewLifecycleResult>;
   };
   readonly sourceYield: {
     list(request?: SourceYieldListRequest): Promise<SourceYieldListResult>;
@@ -5366,6 +5463,18 @@ export const appApi = {
       });
     }
     return requireAppApi().dailyWork.ackGraduationEvents(request);
+  },
+  getWeeklyReviewSummary(request?: WeeklyReviewSummaryRequest): Promise<WeeklyReviewSummaryResult> {
+    return requireAppApi().weeklyReview.summary(request);
+  },
+  updateWeeklyReviewProgress(request: WeeklyReviewProgressPatch): Promise<WeeklyReviewProgress> {
+    return requireAppApi().weeklyReview.updateProgress(request);
+  },
+  completeWeeklyReview(request: WeeklyReviewCompleteRequest): Promise<WeeklyReviewLifecycleResult> {
+    return requireAppApi().weeklyReview.complete(request);
+  },
+  dismissWeeklyReview(request: WeeklyReviewDismissRequest): Promise<WeeklyReviewLifecycleResult> {
+    return requireAppApi().weeklyReview.dismiss(request);
   },
   /**
    * The per-source yield rollup (T083) — for every live source, its read %,

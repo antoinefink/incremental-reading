@@ -484,6 +484,23 @@ export {
 export { type TrashItem, TrashRepository } from "./trash-query";
 export type { DbClient, TransactionClient } from "./types";
 export { type UndoResult, UndoService } from "./undo-service";
+export {
+  type WeeklyReviewDecisions,
+  type WeeklyReviewFallowSuggestion,
+  type WeeklyReviewLedger,
+  type WeeklyReviewPriorityMiss,
+  WeeklyReviewQuery,
+  type WeeklyReviewSummary,
+  type WeeklyReviewWindow,
+} from "./weekly-review-query";
+export {
+  type WeeklyReviewLifecycleResult,
+  type WeeklyReviewProgress,
+  type WeeklyReviewProgressPatch,
+  type WeeklyReviewSectionId,
+  type WeeklyReviewSectionState,
+  WeeklyReviewService,
+} from "./weekly-review-service";
 export { WorkloadService, type WorkloadSimulateOptions } from "./workload-service";
 
 /**
@@ -574,6 +591,10 @@ export interface Repositories {
    * `add_relation`); generation is idempotent + priority-inherited.
    */
   readonly tasks: import("./task-service").TaskService;
+  /** Weekly ledger/integrity session (T110): singleton lifecycle + composed read model. */
+  readonly weeklyReviewService: import("./weekly-review-service").WeeklyReviewService;
+  /** Weekly ledger/integrity session (T110): ledger + T106/T107/T108/T102 decision queue. */
+  readonly weeklyReview: import("./weekly-review-query").WeeklyReviewQuery;
   /**
    * The AI-suggestion DRAFT layer (T093/T094) — inert `ai_suggestions` rows the
    * on-device AI runner produces. NO op-log (a transient draft/infra artifact, like a
@@ -629,6 +650,8 @@ import { SynthesisService } from "./synthesis-service";
 import { TaskService } from "./task-service";
 import { TopicKnowledgeStateQuery } from "./topic-knowledge-state-query";
 import { TrashRepository } from "./trash-query";
+import { WeeklyReviewQuery } from "./weekly-review-query";
+import { WeeklyReviewService } from "./weekly-review-service";
 
 /** Options for {@link createRepositories}. */
 export interface CreateRepositoriesOptions {
@@ -657,6 +680,7 @@ export function createRepositories(
   const embeddings = new EmbeddingRepository(db, options.vecAvailable ?? false);
   const elements = new ElementRepository(db);
   const concepts = new ConceptRepository(db);
+  const weeklyReviewService = new WeeklyReviewService(db);
   const repos: Repositories = {
     elements,
     documents: new DocumentRepository(db),
@@ -692,6 +716,8 @@ export function createRepositories(
     embeddings,
     semanticSearch: new SemanticSearchRepository(search, embeddings),
     tasks: new TaskService(db),
+    weeklyReviewService,
+    weeklyReview: undefined as unknown as WeeklyReviewQuery,
     aiSuggestions: new AiSuggestionRepository(db),
     synthesis: new SynthesisService(db),
     // Built last: it resolves an item's refblock through the SAME `resolveSourceRef`
@@ -705,5 +731,6 @@ export function createRepositories(
     embeddings,
     resolveRef: (id) => resolveSourceRef(repos, id),
   });
+  (repos as { weeklyReview: WeeklyReviewQuery }).weeklyReview = new WeeklyReviewQuery(db, repos);
   return repos;
 }

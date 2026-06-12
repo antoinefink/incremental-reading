@@ -1,14 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { isTaskType, TASK_TYPE_LABEL, TASK_TYPES, taskTypeLabel } from "./task";
+import {
+  isSystemTaskType,
+  isTaskType,
+  SYSTEM_TASK_TYPES,
+  TASK_TYPE_LABEL,
+  TASK_TYPES,
+  taskTypeLabel,
+} from "./task";
 
 describe("TASK_TYPES tuple + guard", () => {
-  it("is the closed five-kind vocabulary", () => {
+  it("is the closed six-kind vocabulary", () => {
     expect(TASK_TYPES).toEqual([
       "verify_claim",
       "find_better_source",
       "update_outdated_card",
       "check_current_version",
       "custom",
+      "weekly_review",
     ]);
   });
 
@@ -21,6 +29,13 @@ describe("TASK_TYPES tuple + guard", () => {
     expect(isTaskType(42)).toBe(false);
     expect(isTaskType({})).toBe(false);
   });
+
+  it("identifies system-owned task kinds", () => {
+    expect(SYSTEM_TASK_TYPES).toEqual(["weekly_review"]);
+    expect(isSystemTaskType("weekly_review")).toBe(true);
+    expect(isSystemTaskType("custom")).toBe(false);
+    expect(isSystemTaskType(null)).toBe(false);
+  });
 });
 
 describe("taskTypeLabel", () => {
@@ -30,6 +45,7 @@ describe("taskTypeLabel", () => {
     expect(taskTypeLabel("update_outdated_card")).toBe("Update outdated card");
     expect(taskTypeLabel("check_current_version")).toBe("Check current version");
     expect(taskTypeLabel("custom")).toBe("Custom task");
+    expect(taskTypeLabel("weekly_review")).toBe("Weekly review");
   });
 
   it("has a label for every tuple member (no gaps)", () => {

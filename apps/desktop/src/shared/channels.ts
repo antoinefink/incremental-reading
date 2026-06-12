@@ -197,6 +197,10 @@ export const IPC_CHANNELS = {
   balanceGet: "balance:get",
   dailyWorkSummary: "dailyWork:summary",
   dailyWorkAckGraduationEvents: "dailyWork:ackGraduationEvents",
+  weeklyReviewSummary: "weeklyReview:summary",
+  weeklyReviewUpdateProgress: "weeklyReview:updateProgress",
+  weeklyReviewComplete: "weeklyReview:complete",
+  weeklyReviewDismiss: "weeklyReview:dismiss",
   // Per-source yield analytics (T083) — a READ-ONLY ranked rollup (read %,
   // extracts/cards/mature-cards, leeches, review time) so low-yield sources are
   // identifiable. No mutation, no `operation_log`, no schedule change.

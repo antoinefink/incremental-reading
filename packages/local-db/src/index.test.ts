@@ -52,6 +52,8 @@ describe("local-db repository factory", () => {
       "embeddings",
       "semanticSearch",
       "tasks",
+      "weeklyReviewService",
+      "weeklyReview",
       "aiSuggestions",
       "synthesis",
       "related",
@@ -59,5 +61,6 @@ describe("local-db repository factory", () => {
     expect(repos.embeddings.available).toBe(false);
     expect(repos.semanticSearch).toBeDefined();
     expect(repos.related).toBeDefined();
+    expect(repos.weeklyReview).toBeDefined();
   });
 });

@@ -182,6 +182,10 @@ import {
   VaultCollectOrphansRequestSchema,
   VaultFindOrphansRequestSchema,
   VaultVerifyRequestSchema,
+  WeeklyReviewCompleteRequestSchema,
+  WeeklyReviewDismissRequestSchema,
+  WeeklyReviewProgressPatchSchema,
+  WeeklyReviewSummaryRequestSchema,
   WorkloadSimulateRequestSchema,
 } from "../shared/contract";
 import { AnkiExportError } from "./anki-export-service";
@@ -1407,6 +1411,26 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.dailyWorkAckGraduationEvents, (_event, rawRequest: unknown) => {
     const request = DailyWorkGraduationAckRequestSchema.parse(rawRequest);
     return dbService.ackDailyWorkGraduationEvents(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.weeklyReviewSummary, (_event, rawRequest: unknown) => {
+    const request = WeeklyReviewSummaryRequestSchema.parse(rawRequest);
+    return dbService.getWeeklyReviewSummary(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.weeklyReviewUpdateProgress, (_event, rawRequest: unknown) => {
+    const request = WeeklyReviewProgressPatchSchema.parse(rawRequest);
+    return dbService.updateWeeklyReviewProgress(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.weeklyReviewComplete, (_event, rawRequest: unknown) => {
+    const request = WeeklyReviewCompleteRequestSchema.parse(rawRequest);
+    return dbService.completeWeeklyReview(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.weeklyReviewDismiss, (_event, rawRequest: unknown) => {
+    const request = WeeklyReviewDismissRequestSchema.parse(rawRequest);
+    return dbService.dismissWeeklyReview(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.sourceYieldList, (_event, rawRequest: unknown) => {

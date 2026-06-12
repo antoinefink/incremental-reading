@@ -28,6 +28,7 @@ function queueItem(overrides: Partial<QueueItemSummary>): QueueItemSummary {
     siblingGroupId: null,
     sourceId: null,
     cardType: null,
+    taskType: null,
     linkedElementId: null,
     linkedElementType: null,
     protected: false,
@@ -126,6 +127,21 @@ describe("openQueueItem", () => {
     expect(h.navigate).toHaveBeenLastCalledWith({
       to: "/card/$id",
       params: { id: "card-1" },
+    });
+  });
+
+  it("opens weekly review tasks in the weekly session", () => {
+    const h = harness();
+    openQueueItem({
+      item: queueItem({ type: "task", taskType: "weekly_review" as const, id: "weekly-1" }),
+      asOf: "2026-06-06T12:00:00.000Z",
+      ...h,
+    });
+
+    expect(h.select).toHaveBeenCalledWith("weekly-1");
+    expect(h.navigate).toHaveBeenCalledWith({
+      to: "/weekly",
+      search: { asOf: "2026-06-06T12:00:00.000Z" },
     });
   });
 

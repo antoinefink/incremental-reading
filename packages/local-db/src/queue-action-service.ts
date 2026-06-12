@@ -31,9 +31,9 @@
  */
 
 import type { Element, ElementId, ElementStatus, IsoTimestamp, Priority } from "@interleave/core";
-import { lowerPriority, raisePriority } from "@interleave/core";
+import { isSystemTaskType, lowerPriority, raisePriority } from "@interleave/core";
 import type { InterleaveDatabase } from "@interleave/db";
-import { reviewStates } from "@interleave/db";
+import { reviewStates, tasks as tasksTable } from "@interleave/db";
 import { eq } from "drizzle-orm";
 import { BlockProcessingService } from "./block-processing-service";
 import { ElementRepository } from "./element-repository";
@@ -167,6 +167,7 @@ export class QueueActionService {
     options: QueueActionOptions = {},
   ): QueueActionResult {
     const element = this.requireLive(id);
+    this.rejectSystemTaskAction(element);
     switch (kind) {
       case "postpone":
         return this.postpone(element, now);
@@ -180,6 +181,20 @@ export class QueueActionService {
         return this.setStatus(element, "dismissed");
       case "delete":
         return this.softDelete(element);
+    }
+  }
+
+  private rejectSystemTaskAction(element: Element): void {
+    if (element.type !== "task") return;
+    const task = this.db
+      .select({ taskType: tasksTable.taskType })
+      .from(tasksTable)
+      .where(eq(tasksTable.elementId, element.id))
+      .get();
+    if (task && isSystemTaskType(task.taskType)) {
+      throw new Error(
+        `QueueActionService: ${task.taskType} is system-owned; use its dedicated service`,
+      );
     }
   }
 

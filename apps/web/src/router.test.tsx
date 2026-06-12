@@ -28,6 +28,7 @@ describe("application router", () => {
       "/synthesis/$id",
       "/synthesis/new",
       "/trash",
+      "/weekly",
     ]);
   });
 });

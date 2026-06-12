@@ -224,6 +224,9 @@ describe("preload bridge", () => {
       {},
     );
 
+    await api().weeklyReview.summary();
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.weeklyReviewSummary, {});
+
     await api().review.sessionNext();
     expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.reviewSessionNext, {});
 
