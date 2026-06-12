@@ -123,7 +123,7 @@ sizes the protected subset honestly.
 
 ## Completion notes
 
-- Completed 2026-06-12 in commit `PENDING`: `dailyBudgetMinutes` is canonical for queue/home
+- Completed 2026-06-12 in commit `2771ff1a`: `dailyBudgetMinutes` is canonical for queue/home
   overload budgeting, while `dailyReviewBudget` remains readable and write-through-compatible for
   count-only consumers.
 - `QueueListResult.budget` remains count-based for existing callers; minute-aware queue reads
