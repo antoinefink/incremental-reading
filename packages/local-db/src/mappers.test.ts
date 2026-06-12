@@ -9,9 +9,9 @@
  * read), and keep a `null` cell `null`.
  */
 
-import type { SourceLocationRow } from "@interleave/db";
+import type { ElementRow, SourceLocationRow } from "@interleave/db";
 import { describe, expect, it } from "vitest";
-import { rowToSourceLocation } from "./mappers";
+import { rowToElement, rowToSourceLocation } from "./mappers";
 
 /** A minimal `source_locations` row with overridable `region`/`clip` cells. */
 function row(region: string | null, clip: string | null = null): SourceLocationRow {
@@ -65,5 +65,32 @@ describe("rowToSourceLocation clip (T074)", () => {
       rowToSourceLocation(row(null, JSON.stringify({ startMs: 9000, endMs: 9000 }))).clip,
     ).toBeNull();
     expect(rowToSourceLocation(row(null, JSON.stringify({ startMs: 1000 }))).clip).toBeNull();
+  });
+});
+
+describe("rowToElement attention interval multiplier", () => {
+  it("maps the persisted attention interval multiplier", () => {
+    const element = rowToElement({
+      id: "el-1",
+      type: "topic",
+      status: "active",
+      stage: "rough_topic",
+      priority: 0.5,
+      attentionIntervalMultiplier: 1.75,
+      dueAt: null,
+      parkedAt: null,
+      fallowUntil: null,
+      fallowReason: null,
+      fallowBatchId: null,
+      extractFate: null,
+      title: "Topic",
+      parentId: null,
+      sourceId: null,
+      createdAt: "2026-06-12T00:00:00.000Z",
+      updatedAt: "2026-06-12T00:00:00.000Z",
+      deletedAt: null,
+    } satisfies ElementRow);
+
+    expect(element.attentionIntervalMultiplier).toBe(1.75);
   });
 });

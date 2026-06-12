@@ -50,6 +50,7 @@ import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
 import { nowIso } from "./ids";
 import { OperationLogRepository } from "./operation-log-repository";
+import { SchedulerService } from "./scheduler-service";
 import { SettingsRepository } from "./settings-repository";
 import type { DbClient } from "./types";
 
@@ -116,11 +117,13 @@ export class ExtractService {
   private readonly elements: ElementRepository;
   private readonly documents: DocumentRepository;
   private readonly settings: SettingsRepository;
+  private readonly scheduler: SchedulerService;
 
   constructor(private readonly db: InterleaveDatabase) {
     this.elements = new ElementRepository(db);
     this.documents = new DocumentRepository(db);
     this.settings = new SettingsRepository(db);
+    this.scheduler = new SchedulerService(db);
   }
 
   /** Load an extract element by id, throwing when it is missing or not an extract. */
@@ -165,13 +168,21 @@ export class ExtractService {
   setStage(id: ElementId, stage: ExtractStage): ExtractActionResult {
     const element = this.requireExtract(id);
     this.assertNotFated(element, "setStage");
+    const now = nowIso();
+    const baseline = this.scheduler.captureAdaptiveVisitBaseline(id, "rewrite");
     return this.db.transaction((tx) => {
       // Persist the new stage first (update_element), then reschedule on the
       // attention scheduler (reschedule_element). Because both run on the SAME tx,
       // the reschedule re-reads the row with the new stage already applied, so the
       // returned element reflects BOTH the new stage and the new due date.
       this.elements.updateWithin(tx, id, { stage });
-      const dueAt = addDays(nowIso(), extractStageIntervalDays(stage, element.priority));
+      if (this.scheduler.adaptiveAttentionIntervalsEnabled()) {
+        return {
+          element: this.scheduler.rescheduleProcessedVisitWithin(tx, id, "rewrite", now, baseline)
+            .element,
+        };
+      }
+      const dueAt = addDays(now, extractStageIntervalDays(stage, element.priority));
       const rescheduled = this.elements.rescheduleWithin(tx, id, dueAt, "scheduled");
       return { element: rescheduled };
     });

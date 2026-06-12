@@ -253,6 +253,13 @@
       "when": 1781270400000,
       "tag": "0035_quiet_network",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1781274000000,
+      "tag": "0036_attention_interval_multiplier",
+      "breakpoints": true
     }
   ]
 }

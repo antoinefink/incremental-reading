@@ -57,6 +57,7 @@ export interface CreateElementInput {
   readonly status: ElementStatus;
   readonly stage: DistillationStage;
   readonly priority: Priority;
+  readonly attentionIntervalMultiplier?: number;
   readonly title: string;
   readonly dueAt?: IsoTimestamp | null;
   readonly fallowUntil?: IsoTimestamp | null;
@@ -73,6 +74,7 @@ export interface UpdateElementInput {
   readonly status?: ElementStatus;
   readonly stage?: DistillationStage;
   readonly priority?: Priority;
+  readonly attentionIntervalMultiplier?: number;
   readonly title?: string;
   readonly dueAt?: IsoTimestamp | null;
   readonly parkedAt?: IsoTimestamp | null;
@@ -103,6 +105,8 @@ export interface OpContext {
 export interface RescheduleOptions {
   /** Override the mutation timestamp; defaults to the repository wall-clock stamp. */
   readonly updatedAt?: IsoTimestamp;
+  /** Optional T112 attention cadence multiplier to persist with the schedule. */
+  readonly attentionIntervalMultiplier?: number;
 }
 
 export class ElementRepository {
@@ -127,6 +131,7 @@ export class ElementRepository {
       status: input.status,
       stage: input.stage,
       priority: input.priority,
+      attentionIntervalMultiplier: input.attentionIntervalMultiplier ?? 1.0,
       dueAt: input.dueAt ?? null,
       parkedAt: null,
       fallowUntil: input.fallowUntil ?? null,
@@ -147,6 +152,7 @@ export class ElementRepository {
         status: element.status,
         stage: element.stage,
         priority: element.priority,
+        attentionIntervalMultiplier: element.attentionIntervalMultiplier,
         dueAt: element.dueAt,
         parkedAt: element.parkedAt,
         fallowUntil: element.fallowUntil,
@@ -258,6 +264,9 @@ export class ElementRepository {
     if (patch.status !== undefined) prev.status = before.status;
     if (patch.stage !== undefined) prev.stage = before.stage;
     if (patch.priority !== undefined) prev.priority = before.priority;
+    if (patch.attentionIntervalMultiplier !== undefined) {
+      prev.attentionIntervalMultiplier = before.attentionIntervalMultiplier;
+    }
     if (patch.title !== undefined) prev.title = before.title;
     if (patch.dueAt !== undefined) prev.dueAt = before.dueAt;
     if (patch.parkedAt !== undefined) prev.parkedAt = before.parkedAt;
@@ -271,6 +280,9 @@ export class ElementRepository {
     if (patch.status !== undefined) set.status = patch.status;
     if (patch.stage !== undefined) set.stage = patch.stage;
     if (patch.priority !== undefined) set.priority = patch.priority;
+    if (patch.attentionIntervalMultiplier !== undefined) {
+      set.attentionIntervalMultiplier = patch.attentionIntervalMultiplier;
+    }
     if (patch.title !== undefined) set.title = patch.title;
     if (patch.dueAt !== undefined) set.dueAt = patch.dueAt;
     if (patch.parkedAt !== undefined) set.parkedAt = patch.parkedAt;
@@ -340,10 +352,14 @@ export class ElementRepository {
     if (!before) throw new Error(`ElementRepository.reschedule: element ${id} not found`);
     const prevDueAt = before.dueAt;
     const prevStatus = before.status;
+    const prevAttentionIntervalMultiplier = before.attentionIntervalMultiplier;
 
     const updatedAt = options?.updatedAt ?? nowIso();
     const set: Record<string, unknown> = { dueAt, updatedAt };
     if (status !== undefined) set.status = status;
+    if (options?.attentionIntervalMultiplier !== undefined) {
+      set.attentionIntervalMultiplier = options.attentionIntervalMultiplier;
+    }
     tx.update(elements).set(set).where(eq(elements.id, id)).run();
     const row = tx.select().from(elements).where(eq(elements.id, id)).get();
     if (!row) throw new Error(`ElementRepository.reschedule: element ${id} not found`);
@@ -356,6 +372,12 @@ export class ElementRepository {
         ...(status !== undefined ? { status } : {}),
         prevDueAt,
         prevStatus,
+        ...(options?.attentionIntervalMultiplier !== undefined
+          ? {
+              attentionIntervalMultiplier: options.attentionIntervalMultiplier,
+              prevAttentionIntervalMultiplier,
+            }
+          : {}),
         ...(opExtras ?? {}),
       },
     });

@@ -27,10 +27,11 @@ import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
 import { ExtractionService } from "./extraction-service";
 import { ReviewRepository } from "./review-repository";
-import { SchedulerService } from "./scheduler-service";
+import { ADAPTIVE_ATTENTION_INTERVALS_SETTING_KEY, SchedulerService } from "./scheduler-service";
 import { SettingsRepository } from "./settings-repository";
 import { SourceRepository } from "./source-repository";
 import { createInMemoryDb } from "./test-db";
+import { UndoService } from "./undo-service";
 
 let handle: DbHandle;
 
@@ -83,6 +84,11 @@ function rescheduleOps(handle: DbHandle, id: ElementId): { payload: Record<strin
 
 function setElementUpdatedAt(id: ElementId, updatedAt: string): void {
   handle.db.update(elements).set({ updatedAt }).where(eq(elements.id, id)).run();
+}
+
+function attentionIntervalMultiplierOf(id: ElementId): number {
+  const element = new ElementRepository(handle.db).findById(id);
+  return element?.attentionIntervalMultiplier ?? 1;
 }
 
 beforeEach(() => {
@@ -381,6 +387,123 @@ describe("SchedulerService.rescheduleForAction", () => {
     const result = service.rescheduleForAction(sourceId, "rewrite", "2026-05-30T12:00:00.000Z");
     expect(result.intervalDays).toBe(60);
     expect(result.retirementSuggestion).toBe(true);
+  });
+
+  it("keeps flag-off source visits on the legacy payload shape with multiplier unchanged", () => {
+    const { sourceId } = seedExtract(handle, 0.375); // C source; extraction creates yield.
+    const service = new SchedulerService(handle.db);
+    const now = "2026-05-30T12:00:00.000Z";
+
+    const result = service.rescheduleForAction(sourceId, "extract", now);
+
+    expect(result.intervalDays).toBe(30);
+    expect(attentionIntervalMultiplierOf(sourceId)).toBe(1);
+    const payload = rescheduleOps(handle, sourceId).at(-1)?.payload;
+    expect(payload).toMatchObject({ action: "extract", scheduledAt: now });
+    expect(payload?.attentionAdaptive).toBeUndefined();
+  });
+
+  it("when enabled, ignores pre-existing lifetime output without a visit baseline", () => {
+    const { sourceId } = seedExtract(handle, 0.375); // C source; one older child extract exists.
+    new SettingsRepository(handle.db).updateAppSettings({ adaptiveAttentionIntervals: true });
+    const service = new SchedulerService(handle.db);
+    const now = "2026-05-30T12:00:00.000Z";
+
+    const result = service.rescheduleForAction(sourceId, "extract", now);
+
+    expect(result.intervalDays).toBe(30);
+    expect(service.getPersistedAttentionIntervalMultiplier(sourceId)).toBe(1);
+    expect(attentionIntervalMultiplierOf(sourceId)).toBe(1);
+
+    const adaptive = rescheduleOps(handle, sourceId).at(-1)?.payload.attentionAdaptive;
+    expect(adaptive).toMatchObject({
+      version: 1,
+      enabled: true,
+      settingKey: ADAPTIVE_ATTENTION_INTERVALS_SETTING_KEY,
+      priorMultiplier: 1,
+      newMultiplier: 1,
+      reason: {
+        reasonKind: "yield_held",
+        baseIntervalDays: 30,
+        intervalAfterMultiplierDays: 30,
+        finalIntervalDays: 30,
+      },
+      counters: {
+        before: { extractsCreated: 1, totalOutputCount: 1 },
+        after: { extractsCreated: 1, totalOutputCount: 1 },
+        delta: { extractsCreated: 0, totalOutputCount: 0 },
+      },
+    });
+    expect(rescheduleOps(handle, sourceId).at(-1)?.payload).toMatchObject({
+      prevAttentionIntervalMultiplier: 1,
+      attentionIntervalMultiplier: 1,
+    });
+  });
+
+  it("undo restores an adaptive source multiplier with its schedule", () => {
+    const sourceId = seedSource(handle, 0.375);
+    new SettingsRepository(handle.db).updateAppSettings({ adaptiveAttentionIntervals: true });
+    const repo = new ElementRepository(handle.db);
+    const scheduler = new SchedulerService(handle.db);
+    const baseline = scheduler.captureAdaptiveVisitBaseline(sourceId, "extract");
+    const before = repo.findById(sourceId);
+
+    handle.db.transaction((tx) => {
+      repo.createWithin(tx, {
+        type: "extract",
+        status: "active",
+        stage: "raw_extract",
+        priority: 0.375,
+        title: "New output",
+        parentId: sourceId,
+        sourceId,
+      });
+      scheduler.rescheduleProcessedVisitWithin(
+        tx,
+        sourceId,
+        "extract",
+        "2026-05-30T12:00:00.000Z",
+        baseline,
+      );
+    });
+    expect(attentionIntervalMultiplierOf(sourceId)).toBe(0.85);
+
+    new UndoService(handle.db).undoLast();
+
+    const restored = repo.findById(sourceId);
+    expect(restored?.dueAt).toBe(before?.dueAt);
+    expect(restored?.status).toBe(before?.status);
+    expect(restored?.attentionIntervalMultiplier).toBe(before?.attentionIntervalMultiplier);
+  });
+
+  it("when enabled, lengthens a barren source without the legacy binary double", () => {
+    const sourceId = seedSource(handle, 0.375); // C source base = 30d
+    const blocks = new DocumentRepository(handle.db).listBlocks(sourceId);
+    const blockProcessing = new BlockProcessingService(handle.db);
+    for (const block of blocks) {
+      blockProcessing.markBlockIgnored({
+        sourceElementId: sourceId,
+        stableBlockId: block.stableBlockId as BlockId,
+      });
+    }
+    new SettingsRepository(handle.db).updateAppSettings({ adaptiveAttentionIntervals: true });
+    const service = new SchedulerService(handle.db);
+
+    const result = service.rescheduleForAction(sourceId, "rewrite", "2026-05-30T12:00:00.000Z");
+
+    expect(result.intervalDays).toBe(35);
+    expect(result.retirementSuggestion).toBe(true);
+    expect(service.getPersistedAttentionIntervalMultiplier(sourceId)).toBe(1.15);
+    const adaptive = rescheduleOps(handle, sourceId).at(-1)?.payload.attentionAdaptive;
+    expect(adaptive).toMatchObject({
+      newMultiplier: 1.15,
+      reason: {
+        reasonKind: "yield_lengthened",
+        baseIntervalDays: 30,
+        intervalAfterMultiplierDays: 35,
+        finalIntervalDays: 35,
+      },
+    });
   });
 });
 

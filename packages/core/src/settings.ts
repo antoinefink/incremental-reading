@@ -66,6 +66,8 @@ export type ThemePreference = (typeof THEMES)[number];
  * - `weeklyReviewEnabled` — whether the scheduled weekly ledger/integrity session
  *   is active (T110). Turning it off suppresses the system-owned weekly task.
  * - `weeklyReviewCadenceDays` — the attention cadence for the weekly session (T110).
+ * - `adaptiveAttentionIntervals` — whether T112's per-element attention interval
+ *   multiplier is used by processed source/extract visits. Default OFF until T113.
  * - `importBalanceFactor` — how lopsided imports-vs-processing must be before the
  *   balance warning fires (T046): imports must exceed processed output by this
  *   multiple. Higher = less sensitive. Read by the pure `judgeBalance` rule.
@@ -89,6 +91,7 @@ export interface AppSettings {
   readonly chronicPostponeThreshold: number;
   readonly weeklyReviewEnabled: boolean;
   readonly weeklyReviewCadenceDays: number;
+  readonly adaptiveAttentionIntervals: boolean;
   readonly importBalanceFactor: number;
   readonly keyboardLayout: KeyboardLayout;
   readonly theme: ThemePreference;
@@ -268,6 +271,7 @@ export const SETTINGS_KEYS = {
   chronicPostponeThreshold: "scheduler.chronicPostponeThreshold",
   weeklyReviewEnabled: "weeklyReview.enabled",
   weeklyReviewCadenceDays: "weeklyReview.cadenceDays",
+  adaptiveAttentionIntervals: "scheduler.adaptiveAttentionIntervals",
   importBalanceFactor: "balance.importFactor",
   keyboardLayout: "ui.keyboardLayout",
   theme: "ui.theme",
@@ -343,6 +347,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   chronicPostponeThreshold: 5,
   weeklyReviewEnabled: true,
   weeklyReviewCadenceDays: 7,
+  adaptiveAttentionIntervals: false,
   importBalanceFactor: DEFAULT_IMPORT_BALANCE_FACTOR,
   keyboardLayout: "qwerty",
   theme: "dark",
@@ -542,6 +547,8 @@ export function coerceSettingValue<K extends keyof AppSettings>(
           ? clampInt(raw, WEEKLY_REVIEW_CADENCE_DAYS_MIN, WEEKLY_REVIEW_CADENCE_DAYS_MAX)
           : fallback
       ) as AppSettings[K];
+    case "adaptiveAttentionIntervals":
+      return (typeof raw === "boolean" ? raw : fallback) as AppSettings[K];
     case "importBalanceFactor":
       return (isFiniteNumber(raw) ? clampFactor(raw) : fallback) as AppSettings[K];
     case "trashRetentionDays":
@@ -659,6 +666,10 @@ export function appSettingsFromStored(stored: Readonly<Record<string, unknown>>)
     weeklyReviewCadenceDays: coerceSettingValue(
       "weeklyReviewCadenceDays",
       stored[SETTINGS_KEYS.weeklyReviewCadenceDays],
+    ),
+    adaptiveAttentionIntervals: coerceSettingValue(
+      "adaptiveAttentionIntervals",
+      stored[SETTINGS_KEYS.adaptiveAttentionIntervals],
     ),
     importBalanceFactor: coerceSettingValue(
       "importBalanceFactor",

@@ -26,11 +26,15 @@ import type { IsoTimestamp, Priority } from "@interleave/core";
 import { PRIORITY_LABEL_VALUE } from "@interleave/core";
 import { describe, expect, it } from "vitest";
 import {
+  adaptiveAttentionIntervalMultiplier,
   basePostponeIntervalDays,
+  DEFAULT_ATTENTION_INTERVAL_MULTIPLIER,
   EXTRACT_STAGES,
   extractStageIntervalDays,
   isExtractStage,
   isSchedulerAction,
+  MAX_ATTENTION_INTERVAL_MULTIPLIER,
+  MIN_ATTENTION_INTERVAL_MULTIPLIER,
   nextDueAt,
   nextExtractStage,
   postponeIntervalForPriority,
@@ -178,6 +182,86 @@ describe("postponeIntervalForPriority (grows with postpone count)", () => {
   it("treats a missing/negative count as zero", () => {
     expect(postponeIntervalForPriority(B)).toBe(14);
     expect(postponeIntervalForPriority(B, -5)).toBe(14);
+  });
+});
+
+describe("adaptiveAttentionIntervalMultiplier", () => {
+  it("shortens a productive high-priority visit by only one bounded step", () => {
+    const decision = adaptiveAttentionIntervalMultiplier({
+      priority: A,
+      currentMultiplier: DEFAULT_ATTENTION_INTERVAL_MULTIPLIER,
+      visitYield: { childExtractsCreated: 2 },
+    });
+
+    expect(decision.reasonKind).toBe("yield_shortened");
+    expect(decision.priorMultiplier).toBe(1);
+    expect(decision.newMultiplier).toBe(0.9);
+    expect(decision.productiveOutputCount).toBe(2);
+  });
+
+  it("lengthens barren lower-priority visits faster than high-priority visits", () => {
+    const high = adaptiveAttentionIntervalMultiplier({
+      priority: B,
+      currentMultiplier: 1,
+      visitYield: { unresolvedRatio: 0, terminalRatio: 1, ignoredRatio: 0.75 },
+    });
+    const low = adaptiveAttentionIntervalMultiplier({
+      priority: C,
+      currentMultiplier: 1,
+      visitYield: { unresolvedRatio: 0, terminalRatio: 1, ignoredRatio: 0.75 },
+    });
+
+    expect(high.reasonKind).toBe("yield_lengthened");
+    expect(high.newMultiplier).toBe(1.05);
+    expect(low.reasonKind).toBe("yield_lengthened");
+    expect(low.newMultiplier).toBe(1.15);
+  });
+
+  it("counts synthesis output and honorable extract fates as productive value", () => {
+    expect(
+      adaptiveAttentionIntervalMultiplier({
+        priority: C,
+        currentMultiplier: 1,
+        visitYield: { synthesisOutputsCreated: 1 },
+      }).newMultiplier,
+    ).toBe(0.85);
+    expect(
+      adaptiveAttentionIntervalMultiplier({
+        priority: C,
+        currentMultiplier: 1,
+        visitYield: { honorableExtractFates: 1 },
+      }).newMultiplier,
+    ).toBe(0.85);
+  });
+
+  it("clamps malformed persisted multipliers to the bounded range", () => {
+    expect(
+      adaptiveAttentionIntervalMultiplier({
+        priority: C,
+        currentMultiplier: -10,
+        visitYield: { cardsCreated: 1 },
+      }).newMultiplier,
+    ).toBe(MIN_ATTENTION_INTERVAL_MULTIPLIER);
+    expect(
+      adaptiveAttentionIntervalMultiplier({
+        priority: C,
+        currentMultiplier: 10,
+        visitYield: { unresolvedRatio: 0 },
+      }).newMultiplier,
+    ).toBe(MAX_ATTENTION_INTERVAL_MULTIPLIER);
+  });
+
+  it("clamps and holds when visit-yield input is malformed", () => {
+    const decision = adaptiveAttentionIntervalMultiplier({
+      priority: C,
+      currentMultiplier: 10,
+      visitYield: { cardsCreated: -1, unresolvedRatio: 2 },
+    });
+
+    expect(decision.reasonKind).toBe("yield_input_malformed");
+    expect(decision.priorMultiplier).toBe(10);
+    expect(decision.clampedPriorMultiplier).toBe(MAX_ATTENTION_INTERVAL_MULTIPLIER);
+    expect(decision.newMultiplier).toBe(MAX_ATTENTION_INTERVAL_MULTIPLIER);
   });
 });
 
@@ -372,6 +456,149 @@ describe("nextDueAt (heuristic + action override)", () => {
     expect(decision.intervalDays).toBe(30);
     expect(daysBetween(NOW, decision.dueAt)).toBe(30);
     expect(decision.retirementSuggestion).toBe(true);
+  });
+
+  it("with adaptive intervals on, applies the multiplier between action interval and recency", () => {
+    const decision = nextDueAt(
+      {
+        type: "source",
+        priority: B,
+        lastAction: "done",
+        lastSeenAt: addDays(NOW, -3),
+        adaptiveAttentionIntervals: true,
+        attentionIntervalMultiplier: 1,
+        visitYield: { childExtractsCreated: 1 },
+      },
+      NOW,
+    );
+
+    expect(decision.attentionIntervalMultiplier).toBe(0.9);
+    expect(decision.adaptiveReason).toMatchObject({
+      reasonKind: "yield_shortened",
+      priorMultiplier: 1,
+      newMultiplier: 0.9,
+      baseIntervalDays: 60,
+      intervalAfterMultiplierDays: 54,
+      finalIntervalDays: 51,
+    });
+    expect(decision.intervalDays).toBe(51);
+    expect(daysBetween(NOW, decision.dueAt)).toBe(51);
+  });
+
+  it("with adaptive intervals on, lengthens barren sources without the legacy binary double", () => {
+    const decision = nextDueAt(
+      {
+        type: "source",
+        priority: C,
+        adaptiveAttentionIntervals: true,
+        attentionIntervalMultiplier: 1,
+        visitYield: { unresolvedRatio: 0, terminalRatio: 1, ignoredRatio: 0.75 },
+        sourceProcessing: {
+          unresolvedRatio: 0,
+          terminalRatio: 1,
+          ignoredRatio: 0.75,
+          extractedOutputCount: 0,
+        },
+      },
+      NOW,
+    );
+
+    expect(decision.intervalDays).toBe(35);
+    expect(decision.attentionIntervalMultiplier).toBe(1.15);
+    expect(decision.retirementSuggestion).toBe(true);
+    expect(decision.adaptiveReason).toMatchObject({
+      reasonKind: "yield_lengthened",
+      baseIntervalDays: 30,
+      intervalAfterMultiplierDays: 35,
+      finalIntervalDays: 35,
+    });
+  });
+
+  it("with adaptive intervals on, productive extract visits emit structured reason data", () => {
+    const decision = nextDueAt(
+      {
+        type: "extract",
+        stage: "clean_extract",
+        priority: C,
+        adaptiveAttentionIntervals: true,
+        attentionIntervalMultiplier: 1,
+        visitYield: { synthesisOutputsCreated: 1 },
+      },
+      NOW,
+    );
+
+    expect(decision.intervalDays).toBe(9);
+    expect(decision.attentionIntervalMultiplier).toBe(0.85);
+    expect(decision.adaptiveReason).toMatchObject({
+      reasonKind: "yield_shortened",
+      productiveOutputCount: 1,
+      baseIntervalDays: 10,
+      intervalAfterMultiplierDays: 9,
+      finalIntervalDays: 9,
+    });
+  });
+
+  it.each([
+    [
+      "source processing",
+      {
+        type: "source",
+        priority: B,
+        sourceProcessing: {
+          unresolvedRatio: 0.5,
+          terminalRatio: 0.5,
+          ignoredRatio: 0,
+          extractedOutputCount: 1,
+        },
+      },
+    ],
+    [
+      "extract",
+      {
+        type: "extract",
+        stage: "raw_extract",
+        priority: B,
+      },
+    ],
+    [
+      "topic default",
+      {
+        type: "topic",
+        priority: C,
+        defaultTopicIntervalDays: 14,
+      },
+    ],
+    [
+      "postpone",
+      {
+        type: "source",
+        priority: B,
+        lastAction: "postpone",
+        postponeCount: 2,
+      },
+    ],
+    [
+      "done with recency",
+      {
+        type: "source",
+        priority: B,
+        lastAction: "done",
+        lastSeenAt: addDays(NOW, -3),
+      },
+    ],
+  ] as const)("keeps flag-off behavior byte-identical for %s", (_, input) => {
+    const legacy = nextDueAt(input, NOW);
+    const flagOff = nextDueAt(
+      {
+        ...input,
+        adaptiveAttentionIntervals: false,
+        attentionIntervalMultiplier: 4,
+        visitYield: { childExtractsCreated: 10, cardsCreated: 10, unresolvedRatio: 0 },
+      },
+      NOW,
+    );
+
+    expect(flagOff).toEqual(legacy);
   });
 });
 

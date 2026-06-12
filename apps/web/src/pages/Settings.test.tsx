@@ -74,6 +74,7 @@ vi.mock("../lib/appApi", async () => {
 import {
   RESET_LOCAL_DATA_CONFIRMATION_PHRASE,
   RESTORE_BACKUP_CONFIRMATION_PHRASE,
+  type RendererSettings,
 } from "../lib/appApi";
 import { Settings } from "./Settings";
 
@@ -87,7 +88,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-const settings = {
+const settings: RendererSettings = {
   dailyReviewBudget: 60,
   defaultDesiredRetention: 0.9,
   defaultTopicIntervalDays: 7,
@@ -99,6 +100,7 @@ const settings = {
   chronicPostponeThreshold: 5,
   weeklyReviewEnabled: true,
   weeklyReviewCadenceDays: 7,
+  adaptiveAttentionIntervals: false,
   importBalanceFactor: 1.5,
   keyboardLayout: "qwerty",
   theme: "dark",

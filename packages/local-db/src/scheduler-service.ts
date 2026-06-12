@@ -19,9 +19,11 @@
  * renderer reaches it only through the typed `window.appApi`, never directly.
  */
 
-import type { Element, ElementId, IsoTimestamp } from "@interleave/core";
+import { type Element, type ElementId, type IsoTimestamp, SETTINGS_KEYS } from "@interleave/core";
 import { elements as elementsTable, type InterleaveDatabase } from "@interleave/db";
 import {
+  type AttentionVisitYieldInput,
+  DEFAULT_ATTENTION_INTERVAL_MULTIPLIER,
   nextDueAt,
   type Schedulable,
   type ScheduleChoice,
@@ -35,6 +37,11 @@ import { nowIso } from "./ids";
 import { rowToElement } from "./mappers";
 import { OperationLogRepository } from "./operation-log-repository";
 import { SettingsRepository } from "./settings-repository";
+import {
+  emptyVisitCounters,
+  SourceYieldQuery,
+  type VisitYieldCounters,
+} from "./source-yield-query";
 import type { TransactionClient } from "./types";
 
 /** The result of applying a schedule: the rescheduled element + the chosen interval. */
@@ -44,6 +51,31 @@ export interface ScheduleResult {
   readonly intervalDays: number;
   /** Low-yield source signal from block processing, when applicable. */
   readonly retirementSuggestion?: boolean;
+}
+
+export const ADAPTIVE_ATTENTION_INTERVALS_SETTING_KEY = SETTINGS_KEYS.adaptiveAttentionIntervals;
+
+interface AdaptiveSchedulePayload {
+  readonly version: 1;
+  readonly enabled: true;
+  readonly settingKey: typeof ADAPTIVE_ATTENTION_INTERVALS_SETTING_KEY;
+  readonly reason: NonNullable<ReturnType<typeof nextDueAt>["adaptiveReason"]>;
+  readonly priorMultiplier: number;
+  readonly newMultiplier: number;
+  readonly counters: {
+    readonly before: VisitYieldCounters;
+    readonly after: VisitYieldCounters;
+    readonly delta: VisitYieldCounters;
+  };
+}
+
+export type AdaptiveVisitBaseline = VisitYieldCounters;
+
+interface AdaptiveVisitContext {
+  readonly before: VisitYieldCounters;
+  readonly after: VisitYieldCounters;
+  readonly delta: VisitYieldCounters;
+  readonly visitYield: AttentionVisitYieldInput;
 }
 
 export class SchedulerService {
@@ -102,6 +134,25 @@ export class SchedulerService {
     return this.operationLog.countPostpones(id);
   }
 
+  adaptiveAttentionIntervalsEnabled(): boolean {
+    return this.settings.getAppSettings().adaptiveAttentionIntervals;
+  }
+
+  getPersistedAttentionIntervalMultiplier(id: ElementId): number {
+    const element = this.elements.findById(id);
+    return element ? attentionIntervalMultiplierOf(element) : DEFAULT_ATTENTION_INTERVAL_MULTIPLIER;
+  }
+
+  captureAdaptiveVisitBaseline(
+    id: ElementId,
+    action: SchedulerAction,
+  ): AdaptiveVisitBaseline | null {
+    if (!this.adaptiveAttentionIntervalsEnabled()) return null;
+    const element = this.requireAttentionElement(id);
+    if (!isAdaptiveVisit(element, action)) return null;
+    return this.visitCountersFor(element);
+  }
+
   private postponeCountForScheduling(element: Element): number {
     const count = this.countPostpones(element.id);
     if (element.type === "task") return count;
@@ -123,7 +174,11 @@ export class SchedulerService {
    * topic onto the by-priority band). This mirrors how the queue's budget gauge
    * reads `getAppSettings().dailyReviewBudget`.
    */
-  private toSchedulable(element: Element, lastAction?: SchedulerAction): Schedulable {
+  private toSchedulable(
+    element: Element,
+    lastAction?: SchedulerAction,
+    visitYield?: AttentionVisitYieldInput | null,
+  ): Schedulable {
     const defaultTopicIntervalDays =
       element.type === "topic" ? this.settings.getAppSettings().defaultTopicIntervalDays : null;
     const blockSummary =
@@ -149,6 +204,13 @@ export class SchedulerService {
             extractedOutputCount: blockSummary.extractedOutputCount,
           }
         : null,
+      ...(visitYield && this.adaptiveAttentionIntervalsEnabled()
+        ? {
+            adaptiveAttentionIntervals: true,
+            attentionIntervalMultiplier: attentionIntervalMultiplierOf(element),
+            visitYield,
+          }
+        : {}),
     };
   }
 
@@ -175,12 +237,18 @@ export class SchedulerService {
   ): ScheduleResult {
     const element = this.requireAttentionElement(id);
     const priorPostpones = this.countPostpones(id);
-    const decision = nextDueAt(this.toSchedulable(element, action), now);
+    const adaptive = this.adaptiveVisitContext(element, action);
+    const decision = nextDueAt(this.toSchedulable(element, action, adaptive?.visitYield), now);
     return this.db.transaction((tx) => {
       const opExtras = {
         ...(action === "postpone"
           ? { postpone: true, postponeCount: priorPostpones + 1, action, scheduledAt: now }
           : { action, scheduledAt: now }),
+        ...(adaptive &&
+        decision.adaptiveReason &&
+        decision.attentionIntervalMultiplier !== undefined
+          ? { attentionAdaptive: adaptivePayload(adaptive, decision.adaptiveReason) }
+          : {}),
         ...(batchId ? { batchId } : {}),
       };
       const rescheduled = this.elements.rescheduleWithin(
@@ -189,7 +257,12 @@ export class SchedulerService {
         decision.dueAt,
         "scheduled",
         opExtras,
-        { updatedAt: now },
+        {
+          updatedAt: now,
+          ...(decision.attentionIntervalMultiplier !== undefined
+            ? { attentionIntervalMultiplier: decision.attentionIntervalMultiplier }
+            : {}),
+        },
       );
       return {
         element: rescheduled,
@@ -199,6 +272,53 @@ export class SchedulerService {
           : {}),
       };
     });
+  }
+
+  /**
+   * Transaction-composable processed-visit reschedule for services that already
+   * own a mutation transaction (currently extract stage changes). With the T112
+   * flag off, callers should keep their legacy path; this method exists for the
+   * adaptive-on path so diagnostics and multiplier state are written through one
+   * scheduler seam.
+   */
+  rescheduleProcessedVisitWithin(
+    tx: TransactionClient,
+    id: ElementId,
+    action: SchedulerAction,
+    now: IsoTimestamp = nowIso(),
+    baseline?: AdaptiveVisitBaseline | null,
+  ): ScheduleResult {
+    const element = this.requireAttentionElementWithin(tx, id);
+    const adaptive = this.adaptiveVisitContext(element, action, baseline);
+    const decision = nextDueAt(this.toSchedulable(element, action, adaptive?.visitYield), now);
+    const rescheduled = this.elements.rescheduleWithin(
+      tx,
+      id,
+      decision.dueAt,
+      "scheduled",
+      {
+        action,
+        scheduledAt: now,
+        ...(adaptive &&
+        decision.adaptiveReason &&
+        decision.attentionIntervalMultiplier !== undefined
+          ? { attentionAdaptive: adaptivePayload(adaptive, decision.adaptiveReason) }
+          : {}),
+      },
+      {
+        updatedAt: now,
+        ...(decision.attentionIntervalMultiplier !== undefined
+          ? { attentionIntervalMultiplier: decision.attentionIntervalMultiplier }
+          : {}),
+      },
+    );
+    return {
+      element: rescheduled,
+      intervalDays: decision.intervalDays,
+      ...(decision.retirementSuggestion
+        ? { retirementSuggestion: decision.retirementSuggestion }
+        : {}),
+    };
   }
 
   /**
@@ -332,4 +452,143 @@ export class SchedulerService {
       return { element: rescheduled, intervalDays: decision.intervalDays };
     });
   }
+
+  private adaptiveVisitContext(
+    element: Element,
+    action: SchedulerAction,
+    baseline?: AdaptiveVisitBaseline | null,
+  ): AdaptiveVisitContext | null {
+    if (!this.adaptiveAttentionIntervalsEnabled()) return null;
+    if (!isAdaptiveVisit(element, action)) return null;
+
+    const after = this.visitCountersFor(element);
+    const previousPayload = this.latestAdaptivePayload(element.id);
+    const before = baseline ?? previousPayload?.counters.after ?? after;
+    const delta = deltaCounters(before, after);
+    const summary =
+      element.type === "source"
+        ? this.blockProcessing.getSourceProcessingSummary(element.id)
+        : null;
+
+    return {
+      before,
+      after,
+      delta,
+      visitYield: {
+        childExtractsCreated:
+          delta.extractsCreated + (element.type === "source" ? delta.extractedOutputCount : 0),
+        atomicStatementsCreated: element.type === "extract" ? delta.extractedOutputCount : 0,
+        cardsCreated: delta.cardsCreated,
+        synthesisOutputsCreated: delta.synthesisNotesCreated,
+        honorableExtractFates: delta.productiveExtracts,
+        ...(summary
+          ? {
+              unresolvedRatio:
+                summary.totalBlocks === 0 ? 0 : summary.unresolvedBlocks / summary.totalBlocks,
+              terminalRatio: summary.terminalRatio,
+              ignoredRatio: summary.ignoredRatio,
+            }
+          : {}),
+      },
+    };
+  }
+
+  private visitCountersFor(element: Element): VisitYieldCounters {
+    const query = new SourceYieldQuery(this.db);
+    if (element.type === "source") {
+      return query.getSourceVisitCounters(element.id);
+    }
+    if (element.type === "extract") {
+      return query.getExtractVisitCounters(element.id);
+    }
+    return emptyVisitCounters();
+  }
+
+  private latestAdaptivePayload(id: ElementId): AdaptiveSchedulePayload | null {
+    const adaptive = this.operationLog.latestAttentionAdaptivePayload(id);
+    return isAdaptivePayload(adaptive) ? adaptive : null;
+  }
+}
+
+function isAdaptiveVisit(element: Element, action: SchedulerAction): boolean {
+  if (element.type !== "source" && element.type !== "extract") return false;
+  return action === "extract" || action === "rewrite";
+}
+
+function isAdaptivePayload(value: unknown): value is AdaptiveSchedulePayload {
+  if (!value || typeof value !== "object") return false;
+  const payload = value as Record<string, unknown>;
+  const counters = payload.counters;
+  return (
+    payload.version === 1 &&
+    payload.enabled === true &&
+    typeof payload.priorMultiplier === "number" &&
+    typeof payload.newMultiplier === "number" &&
+    typeof payload.reason === "object" &&
+    payload.reason !== null &&
+    typeof counters === "object" &&
+    counters !== null &&
+    isVisitYieldCounters((counters as Record<string, unknown>).before) &&
+    isVisitYieldCounters((counters as Record<string, unknown>).after) &&
+    isVisitYieldCounters((counters as Record<string, unknown>).delta)
+  );
+}
+
+function isVisitYieldCounters(value: unknown): value is VisitYieldCounters {
+  if (!value || typeof value !== "object") return false;
+  const counters = value as Record<string, unknown>;
+  return [
+    counters.extractsCreated,
+    counters.productiveExtracts,
+    counters.cardsCreated,
+    counters.synthesisNotesCreated,
+    counters.extractedOutputCount,
+    counters.unresolvedBlocks,
+    counters.totalOutputCount,
+  ].every((counter) => typeof counter === "number" && Number.isFinite(counter) && counter >= 0);
+}
+
+function adaptivePayload(
+  context: AdaptiveVisitContext,
+  reason: NonNullable<ReturnType<typeof nextDueAt>["adaptiveReason"]>,
+): AdaptiveSchedulePayload {
+  return {
+    version: 1,
+    enabled: true,
+    settingKey: ADAPTIVE_ATTENTION_INTERVALS_SETTING_KEY,
+    reason,
+    priorMultiplier: reason.priorMultiplier,
+    newMultiplier: reason.newMultiplier,
+    counters: {
+      before: context.before,
+      after: context.after,
+      delta: context.delta,
+    },
+  };
+}
+
+function attentionIntervalMultiplierOf(element: Element): number {
+  const value = element.attentionIntervalMultiplier;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : DEFAULT_ATTENTION_INTERVAL_MULTIPLIER;
+}
+
+function deltaCounters(before: VisitYieldCounters, after: VisitYieldCounters): VisitYieldCounters {
+  return {
+    extractsCreated: nonnegativeDelta(before.extractsCreated, after.extractsCreated),
+    productiveExtracts: nonnegativeDelta(before.productiveExtracts, after.productiveExtracts),
+    cardsCreated: nonnegativeDelta(before.cardsCreated, after.cardsCreated),
+    synthesisNotesCreated: nonnegativeDelta(
+      before.synthesisNotesCreated,
+      after.synthesisNotesCreated,
+    ),
+    extractedOutputCount: nonnegativeDelta(before.extractedOutputCount, after.extractedOutputCount),
+    unresolvedBlocks: nonnegativeDelta(before.unresolvedBlocks, after.unresolvedBlocks),
+    totalOutputCount: nonnegativeDelta(before.totalOutputCount, after.totalOutputCount),
+  };
+}
+
+function nonnegativeDelta(before: number, after: number): number {
+  return Math.max(0, after - before);
 }

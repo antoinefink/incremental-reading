@@ -47,6 +47,8 @@ export interface Element {
   stage: DistillationStage;
   /** Normalized numeric priority `0.0`–`1.0`; surfaced as A/B/C/D in the UI. */
   priority: Priority;
+  /** Attention interval scaling factor `0.5`–`4.0` (1.0 = normal cadence). */
+  attentionIntervalMultiplier: number;
   /** When this element next wants attention/review; `null` if unscheduled. */
   dueAt: IsoTimestamp | null;
   /** When this element was deliberately parked for later; `null` unless status is `parked`. */

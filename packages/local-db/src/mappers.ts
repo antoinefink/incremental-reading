@@ -37,6 +37,7 @@ export function rowToElement(row: ElementRow): Element {
     status: row.status as Element["status"],
     stage: row.stage as Element["stage"],
     priority: row.priority,
+    attentionIntervalMultiplier: row.attentionIntervalMultiplier,
     dueAt: row.dueAt,
     parkedAt: row.parkedAt ?? null,
     fallowUntil: row.fallowUntil ?? null,

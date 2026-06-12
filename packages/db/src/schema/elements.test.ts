@@ -13,6 +13,7 @@ describe("element schema", () => {
       "status",
       "stage",
       "priority",
+      "attentionIntervalMultiplier",
       "dueAt",
       "parkedAt",
       "fallowUntil",
@@ -27,6 +28,9 @@ describe("element schema", () => {
       "deletedAt",
     ]);
     expect(columns.parentId.name).toBe("parent_id");
+    expect(columns.attentionIntervalMultiplier.name).toBe("attention_interval_multiplier");
+    expect(columns.attentionIntervalMultiplier.notNull).toBe(true);
+    expect(columns.attentionIntervalMultiplier.default).toBe(1.0);
     expect(columns.sourceId.name).toBe("source_id");
     expect(columns.fallowUntil.name).toBe("fallow_until");
     expect(columns.fallowReason.name).toBe("fallow_reason");

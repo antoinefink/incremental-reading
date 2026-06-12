@@ -150,6 +150,22 @@ export interface SourceYieldSummary {
   readonly lowYieldCount: number;
 }
 
+/**
+ * Compact, monotone counters for one adaptive scheduling visit. These are not the
+ * ranked analytics view; they are the small durable facts the write path can store
+ * in `operation_log` so diagnostics do not need to reconstruct old yield from
+ * mutable current rows.
+ */
+export interface VisitYieldCounters {
+  readonly extractsCreated: number;
+  readonly productiveExtracts: number;
+  readonly cardsCreated: number;
+  readonly synthesisNotesCreated: number;
+  readonly extractedOutputCount: number;
+  readonly unresolvedBlocks: number;
+  readonly totalOutputCount: number;
+}
+
 /** Options for {@link SourceYieldQuery.listSourceYield}. */
 export interface SourceYieldOptions {
   /** Cap the row count (defaults to {@link DEFAULT_SOURCE_YIELD_LIMIT}). */
@@ -482,6 +498,176 @@ export class SourceYieldQuery {
   }
 
   /**
+   * Scoped source counters for T112's write path. Unlike `listSourceYield`, this
+   * only reads the requested source's descendants and block-processing summary, so
+   * scheduling a processed visit does not scan the whole library.
+   */
+  getSourceVisitCounters(sourceId: ElementId): VisitYieldCounters {
+    const liveTargets = new Map<string, YieldTarget>();
+    const fatedExtractIds = new Set<string>();
+    const synthesisReferencedExtractIds = new Set<string>();
+    const synthesisNoteIds = new Set<string>();
+    let extractsCreated = 0;
+    let cardsCreated = 0;
+
+    const descendants = this.db
+      .select({
+        id: elements.id,
+        type: elements.type,
+        extractFate: elements.extractFate,
+      })
+      .from(elements)
+      .where(
+        and(
+          eq(elements.sourceId, sourceId),
+          inArray(elements.type, ["extract", "card"]),
+          isNull(elements.deletedAt),
+        ),
+      )
+      .all();
+
+    for (const row of descendants) {
+      liveTargets.set(row.id, { id: row.id, type: row.type, sourceId });
+      if (row.type === "extract") {
+        extractsCreated += 1;
+        if (row.extractFate) fatedExtractIds.add(row.id);
+      } else if (row.type === "card") {
+        cardsCreated += 1;
+      }
+    }
+
+    this.collectSynthesisCounters(liveTargets, synthesisNoteIds, synthesisReferencedExtractIds);
+
+    const blockSummary = this.blockProcessing.getSourceProcessingSummary(sourceId);
+    const productiveExtracts = new Set([...fatedExtractIds, ...synthesisReferencedExtractIds]).size;
+    const totalOutputCount =
+      extractsCreated + productiveExtracts + cardsCreated + synthesisNoteIds.size;
+
+    return {
+      extractsCreated,
+      productiveExtracts,
+      cardsCreated,
+      synthesisNotesCreated: synthesisNoteIds.size,
+      extractedOutputCount: blockSummary.extractedOutputCount,
+      unresolvedBlocks: blockSummary.unresolvedBlocks,
+      totalOutputCount,
+    };
+  }
+
+  /**
+   * Scoped extract counters for T112's write path. Counts only output that can be
+   * attributed to this extract: child extracts/cards, synthesis references, an
+   * honorable fate on the extract itself, and the atomic-statement stage.
+   */
+  getExtractVisitCounters(extractId: ElementId): VisitYieldCounters {
+    const extract = this.db
+      .select({
+        id: elements.id,
+        type: elements.type,
+        stage: elements.stage,
+        extractFate: elements.extractFate,
+      })
+      .from(elements)
+      .where(and(eq(elements.id, extractId), isNull(elements.deletedAt)))
+      .get();
+    if (extract?.type !== "extract") {
+      return emptyVisitCounters();
+    }
+
+    const childRows = this.db
+      .select({
+        id: elements.id,
+        type: elements.type,
+        extractFate: elements.extractFate,
+      })
+      .from(elementRelations)
+      .innerJoin(elements, eq(elementRelations.fromElementId, elements.id))
+      .where(
+        and(
+          eq(elementRelations.toElementId, extractId),
+          eq(elementRelations.relationType, "derived_from"),
+          inArray(elements.type, ["extract", "card"]),
+          isNull(elements.deletedAt),
+        ),
+      )
+      .all();
+
+    const liveTargets = new Map<string, YieldTarget>();
+    const fatedExtractIds = new Set<string>();
+    const synthesisReferencedExtractIds = new Set<string>();
+    const synthesisNoteIds = new Set<string>();
+    let extractsCreated = 0;
+    let cardsCreated = 0;
+
+    liveTargets.set(extract.id, { id: extract.id, type: "extract", sourceId: "" });
+    if (extract.extractFate) fatedExtractIds.add(extract.id);
+
+    for (const row of childRows) {
+      liveTargets.set(row.id, { id: row.id, type: row.type, sourceId: "" });
+      if (row.type === "extract") {
+        extractsCreated += 1;
+        if (row.extractFate) fatedExtractIds.add(row.id);
+      } else if (row.type === "card") {
+        cardsCreated += 1;
+      }
+    }
+
+    this.collectSynthesisCounters(liveTargets, synthesisNoteIds, synthesisReferencedExtractIds);
+
+    const productiveExtracts = new Set([...fatedExtractIds, ...synthesisReferencedExtractIds]).size;
+    const atomicStatements = extract.stage === "atomic_statement" ? 1 : 0;
+    const totalOutputCount =
+      extractsCreated +
+      productiveExtracts +
+      cardsCreated +
+      synthesisNoteIds.size +
+      atomicStatements;
+
+    return {
+      extractsCreated,
+      productiveExtracts,
+      cardsCreated,
+      synthesisNotesCreated: synthesisNoteIds.size,
+      extractedOutputCount: atomicStatements,
+      unresolvedBlocks: 0,
+      totalOutputCount,
+    };
+  }
+
+  private collectSynthesisCounters(
+    liveTargets: ReadonlyMap<string, YieldTarget>,
+    synthesisNoteIds: Set<string>,
+    synthesisReferencedExtractIds: Set<string>,
+  ): void {
+    if (liveTargets.size === 0) return;
+    const referenceEdges = this.db
+      .select({
+        noteId: elementRelations.fromElementId,
+        targetId: elementRelations.toElementId,
+      })
+      .from(elementRelations)
+      .innerJoin(elements, eq(elementRelations.fromElementId, elements.id))
+      .where(
+        and(
+          eq(elementRelations.relationType, "references"),
+          eq(elements.type, "synthesis_note"),
+          isNull(elements.deletedAt),
+          inArray(elementRelations.toElementId, [...liveTargets.keys()]),
+        ),
+      )
+      .all();
+
+    for (const edge of referenceEdges) {
+      const target = liveTargets.get(edge.targetId);
+      if (!target) continue;
+      synthesisNoteIds.add(edge.noteId);
+      if (target.type === "extract") {
+        synthesisReferencedExtractIds.add(target.id);
+      }
+    }
+  }
+
+  /**
    * The read %: the read-point's block position over the source's live block count.
    * `(orderIndex + 1) / blockCount`, clamped to `[0, 1]`. **0** when there is no
    * read-point or no blocks; **100%** when the read-point is at/after the last block.
@@ -500,6 +686,18 @@ export class SourceYieldQuery {
     const pct = (index + 1) / blocks.length;
     return Math.min(1, Math.max(0, pct));
   }
+}
+
+export function emptyVisitCounters(): VisitYieldCounters {
+  return {
+    extractsCreated: 0,
+    productiveExtracts: 0,
+    cardsCreated: 0,
+    synthesisNotesCreated: 0,
+    extractedOutputCount: 0,
+    unresolvedBlocks: 0,
+    totalOutputCount: 0,
+  };
 }
 
 /** The later (greater) of two nullable ISO timestamps, or `null` when both are null. */

@@ -19,6 +19,7 @@ function element(overrides: Partial<Element> & { id: ElementId; type: Element["t
     status: "active",
     stage: stage ?? (type === "source" ? "raw_source" : "raw_extract"),
     priority: 0.5,
+    attentionIntervalMultiplier: 1,
     dueAt: null,
     parkedAt: null,
     fallowUntil: null,

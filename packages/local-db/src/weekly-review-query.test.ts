@@ -1,7 +1,7 @@
 import type { ElementId, IsoTimestamp } from "@interleave/core";
 import { PRIORITY_LABEL_VALUE } from "@interleave/core";
-import { type DbHandle, operationLog, tasks } from "@interleave/db";
-import { eq } from "drizzle-orm";
+import { type DbHandle, elements, operationLog, tasks } from "@interleave/db";
+import { and, eq, inArray } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRepositories, type Repositories } from "./index";
 import { createInMemoryDb } from "./test-db";
@@ -158,15 +158,39 @@ describe("WeeklyReviewQuery / WeeklyReviewService", () => {
       nextLearningSteps: 0,
     });
     repos.elements.reschedule(source.element.id, "2026-06-10T12:00:00.000Z" as IsoTimestamp);
+    handle.db
+      .update(elements)
+      .set({
+        createdAt: "2026-06-10T12:00:00.000Z",
+        updatedAt: "2026-06-10T12:00:00.000Z",
+      })
+      .where(inArray(elements.id, [source.element.id, extract.element.id, card.element.id]))
+      .run();
     handle.db.transaction((tx) => {
       repos.elements.rescheduleWithin(
         tx,
         source.element.id,
         "2026-06-20T12:00:00.000Z" as IsoTimestamp,
         "scheduled",
-        { postpone: true, postponeCount: 1 },
+        {
+          dueAt: "2026-06-20T12:00:00.000Z",
+          postpone: true,
+          postponeCount: 1,
+          prevDueAt: "2026-06-10T12:00:00.000Z",
+        },
+        { updatedAt: NOW },
       );
     });
+    handle.db
+      .update(operationLog)
+      .set({ createdAt: NOW })
+      .where(
+        and(
+          eq(operationLog.elementId, source.element.id),
+          eq(operationLog.opType, "reschedule_element"),
+        ),
+      )
+      .run();
 
     const summary = repos.weeklyReview.summary(NOW);
     expect(summary.ledger.sources).toBeGreaterThanOrEqual(1);

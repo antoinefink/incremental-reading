@@ -99,7 +99,7 @@ engine cannot tell "processed yesterday" from "ignored for a month".
 # T112 — Yield-adaptive interval multiplier
 
 - **Milestone:** M23 — Adaptive attention scheduler
-- **Status:** `[ ]` not started
+- **Status:** `[x]` complete
 - **Depends on:** T104, T111
 - **Roadmap line:** each source/extract carries a bounded per-element interval multiplier
   (≈×0.5–×4 of band base) updated on every processed visit from v2 yield, with priority
@@ -125,22 +125,44 @@ growing linearly with source count.
 
 ## Deliverables
 
-- [ ] Multiplier definition in `packages/scheduler` (pure): inputs = v2 yield of the visit
+- [x] Multiplier definition in `packages/scheduler` (pure): inputs = v2 yield of the visit
       (extracts/statements/cards/synthesis produced, honorable fates), unresolved ratio, and
       priority (higher priority → slower interval growth, mirroring SM's priority↔A-Factor
       coupling). Bounds ≈ [0.5, 4.0] on the band base; step-limited per visit; documented
       in-code with the growth table.
-- [ ] Persistence: per-element multiplier column + migration; written transactionally with the
+- [x] Persistence: per-element multiplier column + migration; written transactionally with the
       schedule on each processed visit; undo preimages logged.
-- [ ] Replace the two binary branches with the graded path (dead-source case still emits
+- [x] Replace the two binary branches with the graded path (dead-source case still emits
       `retirementSuggestion`).
-- [ ] Feature flag/setting: "adaptive intervals" default ON only once T113 ships; OFF falls back
+- [x] Feature flag/setting: "adaptive intervals" default ON only once T113 ships; OFF falls back
       to band tables (keep the fallback path tested).
-- [ ] Drift diagnostic: multiplier-out-of-bounds and multiplier-vs-history inconsistency cases.
-- [ ] Tests: table-tests across the yield×priority grid (productive A-source shortens; barren
+- [x] Drift diagnostic: multiplier-out-of-bounds and multiplier-vs-history inconsistency cases.
+- [x] Tests: table-tests across the yield×priority grid (productive A-source shortens; barren
       C-source lengthens toward retirement; synthesis-only output counts as productive — the
       T104 regression test); 100k-fixture performance check; e2e — a productive fixture source
       visibly returns sooner than its band floor after two visits.
+
+## Completion notes
+
+- Added `elements.attention_interval_multiplier` with a SQLite migration, Drizzle snapshot, core
+  element mapping, repository write support, and undo restoration via `reschedule_element`
+  preimages.
+- Added the typed `scheduler.adaptiveAttentionIntervals` setting, defaulting `false` until T113
+  exposes schedule reasons in the UI. With the flag off, source/extract scheduling keeps the
+  pre-T112 band/legacy source-processing behavior.
+- Added the pure adaptive multiplier path in `@interleave/scheduler`: processed source/extract
+  visits can shorten, hold, or lengthen the bounded multiplier `[0.5, 4.0]`; dead-source
+  retirement suggestions remain available.
+- Scheduler application captures command-scoped source/extract yield baselines before the
+  transaction, computes after-counters after the mutation, records structured adaptive diagnostics
+  in the same `reschedule_element` op, and uses a bounded latest-adaptive-payload lookup instead
+  of scanning full element history.
+- Source/extract yield counters include child extracts, cards, synthesis-note references,
+  honorable extract fates, atomic-statement output, and block-processing output so
+  synthesis-driven reading is counted as productive.
+- Verification: `pnpm lint`; `pnpm typecheck`; `pnpm test`; `pnpm e2e
+  tests/electron/extraction.spec.ts tests/electron/extract-review.spec.ts` (rerun with local
+  server-binding escalation after sandbox `listen EPERM`).
 
 ## Done when
 

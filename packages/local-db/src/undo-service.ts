@@ -290,6 +290,12 @@ export class UndoService {
         const prevStatusRaw = op.payload.prevStatus;
         const prevStatus =
           typeof prevStatusRaw === "string" ? (prevStatusRaw as ElementStatus) : undefined;
+        const prevAttentionIntervalMultiplierRaw = op.payload.prevAttentionIntervalMultiplier;
+        const prevAttentionIntervalMultiplier =
+          typeof prevAttentionIntervalMultiplierRaw === "number" &&
+          Number.isFinite(prevAttentionIntervalMultiplierRaw)
+            ? prevAttentionIntervalMultiplierRaw
+            : undefined;
         const before = this.elements.findById(id);
         // A card postpone-defer (T030) advances BOTH `elements.due_at` AND the FSRS
         // `review_states.due_at` (the queue reads the latter for cards). Restoring
@@ -302,7 +308,11 @@ export class UndoService {
           ? ((op.payload.prevReviewDueAt ?? null) as IsoTimestamp | null)
           : null;
         const rescheduled = this.db.transaction((tx) => {
-          const el = this.elements.rescheduleWithin(tx, id, prevDueAt, prevStatus);
+          const el = this.elements.rescheduleWithin(tx, id, prevDueAt, prevStatus, undefined, {
+            ...(prevAttentionIntervalMultiplier !== undefined
+              ? { attentionIntervalMultiplier: prevAttentionIntervalMultiplier }
+              : {}),
+          });
           if (isCardDefer) {
             tx.update(reviewStates)
               .set({ dueAt: prevReviewDueAt })

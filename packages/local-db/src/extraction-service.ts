@@ -58,6 +58,7 @@ import { BlockProcessingService } from "./block-processing-service";
 import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
 import { newElementId, nowIso } from "./ids";
+import { SchedulerService } from "./scheduler-service";
 import {
   deriveClipLabel,
   deriveSourceLocationLabel,
@@ -169,12 +170,14 @@ export class ExtractionService {
   private readonly sources: SourceRepository;
   private readonly documents: DocumentRepository;
   private readonly blockProcessing: BlockProcessingService;
+  private readonly scheduler: SchedulerService;
 
   constructor(private readonly db: InterleaveDatabase) {
     this.elements = new ElementRepository(db);
     this.sources = new SourceRepository(db);
     this.documents = new DocumentRepository(db);
     this.blockProcessing = new BlockProcessingService(db);
+    this.scheduler = new SchedulerService(db);
   }
 
   /**
@@ -214,6 +217,10 @@ export class ExtractionService {
         : plainTextToProseMirrorDoc(input.selectedText);
     // Read the source's inherited tags up front (a read; the writes happen in tx).
     const inheritedTags = this.elements.listTags(input.sourceElementId);
+    const sourceBaseline =
+      locationSource === input.sourceElementId
+        ? this.scheduler.captureAdaptiveVisitBaseline(input.sourceElementId, "extract")
+        : null;
 
     return this.db.transaction((tx) => {
       // 1) extract element + source_locations anchor (create_element + create_extract).
@@ -260,7 +267,8 @@ export class ExtractionService {
 
       // 5) initial ATTENTION due date + status scheduled (reschedule_element).
       //    NEVER FSRS — no review_states row is created for an extract.
-      const dueAt = addDays(nowIso(), rawExtractIntervalDays(input.priority));
+      const scheduledAt = nowIso();
+      const dueAt = addDays(scheduledAt, rawExtractIntervalDays(input.priority));
       const scheduled = this.elements.rescheduleWithin(tx, element.id, dueAt, "scheduled");
 
       // 6) parent/source extracted_span breadcrumb over the selected range
@@ -291,6 +299,15 @@ export class ExtractionService {
           sourceLocationId: location.id,
           blockIds: input.blockIds,
         });
+        if (this.scheduler.adaptiveAttentionIntervalsEnabled()) {
+          this.scheduler.rescheduleProcessedVisitWithin(
+            tx,
+            input.sourceElementId,
+            "extract",
+            scheduledAt,
+            sourceBaseline,
+          );
+        }
       }
 
       return { element: scheduled, location };

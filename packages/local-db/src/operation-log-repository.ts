@@ -14,7 +14,7 @@
 
 import type { OperationLogEntry, OperationType } from "@interleave/core";
 import { operationLog } from "@interleave/db";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { newOperationId, nowIso } from "./ids";
 import type { DbClient } from "./types";
 
@@ -90,6 +90,30 @@ export class OperationLogRepository {
       .orderBy(desc(operationLog.createdAt), desc(sql`rowid`))
       .all()
       .map(rowToEntry);
+  }
+
+  /**
+   * Latest `attentionAdaptive` diagnostic from a `reschedule_element` op for one
+   * element, newest first. This keeps adaptive scheduling off the unbounded
+   * `listForElement()` history scan while preserving the op-log payload as the
+   * source of previous visit counters.
+   */
+  latestAttentionAdaptivePayload(elementId: string): unknown | null {
+    const row = this.db
+      .select({ payload: operationLog.payload })
+      .from(operationLog)
+      .where(
+        and(
+          eq(operationLog.elementId, elementId),
+          eq(operationLog.opType, "reschedule_element"),
+          sql`json_type(${operationLog.payload}, '$.attentionAdaptive') IS NOT NULL`,
+        ),
+      )
+      .orderBy(desc(operationLog.createdAt), desc(sql`rowid`))
+      .limit(1)
+      .get();
+    if (!row) return null;
+    return payloadObject(JSON.parse(row.payload))?.attentionAdaptive ?? null;
   }
 
   /** The whole log, newest first (audit/backup helper). */

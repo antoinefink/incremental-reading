@@ -1,4 +1,4 @@
-import type { ElementId, SiblingGroupId } from "@interleave/core";
+import type { Element, ElementId, SiblingGroupId } from "@interleave/core";
 import type { DbHandle } from "@interleave/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ElementRepository } from "./element-repository";
@@ -29,6 +29,10 @@ function createTopic(title: string, parentId?: ElementId | null, sourceId?: Elem
     parentId: parentId ?? null,
     sourceId: sourceId ?? null,
   });
+}
+
+function attentionMultiplierOf(element: Element | null): number | null {
+  return element?.attentionIntervalMultiplier ?? null;
 }
 
 describe("ElementRepository direct reads", () => {
@@ -100,6 +104,34 @@ describe("ElementRepository direct reads", () => {
     expect(softDelete?.payload).toMatchObject({
       prev: { status: "scheduled" },
       batchId: "batch-3",
+    });
+  });
+
+  it("persists attention interval multipliers on create and update", () => {
+    const defaulted = createTopic("Default multiplier");
+    const custom = elements.create({
+      type: "topic",
+      status: "active",
+      stage: "rough_topic",
+      priority: 0.5,
+      attentionIntervalMultiplier: 2.5,
+      title: "Custom multiplier",
+    });
+
+    expect(attentionMultiplierOf(defaulted)).toBe(1);
+    expect(attentionMultiplierOf(elements.findById(defaulted.id))).toBe(1);
+    expect(attentionMultiplierOf(custom)).toBe(2.5);
+    expect(attentionMultiplierOf(elements.findById(custom.id))).toBe(2.5);
+
+    const updated = elements.update(custom.id, { attentionIntervalMultiplier: 0.75 });
+    expect(attentionMultiplierOf(updated)).toBe(0.75);
+    expect(attentionMultiplierOf(elements.findById(custom.id))).toBe(0.75);
+
+    const updateLogs = ops.listForElement(custom.id).filter((op) => op.opType === "update_element");
+    const update = updateLogs[updateLogs.length - 1];
+    expect(update?.payload).toMatchObject({
+      patch: { attentionIntervalMultiplier: 0.75 },
+      prev: { attentionIntervalMultiplier: 2.5 },
     });
   });
 

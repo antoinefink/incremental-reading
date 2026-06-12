@@ -64,6 +64,16 @@ function blockIdsOf(handle: DbHandle, sourceId: ElementId): BlockId[] {
     .map((b) => b.stableBlockId as BlockId);
 }
 
+function reschedulePayloads(id: ElementId): Record<string, unknown>[] {
+  return handle.db
+    .select()
+    .from(operationLog)
+    .where(eq(operationLog.elementId, id))
+    .all()
+    .filter((op) => op.opType === "reschedule_element")
+    .map((op) => JSON.parse(op.payload) as Record<string, unknown>);
+}
+
 function seedRichSource(handle: DbHandle): { sourceId: ElementId; blocks: BlockId[] } {
   const conversion: PlainTextConversion = {
     doc: {
@@ -212,6 +222,37 @@ describe("ExtractionService.createExtraction", () => {
     expect(doc).toBeTruthy();
     expect(doc?.plainText).toContain("The definition paragraph two.");
     expect(new DocumentRepository(handle.db).listBlocks(element.id).length).toBeGreaterThan(0);
+  });
+
+  it("updates the parent source adaptive multiplier when extraction is a processed visit", () => {
+    const repos = createRepositories(handle.db);
+    repos.settings.updateAppSettings({ adaptiveAttentionIntervals: true });
+    const sourceId = seedSource(handle, 0.375);
+    const blocks = blockIdsOf(handle, sourceId);
+    const service = new ExtractionService(handle.db);
+
+    service.createExtraction({
+      sourceElementId: sourceId,
+      selectedText: "The definition paragraph two.",
+      blockIds: [blocks[1] as BlockId],
+      startOffset: 0,
+      endOffset: 29,
+      priority: 0.375,
+    });
+
+    const source = new ElementRepository(handle.db).findById(sourceId);
+    expect(source?.attentionIntervalMultiplier).toBe(0.85);
+    expect(reschedulePayloads(sourceId).at(-1)).toMatchObject({
+      action: "extract",
+      prevAttentionIntervalMultiplier: 1,
+      attentionIntervalMultiplier: 0.85,
+      attentionAdaptive: {
+        version: 1,
+        enabled: true,
+        priorMultiplier: 1,
+        newMultiplier: 0.85,
+      },
+    });
   });
 
   it("preserves paragraph structure when the selection spans multiple source blocks", () => {

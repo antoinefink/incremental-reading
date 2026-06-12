@@ -14,6 +14,7 @@ describe("element model shapes", () => {
       status: "active",
       stage: "raw_extract",
       priority: 0.625,
+      attentionIntervalMultiplier: 1,
       dueAt: "2026-06-10T00:00:00.000Z",
       parkedAt: null,
       fallowUntil: null,

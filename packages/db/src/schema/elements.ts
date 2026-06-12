@@ -45,6 +45,8 @@ export const elements = sqliteTable(
     stage: text("stage").notNull(),
     /** Normalized numeric priority `0.0`–`1.0` (higher = more important). */
     priority: real("priority").notNull(),
+    /** Attention interval scaling factor `0.5`–`4.0` (1.0 = normal cadence). */
+    attentionIntervalMultiplier: real("attention_interval_multiplier").notNull().default(1.0),
     /** ISO-8601 UTC timestamp for when this element next wants attention. */
     dueAt: text("due_at"),
     /** ISO-8601 UTC timestamp for when the user deliberately parked the element. */
@@ -80,6 +82,10 @@ export const elements = sqliteTable(
       sql`${table.extractFate} IS NULL OR (${table.type} = 'extract' AND ${inList(table.extractFate, EXTRACT_FATES)})`,
     ),
     check("elements_priority_range_check", sql`${table.priority} >= 0 AND ${table.priority} <= 1`),
+    check(
+      "elements_attention_interval_multiplier_range_check",
+      sql`${table.attentionIntervalMultiplier} >= 0.5 AND ${table.attentionIntervalMultiplier} <= 4.0`,
+    ),
     index("elements_parent_idx").on(table.parentId),
     index("elements_source_idx").on(table.sourceId),
     index("elements_type_status_idx").on(table.type, table.status),

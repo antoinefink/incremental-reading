@@ -120,6 +120,12 @@ Source block processing is source progress, not decoration: visual marks may dis
 
 The explicit result assigned to a source block, distinguishing unresolved reading work from blocks that produced output, were intentionally ignored, were processed without output, need later attention, or became stale after the source text changed.
 
+### Source yield
+
+The durable productive output attributed to processing a Source or Extract, such as derived extracts, cards, synthesis work, and honorable non-card outcomes.
+
+Source yield is evidence for attention scheduling and stagnation analysis, not a card-only score. It should come from lineage and processing outcomes rather than from renderer inference or lifetime totals treated as one visit.
+
 ### Attention scheduler
 
 The scheduling model for sources, topics, extracts, and other non-card work that should return for further processing rather than recall testing.
@@ -127,6 +133,12 @@ The scheduling model for sources, topics, extracts, and other non-card work that
 Attention scheduling is distinct from active-recall scheduling: it decides when to bring work back to the user's attention, not whether the user can remember an answer.
 
 Attention scheduling includes both heuristic returns and explicit user commands. Heuristic returns may use prior processing evidence, while explicit commands such as Queue soon or a manual return date express user intent directly and should not be reinterpreted as heuristic recency evidence.
+
+### Adaptive attention interval
+
+A learned adjustment to an attention-scheduled element's return cadence based on the productive yield of recent processing.
+
+Adaptive attention intervals are bounded attention-scheduler state. They do not apply to FSRS card reviews, and any persisted change should remain explainable, transactional, and undoable like the schedule change it modifies.
 
 ### Due queue
 

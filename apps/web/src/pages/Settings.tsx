@@ -77,6 +77,7 @@ const FALLBACK_SETTINGS: RendererSettings = {
   chronicPostponeThreshold: 5,
   weeklyReviewEnabled: true,
   weeklyReviewCadenceDays: 7,
+  adaptiveAttentionIntervals: false,
   importBalanceFactor: 1.5,
   keyboardLayout: "qwerty",
   theme: "dark",

@@ -738,6 +738,7 @@ describe("DbService", () => {
       chronicPostponeThreshold: 5,
       weeklyReviewEnabled: true,
       weeklyReviewCadenceDays: 7,
+      adaptiveAttentionIntervals: false,
       keyboardLayout: "dvorak",
       theme: "light",
       displayName: "",

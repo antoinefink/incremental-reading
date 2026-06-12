@@ -24,12 +24,21 @@
 export const SCHEDULER_PACKAGE = "@interleave/scheduler" as const;
 
 export {
+  type AdaptiveIntervalMultiplierDecision,
+  type AdaptiveIntervalMultiplierInput,
+  type AdaptiveIntervalReason,
+  type AdaptiveIntervalReasonKind,
+  type AttentionVisitYieldInput,
+  adaptiveAttentionIntervalMultiplier,
   basePostponeIntervalDays,
+  DEFAULT_ATTENTION_INTERVAL_MULTIPLIER,
   EXTRACT_STAGES,
   type ExtractStage,
   extractStageIntervalDays,
   isExtractStage,
   isSchedulerAction,
+  MAX_ATTENTION_INTERVAL_MULTIPLIER,
+  MIN_ATTENTION_INTERVAL_MULTIPLIER,
   nextDueAt,
   nextExtractStage,
   postponeIntervalForPriority,

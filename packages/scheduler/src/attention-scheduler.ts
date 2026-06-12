@@ -117,6 +117,22 @@ export interface Schedulable {
    * These counters come from durable source-block outcomes, not visual marks.
    */
   readonly sourceProcessing?: SourceProcessingSignals | null;
+  /**
+   * Feature flag for T112 adaptive attention intervals. Default/absent is OFF so
+   * the legacy T111 scheduler path remains byte-identical until explainability ships.
+   */
+  readonly adaptiveAttentionIntervals?: boolean | null;
+  /**
+   * Persisted per-element multiplier. Existing rows/default callers omit it and
+   * use {@link DEFAULT_ATTENTION_INTERVAL_MULTIPLIER}.
+   */
+  readonly attentionIntervalMultiplier?: number | null;
+  /**
+   * Visit-scoped value output facts. The service supplies these only for completed
+   * source/extract processing visits; broad lifetime yield must not be folded into
+   * one adaptive step.
+   */
+  readonly visitYield?: AttentionVisitYieldInput | null;
 }
 
 /** The result of a scheduling decision: the new due time + the interval chosen. */
@@ -127,6 +143,10 @@ export interface ScheduleDecision {
   readonly intervalDays: number;
   /** Low-yield source signal: mostly processed/ignored with no extracted output. */
   readonly retirementSuggestion?: boolean;
+  /** The persisted multiplier to write after an adaptive decision. */
+  readonly attentionIntervalMultiplier?: number;
+  /** Closed diagnostic payload for T113 explainability and drift checks. */
+  readonly adaptiveReason?: AdaptiveIntervalReason;
 }
 
 export interface SourceProcessingSignals {
@@ -134,6 +154,54 @@ export interface SourceProcessingSignals {
   readonly terminalRatio: number;
   readonly ignoredRatio: number;
   readonly extractedOutputCount: number;
+}
+
+/** Visit-scoped yield facts for one source/extract processing action. */
+export interface AttentionVisitYieldInput {
+  readonly childExtractsCreated?: number;
+  readonly atomicStatementsCreated?: number;
+  readonly cardsCreated?: number;
+  readonly synthesisOutputsCreated?: number;
+  readonly honorableExtractFates?: number;
+  readonly unresolvedRatio?: number;
+  readonly terminalRatio?: number;
+  readonly ignoredRatio?: number;
+}
+
+export type AdaptiveIntervalReasonKind =
+  | "yield_shortened"
+  | "yield_lengthened"
+  | "yield_held"
+  | "yield_input_malformed";
+
+export interface AdaptiveIntervalMultiplierInput {
+  readonly priority: Priority;
+  readonly currentMultiplier?: number | null;
+  readonly visitYield: AttentionVisitYieldInput;
+}
+
+export interface AdaptiveIntervalMultiplierDecision {
+  readonly reasonKind: AdaptiveIntervalReasonKind;
+  readonly priorMultiplier: number;
+  readonly clampedPriorMultiplier: number;
+  readonly newMultiplier: number;
+  readonly productiveOutputCount: number;
+  readonly unresolvedRatio?: number;
+  readonly terminalRatio?: number;
+  readonly ignoredRatio?: number;
+}
+
+export interface AdaptiveIntervalReason extends AdaptiveIntervalMultiplierDecision {
+  readonly baseIntervalDays: number;
+  readonly intervalAfterMultiplierDays: number;
+  readonly finalIntervalDays: number;
+}
+
+interface IntervalAdjustment {
+  readonly intervalDays: number;
+  readonly retirementSuggestion?: boolean;
+  readonly attentionIntervalMultiplier?: number;
+  readonly adaptiveReason?: Omit<AdaptiveIntervalReason, "finalIntervalDays">;
 }
 
 export interface SourceRetirementSuggestionInput extends SourceProcessingSignals {
@@ -162,6 +230,165 @@ export interface SourceRetirementSuggestion {
 
 const RETIREMENT_SIGNAL_VERSION = "v1";
 const RETIREMENT_THRESHOLD_SIGNATURE = "thresholds:terminal>=0.9,ignored>=0.5,output=0";
+
+export const MIN_ATTENTION_INTERVAL_MULTIPLIER = 0.5;
+export const MAX_ATTENTION_INTERVAL_MULTIPLIER = 4.0;
+export const DEFAULT_ATTENTION_INTERVAL_MULTIPLIER = 1.0;
+
+const HIGH_PRIORITY_PRODUCTIVE_STEP = -0.1;
+const LOW_PRIORITY_PRODUCTIVE_STEP = -0.15;
+const HIGH_PRIORITY_BARREN_STEP = 0.05;
+const LOW_PRIORITY_BARREN_STEP = 0.15;
+const HIGH_PRIORITY_UNRESOLVED_STEP = -0.05;
+const UNRESOLVED_HIGH_VALUE_THRESHOLD = 0.25;
+const LOW_UNRESOLVED_BARREN_THRESHOLD = 0.1;
+
+function clampAttentionIntervalMultiplier(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_ATTENTION_INTERVAL_MULTIPLIER;
+  return Math.min(
+    MAX_ATTENTION_INTERVAL_MULTIPLIER,
+    Math.max(MIN_ATTENTION_INTERVAL_MULTIPLIER, value),
+  );
+}
+
+function finiteNonNegative(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+  return value;
+}
+
+function finiteRatio(value: number | null | undefined): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+    return undefined;
+  }
+  return value;
+}
+
+function isHighPriority(priority: Priority): boolean {
+  const label = priorityToLabel(priority);
+  return label === "A" || label === "B";
+}
+
+function applyMultiplierStep(multiplier: number, step: number): number {
+  return Number(clampAttentionIntervalMultiplier(multiplier + step).toFixed(2));
+}
+
+/**
+ * Compute exactly one bounded adaptive-multiplier step for a completed
+ * source/extract visit. Productive visits shorten, barren visits lengthen, and
+ * unresolved high-priority source work can only shorten by a smaller step.
+ */
+export function adaptiveAttentionIntervalMultiplier(
+  input: AdaptiveIntervalMultiplierInput,
+): AdaptiveIntervalMultiplierDecision {
+  const priorMultiplier =
+    typeof input.currentMultiplier === "number"
+      ? input.currentMultiplier
+      : DEFAULT_ATTENTION_INTERVAL_MULTIPLIER;
+  const clampedPriorMultiplier = clampAttentionIntervalMultiplier(priorMultiplier);
+  const highPriority = isHighPriority(input.priority);
+  const productiveOutputCount =
+    (finiteNonNegative(input.visitYield.childExtractsCreated) ?? 0) +
+    (finiteNonNegative(input.visitYield.atomicStatementsCreated) ?? 0) +
+    (finiteNonNegative(input.visitYield.cardsCreated) ?? 0) +
+    (finiteNonNegative(input.visitYield.synthesisOutputsCreated) ?? 0) +
+    (finiteNonNegative(input.visitYield.honorableExtractFates) ?? 0);
+  const unresolvedRatio = finiteRatio(input.visitYield.unresolvedRatio);
+  const terminalRatio = finiteRatio(input.visitYield.terminalRatio);
+  const ignoredRatio = finiteRatio(input.visitYield.ignoredRatio);
+  const malformed =
+    [
+      input.visitYield.childExtractsCreated,
+      input.visitYield.atomicStatementsCreated,
+      input.visitYield.cardsCreated,
+      input.visitYield.synthesisOutputsCreated,
+      input.visitYield.honorableExtractFates,
+    ].some((value) => value !== undefined && finiteNonNegative(value) === null) ||
+    (input.visitYield.unresolvedRatio !== undefined && unresolvedRatio === undefined) ||
+    (input.visitYield.terminalRatio !== undefined && terminalRatio === undefined) ||
+    (input.visitYield.ignoredRatio !== undefined && ignoredRatio === undefined);
+
+  if (malformed) {
+    return {
+      reasonKind: "yield_input_malformed",
+      priorMultiplier,
+      clampedPriorMultiplier,
+      newMultiplier: clampedPriorMultiplier,
+      productiveOutputCount: 0,
+      ...(unresolvedRatio !== undefined ? { unresolvedRatio } : {}),
+      ...(terminalRatio !== undefined ? { terminalRatio } : {}),
+      ...(ignoredRatio !== undefined ? { ignoredRatio } : {}),
+    };
+  }
+
+  if (productiveOutputCount > 0) {
+    return {
+      reasonKind: "yield_shortened",
+      priorMultiplier,
+      clampedPriorMultiplier,
+      newMultiplier: applyMultiplierStep(
+        clampedPriorMultiplier,
+        highPriority ? HIGH_PRIORITY_PRODUCTIVE_STEP : LOW_PRIORITY_PRODUCTIVE_STEP,
+      ),
+      productiveOutputCount,
+      ...(unresolvedRatio !== undefined ? { unresolvedRatio } : {}),
+      ...(terminalRatio !== undefined ? { terminalRatio } : {}),
+      ...(ignoredRatio !== undefined ? { ignoredRatio } : {}),
+    };
+  }
+
+  const mostlyExhausted =
+    terminalRatio !== undefined &&
+    ignoredRatio !== undefined &&
+    terminalRatio >= 0.9 &&
+    ignoredRatio >= 0.5;
+  const barren =
+    (unresolvedRatio !== undefined && unresolvedRatio <= LOW_UNRESOLVED_BARREN_THRESHOLD) ||
+    mostlyExhausted;
+
+  if (barren) {
+    return {
+      reasonKind: "yield_lengthened",
+      priorMultiplier,
+      clampedPriorMultiplier,
+      newMultiplier: applyMultiplierStep(
+        clampedPriorMultiplier,
+        highPriority ? HIGH_PRIORITY_BARREN_STEP : LOW_PRIORITY_BARREN_STEP,
+      ),
+      productiveOutputCount,
+      ...(unresolvedRatio !== undefined ? { unresolvedRatio } : {}),
+      ...(terminalRatio !== undefined ? { terminalRatio } : {}),
+      ...(ignoredRatio !== undefined ? { ignoredRatio } : {}),
+    };
+  }
+
+  if (
+    highPriority &&
+    unresolvedRatio !== undefined &&
+    unresolvedRatio > UNRESOLVED_HIGH_VALUE_THRESHOLD
+  ) {
+    return {
+      reasonKind: "yield_shortened",
+      priorMultiplier,
+      clampedPriorMultiplier,
+      newMultiplier: applyMultiplierStep(clampedPriorMultiplier, HIGH_PRIORITY_UNRESOLVED_STEP),
+      productiveOutputCount,
+      unresolvedRatio,
+      ...(terminalRatio !== undefined ? { terminalRatio } : {}),
+      ...(ignoredRatio !== undefined ? { ignoredRatio } : {}),
+    };
+  }
+
+  return {
+    reasonKind: "yield_held",
+    priorMultiplier,
+    clampedPriorMultiplier,
+    newMultiplier: clampedPriorMultiplier,
+    productiveOutputCount,
+    ...(unresolvedRatio !== undefined ? { unresolvedRatio } : {}),
+    ...(terminalRatio !== undefined ? { terminalRatio } : {}),
+    ...(ignoredRatio !== undefined ? { ignoredRatio } : {}),
+  };
+}
 
 export function sourceRetirementSignalHash(
   input: SourceRetirementSuggestionInput,
@@ -334,10 +561,7 @@ function heuristicIntervalDays(input: Schedulable): number {
   return sourceIntervalDays(input.priority);
 }
 
-function adjustForSourceProcessing(
-  input: Schedulable,
-  intervalDays: number,
-): { intervalDays: number; retirementSuggestion?: boolean } {
+function adjustForSourceProcessing(input: Schedulable, intervalDays: number): IntervalAdjustment {
   if (input.type !== "source" || !input.sourceProcessing) return { intervalDays };
   const priorityLabel = priorityToLabel(input.priority);
   const highValue = priorityLabel === "A" || priorityLabel === "B";
@@ -360,6 +584,59 @@ function adjustForSourceProcessing(
     };
   }
   return { intervalDays };
+}
+
+function isAdaptiveIntervalCandidate(input: Schedulable): boolean {
+  return (
+    (input.type === "source" || input.type === "extract") &&
+    input.adaptiveAttentionIntervals === true
+  );
+}
+
+function retirementSuggestionForSource(input: Schedulable): boolean | undefined {
+  if (input.type !== "source" || !input.sourceProcessing) return undefined;
+  return sourceRetirementSuggestion({
+    ...input.sourceProcessing,
+    totalBlocks: 0,
+    terminalBlocks: 0,
+    ignoredBlocks: 0,
+    unresolvedBlocks: 0,
+  })
+    ? true
+    : undefined;
+}
+
+function applyAdaptiveIntervalMultiplier(
+  input: Schedulable,
+  baseIntervalDays: number,
+): IntervalAdjustment | null {
+  if (!isAdaptiveIntervalCandidate(input) || !input.visitYield) return null;
+  const multiplierInput: AdaptiveIntervalMultiplierInput =
+    input.attentionIntervalMultiplier === undefined
+      ? {
+          priority: input.priority,
+          visitYield: input.visitYield,
+        }
+      : {
+          priority: input.priority,
+          currentMultiplier: input.attentionIntervalMultiplier,
+          visitYield: input.visitYield,
+        };
+  const multiplier = adaptiveAttentionIntervalMultiplier(multiplierInput);
+  const intervalAfterMultiplierDays = Math.max(
+    1,
+    Math.round(baseIntervalDays * multiplier.newMultiplier),
+  );
+  return {
+    intervalDays: intervalAfterMultiplierDays,
+    attentionIntervalMultiplier: multiplier.newMultiplier,
+    adaptiveReason: {
+      ...multiplier,
+      baseIntervalDays,
+      intervalAfterMultiplierDays,
+    },
+    ...(retirementSuggestionForSource(input) ? { retirementSuggestion: true } : {}),
+  };
 }
 
 function applyRecencyCredit(
@@ -396,13 +673,27 @@ function applyRecencyCredit(
 export function nextDueAt(input: Schedulable, now: IsoTimestamp): ScheduleDecision {
   const override = actionOverrideIntervalDays(input);
   const baseIntervalDays = override ?? heuristicIntervalDays(input);
-  const adjusted = adjustForSourceProcessing(input, baseIntervalDays);
+  const adjusted =
+    applyAdaptiveIntervalMultiplier(input, baseIntervalDays) ??
+    adjustForSourceProcessing(input, baseIntervalDays);
   const intervalDays = applyRecencyCredit(adjusted.intervalDays, input.lastSeenAt, now);
-  return {
+  const decision: ScheduleDecision = {
     dueAt: addDays(now, intervalDays),
     intervalDays,
-    ...(adjusted.retirementSuggestion
-      ? { retirementSuggestion: adjusted.retirementSuggestion }
+  };
+  return {
+    ...decision,
+    ...(adjusted.retirementSuggestion ? { retirementSuggestion: true } : {}),
+    ...(adjusted.attentionIntervalMultiplier !== undefined
+      ? { attentionIntervalMultiplier: adjusted.attentionIntervalMultiplier }
+      : {}),
+    ...(adjusted.adaptiveReason
+      ? {
+          adaptiveReason: {
+            ...adjusted.adaptiveReason,
+            finalIntervalDays: intervalDays,
+          },
+        }
       : {}),
   };
 }

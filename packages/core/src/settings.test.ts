@@ -50,6 +50,7 @@ describe("AppSettings defaults", () => {
       chronicPostponeThreshold: "scheduler.chronicPostponeThreshold",
       weeklyReviewEnabled: "weeklyReview.enabled",
       weeklyReviewCadenceDays: "weeklyReview.cadenceDays",
+      adaptiveAttentionIntervals: "scheduler.adaptiveAttentionIntervals",
       importBalanceFactor: "balance.importFactor",
       keyboardLayout: "ui.keyboardLayout",
       theme: "ui.theme",
@@ -84,6 +85,10 @@ describe("AppSettings defaults", () => {
   it("enables the weekly ledger session on a seven-day cadence by default", () => {
     expect(DEFAULT_APP_SETTINGS.weeklyReviewEnabled).toBe(true);
     expect(DEFAULT_APP_SETTINGS.weeklyReviewCadenceDays).toBe(7);
+  });
+
+  it("keeps adaptive attention intervals off by default until explainability lands", () => {
+    expect(DEFAULT_APP_SETTINGS.adaptiveAttentionIntervals).toBe(false);
   });
 });
 
@@ -212,6 +217,14 @@ describe("coerceSettingValue", () => {
     );
   });
 
+  it("keeps adaptive attention intervals as a real boolean (T112)", () => {
+    expect(coerceSettingValue("adaptiveAttentionIntervals", true)).toBe(true);
+    expect(coerceSettingValue("adaptiveAttentionIntervals", false)).toBe(false);
+    expect(coerceSettingValue("adaptiveAttentionIntervals", "true")).toBe(
+      DEFAULT_APP_SETTINGS.adaptiveAttentionIntervals,
+    );
+  });
+
   it("coerces the per-band retention map: clamp present bands, drop unknown labels (T079)", () => {
     // In-bounds bands kept; out-of-range clamped; unknown labels + non-numbers dropped.
     expect(
@@ -261,6 +274,7 @@ describe("stored ↔ model round-trip", () => {
       [SETTINGS_KEYS.chronicPostponeThreshold]: 6,
       [SETTINGS_KEYS.weeklyReviewEnabled]: false,
       [SETTINGS_KEYS.weeklyReviewCadenceDays]: 14,
+      [SETTINGS_KEYS.adaptiveAttentionIntervals]: true,
       [SETTINGS_KEYS.importBalanceFactor]: 2.5,
       [SETTINGS_KEYS.keyboardLayout]: "dvorak",
       [SETTINGS_KEYS.theme]: "system",
@@ -278,6 +292,7 @@ describe("stored ↔ model round-trip", () => {
       chronicPostponeThreshold: 6,
       weeklyReviewEnabled: false,
       weeklyReviewCadenceDays: 14,
+      adaptiveAttentionIntervals: true,
       importBalanceFactor: 2.5,
       keyboardLayout: "dvorak",
       theme: "system",
@@ -308,6 +323,7 @@ describe("stored ↔ model round-trip", () => {
       chronicPostponeThreshold: 6,
       weeklyReviewEnabled: false,
       weeklyReviewCadenceDays: 14,
+      adaptiveAttentionIntervals: true,
       theme: "system",
     });
     expect(stored).toEqual({
@@ -316,6 +332,7 @@ describe("stored ↔ model round-trip", () => {
       [SETTINGS_KEYS.chronicPostponeThreshold]: 6,
       [SETTINGS_KEYS.weeklyReviewEnabled]: false,
       [SETTINGS_KEYS.weeklyReviewCadenceDays]: 14,
+      [SETTINGS_KEYS.adaptiveAttentionIntervals]: true,
       [SETTINGS_KEYS.theme]: "system",
     });
   });
@@ -333,6 +350,7 @@ describe("stored ↔ model round-trip", () => {
       chronicPostponeThreshold: 7,
       weeklyReviewEnabled: true,
       weeklyReviewCadenceDays: 10,
+      adaptiveAttentionIntervals: true,
       importBalanceFactor: 2,
       keyboardLayout: "vim" as const,
       theme: "system" as const,

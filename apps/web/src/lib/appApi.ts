@@ -93,6 +93,8 @@ export interface AppSettings {
   readonly weeklyReviewEnabled: boolean;
   /** Attention cadence, in days, for the weekly ledger/integrity session (T110). */
   readonly weeklyReviewCadenceDays: number;
+  /** Whether processed source/extract visits adapt their next attention interval (T112). */
+  readonly adaptiveAttentionIntervals: boolean;
   /** How lopsided imports-vs-processing must be before the balance warning fires (T046). */
   readonly importBalanceFactor: number;
   readonly keyboardLayout: KeyboardLayout;

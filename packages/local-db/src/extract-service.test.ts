@@ -44,6 +44,7 @@ import {
   trimExtractText,
 } from "./extract-service";
 import { ExtractionService } from "./extraction-service";
+import { ADAPTIVE_ATTENTION_INTERVALS_SETTING_KEY } from "./scheduler-service";
 import { SettingsRepository } from "./settings-repository";
 import { SourceRepository } from "./source-repository";
 import { SynthesisService } from "./synthesis-service";
@@ -99,6 +100,21 @@ function opsFor(handle: DbHandle, id: ElementId): string[] {
     .where(eq(operationLog.elementId, id))
     .all()
     .map((row) => row.opType);
+}
+
+function reschedulePayloads(handle: DbHandle, id: ElementId): Record<string, unknown>[] {
+  return handle.db
+    .select()
+    .from(operationLog)
+    .where(eq(operationLog.elementId, id))
+    .all()
+    .filter((op) => op.opType === "reschedule_element")
+    .map((op) => JSON.parse(op.payload) as Record<string, unknown>);
+}
+
+function attentionIntervalMultiplierOf(id: ElementId): number {
+  const element = new ElementRepository(handle.db).findById(id);
+  return element?.attentionIntervalMultiplier ?? 1;
 }
 
 beforeEach(() => {
@@ -199,6 +215,47 @@ describe("ExtractService.advanceStage (raw → clean → atomic)", () => {
     const dueMs = Date.parse(element.dueAt as string);
     const days = Math.round((dueMs - before) / 86_400_000);
     expect(days).toBe(expectedDays);
+  });
+
+  it("keeps flag-off stage moves on the legacy payload shape with multiplier unchanged", () => {
+    const { extractId } = seedExtract(handle, 0.375); // C extract
+    const service = new ExtractService(handle.db);
+
+    service.setStage(extractId, "clean_extract");
+
+    expect(attentionIntervalMultiplierOf(extractId)).toBe(1);
+    expect(reschedulePayloads(handle, extractId).at(-1)?.attentionAdaptive).toBeUndefined();
+  });
+
+  it("when enabled, persists an extract stage multiplier step with diagnostics", () => {
+    const { extractId } = seedExtract(handle, 0.375); // C extract
+    const service = new ExtractService(handle.db);
+    service.setStage(extractId, "clean_extract");
+    new SettingsRepository(handle.db).updateAppSettings({ adaptiveAttentionIntervals: true });
+
+    const result = service.setStage(extractId, "atomic_statement");
+
+    expect(result.element.status).toBe("scheduled");
+    expect(attentionIntervalMultiplierOf(extractId)).toBe(0.85);
+    const adaptive = reschedulePayloads(handle, extractId).at(-1)?.attentionAdaptive;
+    expect(adaptive).toMatchObject({
+      version: 1,
+      enabled: true,
+      settingKey: ADAPTIVE_ATTENTION_INTERVALS_SETTING_KEY,
+      priorMultiplier: 1,
+      newMultiplier: 0.85,
+      reason: {
+        reasonKind: "yield_shortened",
+        baseIntervalDays: 1,
+        intervalAfterMultiplierDays: 1,
+        finalIntervalDays: 1,
+      },
+      counters: {
+        before: { totalOutputCount: 0 },
+        after: { extractedOutputCount: 1, totalOutputCount: 1 },
+        delta: { extractedOutputCount: 1, totalOutputCount: 1 },
+      },
+    });
   });
 
   it("throws when already at atomic_statement (nothing to advance)", () => {
