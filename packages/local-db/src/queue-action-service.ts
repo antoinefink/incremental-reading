@@ -85,6 +85,7 @@ export function cardDeferWithin(
   nextDue: IsoTimestamp,
   prevReviewDueAt: IsoTimestamp | null,
   batchId?: string,
+  extras: Readonly<Record<string, unknown>> = {},
 ): Element {
   // Keep the FSRS due (review_states) and the element due in lockstep so the queue (which
   // reads review_states.due_at for cards) picks up the new date.
@@ -97,6 +98,7 @@ export function cardDeferWithin(
     cardDefer: true,
     prevReviewDueAt,
     ...(batchId ? { batchId } : {}),
+    ...extras,
   });
 }
 
@@ -106,6 +108,16 @@ export function cardDeferWithin(
  */
 function reviewDueOf(review: ReviewRepository, id: ElementId): IsoTimestamp | null {
   return review.findReviewState(id)?.dueAt ?? null;
+}
+
+function reviewDueOfWithin(tx: DbClient, id: ElementId): IsoTimestamp | null {
+  return (
+    tx
+      .select({ dueAt: reviewStates.dueAt })
+      .from(reviewStates)
+      .where(eq(reviewStates.elementId, id))
+      .get()?.dueAt ?? null
+  );
 }
 
 /** The result of applying one queue action. */
@@ -222,8 +234,9 @@ export class QueueActionService {
    * BULK postpone's rows undo as one batch (T044).
    */
   private postpone(element: Element, now: IsoTimestamp, batchId?: string): QueueActionResult {
+    const extras = { postponeOrigin: { kind: "manualQueueAction" } };
     if (element.type === "card") {
-      const deferred = this.cardDeferBy(element.id, now, CARD_DEFER_DAYS, batchId);
+      const deferred = this.cardDeferBy(element.id, now, CARD_DEFER_DAYS, batchId, extras);
       return { element: deferred, removed: false, undo: null };
     }
     const { element: rescheduled } = this.scheduler.rescheduleForAction(
@@ -231,6 +244,7 @@ export class QueueActionService {
       "postpone",
       now,
       batchId,
+      extras,
     );
     return { element: rescheduled, removed: false, undo: null };
   }
@@ -279,14 +293,31 @@ export class QueueActionService {
     now: IsoTimestamp = nowIso(),
     days: number = CARD_DEFER_DAYS,
     batchId?: string,
+    extras: Readonly<Record<string, unknown>> = {},
   ): Element {
     const prevReviewDueAt = reviewDueOf(this.review, id);
     const base = prevReviewDueAt ? Date.parse(prevReviewDueAt) : Date.parse(now);
     const from = Number.isNaN(base) ? Date.parse(now) : Math.max(base, Date.parse(now));
     const nextDue = new Date(from + days * DAY_MS).toISOString() as IsoTimestamp;
     return this.db.transaction((tx) =>
-      cardDeferWithin(tx, this.elements, id, nextDue, prevReviewDueAt, batchId),
+      cardDeferWithin(tx, this.elements, id, nextDue, prevReviewDueAt, batchId, extras),
     );
+  }
+
+  /** Transaction-composable RELATIVE FSRS defer for services that own a batch transaction. */
+  cardDeferByWithin(
+    tx: DbClient,
+    id: ElementId,
+    now: IsoTimestamp = nowIso(),
+    days: number = CARD_DEFER_DAYS,
+    batchId?: string,
+    extras: Readonly<Record<string, unknown>> = {},
+  ): Element {
+    const prevReviewDueAt = reviewDueOfWithin(tx, id);
+    const base = prevReviewDueAt ? Date.parse(prevReviewDueAt) : Date.parse(now);
+    const from = Number.isNaN(base) ? Date.parse(now) : Math.max(base, Date.parse(now));
+    const nextDue = new Date(from + days * DAY_MS).toISOString() as IsoTimestamp;
+    return cardDeferWithin(tx, this.elements, id, nextDue, prevReviewDueAt, batchId, extras);
   }
 
   /**
@@ -302,10 +333,11 @@ export class QueueActionService {
     _now: IsoTimestamp,
     targetDueAt: IsoTimestamp,
     batchId?: string,
+    extras: Readonly<Record<string, unknown>> = {},
   ): Element {
     const prevReviewDueAt = reviewDueOf(this.review, id);
     return this.db.transaction((tx) =>
-      cardDeferWithin(tx, this.elements, id, targetDueAt, prevReviewDueAt, batchId),
+      cardDeferWithin(tx, this.elements, id, targetDueAt, prevReviewDueAt, batchId, extras),
     );
   }
 

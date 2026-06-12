@@ -25,6 +25,7 @@
 
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { AutoPostponeReceiptLine } from "../../components/AutoPostponeReceiptLine";
 import { Icon, type IconName } from "../../components/Icon";
 import {
   formatAttentionScheduleReason,
@@ -972,6 +973,15 @@ export function QueueScreen() {
             onPostponed={onPostponed}
           />
         ) : null}
+
+        <AutoPostponeReceiptLine
+          receipt={dailyWork?.autoPostponeReceipt ?? null}
+          onUndo={async (batchId) => {
+            const result = await appApi.undoDailyWorkAutoPostponeReceipt({ batchId });
+            if (result.undone) await refresh();
+            return result;
+          }}
+        />
 
         {/* catch-up & vacation (T078): recover from a backlog (spread overdue forward) or
             pre-adjust the away-window load — BOTH show the cost (the before/after per-day load

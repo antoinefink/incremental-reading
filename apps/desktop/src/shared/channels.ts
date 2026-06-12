@@ -214,6 +214,7 @@ export const IPC_CHANNELS = {
   balanceGet: "balance:get",
   dailyWorkSummary: "dailyWork:summary",
   dailyWorkAckGraduationEvents: "dailyWork:ackGraduationEvents",
+  dailyWorkUndoAutoPostponeReceipt: "dailyWork:autoPostponeReceipt:undo",
   weeklyReviewSummary: "weeklyReview:summary",
   weeklyReviewUpdateProgress: "weeklyReview:updateProgress",
   weeklyReviewComplete: "weeklyReview:complete",

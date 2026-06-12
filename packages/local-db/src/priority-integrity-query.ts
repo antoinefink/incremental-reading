@@ -65,6 +65,15 @@ export interface PriorityIntegritySacrificedRow {
   readonly postponeCount: number;
   readonly postponeDebtDays: number;
   readonly latestDeferredAt: string;
+  readonly postponeOrigin:
+    | "manualAutoPostpone"
+    | "standingAutoPostpone"
+    | "catchUp"
+    | "vacation"
+    | "recovery"
+    | "manualQueueAction"
+    | "unknown";
+  readonly restored: boolean;
   readonly topicAnchorId: string | null;
   readonly topicTitle: string | null;
 }
@@ -138,6 +147,8 @@ interface MutableSacrifice {
   postponeCount: number;
   postponeDebtDays: number;
   latestDeferredAt: string;
+  postponeOrigin: PriorityIntegritySacrificedRow["postponeOrigin"];
+  restored: boolean;
   topicAnchorId: string | null;
   topicTitle: string | null;
 }
@@ -160,6 +171,25 @@ function safePayload(raw: string): Record<string, unknown> | null {
 function stringField(payload: Record<string, unknown> | null, key: string): string | null {
   const value = payload?.[key];
   return typeof value === "string" ? value : null;
+}
+
+function postponeOrigin(
+  payload: Record<string, unknown> | null,
+): PriorityIntegritySacrificedRow["postponeOrigin"] {
+  const origin = payload?.postponeOrigin;
+  if (!origin || typeof origin !== "object") return "unknown";
+  const kind = (origin as Record<string, unknown>).kind;
+  switch (kind) {
+    case "manualAutoPostpone":
+    case "standingAutoPostpone":
+    case "catchUp":
+    case "vacation":
+    case "recovery":
+    case "manualQueueAction":
+      return kind;
+    default:
+      return "unknown";
+  }
 }
 
 function validMs(iso: string | null): number | null {
@@ -284,6 +314,13 @@ export class PriorityIntegrityQuery {
       .orderBy(desc(operationLog.createdAt), desc(sql`rowid`))
       .all();
 
+    const restoredBatchIds = new Set<string>();
+    for (const op of serviceOps) {
+      const payload = safePayload(op.payload);
+      const restoredBatchId = stringField(payload, "restoredBatchId");
+      if (restoredBatchId) restoredBatchIds.add(restoredBatchId);
+    }
+
     let reliableADeferred = 0;
     for (const op of serviceOps) {
       if (!op.elementId) continue;
@@ -291,6 +328,8 @@ export class PriorityIntegrityQuery {
       if (!element?.eventEligible) continue;
       const payload = safePayload(op.payload);
       if (payload?.fallow === true) continue;
+      const batchId = stringField(payload, "batchId");
+      if (batchId && restoredBatchIds.has(batchId)) continue;
       const band = bands.get(element.band);
       if (!band) continue;
 
@@ -308,6 +347,7 @@ export class PriorityIntegrityQuery {
         if (element.band === "A" && !priorityEdited.has(element.id)) reliableADeferred += 1;
         const anchor = this.topicAnchor(element, info);
         const current = sacrificed.get(element.id);
+        const origin = postponeOrigin(payload);
         sacrificed.set(element.id, {
           id: element.id,
           title: element.title,
@@ -317,6 +357,8 @@ export class PriorityIntegrityQuery {
           postponeCount: (current?.postponeCount ?? 0) + 1,
           postponeDebtDays: (current?.postponeDebtDays ?? 0) + addedDebt,
           latestDeferredAt: current?.latestDeferredAt ?? op.createdAt,
+          postponeOrigin: current?.postponeOrigin ?? origin,
+          restored: false,
           topicAnchorId: anchor?.id ?? null,
           topicTitle: anchor?.title ?? null,
         });

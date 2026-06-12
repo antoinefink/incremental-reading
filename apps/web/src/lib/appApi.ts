@@ -69,6 +69,8 @@ export type KeyboardLayout = "qwerty" | "dvorak" | "vim";
 /** UI theme preference; `system` resolves to light/dark in the renderer. */
 export type ThemePreference = "system" | "light" | "dark";
 
+export type OverloadPolicy = "off" | "suggest" | "automatic";
+
 /**
  * The complete, validated user/domain settings the scheduler + UI read. Mirrors
  * `@interleave/core`'s `AppSettings` (the authoritative model). Priority is
@@ -76,6 +78,7 @@ export type ThemePreference = "system" | "light" | "dark";
  */
 export interface AppSettings {
   readonly dailyBudgetMinutes: number;
+  readonly overloadPolicy: OverloadPolicy;
   readonly dailyReviewBudget: number;
   readonly defaultDesiredRetention: number;
   readonly defaultTopicIntervalDays: number;
@@ -3868,6 +3871,15 @@ export interface PriorityIntegritySacrificedRow {
   readonly postponeCount: number;
   readonly postponeDebtDays: number;
   readonly latestDeferredAt: string;
+  readonly postponeOrigin:
+    | "manualAutoPostpone"
+    | "standingAutoPostpone"
+    | "catchUp"
+    | "vacation"
+    | "recovery"
+    | "manualQueueAction"
+    | "unknown";
+  readonly restored: boolean;
   readonly topicAnchorId: string | null;
   readonly topicTitle: string | null;
 }
@@ -4022,6 +4034,20 @@ export interface DailyWorkResumeSource {
   readonly unresolvedBlocks: number | null;
 }
 
+export type AutoPostponeReceiptStatus = "actionable" | "undone";
+
+export interface AutoPostponeReceipt {
+  readonly batchId: string;
+  readonly localDay: string;
+  readonly status: AutoPostponeReceiptStatus;
+  readonly postponed: number;
+  readonly postponedMinutes: number;
+  readonly remainingMinutesAfter: number;
+  readonly priorityBands: readonly string[];
+  readonly createdAt: string;
+  readonly undoneAt?: string;
+}
+
 export interface DailyWorkSummaryResult {
   readonly asOf: string;
   readonly dueQueueItems: number;
@@ -4030,6 +4056,7 @@ export interface DailyWorkSummaryResult {
   readonly resumeSource: DailyWorkResumeSource | null;
   readonly recommendedAction: DailyWorkRecommendedAction;
   readonly graduationEvents: readonly KnowledgeGraduationEvent[];
+  readonly autoPostponeReceipt: AutoPostponeReceipt | null;
 }
 
 export interface DailyWorkGraduationAckRequest {
@@ -4041,6 +4068,18 @@ export interface DailyWorkGraduationAckResult {
   readonly asOf: string;
   readonly acknowledgedEventIds: readonly string[];
   readonly observedSubjectCount: number;
+}
+
+export interface DailyWorkUndoAutoPostponeReceiptRequest {
+  readonly batchId: string;
+}
+
+export interface DailyWorkUndoAutoPostponeReceiptResult {
+  readonly undone: boolean;
+  readonly count: number;
+  readonly label: string;
+  readonly reason?: string;
+  readonly receipt: AutoPostponeReceipt | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -4568,6 +4607,9 @@ export interface AppApi {
     ackGraduationEvents(
       request?: DailyWorkGraduationAckRequest,
     ): Promise<DailyWorkGraduationAckResult>;
+    undoAutoPostponeReceipt(
+      request: DailyWorkUndoAutoPostponeReceiptRequest,
+    ): Promise<DailyWorkUndoAutoPostponeReceiptResult>;
   };
   readonly weeklyReview: {
     summary(request?: WeeklyReviewSummaryRequest): Promise<WeeklyReviewSummaryResult>;
@@ -4752,7 +4794,8 @@ export const appApi = {
   /**
    * The unified, sorted, filtered due queue (T029) — due cards (FSRS) AND due
    * attention items, sorted priority-then-due-date, with type/concept/status
-   * filters + per-type counts + the budget gauge. Read-only.
+   * filters + per-type counts + the budget gauge. May first materialize the
+   * trusted current local day's standing auto-postpone policy when automatic.
    */
   listQueue(request?: QueueListRequest): Promise<QueueListResult> {
     return requireAppApi().queue.list(request);
@@ -5681,7 +5724,9 @@ export const appApi = {
   },
   /**
    * The primary daily workflow recommendation — due queue first, then inbox
-   * triage, then active unscheduled source resume, then true clear. Read-only.
+   * triage, then active unscheduled source resume, then true clear. May first
+   * materialize the trusted current local day's standing auto-postpone policy when
+   * automatic.
    */
   getDailyWorkSummary(request?: DailyWorkSummaryRequest): Promise<DailyWorkSummaryResult> {
     return requireAppApi().dailyWork.summary(request);
@@ -5697,6 +5742,20 @@ export const appApi = {
       });
     }
     return requireAppApi().dailyWork.ackGraduationEvents(request);
+  },
+  undoDailyWorkAutoPostponeReceipt(
+    request: DailyWorkUndoAutoPostponeReceiptRequest,
+  ): Promise<DailyWorkUndoAutoPostponeReceiptResult> {
+    if (!isDesktop() || !window.appApi?.dailyWork?.undoAutoPostponeReceipt) {
+      return Promise.resolve({
+        undone: false,
+        count: 0,
+        label: "",
+        reason: "Desktop bridge unavailable",
+        receipt: null,
+      });
+    }
+    return requireAppApi().dailyWork.undoAutoPostponeReceipt(request);
   },
   getWeeklyReviewSummary(request?: WeeklyReviewSummaryRequest): Promise<WeeklyReviewSummaryResult> {
     return requireAppApi().weeklyReview.summary(request);

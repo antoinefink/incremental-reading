@@ -137,6 +137,7 @@ const h = vi.hoisted(() => {
     resumeSource: null,
     recommendedAction: "process_due_queue",
     graduationEvents: [],
+    autoPostponeReceipt: null,
   };
   // The full reveal-ready view for card-1 (the answer + source ref ship with the
   // card; the renderer hides them until reveal — exactly like the review session).

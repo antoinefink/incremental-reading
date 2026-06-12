@@ -26,6 +26,7 @@
 import { DEFAULT_RANDOM_AUDIT_SIZE } from "@interleave/core";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { AutoPostponeReceiptLine } from "../../components/AutoPostponeReceiptLine";
 import { Icon } from "../../components/Icon";
 import {
   formatAttentionScheduleReason,
@@ -549,6 +550,15 @@ export function HomeScreen() {
         <GraduationReceipts
           events={graduationEvents}
           onOpenConcept={(conceptId) => void navigate({ to: "/concepts", search: { conceptId } })}
+        />
+
+        <AutoPostponeReceiptLine
+          receipt={dailyWork?.autoPostponeReceipt ?? null}
+          onUndo={async (batchId) => {
+            const result = await appApi.undoDailyWorkAutoPostponeReceipt({ batchId });
+            if (result.undone) await load();
+            return result;
+          }}
         />
 
         {/* Today's-status metric tiles (analytics chrome). */}

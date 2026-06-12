@@ -19,6 +19,7 @@ import {
 } from "@interleave/core";
 import { type InterleaveDatabase, settings } from "@interleave/db";
 import { eq } from "drizzle-orm";
+import type { TransactionClient } from "./types";
 
 export class SettingsRepository {
   constructor(private readonly db: InterleaveDatabase) {}
@@ -59,14 +60,19 @@ export class SettingsRepository {
   /** Create/overwrite many settings in one transaction. */
   setMany(values: Record<string, unknown>): void {
     this.db.transaction((tx) => {
-      for (const [key, value] of Object.entries(values)) {
-        const json = JSON.stringify(value ?? null);
-        tx.insert(settings)
-          .values({ key, value: json })
-          .onConflictDoUpdate({ target: settings.key, set: { value: json } })
-          .run();
-      }
+      this.setManyWithin(tx, values);
     });
+  }
+
+  /** Create/overwrite many settings inside a caller-owned transaction. */
+  setManyWithin(tx: TransactionClient, values: Record<string, unknown>): void {
+    for (const [key, value] of Object.entries(values)) {
+      const json = JSON.stringify(value ?? null);
+      tx.insert(settings)
+        .values({ key, value: json })
+        .onConflictDoUpdate({ target: settings.key, set: { value: json } })
+        .run();
+    }
   }
 
   /** Delete one setting by key (settings are not user data — hard delete is fine). */

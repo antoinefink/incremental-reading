@@ -261,6 +261,7 @@ export type {
   AppSettings,
   EmbeddingProvider,
   KeyboardLayout,
+  OverloadPolicy,
   RendererSettings,
   ThemePreference,
 } from "./settings";
@@ -292,8 +293,10 @@ export {
   FSRS_PARAM_VECTOR_LENGTH,
   isEmbeddingProvider,
   isKeyboardLayout,
+  isOverloadPolicy,
   isThemePreference,
   KEYBOARD_LAYOUTS,
+  OVERLOAD_POLICIES,
   PARKED_RESURFACE_AFTER_DAYS_MAX,
   PARKED_RESURFACE_AFTER_DAYS_MIN,
   projectToRendererSettings,

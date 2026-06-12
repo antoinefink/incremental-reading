@@ -200,6 +200,8 @@ describe("PriorityIntegrityQuery.compute", () => {
         postponeCount: 1,
         postponeDebtDays: 15,
         latestDeferredAt: localInstant(2026, 5, 10, 10),
+        postponeOrigin: "unknown",
+        restored: false,
         topicAnchorId: sourceId,
         topicTitle: "Networking paper",
       },

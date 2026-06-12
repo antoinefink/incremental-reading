@@ -36,6 +36,10 @@ export type KeyboardLayout = (typeof KEYBOARD_LAYOUTS)[number];
 export const THEMES = ["system", "light", "dark"] as const;
 export type ThemePreference = (typeof THEMES)[number];
 
+/** Standing overload policy for T117. Manual overload controls remain available in every mode. */
+export const OVERLOAD_POLICIES = ["off", "suggest", "automatic"] as const;
+export type OverloadPolicy = (typeof OVERLOAD_POLICIES)[number];
+
 /**
  * The complete, validated user/domain settings.
  *
@@ -84,6 +88,7 @@ export type ThemePreference = (typeof THEMES)[number];
  */
 export interface AppSettings {
   readonly dailyBudgetMinutes: number;
+  readonly overloadPolicy: OverloadPolicy;
   readonly dailyReviewBudget: number;
   readonly defaultDesiredRetention: Priority;
   readonly defaultTopicIntervalDays: number;
@@ -265,6 +270,7 @@ export function projectToRendererSettings(settings: AppSettings): RendererSettin
  */
 export const SETTINGS_KEYS = {
   dailyBudgetMinutes: "review.dailyBudgetMinutes",
+  overloadPolicy: "review.overloadPolicy",
   dailyReviewBudget: "review.dailyBudget",
   defaultDesiredRetention: "review.defaultDesiredRetention",
   defaultTopicIntervalDays: "scheduler.defaultTopicIntervalDays",
@@ -342,6 +348,7 @@ export function coerceAiProviderKind(raw: unknown): AiProviderKind {
  */
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   dailyBudgetMinutes: 60,
+  overloadPolicy: "suggest",
   dailyReviewBudget: 60,
   defaultDesiredRetention: 0.9,
   defaultTopicIntervalDays: 7,
@@ -506,6 +513,11 @@ export function isThemePreference(value: unknown): value is ThemePreference {
   return typeof value === "string" && (THEMES as readonly string[]).includes(value);
 }
 
+/** Type guard for {@link OverloadPolicy}. */
+export function isOverloadPolicy(value: unknown): value is OverloadPolicy {
+  return typeof value === "string" && (OVERLOAD_POLICIES as readonly string[]).includes(value);
+}
+
 /**
  * Coerce one arbitrary stored value into a valid setting of the given key,
  * falling back to the default when the stored value is missing or malformed.
@@ -530,6 +542,8 @@ export function coerceSettingValue<K extends keyof AppSettings>(
           ? clampInt(raw, DAILY_REVIEW_BUDGET_MIN, DAILY_REVIEW_BUDGET_MAX)
           : fallback
       ) as AppSettings[K];
+    case "overloadPolicy":
+      return (isOverloadPolicy(raw) ? raw : fallback) as AppSettings[K];
     case "defaultDesiredRetention":
       return (
         isFiniteNumber(raw)
@@ -658,6 +672,7 @@ export function appSettingsFromStored(stored: Readonly<Record<string, unknown>>)
         : stored[SETTINGS_KEYS.dailyReviewBudget],
     ),
     dailyReviewBudget: legacyBudget,
+    overloadPolicy: coerceSettingValue("overloadPolicy", stored[SETTINGS_KEYS.overloadPolicy]),
     defaultDesiredRetention: coerceSettingValue(
       "defaultDesiredRetention",
       stored[SETTINGS_KEYS.defaultDesiredRetention],

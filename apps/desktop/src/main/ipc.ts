@@ -53,6 +53,7 @@ import {
   ConceptsUnassignRequestSchema,
   DailyWorkGraduationAckRequestSchema,
   DailyWorkSummaryRequestSchema,
+  DailyWorkUndoAutoPostponeReceiptRequestSchema,
   DbStatusRequestSchema,
   DocumentMarksAddRequestSchema,
   DocumentMarksListRequestSchema,
@@ -1440,6 +1441,11 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.dailyWorkAckGraduationEvents, (_event, rawRequest: unknown) => {
     const request = DailyWorkGraduationAckRequestSchema.parse(rawRequest);
     return dbService.ackDailyWorkGraduationEvents(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.dailyWorkUndoAutoPostponeReceipt, (_event, rawRequest: unknown) => {
+    const request = DailyWorkUndoAutoPostponeReceiptRequestSchema.parse(rawRequest);
+    return dbService.undoDailyWorkAutoPostponeReceipt(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.weeklyReviewSummary, (_event, rawRequest: unknown) => {

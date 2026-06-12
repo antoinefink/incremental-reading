@@ -42,6 +42,7 @@ describe("AppSettings defaults", () => {
   it("has stable, namespaced storage keys", () => {
     expect(SETTINGS_KEYS).toEqual({
       dailyBudgetMinutes: "review.dailyBudgetMinutes",
+      overloadPolicy: "review.overloadPolicy",
       dailyReviewBudget: "review.dailyBudget",
       defaultDesiredRetention: "review.defaultDesiredRetention",
       defaultTopicIntervalDays: "scheduler.defaultTopicIntervalDays",
@@ -109,6 +110,13 @@ describe("coerceSettingValue", () => {
     expect(coerceSettingValue("dailyReviewBudget", "nope")).toBe(
       DEFAULT_APP_SETTINGS.dailyReviewBudget,
     );
+  });
+
+  it("validates the standing overload policy enum", () => {
+    expect(DEFAULT_APP_SETTINGS.overloadPolicy).toBe("suggest");
+    expect(coerceSettingValue("overloadPolicy", "off")).toBe("off");
+    expect(coerceSettingValue("overloadPolicy", "automatic")).toBe("automatic");
+    expect(coerceSettingValue("overloadPolicy", "always")).toBe("suggest");
   });
 
   it("clamps desired retention into the FSRS-sane band", () => {
@@ -292,6 +300,7 @@ describe("stored ↔ model round-trip", () => {
     };
     expect(appSettingsFromStored(stored)).toEqual({
       dailyBudgetMinutes: 90,
+      overloadPolicy: "suggest",
       dailyReviewBudget: 120,
       defaultDesiredRetention: 0.95,
       defaultTopicIntervalDays: 30,
@@ -396,6 +405,7 @@ describe("stored ↔ model round-trip", () => {
   it("survives a full round-trip through stored representation", () => {
     const original = {
       dailyBudgetMinutes: 80,
+      overloadPolicy: "suggest" as const,
       dailyReviewBudget: 80,
       defaultDesiredRetention: 0.92,
       defaultTopicIntervalDays: 3,

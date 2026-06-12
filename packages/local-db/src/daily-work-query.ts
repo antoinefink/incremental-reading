@@ -3,6 +3,10 @@ import { priorityToLabel } from "@interleave/core";
 import type { BlockProcessingService } from "./block-processing-service";
 import { nowIso } from "./ids";
 import type { Repositories } from "./index";
+import {
+  STANDING_AUTO_POSTPONE_STATE_KEY,
+  type StandingAutoPostponeReceipt,
+} from "./standing-auto-postpone-service";
 import type {
   KnowledgeGraduationEvent,
   TopicKnowledgeGraduationStatus,
@@ -37,6 +41,7 @@ export interface DailyWorkSummary {
   readonly resumeSource: DailyWorkResumeSource | null;
   readonly recommendedAction: DailyWorkRecommendedAction;
   readonly graduationEvents: readonly KnowledgeGraduationEvent[];
+  readonly autoPostponeReceipt: StandingAutoPostponeReceipt | null;
 }
 
 export interface DailyWorkGraduationAckRequest {
@@ -75,6 +80,7 @@ export class DailyWorkQuery {
     const resumeSources = this.activeUnscheduledSources();
     const resumeSource = resumeSources[0] ?? null;
     const graduationEvents = this.unacknowledgedGraduationEvents(asOf);
+    const autoPostponeReceipt = this.autoPostponeReceipt(asOf);
     return {
       asOf,
       dueQueueItems,
@@ -87,6 +93,7 @@ export class DailyWorkQuery {
         activeUnscheduledSources: resumeSources.length,
       }),
       graduationEvents,
+      autoPostponeReceipt,
     };
   }
 
@@ -186,6 +193,17 @@ export class DailyWorkQuery {
     }
     return value;
   }
+
+  private autoPostponeReceipt(asOf: IsoTimestamp): StandingAutoPostponeReceipt | null {
+    const state = this.repos.settings.get<{
+      readonly version?: unknown;
+      readonly days?: Record<string, { readonly receipt?: StandingAutoPostponeReceipt }>;
+    }>(STANDING_AUTO_POSTPONE_STATE_KEY);
+    if (state?.version !== 1 || !state.days || typeof state.days !== "object") {
+      return null;
+    }
+    return state.days[localDayOf(asOf)]?.receipt ?? null;
+  }
 }
 
 function recommendedAction(input: {
@@ -204,4 +222,12 @@ function graduationSubjectKey(
   subjectId: string,
 ): string {
   return `${subjectType}:${subjectId}`;
+}
+
+function localDayOf(iso: IsoTimestamp): string {
+  const date = new Date(iso);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }

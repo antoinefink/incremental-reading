@@ -245,45 +245,90 @@ export class SchedulerService {
      * closed op set is unchanged — this only enriches the payload.
      */
     batchId?: string,
+    extras: Readonly<Record<string, unknown>> = {},
   ): ScheduleResult {
     const element = this.requireAttentionElement(id);
     const priorPostpones = this.countPostpones(id);
+    return this.db.transaction((tx) =>
+      this.rescheduleForActionElementWithin(
+        tx,
+        element,
+        action,
+        now,
+        priorPostpones,
+        batchId,
+        extras,
+      ),
+    );
+  }
+
+  /**
+   * Transaction-composable attention postpone/service path for callers that need
+   * additional state committed with the schedule mutation.
+   */
+  rescheduleForActionWithin(
+    tx: TransactionClient,
+    id: ElementId,
+    action: SchedulerAction,
+    now: IsoTimestamp = nowIso(),
+    batchId?: string,
+    extras: Readonly<Record<string, unknown>> = {},
+  ): ScheduleResult {
+    const element = this.requireAttentionElementWithin(tx, id);
+    const priorPostpones = this.countPostpones(id);
+    return this.rescheduleForActionElementWithin(
+      tx,
+      element,
+      action,
+      now,
+      priorPostpones,
+      batchId,
+      extras,
+    );
+  }
+
+  private rescheduleForActionElementWithin(
+    tx: TransactionClient,
+    element: Element,
+    action: SchedulerAction,
+    now: IsoTimestamp,
+    priorPostpones: number,
+    batchId?: string,
+    extras: Readonly<Record<string, unknown>> = {},
+  ): ScheduleResult {
     const adaptive = this.adaptiveVisitContext(element, action);
     const decision = nextDueAt(this.toSchedulable(element, action, adaptive?.visitYield), now);
-    return this.db.transaction((tx) => {
-      const opExtras = {
-        ...(action === "postpone"
-          ? { postpone: true, postponeCount: priorPostpones + 1, action, scheduledAt: now }
-          : { action, scheduledAt: now }),
-        ...(adaptive &&
-        decision.adaptiveReason &&
-        decision.attentionIntervalMultiplier !== undefined
-          ? { attentionAdaptive: adaptivePayload(adaptive, decision.adaptiveReason) }
+    const opExtras = {
+      ...(action === "postpone"
+        ? { postpone: true, postponeCount: priorPostpones + 1, action, scheduledAt: now }
+        : { action, scheduledAt: now }),
+      ...(adaptive && decision.adaptiveReason && decision.attentionIntervalMultiplier !== undefined
+        ? { attentionAdaptive: adaptivePayload(adaptive, decision.adaptiveReason) }
+        : {}),
+      ...(decision.scheduleReason ? { scheduleReason: decision.scheduleReason } : {}),
+      ...(batchId ? { batchId } : {}),
+      ...extras,
+    };
+    const rescheduled = this.elements.rescheduleWithin(
+      tx,
+      element.id,
+      decision.dueAt,
+      "scheduled",
+      opExtras,
+      {
+        updatedAt: now,
+        ...(decision.attentionIntervalMultiplier !== undefined
+          ? { attentionIntervalMultiplier: decision.attentionIntervalMultiplier }
           : {}),
-        ...(decision.scheduleReason ? { scheduleReason: decision.scheduleReason } : {}),
-        ...(batchId ? { batchId } : {}),
-      };
-      const rescheduled = this.elements.rescheduleWithin(
-        tx,
-        id,
-        decision.dueAt,
-        "scheduled",
-        opExtras,
-        {
-          updatedAt: now,
-          ...(decision.attentionIntervalMultiplier !== undefined
-            ? { attentionIntervalMultiplier: decision.attentionIntervalMultiplier }
-            : {}),
-        },
-      );
-      return {
-        element: rescheduled,
-        intervalDays: decision.intervalDays,
-        ...(decision.retirementSuggestion
-          ? { retirementSuggestion: decision.retirementSuggestion }
-          : {}),
-      };
-    });
+      },
+    );
+    return {
+      element: rescheduled,
+      intervalDays: decision.intervalDays,
+      ...(decision.retirementSuggestion
+        ? { retirementSuggestion: decision.retirementSuggestion }
+        : {}),
+    };
   }
 
   /**
@@ -508,6 +553,7 @@ export class SchedulerService {
     choice: ScheduleChoice,
     now: IsoTimestamp = nowIso(),
     batchId?: string,
+    extras: Readonly<Record<string, unknown>> = {},
   ): ScheduleResult {
     this.requireAttentionElement(id);
     const decision = scheduleForChoice(choice, now);
@@ -515,6 +561,7 @@ export class SchedulerService {
       const rescheduled = this.elements.rescheduleWithin(tx, id, decision.dueAt, "scheduled", {
         choice: typeof choice === "string" ? choice : "manual",
         ...(batchId ? { batchId } : {}),
+        ...extras,
       });
       return { element: rescheduled, intervalDays: decision.intervalDays };
     });

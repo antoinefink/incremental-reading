@@ -67,6 +67,7 @@ function formatBackupArtifactLabel(artifact: BackupArtifact): string {
  */
 const FALLBACK_SETTINGS: RendererSettings = {
   dailyBudgetMinutes: 60,
+  overloadPolicy: "suggest",
   dailyReviewBudget: 60,
   defaultDesiredRetention: 0.9,
   defaultTopicIntervalDays: 7,
@@ -123,6 +124,11 @@ const TOPIC_INTERVAL_OPTIONS = [3, 7, 14, 30] as const;
 const DAILY_BUDGET_MINUTES_MIN = 5;
 const DAILY_BUDGET_MINUTES_MAX = 300;
 const DAILY_BUDGET_MINUTE_PRESETS = [15, 30, 60, 120] as const;
+const OVERLOAD_POLICY_OPTIONS: { value: AppSettings["overloadPolicy"]; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "suggest", label: "Suggest" },
+  { value: "automatic", label: "Automatic" },
+];
 const KEYBOARD_LAYOUTS: { value: AppSettings["keyboardLayout"]; label: string }[] = [
   { value: "qwerty", label: "QWERTY" },
   { value: "dvorak", label: "Dvorak" },
@@ -1321,6 +1327,24 @@ export function Settings() {
               </span>
             </div>
           </div>
+        </SettingRow>
+
+        <SettingRow
+          label="Overload policy"
+          hint={
+            s.overloadPolicy === "automatic"
+              ? "Once per local day, safe low-value work can slip before Home, Queue, and Daily Work open; the receipt can undo the batch."
+              : s.overloadPolicy === "suggest"
+                ? "Manual overload suggestions stay visible and wait for confirmation."
+                : "No standing policy runs; the manual overload banner still appears when today is over budget."
+          }
+        >
+          <Segmented
+            name="setting-overload-policy"
+            value={s.overloadPolicy}
+            options={OVERLOAD_POLICY_OPTIONS}
+            onChange={(overloadPolicy) => void patch({ overloadPolicy })}
+          />
         </SettingRow>
 
         <SettingRow

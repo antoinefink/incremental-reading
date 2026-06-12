@@ -55,6 +55,7 @@ import {
   MAX_REVIEW_MODE_DECK,
   MEDIA_REF_FACES,
   type MediaRef,
+  OVERLOAD_POLICIES,
   PARKED_RESURFACE_AFTER_DAYS_MAX,
   PARKED_RESURFACE_AFTER_DAYS_MIN,
   type PriorityLabel,
@@ -230,6 +231,7 @@ export const SettingsPatchSchema = z
       .int()
       .min(DAILY_BUDGET_MINUTES_MIN)
       .max(DAILY_BUDGET_MINUTES_MAX),
+    overloadPolicy: z.enum(OVERLOAD_POLICIES),
     dailyReviewBudget: z.number().int().min(DAILY_REVIEW_BUDGET_MIN).max(DAILY_REVIEW_BUDGET_MAX),
     defaultDesiredRetention: z.number().min(DESIRED_RETENTION_MIN).max(DESIRED_RETENTION_MAX),
     defaultTopicIntervalDays: z.number().int().positive(),
@@ -718,8 +720,10 @@ export interface TopicFallowResult {
  * desc then due date asc**, applies the type/concept/status filters, and returns
  * flat `QueueItemSummary` rows + per-type counts + the daily budget gauge. The
  * 10–20% jitter the daily-queue rule asks for is a stable, seeded shuffle the
- * renderer applies on top — the sort here is deterministic. Read-only: no
- * mutation, no `operation_log`. There is still no generic `db.query`.
+ * renderer applies on top — the sort here is deterministic. Before returning, MAIN
+ * may materialize the trusted current local day's standing auto-postpone policy when
+ * `overloadPolicy` is `automatic`; renderer-supplied `asOf` never controls that
+ * marker/batch creation. There is still no generic `db.query`.
  *
  * `concept` + `tag` filtering is REAL (T041, M8): the query layer narrows on the
  * element's `concept_membership` edges (matched by concept NAME, against ALL of an
@@ -5874,6 +5878,15 @@ export interface PriorityIntegritySacrificedRow {
   readonly postponeCount: number;
   readonly postponeDebtDays: number;
   readonly latestDeferredAt: string;
+  readonly postponeOrigin:
+    | "manualAutoPostpone"
+    | "standingAutoPostpone"
+    | "catchUp"
+    | "vacation"
+    | "recovery"
+    | "manualQueueAction"
+    | "unknown";
+  readonly restored: boolean;
   readonly topicAnchorId: string | null;
   readonly topicTitle: string | null;
 }
@@ -6057,6 +6070,20 @@ export interface DailyWorkResumeSource {
   readonly unresolvedBlocks: number | null;
 }
 
+export type AutoPostponeReceiptStatus = "actionable" | "undone";
+
+export interface AutoPostponeReceipt {
+  readonly batchId: string;
+  readonly localDay: string;
+  readonly status: AutoPostponeReceiptStatus;
+  readonly postponed: number;
+  readonly postponedMinutes: number;
+  readonly remainingMinutesAfter: number;
+  readonly priorityBands: readonly string[];
+  readonly createdAt: string;
+  readonly undoneAt?: string;
+}
+
 export interface DailyWorkSummaryResult {
   readonly asOf: string;
   readonly dueQueueItems: number;
@@ -6065,6 +6092,7 @@ export interface DailyWorkSummaryResult {
   readonly resumeSource: DailyWorkResumeSource | null;
   readonly recommendedAction: DailyWorkRecommendedAction;
   readonly graduationEvents: readonly KnowledgeGraduationEvent[];
+  readonly autoPostponeReceipt: AutoPostponeReceipt | null;
 }
 
 export const DailyWorkGraduationAckRequestSchema = z
@@ -6081,6 +6109,21 @@ export interface DailyWorkGraduationAckResult {
   readonly asOf: string;
   readonly acknowledgedEventIds: readonly string[];
   readonly observedSubjectCount: number;
+}
+
+export const DailyWorkUndoAutoPostponeReceiptRequestSchema = z.object({
+  batchId: z.string().min(1),
+});
+export type DailyWorkUndoAutoPostponeReceiptRequest = z.infer<
+  typeof DailyWorkUndoAutoPostponeReceiptRequestSchema
+>;
+
+export interface DailyWorkUndoAutoPostponeReceiptResult {
+  readonly undone: boolean;
+  readonly count: number;
+  readonly label: string;
+  readonly reason?: string;
+  readonly receipt: AutoPostponeReceipt | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -6557,7 +6600,8 @@ export interface AppApi {
     /**
      * The unified, sorted, filtered due queue (T029) — due cards (FSRS) AND due
      * attention items, sorted priority-then-due-date, with type/concept/status
-     * filters + per-type counts + the budget gauge. Read-only.
+     * filters + per-type counts + the budget gauge. May first materialize the
+     * trusted current local day's standing auto-postpone policy when automatic.
      */
     list(request?: QueueListRequest): Promise<QueueListResult>;
     /**
@@ -7250,7 +7294,9 @@ export interface AppApi {
   readonly dailyWork: {
     /**
      * The primary daily workflow recommendation — due queue first, then inbox
-     * triage, then active unscheduled source resume, then true clear. Read-only.
+     * triage, then active unscheduled source resume, then true clear. May first
+     * materialize the trusted current local day's standing auto-postpone policy when
+     * automatic.
      */
     summary(request?: DailyWorkSummaryRequest): Promise<DailyWorkSummaryResult>;
     /**
@@ -7260,6 +7306,13 @@ export interface AppApi {
     ackGraduationEvents(
       request?: DailyWorkGraduationAckRequest,
     ): Promise<DailyWorkGraduationAckResult>;
+    /**
+     * Undo the standing auto-postpone receipt batch only. This is not arbitrary
+     * batch undo; the main side validates receipt ownership before restoring.
+     */
+    undoAutoPostponeReceipt(
+      request: DailyWorkUndoAutoPostponeReceiptRequest,
+    ): Promise<DailyWorkUndoAutoPostponeReceiptResult>;
   };
   readonly weeklyReview: {
     /** Weekly ledger/integrity session summary. May create/suppress the system task. */

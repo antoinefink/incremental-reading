@@ -182,6 +182,18 @@ The overload-management process that moves lower-value due work later so the rem
 
 Auto-postpone is advisory and bounded by protection rules. It should preserve source lineage, review state, and operation-log auditability while avoiding high-priority, fragile, or otherwise protected work.
 
+### Standing auto-postpone policy
+
+The opt-in form of Auto-postpone that evaluates the current local day automatically before trusted Due queue or daily-work reads.
+
+Standing auto-postpone is not owned by renderer clocks or wall-clock jobs. It writes a durable daily receipt when it moves work, and a day already evaluated by the policy must not be trimmed again unless a future policy explicitly defines re-evaluation.
+
+### Auto-postpone receipt
+
+The daily explanation of an automatic Auto-postpone run, including what was moved, which budget impact remains, and the batch that can be targeted for undo.
+
+The receipt is distinct from a toast: it persists for the local day, is backed by operation-log evidence, and can become `undone` without deleting the historical postponement facts.
+
 ### System-owned task
 
 A scheduled Task element created and maintained by Interleave itself for a product ritual or integrity workflow, not by generic user task creation.

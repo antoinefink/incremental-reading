@@ -41,6 +41,7 @@ import {
   type RecoveryInput,
   type VacationPlan,
 } from "@interleave/scheduler";
+import type { PostponeOriginPayload } from "./auto-postpone-service";
 import { ElementRepository } from "./element-repository";
 import { newRowId, nowIso } from "./ids";
 import type { Repositories } from "./index";
@@ -221,6 +222,7 @@ export class RecoveryModeService {
         item.targetDueAt as IsoTimestamp,
         now,
         batchId,
+        { kind: "catchUp" },
       );
       moved += 1;
     }
@@ -287,6 +289,7 @@ export class RecoveryModeService {
         item.targetDueAt as IsoTimestamp,
         now,
         batchId,
+        { kind: "vacation" },
       );
       moved += 1;
     }
@@ -305,11 +308,13 @@ export class RecoveryModeService {
     targetDueAt: IsoTimestamp,
     now: IsoTimestamp,
     batchId: string,
+    origin: PostponeOriginPayload,
   ): void {
+    const extras = { postponeOrigin: origin };
     if (scheduler === "fsrs") {
-      this.queueActions.cardDeferTo(id, now, targetDueAt, batchId);
+      this.queueActions.cardDeferTo(id, now, targetDueAt, batchId, extras);
     } else {
-      this.scheduler.scheduleAt(id, { manual: targetDueAt }, now, batchId);
+      this.scheduler.scheduleAt(id, { manual: targetDueAt }, now, batchId, extras);
     }
   }
 }

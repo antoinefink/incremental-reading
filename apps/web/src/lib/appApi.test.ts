@@ -225,6 +225,7 @@ function installAppApi(overrides: Partial<AppApi> = {}): AppApi {
         resumeSource: null,
         recommendedAction: "triage_inbox",
         graduationEvents: [],
+        autoPostponeReceipt: null,
         request,
       })),
       ackGraduationEvents: vi.fn(async (request?: unknown) => ({
@@ -234,6 +235,13 @@ function installAppApi(overrides: Partial<AppApi> = {}): AppApi {
             ? ((request as { eventIds?: readonly string[] }).eventIds ?? [])
             : [],
         observedSubjectCount: 0,
+      })),
+      undoAutoPostponeReceipt: vi.fn(async (request?: unknown) => ({
+        undone: true,
+        count: 2,
+        label: "Undid 2 changes",
+        receipt: null,
+        request,
       })),
     },
     weeklyReview: {
@@ -445,6 +453,11 @@ describe("renderer appApi wrapper", () => {
     expect(bridge.dailyWork.ackGraduationEvents).toHaveBeenCalledWith({
       asOf: "2026-06-08T09:00:00.000Z",
       eventIds: ["topic:topic-1:graduated:v1"],
+    });
+
+    await appApi.undoDailyWorkAutoPostponeReceipt({ batchId: "batch-1" });
+    expect(bridge.dailyWork.undoAutoPostponeReceipt).toHaveBeenCalledWith({
+      batchId: "batch-1",
     });
 
     await appApi.getWeeklyReviewSummary({ asOf: "2026-06-08T09:00:00.000Z" });

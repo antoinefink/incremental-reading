@@ -240,6 +240,12 @@ describe("preload bridge", () => {
       {},
     );
 
+    await api().dailyWork.undoAutoPostponeReceipt({ batchId: "batch-1" });
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(
+      IPC_CHANNELS.dailyWorkUndoAutoPostponeReceipt,
+      { batchId: "batch-1" },
+    );
+
     await api().weeklyReview.summary();
     expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.weeklyReviewSummary, {});
 

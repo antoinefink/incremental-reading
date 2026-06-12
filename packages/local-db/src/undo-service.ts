@@ -37,7 +37,7 @@
  */
 
 import type { ElementId, ElementStatus, IsoTimestamp, OperationType } from "@interleave/core";
-import { type InterleaveDatabase, operationLog, reviewStates } from "@interleave/db";
+import { elements, type InterleaveDatabase, operationLog, reviewStates } from "@interleave/db";
 import { desc, eq, sql } from "drizzle-orm";
 import { ElementRepository } from "./element-repository";
 import {
@@ -46,6 +46,7 @@ import {
   restoreScheduleFromPayload,
 } from "./op-payload-helpers";
 import { OperationLogRepository } from "./operation-log-repository";
+import type { DbClient, TransactionClient } from "./types";
 
 /** The op types the global command-level undo can invert (the MVP scope). */
 const UNDOABLE_OP_TYPES: ReadonlySet<OperationType> = new Set<OperationType>([
@@ -69,6 +70,13 @@ export interface UndoResult {
   readonly reason?: string;
   /** How many ops were reversed (>1 for a bulk batch). */
   readonly count: number;
+}
+
+export interface UndoBatchOptions {
+  readonly requirePostponeOriginKind?: string;
+  readonly requireCurrentDueMatch?: boolean;
+  readonly restoredPayloadExtras?: Readonly<Record<string, unknown>>;
+  readonly afterUndo?: (tx: TransactionClient) => void;
 }
 
 interface RawOpRow {
@@ -172,6 +180,82 @@ export class UndoService {
   }
 
   /**
+   * Target one known batch id instead of the newest command. This is deliberately
+   * narrower than a renderer-facing arbitrary batch undo: callers can require a
+   * payload origin, and only invertible ops in that batch are restored.
+   */
+  undoBatch(batchId: string, options: UndoBatchOptions = {}): UndoResult {
+    const batch = this.collectBatch(batchId);
+    if (batch.length === 0) {
+      return {
+        undone: false,
+        opType: null,
+        elementId: null,
+        label: "",
+        reason: "Batch not found",
+        count: 0,
+      };
+    }
+    if (options.requirePostponeOriginKind && !isOwnedPostponeBatch(batch, options)) {
+      return {
+        undone: false,
+        opType: batch[0]?.opType ?? null,
+        elementId: batch[0]?.elementId ?? null,
+        label: "",
+        reason: "Batch is not owned by this receipt",
+        count: 0,
+      };
+    }
+
+    let label = "";
+    let undoneCount = 0;
+    let conflict = false;
+    this.db.transaction((tx) => {
+      if (options.requireCurrentDueMatch) {
+        conflict = batch.some((op) => !this.currentDueMatchesAppliedWithin(tx, op));
+        if (conflict) return;
+      }
+      for (const op of batch) {
+        const opLabel = this.invertWithin(tx, op, options.restoredPayloadExtras ?? {});
+        if (opLabel === null) continue;
+        undoneCount += 1;
+        if (!label && opLabel) label = opLabel;
+      }
+      if (undoneCount > 0) options.afterUndo?.(tx);
+    });
+
+    if (conflict) {
+      return {
+        undone: false,
+        opType: batch[0]?.opType ?? null,
+        elementId: batch[0]?.elementId ?? null,
+        label: "",
+        reason: "Batch no longer matches current schedule",
+        count: 0,
+      };
+    }
+
+    if (undoneCount === 0) {
+      return {
+        undone: false,
+        opType: batch[0]?.opType ?? null,
+        elementId: batch[0]?.elementId ?? null,
+        label: "",
+        reason: "Batch contains no invertible operations",
+        count: 0,
+      };
+    }
+
+    return {
+      undone: true,
+      opType: batch[0]?.opType ?? null,
+      elementId: batch[0]?.elementId ?? null,
+      label: undoneCount === 1 ? label : `Undid ${undoneCount} changes`,
+      count: undoneCount,
+    };
+  }
+
+  /**
    * Whether an op CAN actually be inverted (beyond merely having an undoable type).
    * A marker `update_element` op (leech-flag-on-review, manual flag, card-body edit)
    * carries NO object `prev` PRE-IMAGE, so re-applying it would mutate nothing —
@@ -186,6 +270,7 @@ export class UndoService {
    */
   private isInvertible(op: ParsedOp): boolean {
     if (!op.elementId) return false;
+    if (op.payload.receiptRestore === true) return false;
     if (op.opType === "update_element") {
       if (
         op.payload.chronicPostponeReset === true ||
@@ -224,6 +309,43 @@ export class UndoService {
    * `undoLast` can skip it rather than report a phantom success.
    */
   private invert(op: ParsedOp): string | null {
+    return this.invertWithin(this.db, op);
+  }
+
+  private currentDueMatchesAppliedWithin(tx: DbClient, op: ParsedOp): boolean {
+    if (
+      op.opType !== "reschedule_element" ||
+      !op.elementId ||
+      !Object.hasOwn(op.payload, "dueAt")
+    ) {
+      return false;
+    }
+    const appliedDueAt = (op.payload.dueAt ?? null) as IsoTimestamp | null;
+    const element = tx
+      .select({ deletedAt: elements.deletedAt, dueAt: elements.dueAt, status: elements.status })
+      .from(elements)
+      .where(eq(elements.id, op.elementId))
+      .get();
+    if (!element || (element.dueAt ?? null) !== appliedDueAt) return false;
+    if (element.deletedAt !== null) return false;
+    const appliedStatus = typeof op.payload.status === "string" ? op.payload.status : undefined;
+    if (appliedStatus !== undefined && element.status !== appliedStatus) return false;
+    if (op.payload.cardDefer === true) {
+      const review = tx
+        .select({ dueAt: reviewStates.dueAt })
+        .from(reviewStates)
+        .where(eq(reviewStates.elementId, op.elementId))
+        .get();
+      return (review?.dueAt ?? null) === appliedDueAt;
+    }
+    return true;
+  }
+
+  private invertWithin(
+    tx: DbClient,
+    op: ParsedOp,
+    restoredPayloadExtras: Readonly<Record<string, unknown>> = {},
+  ): string | null {
     const id = op.elementId;
     if (!id) return null;
     switch (op.opType) {
@@ -334,27 +456,24 @@ export class UndoService {
           prevDueAt,
           op.id,
         );
-        const rescheduled = this.db.transaction((tx) => {
-          const el = this.elements.rescheduleWithin(
-            tx,
-            id,
-            prevDueAt,
-            prevStatus,
-            restoredScheduleEvidence,
-            {
-              ...(prevAttentionIntervalMultiplier !== undefined
-                ? { attentionIntervalMultiplier: prevAttentionIntervalMultiplier }
-                : {}),
-            },
-          );
-          if (isCardDefer) {
-            tx.update(reviewStates)
-              .set({ dueAt: prevReviewDueAt })
-              .where(eq(reviewStates.elementId, id))
-              .run();
-          }
-          return el;
-        });
+        const rescheduled = this.elements.rescheduleWithin(
+          tx,
+          id,
+          prevDueAt,
+          prevStatus,
+          { ...restoredScheduleEvidence, ...restoredPayloadExtras },
+          {
+            ...(prevAttentionIntervalMultiplier !== undefined
+              ? { attentionIntervalMultiplier: prevAttentionIntervalMultiplier }
+              : {}),
+          },
+        );
+        if (isCardDefer) {
+          tx.update(reviewStates)
+            .set({ dueAt: prevReviewDueAt })
+            .where(eq(reviewStates.elementId, id))
+            .run();
+        }
         return `Restored schedule of "${(before ?? rescheduled).title}"`;
       }
       default:
@@ -403,4 +522,20 @@ export class UndoService {
       payload: parsePayload(row.payload),
     };
   }
+}
+
+function postponeOriginKind(payload: Record<string, unknown>): string | null {
+  const origin = payload.postponeOrigin;
+  if (!origin || typeof origin !== "object") return null;
+  const kind = (origin as Record<string, unknown>).kind;
+  return typeof kind === "string" ? kind : null;
+}
+
+function isOwnedPostponeBatch(batch: readonly ParsedOp[], options: UndoBatchOptions): boolean {
+  return batch.every(
+    (op) =>
+      op.opType === "reschedule_element" &&
+      op.payload.postpone === true &&
+      postponeOriginKind(op.payload) === options.requirePostponeOriginKind,
+  );
 }

@@ -339,6 +339,7 @@ describe("IPC channels", () => {
         "balance:get",
         "dailyWork:summary",
         "dailyWork:ackGraduationEvents",
+        "dailyWork:autoPostponeReceipt:undo",
         "weeklyReview:summary",
         "weeklyReview:updateProgress",
         "weeklyReview:complete",
@@ -1968,6 +1969,7 @@ describe("SettingsPatchSchema (T011)", () => {
   it("accepts a valid partial patch", () => {
     const parsed = SettingsPatchSchema.parse({
       dailyBudgetMinutes: 60,
+      overloadPolicy: "automatic",
       dailyReviewBudget: 60,
       theme: "system",
       chronicPostponeThreshold: 6,
@@ -1976,6 +1978,7 @@ describe("SettingsPatchSchema (T011)", () => {
     });
     expect(parsed).toEqual({
       dailyBudgetMinutes: 60,
+      overloadPolicy: "automatic",
       dailyReviewBudget: 60,
       theme: "system",
       chronicPostponeThreshold: 6,

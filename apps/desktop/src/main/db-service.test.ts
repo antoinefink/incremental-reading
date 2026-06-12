@@ -765,6 +765,7 @@ describe("DbService", () => {
       trashRetentionDays: 30,
       balanceWarnings: true,
       importBalanceFactor: 1.5,
+      overloadPolicy: "suggest",
       parkedResurfaceAfterDays: 90,
       chronicPostponeThreshold: 5,
       weeklyReviewEnabled: true,

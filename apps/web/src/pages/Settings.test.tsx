@@ -90,6 +90,7 @@ function deferred<T>() {
 
 const settings: RendererSettings = {
   dailyBudgetMinutes: 60,
+  overloadPolicy: "suggest",
   dailyReviewBudget: 60,
   defaultDesiredRetention: 0.9,
   defaultTopicIntervalDays: 7,
@@ -242,6 +243,11 @@ describe("Settings", () => {
     fireEvent.click(getByTestId("setting-budget-preset-option-120"));
     await waitFor(() =>
       expect(h.updateAppSettings).toHaveBeenCalledWith({ patch: { dailyBudgetMinutes: 120 } }),
+    );
+
+    fireEvent.click(getByTestId("setting-overload-policy-option-automatic"));
+    await waitFor(() =>
+      expect(h.updateAppSettings).toHaveBeenCalledWith({ patch: { overloadPolicy: "automatic" } }),
     );
 
     fireEvent.change(getByTestId("setting-parked-resurface"), { target: { value: "120" } });

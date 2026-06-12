@@ -24,6 +24,25 @@ function formatDate(iso: string): string {
   ).padStart(2, "0")}`;
 }
 
+function originLabel(origin: PriorityIntegrityGetResult["sacrificed"][number]["postponeOrigin"]) {
+  switch (origin) {
+    case "standingAutoPostpone":
+      return "standing auto";
+    case "manualAutoPostpone":
+      return "manual auto";
+    case "catchUp":
+      return "catch-up";
+    case "vacation":
+      return "vacation";
+    case "recovery":
+      return "recovery";
+    case "manualQueueAction":
+      return "manual";
+    default:
+      return "unknown";
+  }
+}
+
 function activeFlagLabels(data: PriorityIntegrityGetResult): readonly string[] {
   const labels: string[] = [];
   if (data.thresholdFlags.aBandInflation) labels.push("A-band share is high");
@@ -150,7 +169,7 @@ export const PriorityIntegrityPanel = forwardRef<HTMLElement, PriorityIntegrityP
                         </div>
                         <span>
                           {row.postponeCount}x · {formatDays(row.postponeDebtDays)} ·{" "}
-                          {row.scheduler}
+                          {row.scheduler} · {originLabel(row.postponeOrigin)}
                         </span>
                       </div>
                     ))}

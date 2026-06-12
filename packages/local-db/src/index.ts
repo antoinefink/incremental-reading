@@ -457,6 +457,14 @@ export {
   type SourceYieldSummary,
 } from "./source-yield-query";
 export {
+  STANDING_AUTO_POSTPONE_STATE_KEY,
+  type StandingAutoPostponeMaterializeResult,
+  type StandingAutoPostponeReceipt,
+  type StandingAutoPostponeReceiptStatus,
+  StandingAutoPostponeService,
+  type StandingAutoPostponeUndoResult,
+} from "./standing-auto-postpone-service";
+export {
   type CreateSynthesisInput,
   type EditSynthesisBodyInput,
   SYNTHESIS_STAGE,

@@ -83,7 +83,7 @@ when history is thin.
 # T116 — Minutes-denominated daily budget
 
 - **Milestone:** M24 — Ambient, time-denominated overload
-- **Status:** `[ ]` not started
+- **Status:** `[x]` done
 - **Depends on:** T115
 - **Roadmap line:** the daily budget is set in minutes (count setting migrated with a sensible
   conversion), the queue gauge projects today's real time cost, and over-budget detection
@@ -174,16 +174,16 @@ stronger audit trail than SuperMemo ever had.
 
 ## Deliverables
 
-- [ ] Setting: `overloadPolicy: off | suggest | automatic` (default `suggest` for existing
+- [x] Setting: `overloadPolicy: off | suggest | automatic` (default `suggest` for existing
       users; onboarding may default new users to `automatic` — decide and document).
-- [ ] Day-rollover trigger: on first queue materialization of a local day (or a runner job at
+- [x] Day-rollover trigger: on first queue materialization of a local day (or a runner job at
       rollover — pick one, document why; first-materialization avoids wall-clock jobs while the
       app is closed), `suggest` pre-computes the plan and one-taps from the banner; `automatic`
       applies it, writes one `batchId`, marks the day.
-- [ ] Receipt: daily-work summary line — items trimmed, bands affected, one-tap undo (whole
+- [x] Receipt: daily-work summary line — items trimmed, bands affected, one-tap undo (whole
       batch); receipt persists for the day, not just a toast.
-- [ ] T105 integration: automatic batches visibly attributed in the integrity ledger.
-- [ ] Tests: unit (idempotence per day; protection rules hold; undo restores the full batch with
+- [x] T105 integration: automatic batches visibly attributed in the integrity ledger.
+- [x] Tests: unit (idempotence per day; protection rules hold; undo restores the full batch with
       preimages); e2e — overloaded fixture + automatic policy opens onto a within-budget day
       with the receipt, undo restores, second open does not double-trim.
 
@@ -197,8 +197,17 @@ stronger audit trail than SuperMemo ever had.
 
 - Trust is the whole feature: if anything about the trim is not visible/undoable/attributable,
   stop and fix that before shipping the trigger.
-- Vacation/catch-up (T078) interplay: a day inside an active vacation plan should skip the
-  policy (document the precedence).
+- Implemented trigger is first trusted main-process queue/daily-work materialization for the
+  current local day, not a wall-clock job. This avoids background timers while the app is closed
+  and keeps renderer-supplied `asOf` from controlling marker or batch creation.
+- Receipt undo is deliberately scoped to the receipt: it validates that every op in the batch is a
+  standing automatic postpone and that each victim still matches the applied due/status before
+  restoring. Restore rows are marked non-global-undoable so command-level undo cannot partially
+  reverse the receipt after the receipt state has moved to `undone`.
+- Vacation/catch-up (T078) precedence remains explicit future work: the current T078 model does
+  not persist an "active recovery/vacation owns this local day" marker for T117 to consult. T117
+  distinguishes recovery/catch-up/vacation origins in the ledger, but it does not infer active
+  vacation ownership from historical operations.
 
 ---
 

@@ -103,6 +103,7 @@ import {
   resolveSourceRef,
   type SemanticResolveContext,
   SourceYieldQuery,
+  StandingAutoPostponeService,
   type SynthesisData,
   type SynthesisLinkedElement,
   TimeCostQuery,
@@ -194,6 +195,8 @@ import type {
   DailyWorkGraduationAckResult,
   DailyWorkSummaryRequest,
   DailyWorkSummaryResult,
+  DailyWorkUndoAutoPostponeReceiptRequest,
+  DailyWorkUndoAutoPostponeReceiptResult,
   DbStatus,
   DocumentMarkPayload,
   DocumentMarksAddRequest,
@@ -517,6 +520,8 @@ export class DbService {
   private blockProcessing: BlockProcessingService | null = null;
   /** The overload AUTO-POSTPONE apply seam (T077) — preview + apply, one `batchId` per sweep. */
   private autoPostpone: AutoPostponeService | null = null;
+  /** The standing overload policy (T117) — once-per-local-day automatic materialization. */
+  private standingAutoPostpone: StandingAutoPostponeService | null = null;
   /** The CATCH-UP & VACATION apply seam (T078) — previewed, reversible, one `batchId` per plan. */
   private recoveryMode: RecoveryModeService | null = null;
   private extraction: ExtractionService | null = null;
@@ -819,6 +824,7 @@ export class DbService {
     // runs the pure `planAutoPostpone`, and applies each victim through its CORRECT
     // scheduler (attention reschedule / FSRS card defer) under one `batchId`.
     this.autoPostpone = new AutoPostponeService(this.handle.db, this.repositories);
+    this.standingAutoPostpone = new StandingAutoPostponeService(this.handle.db, this.repositories);
     // The CATCH-UP & VACATION apply seam (T078): previews the cost (the per-day load curve
     // before vs after + what slips) and applies the plan — reschedule attention / FSRS card
     // defer / vacation suspend — under one `batchId`, reusing the existing ops only.
@@ -881,6 +887,7 @@ export class DbService {
     this.queueAction = null;
     this.blockProcessing = null;
     this.autoPostpone = null;
+    this.standingAutoPostpone = null;
     this.recoveryMode = null;
     this.inboxQuery = null;
     this.extraction = null;
@@ -1249,6 +1256,7 @@ export class DbService {
    * separate inside the read.
    */
   listQueue(request: QueueListRequest): QueueListResult {
+    this.materializeStandingAutoPostponeToday();
     const asOf = (request.asOf as IsoTimestamp | undefined) ?? nowIso();
     const data = this.queueQuery.list({
       asOf,
@@ -1414,6 +1422,17 @@ export class DbService {
       throw new Error("DbService: database is not open");
     }
     return this.autoPostpone;
+  }
+
+  private get standingAutoPostponeService(): StandingAutoPostponeService {
+    if (!this.standingAutoPostpone) {
+      throw new Error("DbService: database is not open");
+    }
+    return this.standingAutoPostpone;
+  }
+
+  private materializeStandingAutoPostponeToday(): void {
+    this.standingAutoPostponeService.materializeToday();
   }
 
   /**
@@ -5601,8 +5620,22 @@ export class DbService {
     if (!this.dailyWork) {
       throw new Error("DbService: database is not open");
     }
+    this.materializeStandingAutoPostponeToday();
     const asOf = (request?.asOf ?? nowIso()) as IsoTimestamp;
     return this.dailyWork.summary(asOf);
+  }
+
+  undoDailyWorkAutoPostponeReceipt(
+    request: DailyWorkUndoAutoPostponeReceiptRequest,
+  ): DailyWorkUndoAutoPostponeReceiptResult {
+    const result = this.standingAutoPostponeService.undoReceipt(request.batchId);
+    return {
+      undone: result.undo.undone,
+      count: result.undo.count,
+      label: result.undo.label,
+      ...(result.undo.reason ? { reason: result.undo.reason } : {}),
+      receipt: result.receipt,
+    };
   }
 
   getWeeklyReviewSummary(request?: WeeklyReviewSummaryRequest): WeeklyReviewSummaryResult {

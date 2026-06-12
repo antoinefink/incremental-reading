@@ -36,6 +36,8 @@ let baseUrl: string;
 const AS_OF = "2027-06-01T12:00:00.000Z";
 /** The date we park the created low-priority sources on (well before AS_OF → overdue at AS_OF). */
 const PAST_DUE = "2027-01-01T09:00:00.000Z";
+/** Past relative to the real clock, for standing-current-day policy checks. */
+const CURRENT_PAST_DUE = "2025-01-01T09:00:00.000Z";
 /** Daily minute budget for the overload test. */
 const BUDGET_MINUTES = 60;
 /** How many low-priority due sources to create so the queue is over budget. */
@@ -44,6 +46,13 @@ const LOW_SOURCES = 14;
 /** Open `/queue` date-scoped via `?asOf=` and wait for it to render. */
 async function openQueue(page: Page, asOf: string): Promise<void> {
   await page.goto(`${baseUrl}/queue?asOf=${encodeURIComponent(asOf)}`);
+  await page.waitForLoadState("domcontentloaded");
+  await expect(page.getByTestId("route-queue")).toBeVisible();
+}
+
+/** Open the live current-day queue, the surface that materializes the standing policy. */
+async function openCurrentQueue(page: Page): Promise<void> {
+  await page.goto(`${baseUrl}/queue`);
   await page.waitForLoadState("domcontentloaded");
   await expect(page.getByTestId("route-queue")).toBeVisible();
 }
@@ -62,6 +71,21 @@ async function dueMinutes(page: Page): Promise<number> {
     const result = await api.queue.list({ asOf, includeTimeEstimate: true });
     return result.minuteBudget?.usedMinutes ?? 0;
   }, AS_OF);
+}
+
+/** Read the live current-day estimated due minutes via the bridge. */
+async function currentDueMinutes(page: Page): Promise<number> {
+  return page.evaluate(async () => {
+    const api = window.appApi as unknown as {
+      queue: {
+        list(req: { includeTimeEstimate: true }): Promise<{
+          minuteBudget?: { usedMinutes: number };
+        }>;
+      };
+    };
+    const result = await api.queue.list({ includeTimeEstimate: true });
+    return result.minuteBudget?.usedMinutes ?? 0;
+  });
 }
 
 /**
@@ -88,6 +112,77 @@ async function highPriorityDueCardId(page: Page): Promise<string> {
 test.beforeAll(() => {
   ensureBuilt();
   dataDir = makeDataDir();
+});
+
+test("standing automatic auto-postpone materializes once, survives restart, and undoes by receipt", async () => {
+  const standingDir = makeDataDir();
+  const app1 = await launchApp(standingDir, { seedOnEmpty: true });
+  const page1 = await app1.firstWindow();
+  await page1.waitForLoadState("domcontentloaded");
+  const url = new URL(page1.url());
+  baseUrl = `${url.protocol}//${url.host}`;
+
+  await page1.evaluate(
+    async ({ budget, count, pastDue }) => {
+      const api = window.appApi as unknown as {
+        settings: { updateMany(req: { patch: Record<string, unknown> }): Promise<unknown> };
+        sources: {
+          importManual(req: {
+            title: string;
+            priority?: string;
+            body?: string;
+          }): Promise<{ id: string }>;
+        };
+        queue: {
+          schedule(req: { id: string; choice: { kind: "manual"; date: string } }): Promise<unknown>;
+        };
+      };
+      await api.settings.updateMany({
+        patch: { dailyBudgetMinutes: budget, overloadPolicy: "suggest" },
+      });
+      for (let i = 0; i < count; i++) {
+        const { id } = await api.sources.importManual({
+          title: `Standing backlog source ${i}`,
+          priority: "C",
+          body: "A low-priority standing-policy backlog item.",
+        });
+        await api.queue.schedule({ id, choice: { kind: "manual", date: pastDue } });
+      }
+    },
+    { budget: BUDGET_MINUTES, count: LOW_SOURCES, pastDue: CURRENT_PAST_DUE },
+  );
+
+  const before = await currentDueMinutes(page1);
+  expect(before).toBeGreaterThan(BUDGET_MINUTES);
+  await page1.evaluate(async () => {
+    const api = window.appApi as unknown as {
+      settings: { updateMany(req: { patch: Record<string, unknown> }): Promise<unknown> };
+    };
+    await api.settings.updateMany({ patch: { overloadPolicy: "automatic" } });
+  });
+
+  await openCurrentQueue(page1);
+  const receipt = page1.getByTestId("auto-postpone-receipt");
+  await expect(receipt).toBeVisible();
+  await expect(receipt).toContainText("slipped");
+  await expect.poll(async () => currentDueMinutes(page1)).toBeLessThanOrEqual(BUDGET_MINUTES);
+  const afterMaterialize = await currentDueMinutes(page1);
+  await app1.close();
+
+  const app2 = await launchApp(standingDir, { seedOnEmpty: true });
+  const page2 = await app2.firstWindow();
+  await page2.waitForLoadState("domcontentloaded");
+  const url2 = new URL(page2.url());
+  baseUrl = `${url2.protocol}//${url2.host}`;
+  await openCurrentQueue(page2);
+  await expect(page2.getByTestId("auto-postpone-receipt")).toBeVisible();
+  expect(await currentDueMinutes(page2)).toBe(afterMaterialize);
+
+  await page2.getByTestId("auto-postpone-receipt-undo").click();
+  await expect(page2.getByTestId("auto-postpone-receipt-undone")).toBeVisible();
+  await expect.poll(async () => currentDueMinutes(page2)).toBeGreaterThan(afterMaterialize);
+
+  await app2.close();
 });
 
 test("auto-postpone relieves an over-budget queue, protects high-priority cards, and undoes", async () => {

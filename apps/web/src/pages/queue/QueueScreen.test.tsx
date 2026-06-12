@@ -253,6 +253,7 @@ const h = vi.hoisted(() => {
     resumeSource: null,
     recommendedAction: "process_due_queue",
     graduationEvents: [],
+    autoPostponeReceipt: null,
   };
   const priorityIntegrity: PriorityIntegrityGetResult = {
     asOf: "2026-05-30T18:00:00.000Z",
@@ -352,6 +353,12 @@ const h = vi.hoisted(() => {
       label: "Undid change",
       count: 1,
     }),
+    undoDailyWorkAutoPostponeReceipt: vi.fn().mockResolvedValue({
+      undone: true,
+      count: 2,
+      label: "Undid 2 changes",
+      receipt: null,
+    }),
     undoQueueAction: vi.fn().mockResolvedValue({ item: extractRow }),
     getPriorityIntegrity: vi.fn().mockResolvedValue(priorityIntegrity),
     getSettings: vi.fn().mockResolvedValue({ settings: { "ui.noticeDismissals": {} } }),
@@ -385,6 +392,7 @@ vi.mock("../../lib/appApi", async () => {
       getBlockProcessingSummary: h.getBlockProcessingSummary,
       dismissSourceRetirementSuggestion: h.dismissSourceRetirementSuggestion,
       undoLast: h.undoLast,
+      undoDailyWorkAutoPostponeReceipt: h.undoDailyWorkAutoPostponeReceipt,
       undoQueueAction: h.undoQueueAction,
       getPriorityIntegrity: h.getPriorityIntegrity,
       getSettings: h.getSettings,
@@ -421,12 +429,48 @@ beforeEach(() => {
     stale: false,
     suggestion: null,
   });
+  h.undoDailyWorkAutoPostponeReceipt.mockResolvedValue({
+    undone: true,
+    count: 2,
+    label: "Undid 2 changes",
+    receipt: null,
+  });
   h.getPriorityIntegrity.mockResolvedValue(h.priorityIntegrity);
   h.getSettings.mockResolvedValue({ settings: { "ui.noticeDismissals": {} } });
   h.updateSetting.mockResolvedValue({ key: "ui.noticeDismissals", value: {} });
 });
 
 describe("QueueScreen", () => {
+  it("renders the standing auto-postpone receipt and targets its undo batch", async () => {
+    h.getDailyWorkSummary.mockResolvedValue({
+      ...h.dailyWork,
+      autoPostponeReceipt: {
+        batchId: "batch-standing",
+        localDay: "2026-05-30",
+        status: "actionable",
+        postponed: 2,
+        postponedMinutes: 12,
+        remainingMinutesAfter: 18,
+        priorityBands: ["C"],
+        createdAt: h.dailyWork.asOf,
+      },
+    });
+
+    render(<QueueScreen />);
+
+    const receipt = await screen.findByTestId("auto-postpone-receipt");
+    expect(receipt).toHaveTextContent("2 items slipped");
+    fireEvent.click(screen.getByTestId("auto-postpone-receipt-undo"));
+
+    await waitFor(() =>
+      expect(h.undoDailyWorkAutoPostponeReceipt).toHaveBeenCalledWith({
+        batchId: "batch-standing",
+      }),
+    );
+    await waitFor(() => expect(h.listQueue).toHaveBeenCalledTimes(2));
+    expect(h.getDailyWorkSummary).toHaveBeenCalledTimes(2);
+  });
+
   it("renders one qitem per due row", async () => {
     render(<QueueScreen />);
     await waitFor(() => expect(screen.getAllByTestId("queue-item")).toHaveLength(4));
