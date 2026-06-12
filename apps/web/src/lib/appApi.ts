@@ -1496,6 +1496,7 @@ export type SchedulerConsistencyReason =
   | "terminal-card-review-due"
   | "retired-card-review-due"
   | "scheduled-attention-missing-due"
+  | "attention-due-before-last-seen"
   | "chronic-postpone-paused"
   | "chronic-postpone-reset";
 

@@ -9,6 +9,8 @@
  *    priority returning sooner;
  *  - each extract STAGE interval (raw +1..7d, clean +3..14d, atomic +1d), and that
  *    `rawExtractIntervalDays` matches `extractStageIntervalDays("raw_extract", …)`;
+ *  - last-seen recency credit shortens valid older attention intervals after the
+ *    base heuristic and source-processing adjustment;
  *  - the action-based reschedule table (extract/rewrite/activate use the heuristic;
  *    postpone pushes out and grows with postponeCount; done recedes far out);
  *  - postpone intervals GROW with the postpone count and cap at the 180d ceiling;
@@ -56,6 +58,10 @@ const D: Priority = PRIORITY_LABEL_VALUE.D;
 /** Whole-day delta between `now` and a computed due time. */
 function daysBetween(now: IsoTimestamp, dueAt: IsoTimestamp): number {
   return Math.round((Date.parse(dueAt) - Date.parse(now)) / MS_PER_DAY);
+}
+
+function hoursBefore(now: IsoTimestamp, hours: number): IsoTimestamp {
+  return new Date(Date.parse(now) - hours * 60 * 60 * 1000).toISOString() as IsoTimestamp;
 }
 
 describe("date-util: addDays", () => {
@@ -301,19 +307,71 @@ describe("nextDueAt (heuristic + action override)", () => {
     expect(done.intervalDays).toBe(60); // B done window
   });
 
-  it("lastSeenAt is RESERVED — it does NOT change the interval for the MVP", () => {
-    // The interval is measured forward from `now`; lastSeenAt has zero effect today.
-    // Pin that contract so a future heuristic that consumes it must update this test.
-    const base = nextDueAt({ type: "source", priority: B }, NOW);
-    const recent = nextDueAt({ type: "source", priority: B, lastSeenAt: NOW }, NOW);
-    const ancient = nextDueAt(
-      { type: "source", priority: B, lastSeenAt: "2000-01-01T00:00:00.000Z" },
+  it.each([
+    ["never seen", null, 7],
+    ["seen now", NOW, 7],
+    ["seen 23 hours ago", hoursBefore(NOW, 23), 7],
+    ["seen exactly 1 day ago", addDays(NOW, -1), 6],
+    ["seen 3 days ago", addDays(NOW, -3), 4],
+    ["seen 30 days ago caps at half the base interval", addDays(NOW, -30), 4],
+    ["invalid lastSeenAt", "not-a-date" as IsoTimestamp, 7],
+    ["future lastSeenAt", addDays(NOW, 1), 7],
+  ])("applies bounded source recency credit for %s", (_, lastSeenAt, expectedIntervalDays) => {
+    const decision = nextDueAt({ type: "source", priority: B, lastSeenAt }, NOW);
+    expect(decision.intervalDays).toBe(expectedIntervalDays);
+    expect(daysBetween(NOW, decision.dueAt)).toBe(expectedIntervalDays);
+  });
+
+  it.each([
+    ["topic default interval", { type: "topic", priority: C, defaultTopicIntervalDays: 14 }, 11],
+    ["raw extract", { type: "extract", stage: "raw_extract", priority: D }, 4],
+    ["postpone action", { type: "source", priority: B, lastAction: "postpone" }, 11],
+    ["done action", { type: "source", priority: B, lastAction: "done" }, 57],
+  ] as const)("applies recency credit after the %s base interval", (_, input, expectedIntervalDays) => {
+    const decision = nextDueAt({ ...input, lastSeenAt: addDays(NOW, -3) }, NOW);
+    expect(decision.intervalDays).toBe(expectedIntervalDays);
+    expect(daysBetween(NOW, decision.dueAt)).toBe(expectedIntervalDays);
+  });
+
+  it("applies recency after high-value unresolved source-processing adjustment", () => {
+    const decision = nextDueAt(
+      {
+        type: "source",
+        priority: B,
+        lastSeenAt: addDays(NOW, -3),
+        sourceProcessing: {
+          unresolvedRatio: 0.5,
+          terminalRatio: 0.5,
+          ignoredRatio: 0,
+          extractedOutputCount: 1,
+        },
+      },
       NOW,
     );
-    expect(recent.intervalDays).toBe(base.intervalDays);
-    expect(ancient.intervalDays).toBe(base.intervalDays);
-    expect(recent.dueAt).toBe(base.dueAt);
-    expect(ancient.dueAt).toBe(base.dueAt);
+
+    expect(decision.intervalDays).toBe(2);
+    expect(daysBetween(NOW, decision.dueAt)).toBe(2);
+  });
+
+  it("applies recency after mostly ignored no-output source-processing adjustment", () => {
+    const decision = nextDueAt(
+      {
+        type: "source",
+        priority: C,
+        lastSeenAt: addDays(NOW, -30),
+        sourceProcessing: {
+          unresolvedRatio: 0,
+          terminalRatio: 1,
+          ignoredRatio: 0.75,
+          extractedOutputCount: 0,
+        },
+      },
+      NOW,
+    );
+
+    expect(decision.intervalDays).toBe(30);
+    expect(daysBetween(NOW, decision.dueAt)).toBe(30);
+    expect(decision.retirementSuggestion).toBe(true);
   });
 });
 
@@ -375,8 +433,8 @@ describe("explicit choices: tomorrow / next week / next month", () => {
 });
 
 describe("scheduleManual (normalize + validate)", () => {
-  it("normalizes an ISO string to canonical ISO and computes the day delta", () => {
-    const decision = scheduleManual("2026-06-09T12:00:00Z", NOW);
+  it("accepts a canonical ISO string and computes the day delta", () => {
+    const decision = scheduleManual("2026-06-09T12:00:00.000Z", NOW);
     expect(decision.dueAt).toBe("2026-06-09T12:00:00.000Z");
     expect(decision.intervalDays).toBe(10);
   });
@@ -387,19 +445,27 @@ describe("scheduleManual (normalize + validate)", () => {
     expect(decision.intervalDays).toBe(1);
   });
 
-  it("allows a past date (due immediately) but still normalizes it", () => {
-    const decision = scheduleManual("2026-05-29T12:00:00Z", NOW);
+  it("allows a past canonical date (due immediately)", () => {
+    const decision = scheduleManual("2026-05-29T12:00:00.000Z", NOW);
     expect(decision.dueAt).toBe("2026-05-29T12:00:00.000Z");
     expect(decision.intervalDays).toBe(-1);
   });
 
-  it("throws on an unparseable date", () => {
-    expect(() => scheduleManual("garbage" as IsoTimestamp, NOW)).toThrow(/invalid date/);
+  it("throws on unparseable or non-canonical date strings", () => {
+    for (const bad of [
+      "garbage",
+      "0",
+      "2026-02-31T00:00:00.000Z",
+      "2026-06-09T12:00:00Z",
+      "2026-06-09T12:00:00.000+00:00",
+    ]) {
+      expect(() => scheduleManual(bad as IsoTimestamp, NOW)).toThrow(/invalid date/);
+    }
   });
 
   it("scheduleForChoice routes a manual choice through scheduleManual", () => {
-    expect(scheduleForChoice({ manual: "2026-06-09T12:00:00Z" }, NOW)).toEqual(
-      scheduleManual("2026-06-09T12:00:00Z", NOW),
+    expect(scheduleForChoice({ manual: "2026-06-09T12:00:00.000Z" }, NOW)).toEqual(
+      scheduleManual("2026-06-09T12:00:00.000Z", NOW),
     );
   });
 });

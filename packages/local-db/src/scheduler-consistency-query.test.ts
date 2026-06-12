@@ -33,6 +33,16 @@ function appendPostpones(id: string, times: number): void {
   }
 }
 
+function appendReschedule(id: string, payload: Record<string, unknown>): void {
+  handle.db.transaction((tx) => {
+    repos.operationLog.append(tx, {
+      opType: "reschedule_element",
+      elementId: id as never,
+      payload: { id, ...payload },
+    });
+  });
+}
+
 describe("SchedulerConsistencyQuery", () => {
   it("surfaces terminal elements that still carry an element due date", () => {
     const source = repos.sources.create({
@@ -98,6 +108,122 @@ describe("SchedulerConsistencyQuery", () => {
 
     const row = query.list()[0];
     expect(row?.reason).toBe("scheduled-attention-missing-due");
+  });
+
+  it("surfaces live attention rows whose heuristic due date is not after its scheduler decision", () => {
+    const source = repos.sources.create({
+      title: "Due before last seen",
+      priority: PRIORITY_LABEL_VALUE.B,
+      status: "scheduled",
+      stage: "raw_source",
+    });
+    repos.elements.update(source.element.id, {
+      dueAt: "2026-06-01T12:00:00.000Z",
+      status: "scheduled",
+    });
+    appendReschedule(source.element.id, {
+      action: "extract",
+      scheduledAt: "2026-06-01T12:00:00.000Z",
+    });
+
+    const row = query.list().find((r) => r.reason === "attention-due-before-last-seen");
+
+    expect(row?.element.id).toBe(source.element.id);
+    expect(row?.elementDueAt).toBe("2026-06-01T12:00:00.000Z");
+  });
+
+  it("does not surface explicit manual past schedules", () => {
+    const source = repos.sources.create({
+      title: "Manual past schedule",
+      priority: PRIORITY_LABEL_VALUE.B,
+      status: "scheduled",
+      stage: "raw_source",
+    });
+    repos.elements.update(source.element.id, {
+      dueAt: "2026-06-01T12:00:00.000Z",
+      status: "scheduled",
+    });
+    appendReschedule(source.element.id, {
+      action: "postpone",
+      scheduledAt: "2026-06-01T12:00:00.000Z",
+    });
+    appendReschedule(source.element.id, {
+      choice: "manual",
+      dueAt: "2026-05-31T12:00:00.000Z",
+    });
+
+    const rows = query.list().filter((r) => r.element.id === source.element.id);
+
+    expect(rows.map((r) => r.reason)).not.toContain("attention-due-before-last-seen");
+  });
+
+  it("does not surface queue-soon rows", () => {
+    const source = repos.sources.create({
+      title: "Queue soon",
+      priority: PRIORITY_LABEL_VALUE.B,
+      status: "scheduled",
+      stage: "raw_source",
+    });
+    repos.elements.update(source.element.id, {
+      dueAt: "2026-06-01T12:00:00.000Z",
+      status: "scheduled",
+    });
+    appendReschedule(source.element.id, {
+      action: "queueSoon",
+      queueSoon: true,
+      scheduledAt: "2026-06-01T12:00:00.000Z",
+    });
+
+    const rows = query.list().filter((r) => r.element.id === source.element.id);
+
+    expect(rows.map((r) => r.reason)).not.toContain("attention-due-before-last-seen");
+  });
+
+  it("does not use later non-scheduling updated_at changes as scheduler decisions", () => {
+    const source = repos.sources.create({
+      title: "Later update",
+      priority: PRIORITY_LABEL_VALUE.B,
+      status: "scheduled",
+      stage: "raw_source",
+    });
+    repos.elements.update(source.element.id, {
+      dueAt: "2026-06-05T12:00:00.000Z",
+      status: "scheduled",
+    });
+    appendReschedule(source.element.id, {
+      action: "rewrite",
+      scheduledAt: "2026-06-01T12:00:00.000Z",
+    });
+    handle.sqlite
+      .prepare("UPDATE elements SET updated_at = ? WHERE id = ?")
+      .run("2026-06-10T12:00:00.000Z", source.element.id);
+
+    const rows = query.list().filter((r) => r.element.id === source.element.id);
+
+    expect(rows.map((r) => r.reason)).not.toContain("attention-due-before-last-seen");
+  });
+
+  it("honors the caller limit for heuristic due-before-last-seen diagnostics", () => {
+    for (const title of ["First limited", "Second limited"]) {
+      const source = repos.sources.create({
+        title,
+        priority: PRIORITY_LABEL_VALUE.B,
+        status: "scheduled",
+        stage: "raw_source",
+      });
+      repos.elements.update(source.element.id, {
+        dueAt: "2026-06-01T12:00:00.000Z",
+        status: "scheduled",
+      });
+      appendReschedule(source.element.id, {
+        action: "rewrite",
+        scheduledAt: "2026-06-01T12:00:00.000Z",
+      });
+    }
+
+    const rows = query.list(1).filter((r) => r.reason === "attention-due-before-last-seen");
+
+    expect(rows).toHaveLength(1);
   });
 
   it("surfaces chronic-postpone rows whose recession is paused pending a decision", () => {

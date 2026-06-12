@@ -126,6 +126,8 @@ The scheduling model for sources, topics, extracts, and other non-card work that
 
 Attention scheduling is distinct from active-recall scheduling: it decides when to bring work back to the user's attention, not whether the user can remember an answer.
 
+Attention scheduling includes both heuristic returns and explicit user commands. Heuristic returns may use prior processing evidence, while explicit commands such as Queue soon or a manual return date express user intent directly and should not be reinterpreted as heuristic recency evidence.
+
 ### Due queue
 
 The currently actionable processing set: due active-recall cards plus due attention-scheduled sources, topics, extracts, and similar non-card work.

@@ -2,9 +2,8 @@
 
 > The flagship gap — the only finding all six ideation frames produced independently (survivor
 > #1; the SuperMemo A-Factor analog). The attention scheduler is a static band lookup
-> (`sourceIntervalDays` returns `{A:1, B:7, C:30, D:90}` forever); `lastSeenAt` is explicitly
-> "RESERVED — deliberately NOT consumed by `nextDueAt` … zero effect on the output today"
-> (`packages/scheduler/src/attention-scheduler.ts:104-112`); the rich yield signals reduce to
+> (`sourceIntervalDays` returns `{A:1, B:7, C:30, D:90}` forever); T111 has now wired
+> `lastSeenAt` into `nextDueAt` as a bounded recency credit, while the rich yield signals reduce to
 > exactly two binary branches in `adjustForSourceProcessing` (halve when high-priority with >25%
 > unresolved; double + `retirementSuggestion` when dead). `docs/scheduling-and-priority.md` and
 > the package charter promise inputs ("last processed date", "whether the element produced
@@ -35,7 +34,7 @@
 # T111 — Consume recency (`lastSeenAt`)
 
 - **Milestone:** M23 — Adaptive attention scheduler
-- **Status:** `[ ]` not started
+- **Status:** `[x]` complete
 - **Depends on:** T028, T076
 - **Roadmap line:** `lastSeenAt` feeds interval computation so untouched-but-due elements stop
   interleaving identically with just-processed ones; deterministic, unit-tested, with a
@@ -51,30 +50,42 @@ engine cannot tell "processed yesterday" from "ignored for a month".
 ## Context to load first
 
 - Existing code: `packages/scheduler/src/attention-scheduler.ts` — the `Schedulable` descriptor,
-  the RESERVED comment block (:104-112), `sourceIntervalDays`, `extractStageIntervalDays`,
-  `postponeIntervalForPriority`; `packages/local-db/src/scheduler-service.ts` — where
-  descriptors are built (confirm `lastSeenAt` is actually populated; if not, populate it from
-  op-log/processing facts in this task); scheduler unit tests as the spec of current behavior.
+  `sourceIntervalDays`, `extractStageIntervalDays`, `postponeIntervalForPriority`; `packages/local-db/src/scheduler-service.ts` — where
+  descriptors are built and `lastSeenAt` is supplied from pre-action `updatedAt`; scheduler unit
+  tests as the spec of current behavior.
 - Invariants: pure-function determinism (clock injected, never `Date.now()` inside the math).
 
 ## Deliverables
 
-- [ ] Define and document the recency rule in-code (e.g., a damping term so a just-processed
+- [x] Define and document the recency rule in-code (e.g., a damping term so a just-processed
       element's next return is computed from `lastSeenAt`, not from a band table applied to
       "now"; an element untouched far past its due gets a bounded freshness boost in queue
       score, not a punishment). Keep it small — this is one input, not the multiplier.
-- [ ] Ensure `lastSeenAt` is populated correctly for sources, topics, and extracts at every
+- [x] Ensure `lastSeenAt` is populated correctly for sources, topics, and extracts at every
       processing action (grep all `SchedulerService` write paths).
-- [ ] Delete/replace the RESERVED comment with the real contract; update
+- [x] Delete/replace the old placeholder comment with the real contract; update
       `docs/scheduling-and-priority.md` accordingly.
-- [ ] Drift diagnostic: a case detecting `lastSeenAt`-vs-due inconsistency.
-- [ ] Tests: unit table-tests for the new term (boundary: never-seen, just-seen, long-overdue);
+- [x] Drift diagnostic: a case detecting `lastSeenAt`-vs-due inconsistency.
+- [x] Tests: unit table-tests for the new term (boundary: never-seen, just-seen, long-overdue);
       scheduler-service integration proving writes populate the field.
+
+## Completion notes
+
+- Recency rule: after priority/stage/action/source-processing chooses the base interval,
+  `nextDueAt` applies whole-day credit from valid `lastSeenAt`, capped at half the base interval
+  with a one-day minimum. Missing, invalid, sub-day, or future values keep the base interval.
+- Local-db seam: `SchedulerService` computes recency from pre-action `updatedAt`, persists the
+  action clock through the reschedule timestamp seam, and records heuristic `scheduledAt` payloads
+  for diagnostics. Explicit choices and queue-soon remain outside the heuristic drift rule.
+- Verification: focused `pnpm exec vitest run packages/scheduler/src/attention-scheduler.test.ts`,
+  `pnpm --filter @interleave/local-db test -- scheduler-service`,
+  `pnpm --filter @interleave/local-db test -- scheduler-consistency-query`, and
+  `pnpm --filter @interleave/local-db test -- element-repository`.
 
 ## Done when
 
 - Two otherwise-identical elements with different `lastSeenAt` get different, correctly-ordered
-  next dues; the RESERVED comment is gone; the doc matches the code; drift case exists.
+  next dues; the old placeholder comment is gone; the doc matches the code; drift case exists.
 - Standard gates pass.
 
 ## Notes / risks

@@ -26,7 +26,7 @@ considers:
 
 - priority
 - distillation stage
-- last processed date
+- last-seen recency (`lastSeenAt`)
 - the user's last action (extract / rewrite / postpone / done / delete)
 - whether the element produced useful children (extracts/cards)
 - whether it is **stagnant** (keeps returning without progressing)
@@ -58,6 +58,14 @@ low-value source   +30 to +180 days
 medium source      +7 to +30 days
 high-value source  +1 to +7 days
 ```
+
+### Last-seen recency
+
+`lastSeenAt` is consumed as a bounded recency credit after the scheduler chooses the base
+interval from priority, stage, action, and source-processing signals. Missing, invalid, or future
+values keep the base interval. Valid older timestamps subtract whole-day credit capped at half the
+base interval, with a one-day minimum, so untouched work returns sooner than otherwise-identical
+freshly processed work without becoming immediately due again.
 
 ## The daily queue
 

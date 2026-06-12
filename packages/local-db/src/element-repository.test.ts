@@ -103,6 +103,25 @@ describe("ElementRepository direct reads", () => {
     });
   });
 
+  it("rescheduleWithin can persist an injected mutation timestamp", () => {
+    const el = createTopic("Clocked");
+    const dueAt = "2026-06-20T00:00:00.000Z";
+    const updatedAt = "2026-06-12T09:30:00.000Z";
+
+    const rescheduled = elements.rescheduleWithin(
+      handle.db,
+      el.id,
+      dueAt,
+      "scheduled",
+      { action: "rewrite" },
+      { updatedAt },
+    );
+
+    expect(rescheduled.dueAt).toBe(dueAt);
+    expect(rescheduled.updatedAt).toBe(updatedAt);
+    expect(elements.findById(el.id)?.updatedAt).toBe(updatedAt);
+  });
+
   it("builds a live sibling-group map and keeps the first group per card", () => {
     const card = elements.create({
       type: "card",

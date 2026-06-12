@@ -1061,7 +1061,7 @@ describe("DbService", () => {
     svc.close();
   });
 
-  it("scheduleQueueItem normalizes a manual date to canonical ISO (T028)", () => {
+  it("scheduleQueueItem persists a canonical manual date (T028)", () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
 
@@ -1075,7 +1075,7 @@ describe("DbService", () => {
 
     const res = svc.scheduleQueueItem({
       id: extract.id,
-      choice: { kind: "manual", date: "2026-07-01T09:00:00Z" },
+      choice: { kind: "manual", date: "2026-07-01T09:00:00.000Z" },
     });
     expect(res.dueAt).toBe("2026-07-01T09:00:00.000Z");
     expect(svc.repos.elements.findById(extract.id)?.status).toBe("scheduled");

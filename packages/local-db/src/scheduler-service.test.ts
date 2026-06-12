@@ -81,6 +81,10 @@ function rescheduleOps(handle: DbHandle, id: ElementId): { payload: Record<strin
     .map((op) => ({ payload: JSON.parse(op.payload) as Record<string, unknown> }));
 }
 
+function setElementUpdatedAt(id: ElementId, updatedAt: string): void {
+  handle.db.update(elements).set({ updatedAt }).where(eq(elements.id, id)).run();
+}
+
 beforeEach(() => {
   handle = createInMemoryDb();
 });
@@ -108,11 +112,13 @@ describe("SchedulerService.rescheduleForAction", () => {
     const persisted = new ElementRepository(handle.db).findById(sourceId);
     expect(persisted?.status).toBe("active");
     expect(persisted?.dueAt).toBe(element.dueAt);
+    expect(persisted?.updatedAt).toBe(now);
 
     const ops = rescheduleOps(handle, sourceId);
     expect(ops).toHaveLength(opsBefore + 1);
     expect(ops.at(-1)?.payload).toMatchObject({
       action: "activate",
+      scheduledAt: now,
       status: "active",
       prevStatus: "active",
     });
@@ -157,6 +163,7 @@ describe("SchedulerService.rescheduleForAction", () => {
     const persisted = new ElementRepository(handle.db).findById(sourceId);
     expect(persisted?.status).toBe("scheduled");
     expect(persisted?.dueAt).toBe(now);
+    expect(persisted?.updatedAt).toBe(now);
 
     const ops = rescheduleOps(handle, sourceId);
     expect(ops.at(-1)?.payload).toMatchObject({
@@ -309,6 +316,41 @@ describe("SchedulerService.rescheduleForAction", () => {
     expect(intervalDays).toBe(7); // the canonical default, not the 30d C-band
   });
 
+  it("uses pre-action recency but persists the action clock for heuristic schedules", () => {
+    const elementsRepo = new ElementRepository(handle.db);
+    const oldTopic = elementsRepo.create({
+      type: "topic",
+      status: "active",
+      stage: "rough_topic",
+      priority: 0.625,
+      title: "Old topic",
+    });
+    const recentTopic = elementsRepo.create({
+      type: "topic",
+      status: "active",
+      stage: "rough_topic",
+      priority: 0.625,
+      title: "Recent topic",
+    });
+    const now = "2026-05-30T12:00:00.000Z";
+    setElementUpdatedAt(oldTopic.id, "2026-05-20T12:00:00.000Z");
+    setElementUpdatedAt(recentTopic.id, now);
+    const service = new SchedulerService(handle.db);
+
+    const oldResult = service.rescheduleForAction(oldTopic.id, "rewrite", now);
+    const recentResult = service.rescheduleForAction(recentTopic.id, "rewrite", now);
+
+    expect(oldResult.intervalDays).toBe(4);
+    expect(recentResult.intervalDays).toBe(7);
+    expect(oldResult.element.dueAt).toBe("2026-06-03T12:00:00.000Z");
+    expect(recentResult.element.dueAt).toBe("2026-06-06T12:00:00.000Z");
+    expect(new ElementRepository(handle.db).findById(oldTopic.id)?.updatedAt).toBe(now);
+    expect(rescheduleOps(handle, oldTopic.id).at(-1)?.payload).toMatchObject({
+      action: "rewrite",
+      scheduledAt: now,
+    });
+  });
+
   it("consumes the global defaultTopicIntervalDays setting for a topic", () => {
     new SettingsRepository(handle.db).set("scheduler.defaultTopicIntervalDays", 14);
     const elementsRepo = new ElementRepository(handle.db);
@@ -361,12 +403,24 @@ describe("SchedulerService.scheduleAt (explicit choices)", () => {
     }
   });
 
+  it("does not persist an explicit schedule planner clock as scheduler recency", () => {
+    const sourceId = seedSource(handle);
+    const service = new SchedulerService(handle.db);
+    const asOf = "2099-01-01T00:00:00.000Z";
+
+    const { element } = service.scheduleAt(sourceId, "nextWeek", asOf);
+
+    const persisted = new ElementRepository(handle.db).findById(sourceId);
+    expect(element.dueAt).toBe("2099-01-08T00:00:00.000Z");
+    expect(persisted?.updatedAt).not.toBe(asOf);
+  });
+
   it("schedules a manual date, normalized to canonical ISO", () => {
     const sourceId = seedSource(handle);
     const service = new SchedulerService(handle.db);
     const { element } = service.scheduleAt(
       sourceId,
-      { manual: "2026-07-01T09:00:00Z" },
+      { manual: "2026-07-01T09:00:00.000Z" },
       "2026-05-30T12:00:00.000Z",
     );
     expect(element.dueAt).toBe("2026-07-01T09:00:00.000Z");

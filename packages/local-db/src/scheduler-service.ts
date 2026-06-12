@@ -112,10 +112,9 @@ export class SchedulerService {
   /**
    * Build the pure scheduler's {@link Schedulable} descriptor from an element +
    * the data it needs off the op log/settings. `lastSeenAt` derives from the
-   * element's `updatedAt` (the last time it was touched) and is supplied as a
-   * RESERVED field — `nextDueAt` does not consume it for the MVP (intervals are
-   * measured forward from `now`). The topic interval setting is supplied so a
-   * `topic` consumes it rather than orphaning it.
+   * element's pre-action `updatedAt` (the last time it was touched), while the
+   * injected action clock still anchors the next due calculation. The topic
+   * interval setting is supplied so a `topic` consumes it rather than orphaning it.
    *
    * The topic interval is read through the VALIDATED app-settings surface
    * ({@link SettingsRepository.getAppSettings}) — NOT the raw key — so an unwritten
@@ -180,8 +179,8 @@ export class SchedulerService {
     return this.db.transaction((tx) => {
       const opExtras = {
         ...(action === "postpone"
-          ? { postpone: true, postponeCount: priorPostpones + 1, action }
-          : { action }),
+          ? { postpone: true, postponeCount: priorPostpones + 1, action, scheduledAt: now }
+          : { action, scheduledAt: now }),
         ...(batchId ? { batchId } : {}),
       };
       const rescheduled = this.elements.rescheduleWithin(
@@ -190,6 +189,7 @@ export class SchedulerService {
         decision.dueAt,
         "scheduled",
         opExtras,
+        { updatedAt: now },
       );
       return {
         element: rescheduled,
@@ -245,10 +245,17 @@ export class SchedulerService {
         `SchedulerService: element ${element.id} is a ${element.type} — only sources can be queued from inbox`,
       );
     }
-    const rescheduled = this.elements.rescheduleWithin(tx, element.id, now, "scheduled", {
-      action: "queueSoon",
-      queueSoon: true,
-    });
+    const rescheduled = this.elements.rescheduleWithin(
+      tx,
+      element.id,
+      now,
+      "scheduled",
+      {
+        action: "queueSoon",
+        queueSoon: true,
+      },
+      { updatedAt: now },
+    );
     return { element: rescheduled, intervalDays: 0 };
   }
 
@@ -263,9 +270,19 @@ export class SchedulerService {
       );
     }
     const decision = nextDueAt(this.toSchedulable(element, "activate"), now);
-    const rescheduled = this.elements.rescheduleWithin(tx, element.id, decision.dueAt, "active", {
-      action: "activate",
-    });
+    const rescheduled = this.elements.rescheduleWithin(
+      tx,
+      element.id,
+      decision.dueAt,
+      "active",
+      {
+        action: "activate",
+        scheduledAt: now,
+      },
+      {
+        updatedAt: now,
+      },
+    );
     return {
       element: rescheduled,
       intervalDays: decision.intervalDays,

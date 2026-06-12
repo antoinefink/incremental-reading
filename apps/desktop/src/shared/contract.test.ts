@@ -1264,6 +1264,14 @@ describe("QueueScheduleRequestSchema (T028)", () => {
     expect(() =>
       QueueScheduleRequestSchema.parse({ id: "el_1", choice: { kind: "manual", date: "" } }),
     ).toThrow();
+    for (const badDate of ["0", "2026-02-31T00:00:00.000Z", "2026-07-01T12:00:00Z"]) {
+      expect(() =>
+        QueueScheduleRequestSchema.parse({
+          id: "el_1",
+          choice: { kind: "manual", date: badDate },
+        }),
+      ).toThrow();
+    }
   });
 
   it("rejects a missing id", () => {
@@ -3103,6 +3111,13 @@ describe("Verification-task schemas (T092)", () => {
     expect(
       TasksCreateRequestSchema.safeParse({
         taskType: "verify_claim",
+        title: "Verify",
+        dueChoice: { kind: "manual", date: "2026-02-31T00:00:00.000Z" },
+      }).success,
+    ).toBe(false);
+    expect(
+      TasksCreateRequestSchema.safeParse({
+        taskType: "verify_claim",
         title: "x",
         note: "n".repeat(2049),
       }).success,
@@ -3202,6 +3217,12 @@ describe("Synthesis-note schemas (T095)", () => {
     expect(
       SynthesisScheduleReturnRequestSchema.safeParse({ noteId: "n-1", when: { kind: "manual" } })
         .success,
+    ).toBe(false);
+    expect(
+      SynthesisScheduleReturnRequestSchema.safeParse({
+        noteId: "n-1",
+        when: { kind: "manual", date: "2026-07-01T12:00:00Z" },
+      }).success,
     ).toBe(false);
   });
 });

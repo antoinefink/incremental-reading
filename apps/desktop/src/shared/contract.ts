@@ -916,7 +916,7 @@ export const QueueScheduleRequestSchema = z.object({
     z.object({
       kind: z.literal("manual"),
       /** The chosen return date, ISO-8601 (normalized to canonical ISO main-side). */
-      date: z.string().trim().min(1).max(64),
+      date: IsoTimestampInputSchema,
     }),
   ]),
 });
@@ -2282,6 +2282,7 @@ export type SchedulerConsistencyReason =
   | "terminal-card-review-due"
   | "retired-card-review-due"
   | "scheduled-attention-missing-due"
+  | "attention-due-before-last-seen"
   | "chronic-postpone-paused"
   | "chronic-postpone-reset";
 
@@ -4393,7 +4394,7 @@ const TaskDueChoiceSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("tomorrow") }),
   z.object({ kind: z.literal("nextWeek") }),
   z.object({ kind: z.literal("nextMonth") }),
-  z.object({ kind: z.literal("manual"), date: z.string().trim().min(1).max(64) }),
+  z.object({ kind: z.literal("manual"), date: IsoTimestampInputSchema }),
 ]);
 
 /** A flat verification-task summary — the inspector/queue read shape. */
@@ -4498,7 +4499,7 @@ const SynthesisWhenSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("tomorrow") }),
   z.object({ kind: z.literal("nextWeek") }),
   z.object({ kind: z.literal("nextMonth") }),
-  z.object({ kind: z.literal("manual"), date: z.string().trim().min(1).max(64) }),
+  z.object({ kind: z.literal("manual"), date: IsoTimestampInputSchema }),
 ]);
 export type SynthesisWhen = z.infer<typeof SynthesisWhenSchema>;
 

@@ -15,7 +15,7 @@ import {
   operationLog,
   reviewStates,
 } from "@interleave/db";
-import { and, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { CHRONIC_POSTPONE_TYPES, ChronicPostponeQuery } from "./chronic-postpone-query";
 import { OperationLogRepository } from "./operation-log-repository";
 import { QUEUE_EXCLUDED_STATUSES } from "./queue-repository";
@@ -26,8 +26,21 @@ export type SchedulerConsistencyReason =
   | "terminal-card-review-due"
   | "retired-card-review-due"
   | "scheduled-attention-missing-due"
+  | "attention-due-before-last-seen"
   | "chronic-postpone-paused"
   | "chronic-postpone-reset";
+
+const HEURISTIC_SCHEDULER_ACTIONS = new Set(["extract", "rewrite", "activate", "done", "postpone"]);
+
+interface AttentionDueBeforeLastSeenRow {
+  readonly id: string;
+  readonly type: string;
+  readonly title: string;
+  readonly priority: number;
+  readonly status: string;
+  readonly createdAt: string;
+  readonly dueAt: string;
+}
 
 export interface SchedulerConsistencyRow {
   readonly element: {
@@ -58,6 +71,7 @@ export class SchedulerConsistencyQuery {
     for (const row of this.terminalCardReviewDue()) push(row);
     for (const row of this.retiredCardReviewDue()) push(row);
     for (const row of this.scheduledAttentionMissingDue()) push(row);
+    for (const row of this.attentionDueBeforeLastSeen(limit - rows.size)) push(row);
     for (const row of this.chronicPostponePaused()) push(row);
     for (const row of this.chronicPostponeReset()) push(row);
     return [...rows.values()];
@@ -180,6 +194,66 @@ export class SchedulerConsistencyQuery {
         elementDueAt: r.dueAt as IsoTimestamp | null,
         reviewDueAt: null,
       }));
+  }
+
+  private attentionDueBeforeLastSeen(limit = Number.MAX_SAFE_INTEGER): SchedulerConsistencyRow[] {
+    if (limit <= 0) return [];
+
+    const excludedStatuses = sql.join(
+      QUEUE_EXCLUDED_STATUSES.map((status) => sql`${status}`),
+      sql`, `,
+    );
+    const heuristicActions = sql.join(
+      [...HEURISTIC_SCHEDULER_ACTIONS].map((action) => sql`${action}`),
+      sql`, `,
+    );
+    const rows = this.db.all<AttentionDueBeforeLastSeenRow>(sql`
+      WITH latest_reschedule AS (
+        SELECT element_id, payload
+        FROM (
+          SELECT
+            element_id,
+            payload,
+            row_number() OVER (
+              PARTITION BY element_id
+              ORDER BY created_at DESC, rowid DESC
+            ) AS rn
+          FROM operation_log
+          WHERE op_type = 'reschedule_element'
+            AND element_id IS NOT NULL
+        )
+        WHERE rn = 1
+      )
+      SELECT
+        e.id AS id,
+        e.type AS type,
+        e.title AS title,
+        e.priority AS priority,
+        e.status AS status,
+        e.created_at AS createdAt,
+        e.due_at AS dueAt
+      FROM elements e
+      JOIN latest_reschedule lr ON lr.element_id = e.id
+      WHERE e.deleted_at IS NULL
+        AND e.type <> 'card'
+        AND e.status NOT IN (${excludedStatuses})
+        AND e.due_at IS NOT NULL
+        AND json_valid(lr.payload)
+        AND json_type(lr.payload, '$.choice') IS NULL
+        AND COALESCE(json_extract(lr.payload, '$.queueSoon'), 0) != 1
+        AND json_extract(lr.payload, '$.action') IN (${heuristicActions})
+        AND julianday(json_extract(lr.payload, '$.scheduledAt')) IS NOT NULL
+        AND julianday(e.due_at) <= julianday(json_extract(lr.payload, '$.scheduledAt'))
+      ORDER BY e.created_at ASC
+      LIMIT ${limit}
+    `);
+
+    return rows.map((r) => ({
+      element: ref(r),
+      reason: "attention-due-before-last-seen" as const,
+      elementDueAt: r.dueAt as IsoTimestamp | null,
+      reviewDueAt: null,
+    }));
   }
 
   private chronicPostponePaused(): SchedulerConsistencyRow[] {

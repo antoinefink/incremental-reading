@@ -100,6 +100,11 @@ export interface OpContext {
   readonly extras?: Readonly<Record<string, unknown>>;
 }
 
+export interface RescheduleOptions {
+  /** Override the mutation timestamp; defaults to the repository wall-clock stamp. */
+  readonly updatedAt?: IsoTimestamp;
+}
+
 export class ElementRepository {
   constructor(private readonly db: InterleaveDatabase) {}
 
@@ -296,8 +301,10 @@ export class ElementRepository {
    * generic "process this again later" hook used by the attention scheduler and
    * the FSRS review flow alike (the scheduler decides the date elsewhere).
    */
-  reschedule(id: ElementId, dueAt: IsoTimestamp | null): Element {
-    return this.db.transaction((tx) => this.rescheduleWithin(tx, id, dueAt));
+  reschedule(id: ElementId, dueAt: IsoTimestamp | null, options?: RescheduleOptions): Element {
+    return this.db.transaction((tx) =>
+      this.rescheduleWithin(tx, id, dueAt, undefined, undefined, options),
+    );
   }
 
   /**
@@ -326,6 +333,7 @@ export class ElementRepository {
      * migration (the closed op set is unchanged — this only enriches the payload).
      */
     opExtras?: Readonly<Record<string, unknown>>,
+    options?: RescheduleOptions,
   ): Element {
     // Read the PRE-IMAGE before mutating so undo can restore the exact prior schedule.
     const before = tx.select().from(elements).where(eq(elements.id, id)).get();
@@ -333,7 +341,7 @@ export class ElementRepository {
     const prevDueAt = before.dueAt;
     const prevStatus = before.status;
 
-    const updatedAt = nowIso();
+    const updatedAt = options?.updatedAt ?? nowIso();
     const set: Record<string, unknown> = { dueAt, updatedAt };
     if (status !== undefined) set.status = status;
     tx.update(elements).set(set).where(eq(elements.id, id)).run();

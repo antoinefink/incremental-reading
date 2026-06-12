@@ -33,7 +33,7 @@
 
 import type { DistillationStage, ElementType, IsoTimestamp, Priority } from "@interleave/core";
 import { priorityToLabel } from "@interleave/core";
-import { addDays } from "./date-util";
+import { addDays, MS_PER_DAY } from "./date-util";
 
 /**
  * The ordered extract distillation chain the attention scheduler walks. A strict
@@ -99,16 +99,7 @@ export interface Schedulable {
   readonly stage?: DistillationStage | null;
   /** Numeric priority `0.0`–`1.0` (the by-priority band + within-band ordering). */
   readonly priority: Priority;
-  /**
-   * When the item was last seen/processed (derives from `updatedAt`/last reschedule).
-   *
-   * RESERVED — deliberately NOT consumed by `nextDueAt` for the MVP. All intervals
-   * are measured forward from `now` (the boring, deterministic choice), so this axis
-   * has zero effect on the output today. It is captured on the descriptor so a future
-   * iteration can clamp/extend the interval by how recently the item was processed
-   * WITHOUT a descriptor-shape change. Do not present it as a contributing input until
-   * a heuristic actually reads it (and a test pins the behaviour).
-   */
+  /** When the item was last seen/processed (derives from `updatedAt`/last reschedule). */
   readonly lastSeenAt?: IsoTimestamp | null;
   /** How many times the item has been postponed (read from `reschedule_element` ops). */
   readonly postponeCount?: number;
@@ -371,15 +362,33 @@ function adjustForSourceProcessing(
   return { intervalDays };
 }
 
+function applyRecencyCredit(
+  baseIntervalDays: number,
+  lastSeenAt: IsoTimestamp | null | undefined,
+  now: IsoTimestamp,
+): number {
+  if (!lastSeenAt) return baseIntervalDays;
+
+  const lastSeenMs = Date.parse(lastSeenAt);
+  const nowMs = Date.parse(now);
+  if (Number.isNaN(lastSeenMs) || Number.isNaN(nowMs) || lastSeenMs > nowMs) {
+    return baseIntervalDays;
+  }
+
+  const ageDays = Math.floor((nowMs - lastSeenMs) / MS_PER_DAY);
+  if (ageDays < 1) return baseIntervalDays;
+
+  const creditDays = Math.min(ageDays, Math.floor(baseIntervalDays / 2));
+  return Math.max(1, baseIntervalDays - creditDays);
+}
+
 /**
  * Compute the next attention `due_at` for a non-card element from priority, stage,
- * last action, and postpone count. The action override (postpone/done) takes
- * precedence; otherwise the by-stage (extract) / by-priority (source/topic) heuristic
- * applies. ALWAYS measured from `now` (the service passes the clock), so the returned
- * date is deterministic for a fixed clock.
- *
- * NOTE: `input.lastSeenAt` is RESERVED and not consumed here for the MVP — every
- * interval is measured forward from `now`. See {@link Schedulable.lastSeenAt}.
+ * last action, postpone count, source-processing signals, and last-seen recency. The
+ * action override (postpone/done) takes precedence over the base heuristic; source
+ * processing then adjusts that base; finally, valid older `lastSeenAt` values apply
+ * a bounded credit so untouched items return sooner. ALWAYS measured from `now` (the
+ * service passes the clock), so the returned date is deterministic for a fixed clock.
  *
  * This is the attention half ONLY — it never produces FSRS state and is never called
  * for a `card`.
@@ -388,9 +397,10 @@ export function nextDueAt(input: Schedulable, now: IsoTimestamp): ScheduleDecisi
   const override = actionOverrideIntervalDays(input);
   const baseIntervalDays = override ?? heuristicIntervalDays(input);
   const adjusted = adjustForSourceProcessing(input, baseIntervalDays);
+  const intervalDays = applyRecencyCredit(adjusted.intervalDays, input.lastSeenAt, now);
   return {
-    dueAt: addDays(now, adjusted.intervalDays),
-    intervalDays: adjusted.intervalDays,
+    dueAt: addDays(now, intervalDays),
+    intervalDays,
     ...(adjusted.retirementSuggestion
       ? { retirementSuggestion: adjusted.retirementSuggestion }
       : {}),
@@ -414,13 +424,13 @@ export function scheduleNextMonth(now: IsoTimestamp): ScheduleDecision {
 
 /**
  * Normalize + validate a MANUAL pick-a-date choice into a `{ dueAt, intervalDays }`
- * decision relative to `now`. Accepts an ISO timestamp or a `Date`; throws on an
- * unparseable value. `intervalDays` is the (possibly fractional, possibly negative)
- * day delta from `now` — informational; a past date is allowed (the user may want it
- * due immediately) but normalized to a canonical ISO string.
+ * decision relative to `now`. String inputs must already be canonical UTC ISO
+ * timestamps; `Date` inputs are normalized. `intervalDays` is the (possibly
+ * fractional, possibly negative) day delta from `now` — informational; a past date
+ * is allowed (the user may want it due immediately).
  */
 export function scheduleManual(date: IsoTimestamp | Date, now: IsoTimestamp): ScheduleDecision {
-  const ms = date instanceof Date ? date.getTime() : Date.parse(date);
+  const ms = date instanceof Date ? date.getTime() : canonicalUtcIsoMs(date);
   if (Number.isNaN(ms)) {
     throw new Error(`scheduleManual: invalid date "${String(date)}"`);
   }
@@ -428,6 +438,13 @@ export function scheduleManual(date: IsoTimestamp | Date, now: IsoTimestamp): Sc
   const nowMs = Date.parse(now);
   const intervalDays = (ms - nowMs) / 86_400_000;
   return { dueAt, intervalDays };
+}
+
+function canonicalUtcIsoMs(value: IsoTimestamp): number {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return Number.NaN;
+  const ms = Date.parse(value);
+  if (Number.isNaN(ms)) return Number.NaN;
+  return new Date(ms).toISOString() === value ? ms : Number.NaN;
 }
 
 /** The explicit, non-heuristic scheduling choices the queue/loop offer the user. */
