@@ -106,22 +106,36 @@ sizes the protected subset honestly.
 
 ## Deliverables
 
-- [ ] Settings: `dailyBudgetMinutes` (+ migration from the count; Settings UI updated with
-      presets like 15/30/60/120).
-- [ ] Queue gauge: projected minutes of today's plan vs budget (T115 pricing, uncertainty
+- [x] Settings: `dailyBudgetMinutes` (+ migration from the count; Settings UI updated with
+      minute-denominated control and rollback-compatible write-through to `dailyReviewBudget`).
+- [x] Queue gauge: projected minutes of today's plan vs budget (T115 pricing, uncertainty
       labeled); over-budget detection in minutes.
-- [ ] T077 planner: victim selection trims to the minute envelope (same priority-ordered
-      protection rules; cut math in minutes) with an explicit reserve buffer (e.g. plan to
-      budget − 10%).
-- [ ] Tests: unit (planner trims mixed-cost fixtures correctly — a day of 30 cheap clozes and a
-      day of 3 heavy sources both land within budget); migration test; e2e — gauge renders
-      minutes, banner triggers on a minute-overloaded fixture.
+- [x] T077 planner: victim selection trims to the minute envelope (same priority-ordered
+      protection rules; cut math in minutes) with an explicit 10% reserve buffer.
+- [x] Tests: unit (planner trims mixed-cost fixtures correctly and reports protected overflow);
+      migration test; e2e — gauge renders minutes, banner triggers on a minute-overloaded fixture.
 
 ## Done when
 
 - Budget is set and enforced in minutes end-to-end; mixed-type fixture days are sized correctly;
   the count setting is migrated.
 - Standard gates pass.
+
+## Completion notes
+
+- Completed 2026-06-12 in commit `PENDING`: `dailyBudgetMinutes` is canonical for queue/home
+  overload budgeting, while `dailyReviewBudget` remains readable and write-through-compatible for
+  count-only consumers.
+- `QueueListResult.budget` remains count-based for existing callers; minute-aware queue reads
+  request `includeTimeEstimate` and consume `minuteBudget`.
+- Manual auto-postpone now plans from the full filtered due universe, prices every candidate with
+  T115 estimates, forwards visible queue filters/mode into preview/apply, and trims toward
+  `budgetMinutes * 0.9` without sacrificing protected/fragile work.
+- Audited remaining count consumers: review-session caps, recovery modes, workload simulation,
+  and some count-only badges intentionally remain count-denominated pending T118/session-assembly
+  work or a dedicated compatibility cleanup.
+- Verified with `pnpm lint`, `pnpm typecheck`, `pnpm test`, and
+  `pnpm e2e tests/electron/settings.spec.ts tests/electron/auto-postpone.spec.ts`.
 
 ## Notes / risks
 

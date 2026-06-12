@@ -461,7 +461,11 @@ export function HomeScreen() {
 
         {/* Hero overload strip — BudgetMeter + at-risk metrics (mirrors QueueScreen). */}
         <div className="q-panel q-panel-pad q-overload" style={{ marginBottom: 14 }}>
-          <BudgetMeter used={queue?.budget.used ?? 0} target={queue?.budget.target ?? 0} />
+          <BudgetMeter
+            used={queue?.minuteBudget?.usedMinutes ?? queue?.budget.used ?? 0}
+            target={queue?.minuteBudget?.targetMinutes ?? queue?.budget.target ?? 0}
+            confidence={queue?.minuteBudget?.confidence ?? "learned"}
+          />
           <div className="q-overload__div" />
           <div className="q-metrics">
             <div className="q-metric">

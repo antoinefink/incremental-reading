@@ -131,6 +131,9 @@ describe("seedDemoCollection", () => {
 
   it("writes dev settings and a second inbox source for triage variety", () => {
     const { collection, repos } = seed();
+    expect(repos.settings.get<number>("review.dailyBudgetMinutes")).toBe(
+      DEMO_FIXTURES.settings["review.dailyBudgetMinutes"],
+    );
     expect(repos.settings.get<number>("review.dailyBudget")).toBe(
       DEMO_FIXTURES.settings["review.dailyBudget"],
     );

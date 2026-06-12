@@ -90,6 +90,7 @@ import {
   type OptimizationSuggestionWithWorkload,
   PurgeBlockedByLiveDescendantsError,
   QueueActionService,
+  type QueueFilters,
   QueueQuery,
   RecoveryModeService,
   type RelatedItem,
@@ -446,6 +447,18 @@ import { OcrService } from "./ocr-service";
 import { PdfImportService } from "./pdf-import-service";
 import { PdfRegionService } from "./pdf-region-service";
 import { UrlImportService } from "./url-import-service";
+
+function queueFiltersFromRequest(
+  request: Pick<QueueListRequest, "types" | "concept" | "tag" | "statuses">,
+): { filters?: QueueFilters } {
+  const filters: QueueFilters = {
+    ...(request.types ? { types: request.types } : {}),
+    ...(request.concept ? { concept: request.concept } : {}),
+    ...(request.tag ? { tag: request.tag } : {}),
+    ...(request.statuses ? { statuses: request.statuses } : {}),
+  };
+  return Object.keys(filters).length > 0 ? { filters } : {};
+}
 
 /**
  * Capture-server pairing keys ({@link CAPTURE_TOKEN_KEY} et al.) are
@@ -1240,12 +1253,7 @@ export class DbService {
     const data = this.queueQuery.list({
       asOf,
       ...(request.mode ? { mode: request.mode } : {}),
-      filters: {
-        ...(request.types ? { types: request.types } : {}),
-        ...(request.concept ? { concept: request.concept } : {}),
-        ...(request.tag ? { tag: request.tag } : {}),
-        ...(request.statuses ? { statuses: request.statuses } : {}),
-      },
+      ...queueFiltersFromRequest(request),
     });
     const timeEstimate = request.includeTimeEstimate
       ? this.timeCostQuery.estimateQueue(data.timeCostSummary, {
@@ -1261,7 +1269,16 @@ export class DbService {
       items: data.items,
       counts: data.counts,
       budget: data.budget,
-      ...(timeEstimate ? { timeEstimate } : {}),
+      ...(timeEstimate
+        ? {
+            minuteBudget: {
+              usedMinutes: timeEstimate.totalMinutes,
+              targetMinutes: this.repos.settings.getAppSettings().dailyBudgetMinutes,
+              confidence: timeEstimate.confidence,
+            },
+            timeEstimate,
+          }
+        : {}),
     };
   }
 
@@ -1408,6 +1425,8 @@ export class DbService {
   previewAutoPostpone(request: QueueAutoPostponeRequest): AutoPostponePreview {
     return this.autoPostponeService.preview({
       ...(request.asOf ? { asOf: request.asOf as IsoTimestamp } : {}),
+      ...(request.mode ? { mode: request.mode } : {}),
+      ...queueFiltersFromRequest(request),
     });
   }
 
@@ -1421,6 +1440,8 @@ export class DbService {
   applyAutoPostpone(request: QueueAutoPostponeRequest): AutoPostponeApplyResult {
     return this.autoPostponeService.apply({
       ...(request.asOf ? { asOf: request.asOf as IsoTimestamp } : {}),
+      ...(request.mode ? { mode: request.mode } : {}),
+      ...queueFiltersFromRequest(request),
     });
   }
 

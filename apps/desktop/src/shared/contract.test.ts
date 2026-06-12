@@ -1874,10 +1874,18 @@ describe("QueueListRequestSchema asOf guard", () => {
 describe("QueueAutoPostponeRequestSchema (T077)", () => {
   it("accepts an empty object + a parseable asOf, rejects a garbage asOf", () => {
     expect(QueueAutoPostponeRequestSchema.parse({})).toEqual({});
-    expect(QueueAutoPostponeRequestSchema.parse({ asOf: "2027-06-01T12:00:00.000Z" }).asOf).toBe(
-      "2027-06-01T12:00:00.000Z",
-    );
+    const parsed = QueueAutoPostponeRequestSchema.parse({
+      asOf: "2027-06-01T12:00:00.000Z",
+      concept: "memory",
+      statuses: ["scheduled"],
+      mode: "read",
+    });
+    expect(parsed.asOf).toBe("2027-06-01T12:00:00.000Z");
+    expect(parsed.concept).toBe("memory");
+    expect(parsed.statuses).toEqual(["scheduled"]);
+    expect(parsed.mode).toBe("read");
     expect(() => QueueAutoPostponeRequestSchema.parse({ asOf: "whenever" })).toThrow();
+    expect(() => QueueAutoPostponeRequestSchema.parse({ statuses: ["not-a-status"] })).toThrow();
   });
 });
 
@@ -1959,6 +1967,7 @@ describe("SettingsUpdateRequestSchema", () => {
 describe("SettingsPatchSchema (T011)", () => {
   it("accepts a valid partial patch", () => {
     const parsed = SettingsPatchSchema.parse({
+      dailyBudgetMinutes: 60,
       dailyReviewBudget: 60,
       theme: "system",
       chronicPostponeThreshold: 6,
@@ -1966,6 +1975,7 @@ describe("SettingsPatchSchema (T011)", () => {
       weeklyReviewCadenceDays: 14,
     });
     expect(parsed).toEqual({
+      dailyBudgetMinutes: 60,
       dailyReviewBudget: 60,
       theme: "system",
       chronicPostponeThreshold: 6,
@@ -1983,6 +1993,8 @@ describe("SettingsPatchSchema (T011)", () => {
   });
 
   it("rejects an out-of-range daily budget", () => {
+    expect(() => SettingsPatchSchema.parse({ dailyBudgetMinutes: 301 })).toThrow();
+    expect(() => SettingsPatchSchema.parse({ dailyBudgetMinutes: 4 })).toThrow();
     expect(() => SettingsPatchSchema.parse({ dailyReviewBudget: 9999 })).toThrow();
     expect(() => SettingsPatchSchema.parse({ dailyReviewBudget: 1 })).toThrow();
   });
@@ -1994,6 +2006,7 @@ describe("SettingsPatchSchema (T011)", () => {
   });
 
   it("rejects a non-integer budget / topic interval", () => {
+    expect(() => SettingsPatchSchema.parse({ dailyBudgetMinutes: 60.5 })).toThrow();
     expect(() => SettingsPatchSchema.parse({ dailyReviewBudget: 60.5 })).toThrow();
     expect(() => SettingsPatchSchema.parse({ defaultTopicIntervalDays: 0 })).toThrow();
     expect(() => SettingsPatchSchema.parse({ chronicPostponeThreshold: 1 })).toThrow();

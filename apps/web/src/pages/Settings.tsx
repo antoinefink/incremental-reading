@@ -66,6 +66,7 @@ function formatBackupArtifactLabel(artifact: BackupArtifact): string {
  * plaintext keys.
  */
 const FALLBACK_SETTINGS: RendererSettings = {
+  dailyBudgetMinutes: 60,
   dailyReviewBudget: 60,
   defaultDesiredRetention: 0.9,
   defaultTopicIntervalDays: 7,
@@ -119,6 +120,9 @@ const DESIRED_RETENTION_MIN = 0.8;
 const DESIRED_RETENTION_MAX = 0.97;
 
 const TOPIC_INTERVAL_OPTIONS = [3, 7, 14, 30] as const;
+const DAILY_BUDGET_MINUTES_MIN = 5;
+const DAILY_BUDGET_MINUTES_MAX = 300;
+const DAILY_BUDGET_MINUTE_PRESETS = [15, 30, 60, 120] as const;
 const KEYBOARD_LAYOUTS: { value: AppSettings["keyboardLayout"]; label: string }[] = [
   { value: "qwerty", label: "QWERTY" },
   { value: "dvorak", label: "Dvorak" },
@@ -1286,25 +1290,36 @@ export function Settings() {
       <SectionPanel title="Review & scheduling">
         <SettingRow
           label="Daily review budget"
-          hint="Soft cap on items surfaced per day. Overflow auto-postpones by priority."
+          hint="Soft cap on estimated review and processing time per day."
         >
-          <div className="flex items-center gap-2.5">
-            <input
-              type="range"
-              min={10}
-              max={300}
-              step={5}
-              value={s.dailyReviewBudget}
-              data-testid="setting-budget"
-              onChange={(e) => void patch({ dailyReviewBudget: Number(e.target.value) })}
-              className="w-40 accent-accent"
+          <div className="flex flex-col items-end gap-2">
+            <Segmented
+              name="setting-budget-preset"
+              value={s.dailyBudgetMinutes}
+              options={DAILY_BUDGET_MINUTE_PRESETS.map((value) => ({
+                value,
+                label: `${value}m`,
+              }))}
+              onChange={(dailyBudgetMinutes) => void patch({ dailyBudgetMinutes })}
             />
-            <span
-              data-testid="setting-budget-value"
-              className="w-16 text-right font-mono font-semibold text-sm text-text"
-            >
-              {s.dailyReviewBudget}/day
-            </span>
+            <div className="flex items-center gap-2.5">
+              <input
+                type="range"
+                min={DAILY_BUDGET_MINUTES_MIN}
+                max={DAILY_BUDGET_MINUTES_MAX}
+                step={5}
+                value={s.dailyBudgetMinutes}
+                data-testid="setting-budget"
+                onChange={(e) => void patch({ dailyBudgetMinutes: Number(e.target.value) })}
+                className="w-40 accent-accent"
+              />
+              <span
+                data-testid="setting-budget-value"
+                className="w-16 text-right font-mono font-semibold text-sm text-text"
+              >
+                {s.dailyBudgetMinutes} min
+              </span>
+            </div>
           </div>
         </SettingRow>
 

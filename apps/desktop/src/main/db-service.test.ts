@@ -197,6 +197,7 @@ describe("DbService", () => {
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
 
     const { settings } = svc.getAppSettings();
+    expect(settings.dailyBudgetMinutes).toBe(60);
     expect(settings.dailyReviewBudget).toBe(60);
     expect(settings.defaultDesiredRetention).toBe(0.9);
     expect(settings.defaultTopicIntervalDays).toBe(7);
@@ -211,10 +212,11 @@ describe("DbService", () => {
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
 
     const { settings } = svc.updateAppSettings({
-      dailyReviewBudget: 120,
+      dailyBudgetMinutes: 120,
       keyboardLayout: "vim",
       theme: "system",
     });
+    expect(settings.dailyBudgetMinutes).toBe(120);
     expect(settings.dailyReviewBudget).toBe(120);
     expect(settings.keyboardLayout).toBe("vim");
     expect(settings.theme).toBe("system");
@@ -488,6 +490,33 @@ describe("DbService", () => {
     svc.close();
   });
 
+  it("listQueue returns minuteBudget only for time-estimate reads and keeps count budget", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const asOf = new Date().toISOString();
+    svc.updateAppSettings({ dailyBudgetMinutes: 25, dailyReviewBudget: 11 });
+    const { id } = svc.importManualSource({
+      title: "Minute-priced source",
+      body: "A source costs the documented attention default.",
+      priority: "C",
+    });
+    svc.scheduleQueueItem({ id, choice: { kind: "manual", date: asOf } });
+
+    const countOnly = svc.listQueue({ asOf });
+    expect(countOnly.budget).toEqual({ used: 1, target: 11 });
+    expect(countOnly.minuteBudget).toBeUndefined();
+
+    const priced = svc.listQueue({ asOf, includeTimeEstimate: true });
+    expect(priced.budget).toEqual({ used: 1, target: 11 });
+    expect(priced.minuteBudget).toEqual({
+      usedMinutes: priced.timeEstimate?.totalMinutes,
+      targetMinutes: 25,
+      confidence: priced.timeEstimate?.confidence,
+    });
+
+    svc.close();
+  });
+
   it("save-for-later triage parks an inbox source instead of dismissing it", () => {
     const first = new DbService();
     first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
@@ -708,6 +737,7 @@ describe("DbService", () => {
     const first = new DbService();
     first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
     first.updateAppSettings({
+      dailyBudgetMinutes: 90,
       dailyReviewBudget: 90,
       defaultDesiredRetention: 0.95,
       defaultTopicIntervalDays: 30,
@@ -726,6 +756,7 @@ describe("DbService", () => {
     // The IPC-facing read PROJECTS the own-keys to `*Configured` booleans (T087/T093) —
     // the plaintext `aiApiKey`/`embeddingApiKey` are NEVER returned to the renderer.
     expect(settings).toEqual({
+      dailyBudgetMinutes: 90,
       dailyReviewBudget: 90,
       defaultDesiredRetention: 0.95,
       defaultTopicIntervalDays: 30,

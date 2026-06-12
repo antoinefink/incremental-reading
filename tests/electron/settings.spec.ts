@@ -71,9 +71,9 @@ test("the /settings UI reads the persisted settings through the bridge", async (
   await page.waitForLoadState("domcontentloaded");
   await gotoSettings(page);
 
-  // The control reflects the DB-backed value (60/day default), not a hard-coded
+  // The control reflects the DB-backed value (60 min default), not a hard-coded
   // literal — proving it loaded through settings.getAll().
-  await expect(page.getByTestId("setting-budget-value")).toHaveText("60/day");
+  await expect(page.getByTestId("setting-budget-value")).toHaveText("60 min");
   await expect(page.getByTestId("setting-theme-option-dark")).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -141,9 +141,9 @@ test("changing a setting persists and SURVIVES a full app restart", async () => 
   await firstPage.waitForLoadState("domcontentloaded");
   await gotoSettings(firstPage);
 
-  // Drag the budget slider to its max (300) and pick the Vim layout.
+  // Drag the minute budget slider to its max (300) and pick the Vim layout.
   await firstPage.getByTestId("setting-budget").fill("300");
-  await expect(firstPage.getByTestId("setting-budget-value")).toHaveText("300/day");
+  await expect(firstPage.getByTestId("setting-budget-value")).toHaveText("300 min");
   await firstPage.getByTestId("setting-keyboard-option-vim").click();
   await expect(firstPage.getByTestId("setting-keyboard-option-vim")).toHaveAttribute(
     "aria-pressed",
@@ -157,7 +157,7 @@ test("changing a setting persists and SURVIVES a full app restart", async () => 
     };
     return (await api.settings.getAll()).settings;
   });
-  expect(beforeRestart.dailyReviewBudget).toBe(300);
+  expect(beforeRestart.dailyBudgetMinutes).toBe(300);
   expect(beforeRestart.keyboardLayout).toBe("vim");
 
   await first.close();
@@ -169,7 +169,7 @@ test("changing a setting persists and SURVIVES a full app restart", async () => 
   await gotoSettings(secondPage);
 
   // The UI shows the persisted values, read through settings.getAll().
-  await expect(secondPage.getByTestId("setting-budget-value")).toHaveText("300/day");
+  await expect(secondPage.getByTestId("setting-budget-value")).toHaveText("300 min");
   await expect(secondPage.getByTestId("setting-keyboard-option-vim")).toHaveAttribute(
     "aria-pressed",
     "true",

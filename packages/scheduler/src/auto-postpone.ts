@@ -60,6 +60,8 @@ export interface AutoPostponeInput extends QueueScoreInput {
   readonly schedulerSignals: QueueScoreInput["schedulerSignals"] & AutoPostponeSignals;
   /** True for an A-priority / user-protected row — never auto-postponed. */
   readonly protected: boolean;
+  /** Estimated real review/processing time for this due row, in minutes. */
+  readonly estimatedMinutes?: number;
 }
 
 /**
@@ -102,13 +104,21 @@ export interface AutoPostponePlan {
   readonly items: readonly PostponePlanItem[];
   /** How many items would be postponed (`items.length`). */
   readonly count: number;
-  /** The due count that remains after applying the plan (≤ budget when achievable). */
+  /** The due count that remains after applying the plan. */
   readonly remainingAfter: number;
+  /** Estimated minutes currently due before applying the plan. */
+  readonly usedMinutes: number;
+  /** The configured daily minute budget. */
+  readonly targetMinutes: number;
+  /** The reserve target the planner trims toward, in minutes. */
+  readonly reserveTargetMinutes: number;
+  /** Estimated due minutes remaining after applying the plan. */
+  readonly remainingMinutesAfter: number;
 }
 
 /** Options for {@link planAutoPostpone}. */
 export interface AutoPostponeOptions {
-  /** The daily review budget — the threshold the remaining due count must drop to. */
+  /** The daily review budget, in minutes. */
   readonly budget: number;
   /** "Now" the victim ranking compares against (ISO-8601); defaults to the wall clock. */
   readonly asOf?: string;
@@ -121,6 +131,11 @@ export interface AutoPostponeOptions {
   readonly protectHighPriority?: boolean;
   /** The mode the victim-ranking score uses (default `"full"`); the plan is mode-stable. */
   readonly mode?: SessionMode;
+  /**
+   * How far below the daily minute target to trim (default `0.9`, leaving a 10% reserve
+   * so late-day reviews/imports do not immediately put the user back over budget).
+   */
+  readonly reserveRatio?: number;
 }
 
 /** Band-A threshold (mirrors `@interleave/core` `priorityToLabel`: A ≥ 0.75). */
@@ -169,15 +184,20 @@ function isLeechRow(item: AutoPostponeInput): boolean {
   return isLeech({ lapses }, LEECH_LAPSE_THRESHOLD);
 }
 
+function finiteMinutes(value: number | undefined): number {
+  return value !== undefined && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
 /**
  * Plan the overload auto-postpone. Returns a DETERMINISTIC, ordered list of victims so the
- * remaining due count drops to ≤ `budget`, applying the doc's exact victim policy:
+ * remaining due minutes drop to the reserve target when possible, applying the doc's
+ * exact victim policy:
  *
  *   1. **low-priority attention items** (topics/sources/extracts/tasks/synthesis notes,
  *      band C/D) — lowest {@link queueItemScore} first;
  *   2. then **low-priority *mature* cards** — lowest score first; NEVER a fragile card and
  *      NEVER a high-priority card while `protectHighPriority`;
- *   3. it STOPS as soon as the remaining due count is back within budget.
+ *   3. it STOPS as soon as the remaining due minutes are inside the reserve envelope.
  *
  * It NEVER selects a high-priority fragile card, a leech, or a `protected` (band-A / pinned)
  * item. Pure: no DB, no IPC, no React, no randomness — same input always yields the same plan.
@@ -190,15 +210,25 @@ export function planAutoPostpone(
   const parsedAsOf = options.asOf ? Date.parse(options.asOf) : Date.now();
   const asOfMs = Number.isNaN(parsedAsOf) ? Date.now() : parsedAsOf;
   const mode = options.mode ?? ("full" as SessionMode);
+  const targetMinutes = Math.max(0, options.budget);
+  const reserveRatio = Math.min(1, Math.max(0, options.reserveRatio ?? 0.9));
+  const reserveTargetMinutes = targetMinutes * reserveRatio;
+  const usedMinutes = items.reduce((sum, item) => sum + finiteMinutes(item.estimatedMinutes), 0);
   // Rank victims by the SAME value reasoning as T076's auto-sort (reusing its default
   // weights), so "least valuable right now" is one consistent notion across both.
   const score = (item: AutoPostponeInput): number =>
     queueItemScore(item, { mode, asOfMs, weights: DEFAULT_QUEUE_SCORE_WEIGHTS });
 
-  // How many items must recede to get the WHOLE due set back within budget.
-  const overflow = Math.max(0, items.length - Math.max(0, options.budget));
-  if (overflow === 0) {
-    return { items: [], count: 0, remainingAfter: items.length };
+  if (usedMinutes <= targetMinutes) {
+    return {
+      items: [],
+      count: 0,
+      remainingAfter: items.length,
+      usedMinutes,
+      targetMinutes,
+      reserveTargetMinutes,
+      remainingMinutesAfter: usedMinutes,
+    };
   }
 
   // Eligible victims, partitioned into the two tiers. An item is eligible only if it is
@@ -232,12 +262,14 @@ export function planAutoPostpone(
   lowMatureCards.sort(byScoreThenId);
 
   // Drain attention items first, then mature cards, stopping as soon as the remaining due
-  // count is within budget.
+  // minutes are inside the reserve envelope. Protected/fragile items can make the target
+  // unreachable; in that case the plan postpones every safe victim and reports the residue.
   const ordered = [...lowAttention, ...lowMatureCards];
   const plan: PostponePlanItem[] = [];
-  let remaining = items.length;
+  let remainingCount = items.length;
+  let remainingMinutes = usedMinutes;
   for (const item of ordered) {
-    if (remaining <= options.budget) break;
+    if (remainingMinutes <= reserveTargetMinutes) break;
     plan.push({
       id: item.id,
       type: item.type,
@@ -245,8 +277,17 @@ export function planAutoPostpone(
       postponeKind: item.type === "card" ? "cardDefer" : "attention",
       reason: item.type === "card" ? "low-priority-mature-card" : "low-priority-topic",
     });
-    remaining -= 1;
+    remainingCount -= 1;
+    remainingMinutes = Math.max(0, remainingMinutes - finiteMinutes(item.estimatedMinutes));
   }
 
-  return { items: plan, count: plan.length, remainingAfter: remaining };
+  return {
+    items: plan,
+    count: plan.length,
+    remainingAfter: remainingCount,
+    usedMinutes,
+    targetMinutes,
+    reserveTargetMinutes,
+    remainingMinutesAfter: remainingMinutes,
+  };
 }

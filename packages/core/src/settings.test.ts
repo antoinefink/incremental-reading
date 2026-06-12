@@ -14,6 +14,8 @@ import {
   coerceAiProviderKind,
   coerceSettingsPatch,
   coerceSettingValue,
+  DAILY_BUDGET_MINUTES_MAX,
+  DAILY_BUDGET_MINUTES_MIN,
   DAILY_REVIEW_BUDGET_MAX,
   DAILY_REVIEW_BUDGET_MIN,
   DEFAULT_AI_LOCAL_MODEL_ID,
@@ -39,6 +41,7 @@ describe("AppSettings defaults", () => {
 
   it("has stable, namespaced storage keys", () => {
     expect(SETTINGS_KEYS).toEqual({
+      dailyBudgetMinutes: "review.dailyBudgetMinutes",
       dailyReviewBudget: "review.dailyBudget",
       defaultDesiredRetention: "review.defaultDesiredRetention",
       defaultTopicIntervalDays: "scheduler.defaultTopicIntervalDays",
@@ -94,6 +97,12 @@ describe("AppSettings defaults", () => {
 
 describe("coerceSettingValue", () => {
   it("clamps + rounds the daily review budget into range", () => {
+    expect(coerceSettingValue("dailyBudgetMinutes", 1)).toBe(DAILY_BUDGET_MINUTES_MIN);
+    expect(coerceSettingValue("dailyBudgetMinutes", 9999)).toBe(DAILY_BUDGET_MINUTES_MAX);
+    expect(coerceSettingValue("dailyBudgetMinutes", 42.7)).toBe(43);
+    expect(coerceSettingValue("dailyBudgetMinutes", "nope")).toBe(
+      DEFAULT_APP_SETTINGS.dailyBudgetMinutes,
+    );
     expect(coerceSettingValue("dailyReviewBudget", 1)).toBe(DAILY_REVIEW_BUDGET_MIN);
     expect(coerceSettingValue("dailyReviewBudget", 9999)).toBe(DAILY_REVIEW_BUDGET_MAX);
     expect(coerceSettingValue("dailyReviewBudget", 42.7)).toBe(43);
@@ -263,6 +272,7 @@ describe("type guards", () => {
 describe("stored ↔ model round-trip", () => {
   it("reads custom stored values and coerces them", () => {
     const stored = {
+      [SETTINGS_KEYS.dailyBudgetMinutes]: 90,
       [SETTINGS_KEYS.dailyReviewBudget]: 120,
       [SETTINGS_KEYS.defaultDesiredRetention]: 0.95,
       [SETTINGS_KEYS.defaultTopicIntervalDays]: 30,
@@ -281,6 +291,7 @@ describe("stored ↔ model round-trip", () => {
       [SETTINGS_KEYS.displayName]: "Ada Lovelace",
     };
     expect(appSettingsFromStored(stored)).toEqual({
+      dailyBudgetMinutes: 90,
       dailyReviewBudget: 120,
       defaultDesiredRetention: 0.95,
       defaultTopicIntervalDays: 30,
@@ -316,8 +327,38 @@ describe("stored ↔ model round-trip", () => {
     });
   });
 
+  it("derives the minute budget from the legacy count budget when the minute key is absent", () => {
+    expect(
+      appSettingsFromStored({
+        [SETTINGS_KEYS.dailyReviewBudget]: 75,
+      }).dailyBudgetMinutes,
+    ).toBe(75);
+    expect(
+      appSettingsFromStored({
+        [SETTINGS_KEYS.dailyReviewBudget]: 1,
+      }).dailyBudgetMinutes,
+    ).toBe(DAILY_BUDGET_MINUTES_MIN);
+    expect(
+      appSettingsFromStored({
+        [SETTINGS_KEYS.dailyReviewBudget]: 9999,
+      }).dailyBudgetMinutes,
+    ).toBe(DAILY_BUDGET_MINUTES_MAX);
+    expect(
+      appSettingsFromStored({
+        [SETTINGS_KEYS.dailyReviewBudget]: 42.7,
+      }).dailyBudgetMinutes,
+    ).toBe(43);
+    expect(
+      appSettingsFromStored({
+        [SETTINGS_KEYS.dailyReviewBudget]: 1,
+        [SETTINGS_KEYS.dailyBudgetMinutes]: 30,
+      }).dailyBudgetMinutes,
+    ).toBe(30);
+  });
+
   it("a model patch maps back to stable storage keys", () => {
     const stored = settingsPatchToStored({
+      dailyBudgetMinutes: 100,
       dailyReviewBudget: 100,
       parkedResurfaceAfterDays: 120,
       chronicPostponeThreshold: 6,
@@ -327,6 +368,7 @@ describe("stored ↔ model round-trip", () => {
       theme: "system",
     });
     expect(stored).toEqual({
+      [SETTINGS_KEYS.dailyBudgetMinutes]: 100,
       [SETTINGS_KEYS.dailyReviewBudget]: 100,
       [SETTINGS_KEYS.parkedResurfaceAfterDays]: 120,
       [SETTINGS_KEYS.chronicPostponeThreshold]: 6,
@@ -337,8 +379,23 @@ describe("stored ↔ model round-trip", () => {
     });
   });
 
+  it("writes the legacy count key when only the minute budget is patched", () => {
+    expect(settingsPatchToStored({ dailyBudgetMinutes: 45 })).toEqual({
+      [SETTINGS_KEYS.dailyBudgetMinutes]: 45,
+      [SETTINGS_KEYS.dailyReviewBudget]: 45,
+    });
+  });
+
+  it("writes the canonical minute key when only the legacy count budget is patched", () => {
+    expect(settingsPatchToStored({ dailyReviewBudget: 4 })).toEqual({
+      [SETTINGS_KEYS.dailyReviewBudget]: 4,
+      [SETTINGS_KEYS.dailyBudgetMinutes]: DAILY_BUDGET_MINUTES_MIN,
+    });
+  });
+
   it("survives a full round-trip through stored representation", () => {
     const original = {
+      dailyBudgetMinutes: 80,
       dailyReviewBudget: 80,
       defaultDesiredRetention: 0.92,
       defaultTopicIntervalDays: 3,
@@ -381,11 +438,16 @@ describe("stored ↔ model round-trip", () => {
 describe("coerceSettingsPatch", () => {
   it("drops unknown keys and coerces known ones", () => {
     const patch = coerceSettingsPatch({
+      dailyBudgetMinutes: 9999,
       dailyReviewBudget: 9999,
       bogus: "x",
       theme: "system",
     });
-    expect(patch).toEqual({ dailyReviewBudget: DAILY_REVIEW_BUDGET_MAX, theme: "system" });
+    expect(patch).toEqual({
+      dailyBudgetMinutes: DAILY_BUDGET_MINUTES_MAX,
+      dailyReviewBudget: DAILY_REVIEW_BUDGET_MAX,
+      theme: "system",
+    });
   });
 
   it("ignores undefined fields", () => {

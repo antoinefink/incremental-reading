@@ -1,20 +1,20 @@
 /**
  * Auto-postpone overload valve (T077) E2E — drives the real Electron app.
  *
- * When the due load exceeds the daily review budget, the `/queue` overload `Banner`
- * (the slot left unwired in M5) shows "N over budget" + an "Auto-postpone N" action.
+ * When the due load exceeds the daily minute budget, the `/queue` overload `Banner`
+ * shows "N min over budget" + an "Auto-postpone" action.
  * Auto-postpone postpones the LOWEST-priority topics/sources first (then low-priority
  * mature cards) while PROTECTING high-priority cards, deterministically and undoably.
  *
  * This spec launches the built desktop app against a fresh data dir seeded with the
  * shared demo collection and:
  *
- *   1. sets the daily budget to its floor (10) via the typed settings bridge;
+ *   1. sets the daily minute budget via the typed settings bridge;
  *   2. creates an over-budget set of low-priority (C) due attention items, plus keeps
- *      the seeded HIGH-priority due card, so `used > budget`;
+ *      the seeded HIGH-priority due card, so estimated minutes exceed budget;
  *   3. opens `/queue` (future-clocked) → the overload Banner shows the over-budget count;
- *   4. clicks Auto-postpone → the preview lists what moves → confirm drops the due count
- *      to ≤ budget, with the high-priority card STILL present;
+ *   4. clicks Auto-postpone → the preview lists what moves → confirm drops due minutes
+ *      to ≤ budget when safe victims allow it, with the high-priority card STILL present;
  *   5. Undo restores the postponed items;
  *   6. it SURVIVES AN APP RESTART (re-postpone, then reopen — postponed items stay
  *      postponed; nothing is lost), and the bridge never exposes a generic db.query.
@@ -36,8 +36,8 @@ let baseUrl: string;
 const AS_OF = "2027-06-01T12:00:00.000Z";
 /** The date we park the created low-priority sources on (well before AS_OF → overdue at AS_OF). */
 const PAST_DUE = "2027-01-01T09:00:00.000Z";
-/** The budget floor the settings layer clamps to. */
-const BUDGET = 10;
+/** Daily minute budget for the overload test. */
+const BUDGET_MINUTES = 60;
 /** How many low-priority due sources to create so the queue is over budget. */
 const LOW_SOURCES = 14;
 
@@ -48,13 +48,19 @@ async function openQueue(page: Page, asOf: string): Promise<void> {
   await expect(page.getByTestId("route-queue")).toBeVisible();
 }
 
-/** Read the current due count (the budget gauge's `used`) via the bridge. */
-async function dueCount(page: Page): Promise<number> {
+/** Read the current estimated due minutes via the bridge. */
+async function dueMinutes(page: Page): Promise<number> {
   return page.evaluate(async (asOf) => {
     const api = window.appApi as unknown as {
-      queue: { list(req: { asOf: string }): Promise<{ budget: { used: number } }> };
+      queue: {
+        list(req: {
+          asOf: string;
+          includeTimeEstimate: true;
+        }): Promise<{ minuteBudget?: { usedMinutes: number } }>;
+      };
     };
-    return (await api.queue.list({ asOf })).budget.used;
+    const result = await api.queue.list({ asOf, includeTimeEstimate: true });
+    return result.minuteBudget?.usedMinutes ?? 0;
   }, AS_OF);
 }
 
@@ -91,7 +97,7 @@ test("auto-postpone relieves an over-budget queue, protects high-priority cards,
   const url = new URL(page.url());
   baseUrl = `${url.protocol}//${url.host}`;
 
-  // 1) Set the budget to its floor + 2) create an over-budget low-priority due set:
+  // 1) Set the minute budget + 2) create an over-budget low-priority due set:
   //    LOW_SOURCES C-priority sources, each scheduled to a PAST date so they read as
   //    overdue at AS_OF (low-priority topics — the FIRST auto-postpone victims).
   await page.evaluate(
@@ -109,7 +115,7 @@ test("auto-postpone relieves an over-budget queue, protects high-priority cards,
           schedule(req: { id: string; choice: { kind: "manual"; date: string } }): Promise<unknown>;
         };
       };
-      await api.settings.updateMany({ patch: { dailyReviewBudget: budget } });
+      await api.settings.updateMany({ patch: { dailyBudgetMinutes: budget } });
       for (let i = 0; i < count; i++) {
         const { id } = await api.sources.importManual({
           title: `Low-priority backlog source ${i}`,
@@ -120,12 +126,12 @@ test("auto-postpone relieves an over-budget queue, protects high-priority cards,
         await api.queue.schedule({ id, choice: { kind: "manual", date: pastDue } });
       }
     },
-    { budget: BUDGET, count: LOW_SOURCES, pastDue: PAST_DUE },
+    { budget: BUDGET_MINUTES, count: LOW_SOURCES, pastDue: PAST_DUE },
   );
 
   const cardId = await highPriorityDueCardId(page);
-  const before = await dueCount(page);
-  expect(before).toBeGreaterThan(BUDGET); // genuinely over budget
+  const before = await dueMinutes(page);
+  expect(before).toBeGreaterThan(BUDGET_MINUTES); // genuinely over budget
 
   // 3) The overload Banner shows the over-budget count.
   await openQueue(page, AS_OF);
@@ -144,8 +150,8 @@ test("auto-postpone relieves an over-budget queue, protects high-priority cards,
   await expect(page.getByTestId("queue-postpone-row").first()).toBeVisible();
   await page.getByTestId("queue-postpone-confirm").click();
 
-  // The due count drops to ≤ budget (via the bridge, the authoritative number)…
-  await expect.poll(async () => dueCount(page)).toBeLessThanOrEqual(BUDGET);
+  // The due minutes drop to ≤ budget (via the bridge, the authoritative number)…
+  await expect.poll(async () => dueMinutes(page)).toBeLessThanOrEqual(BUDGET_MINUTES);
   // …and the high-priority card row is STILL in the in-place-refreshed list.
   await expect(
     page.locator(`[data-testid="queue-item"][data-element-id="${cardId}"]`),
@@ -154,10 +160,10 @@ test("auto-postpone relieves an over-budget queue, protects high-priority cards,
   await expect(page.getByTestId("queue-snackbar")).toBeVisible();
 
   // 5) Undo restores the postponed items (the snackbar's Undo → batch undo).
-  const afterPostpone = await dueCount(page);
+  const afterPostpone = await dueMinutes(page);
   await page.getByTestId("queue-snackbar").getByText("Undo").click();
-  await expect.poll(async () => dueCount(page)).toBeGreaterThan(afterPostpone);
-  expect(await dueCount(page)).toBe(before);
+  await expect.poll(async () => dueMinutes(page)).toBeGreaterThan(afterPostpone);
+  expect(await dueMinutes(page)).toBe(before);
 
   await app.close();
 });
@@ -184,8 +190,8 @@ test("the auto-postpone result survives an app restart (no generic db.query)", a
   expect(surface.hasApply).toBe(true);
   expect(surface.hasQuery).toBe(false);
 
-  const overBudget = await dueCount(page1);
-  expect(overBudget).toBeGreaterThan(BUDGET);
+  const overBudget = await dueMinutes(page1);
+  expect(overBudget).toBeGreaterThan(BUDGET_MINUTES);
   const applied = await page1.evaluate(async (asOf) => {
     const api = window.appApi as unknown as {
       queue: { autoPostponeApply(req: { asOf: string }): Promise<{ postponed: number }> };
@@ -193,14 +199,14 @@ test("the auto-postpone result survives an app restart (no generic db.query)", a
     return api.queue.autoPostponeApply({ asOf });
   }, AS_OF);
   expect(applied.postponed).toBeGreaterThan(0);
-  const afterApply = await dueCount(page1);
-  expect(afterApply).toBeLessThanOrEqual(BUDGET);
+  const afterApply = await dueMinutes(page1);
+  expect(afterApply).toBeLessThanOrEqual(BUDGET_MINUTES);
   await app1.close();
 
   // Reopen — the postponed items stay postponed (durable across restart).
   const app2 = await launchApp(dataDir, { seedOnEmpty: true });
   const page2 = await app2.firstWindow();
   await page2.waitForLoadState("domcontentloaded");
-  expect(await dueCount(page2)).toBe(afterApply);
+  expect(await dueMinutes(page2)).toBe(afterApply);
   await app2.close();
 });

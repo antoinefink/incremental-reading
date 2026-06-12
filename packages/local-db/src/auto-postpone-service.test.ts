@@ -112,12 +112,11 @@ function service(): AutoPostponeService {
   return new AutoPostponeService(handle.db, createRepositories(handle.db));
 }
 
-/** The hard floor the settings layer clamps `dailyReviewBudget` to. */
-const BUDGET_MIN = 10;
+const BUDGET_MINUTES = 20;
 
-/** Set the daily review budget (the overflow threshold; clamped to ≥ {@link BUDGET_MIN}). */
+/** Set the daily review budget in estimated minutes. */
 function setBudget(n: number): void {
-  createRepositories(handle.db).settings.updateAppSettings({ dailyReviewBudget: n });
+  createRepositories(handle.db).settings.updateAppSettings({ dailyBudgetMinutes: n });
 }
 
 beforeEach(() => {
@@ -128,17 +127,15 @@ afterEach(() => {
   handle.sqlite.close();
 });
 
-// The settings budget floor is 10, so each over-budget scenario seeds exactly
-// (BUDGET_MIN + overflow) due items where the overflow is the intended victims, padded
-// with PROTECTED filler so the filler inflates `used` without ever being a victim.
+// T115 defaults used here: a source costs 10 minutes, a QA card costs 2 minutes.
+// Protected filler cards inflate due minutes without ever being eligible victims.
 
 describe("AutoPostponeService.preview", () => {
   it("mutates nothing — no due-date change, no op appended", () => {
-    setBudget(BUDGET_MIN);
+    setBudget(BUDGET_MINUTES);
     const topicLow = seedTopic(0.375, "low topic");
     const cardMature = seedCard(0.375, { mature: true, title: "mature low card" });
-    // BUDGET_MIN protected filler + the 2 low victims = BUDGET_MIN + 2 due → 2 over budget.
-    seedProtectedFiller(BUDGET_MIN);
+    seedProtectedFiller(9);
 
     const elements = new ElementRepository(handle.db);
     const beforeTopicDue = elements.findById(topicLow)?.dueAt;
@@ -151,8 +148,12 @@ describe("AutoPostponeService.preview", () => {
 
     const preview = service().preview({ asOf: NOW });
     expect(preview.willPostpone.length).toBe(2);
-    expect(preview.overBudget).toBe(2);
-    expect(preview.remainingAfter).toBe(BUDGET_MIN);
+    expect(preview.overBudgetMinutes).toBe(10);
+    expect(preview.usedMinutes).toBe(30);
+    expect(preview.targetMinutes).toBe(BUDGET_MINUTES);
+    expect(preview.remainingMinutesAfter).toBe(18);
+    expect(preview.remainingAfter).toBe(9);
+    expect(preview.willPostpone.map((row) => row.estimatedMinutes)).toEqual([10, 2]);
 
     // Nothing changed.
     expect(elements.findById(topicLow)?.dueAt).toBe(beforeTopicDue);
@@ -164,10 +165,10 @@ describe("AutoPostponeService.preview", () => {
   });
 
   it("orders victims low-priority topics first, then low-priority mature cards", () => {
-    setBudget(BUDGET_MIN);
+    setBudget(BUDGET_MINUTES);
     seedTopic(0.375, "low topic");
     seedCard(0.375, { mature: true, title: "mature low card" });
-    seedProtectedFiller(BUDGET_MIN); // 2 over budget → both low victims recede
+    seedProtectedFiller(9);
 
     const preview = service().preview({ asOf: NOW });
     const reasons = preview.willPostpone.map((r) => r.reason);
@@ -178,20 +179,42 @@ describe("AutoPostponeService.preview", () => {
       expect(Date.parse(row.toDueAt)).toBeGreaterThan(Date.parse(NOW));
     }
   });
+
+  it("uses the filtered due universe for candidate minutes", () => {
+    setBudget(BUDGET_MINUTES);
+    seedTopic(0.375, "low source");
+    seedCard(0.375, { mature: true, title: "mature low card" });
+    seedProtectedFiller(9);
+
+    const queue = new QueueQuery(createRepositories(handle.db));
+    const sourceQueue = queue.list({
+      asOf: NOW,
+      filters: { types: ["source"] },
+    });
+    const preview = service().preview({ asOf: NOW, filters: { types: ["source"] } });
+
+    expect(sourceQueue.timeCostSummary.pricedItemCount).toBe(1);
+    expect(preview.usedMinutes).toBe(10);
+    expect(preview.usedMinutes).toBeGreaterThan(0);
+    expect(preview.usedMinutes).toBeLessThan(BUDGET_MINUTES);
+    expect(preview.willPostpone).toEqual([]);
+  });
 });
 
 describe("AutoPostponeService.apply", () => {
   it("postpones planned items under ONE batchId, exactly one reschedule_element op each", () => {
-    setBudget(BUDGET_MIN);
+    setBudget(BUDGET_MINUTES);
     const topicLow = seedTopic(0.375, "low topic");
     const cardMature = seedCard(0.375, { mature: true, title: "mature low card" });
-    seedProtectedFiller(BUDGET_MIN);
+    seedProtectedFiller(9);
 
     const beforeTopicOps = opCount(topicLow, "reschedule_element");
     const beforeCardOps = opCount(cardMature, "reschedule_element");
 
     const result = service().apply({ asOf: NOW });
     expect(result.postponed).toBe(2);
+    expect(result.postponedMinutes).toBe(12);
+    expect(result.remainingMinutesAfter).toBe(18);
     expect(result.batchId).toBeTruthy();
 
     // Exactly one reschedule_element op per item.
@@ -218,9 +241,9 @@ describe("AutoPostponeService.apply", () => {
   });
 
   it("defers a card on review_states.due_at WITHOUT touching FSRS memory state or writing a review log", () => {
-    setBudget(BUDGET_MIN);
+    setBudget(BUDGET_MINUTES);
     const cardMature = seedCard(0.375, { mature: true, title: "mature low card" });
-    seedProtectedFiller(BUDGET_MIN); // 1 over budget → the mature card recedes
+    seedProtectedFiller(10);
 
     const before = handle.db
       .select()
@@ -258,10 +281,10 @@ describe("AutoPostponeService.apply", () => {
   });
 
   it("PROTECTS high-priority fragile cards — they stay due after the sweep", () => {
-    setBudget(BUDGET_MIN);
+    setBudget(BUDGET_MINUTES);
     const fragileHigh = seedCard(0.875, { mature: false, title: "fragile high card" });
     const topicLow = seedTopic(0.375, "low topic");
-    seedProtectedFiller(BUDGET_MIN); // BUDGET_MIN+2 due → 2 over budget
+    seedProtectedFiller(6);
 
     expect(dueIds().has(fragileHigh)).toBe(true);
     service().apply({ asOf: NOW });
@@ -273,10 +296,10 @@ describe("AutoPostponeService.apply", () => {
   });
 
   it("never postpones a leech card", () => {
-    setBudget(BUDGET_MIN);
+    setBudget(BUDGET_MINUTES);
     const leech = seedCard(0.375, { mature: true, lapses: 4, title: "leech card" });
     const topicLow = seedTopic(0.375);
-    seedProtectedFiller(BUDGET_MIN); // 2 over budget
+    seedProtectedFiller(6);
 
     service().apply({ asOf: NOW });
     const due = dueIds();
@@ -285,8 +308,8 @@ describe("AutoPostponeService.apply", () => {
   });
 
   it("does nothing when the due load is within budget", () => {
-    setBudget(BUDGET_MIN);
-    seedTopic(0.375); // 1 due, well within BUDGET_MIN
+    setBudget(BUDGET_MINUTES);
+    seedCard(0.375, { mature: true, title: "small card" }); // 2 min, well within budget
     const beforeOps = handle.db.select().from(operationLog).all().length;
     const result = service().apply({ asOf: NOW });
     expect(result.postponed).toBe(0);

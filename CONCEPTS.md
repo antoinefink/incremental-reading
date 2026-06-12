@@ -170,6 +170,18 @@ A read-only minute estimate for current Due queue work, scoped to the queue-elig
 
 Queue time estimates should preserve the distinction between active-recall card reviews and attention-scheduled processing work. They explain expected effort without changing scheduling, priority, review state, or queue eligibility.
 
+### Daily budget
+
+The user's intended amount of Due queue work for a day, expressed as estimated minutes rather than item count.
+
+The Daily budget is a soft overload boundary, not a hard eligibility rule: it informs gauges, session planning, and postponement suggestions while the Due queue remains the source of what is actionable.
+
+### Auto-postpone
+
+The overload-management process that moves lower-value due work later so the remaining Due queue better fits the Daily budget.
+
+Auto-postpone is advisory and bounded by protection rules. It should preserve source lineage, review state, and operation-log auditability while avoiding high-priority, fragile, or otherwise protected work.
+
 ### System-owned task
 
 A scheduled Task element created and maintained by Interleave itself for a product ritual or integrity workflow, not by generic user task creation.

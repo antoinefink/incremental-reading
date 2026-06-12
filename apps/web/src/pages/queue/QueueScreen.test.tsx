@@ -237,6 +237,7 @@ const h = vi.hoisted(() => {
       protected: 2,
     },
     budget: { used: 4, target: 30 },
+    minuteBudget: { usedMinutes: 19, targetMinutes: 30, confidence: "default" },
     timeEstimate: {
       confidence: "default",
       totalMinutes: 19,
@@ -946,8 +947,8 @@ describe("QueueScreen", () => {
   it("renders the BudgetMeter with the items-due / target gauge", async () => {
     render(<QueueScreen />);
     await screen.findByTestId("budget-meter");
-    expect(screen.getByTestId("budget-meter")).toHaveTextContent("4");
-    expect(screen.getByTestId("budget-meter")).toHaveTextContent("30 today");
+    expect(screen.getByTestId("budget-meter")).toHaveTextContent("19");
+    expect(screen.getByTestId("budget-meter")).toHaveTextContent("30 min today");
   });
 
   it("marks the row matching the shell selection with the active highlight (aria-current + qitem--active)", async () => {

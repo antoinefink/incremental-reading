@@ -43,6 +43,7 @@ function attention(
     siblingGroupId: null,
     sourceId: null,
     protected: priority >= 0.75,
+    estimatedMinutes: 1,
   };
 }
 
@@ -71,6 +72,7 @@ function card(
     siblingGroupId: null,
     sourceId: null,
     protected: priority >= 0.75,
+    estimatedMinutes: 1,
   };
 }
 

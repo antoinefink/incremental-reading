@@ -545,6 +545,21 @@ describe("QueueQuery", () => {
     expect(res.timeCostSummary.attention.extract).toBe(1);
   });
 
+  it("prices auto-postpone candidates after applying type filters", () => {
+    const { sourceId } = buildDueSet();
+
+    const candidates = queue.autoPostponeCandidates({
+      asOf: NOW,
+      filters: { types: ["source"] },
+    });
+
+    expect(candidates.items.map((item) => item.id)).toEqual([sourceId]);
+    expect(candidates.timeCostSummary.pricedItemCount).toBe(1);
+    expect(candidates.timeCostSummary.attention.source).toBe(1);
+    expect(candidates.timeCostSummary.attention.extract).toBe(0);
+    expect(candidates.timeCostSummary.cardBuckets.qa).toBe(0);
+  });
+
   it("reads the daily review budget from settings for the gauge", () => {
     buildDueSet();
     repos.settings.updateAppSettings({ dailyReviewBudget: 25 });

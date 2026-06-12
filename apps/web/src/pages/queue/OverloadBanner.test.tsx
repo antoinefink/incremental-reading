@@ -34,7 +34,12 @@ const PREVIEW = {
   overBudget: 2,
   target: 10,
   used: 12,
+  overBudgetMinutes: 2,
+  targetMinutes: 10,
+  usedMinutes: 12,
+  confidence: "default" as const,
   remainingAfter: 10,
+  remainingMinutesAfter: 9,
   willPostpone: [
     {
       id: "topic-1",
@@ -45,6 +50,8 @@ const PREVIEW = {
       fromDueAt: "2027-06-01T12:00:00.000Z",
       toDueAt: "2027-06-08T12:00:00.000Z",
       reason: "low-priority-topic" as const,
+      estimatedMinutes: 10,
+      estimateConfidence: "default" as const,
     },
     {
       id: "card-1",
@@ -55,6 +62,8 @@ const PREVIEW = {
       fromDueAt: "2027-06-01T12:00:00.000Z",
       toDueAt: "2027-06-08T12:00:00.000Z",
       reason: "low-priority-mature-card" as const,
+      estimatedMinutes: 2,
+      estimateConfidence: "default" as const,
     },
   ],
 };
@@ -62,7 +71,12 @@ const PREVIEW = {
 beforeEach(() => {
   vi.clearAllMocks();
   h.previewAutoPostpone.mockResolvedValue(PREVIEW);
-  h.applyAutoPostpone.mockResolvedValue({ postponed: 2, batchId: "batch-1" });
+  h.applyAutoPostpone.mockResolvedValue({
+    postponed: 2,
+    postponedMinutes: 12,
+    remainingMinutesAfter: 9,
+    batchId: "batch-1",
+  });
 });
 
 describe("OverloadBanner", () => {
@@ -77,8 +91,10 @@ describe("OverloadBanner", () => {
   it("shows the over-budget count + Auto-postpone action when over budget", () => {
     render(<OverloadBanner used={12} target={10} onPostponed={h.onPostponed} />);
     expect(screen.getByTestId("queue-overload-banner")).toBeInTheDocument();
-    expect(screen.getByTestId("queue-overload-count")).toHaveTextContent("2 items over");
-    expect(screen.getByTestId("queue-auto-postpone")).toHaveTextContent("Auto-postpone 2");
+    expect(screen.getByTestId("queue-overload-count")).toHaveTextContent(
+      "2 min over today's budget",
+    );
+    expect(screen.getByTestId("queue-auto-postpone")).toHaveTextContent("Auto-postpone");
   });
 
   it("opens the preview (read-only) listing what moves, then applies on confirm", async () => {
@@ -119,6 +135,32 @@ describe("OverloadBanner", () => {
     await user.click(screen.getByTestId("queue-postpone-confirm"));
     await waitFor(() =>
       expect(h.applyAutoPostpone).toHaveBeenCalledWith({ asOf: "2027-06-01T12:00:00.000Z" }),
+    );
+  });
+
+  it("forwards visible queue filters to preview + apply commands", async () => {
+    const user = userEvent.setup();
+    render(
+      <OverloadBanner
+        used={12}
+        target={10}
+        filters={{ statuses: ["scheduled"], concept: "memory" }}
+        onPostponed={h.onPostponed}
+      />,
+    );
+    await user.click(screen.getByTestId("queue-auto-postpone"));
+    await waitFor(() =>
+      expect(h.previewAutoPostpone).toHaveBeenCalledWith({
+        statuses: ["scheduled"],
+        concept: "memory",
+      }),
+    );
+    await user.click(screen.getByTestId("queue-postpone-confirm"));
+    await waitFor(() =>
+      expect(h.applyAutoPostpone).toHaveBeenCalledWith({
+        statuses: ["scheduled"],
+        concept: "memory",
+      }),
     );
   });
 });

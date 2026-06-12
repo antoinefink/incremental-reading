@@ -119,8 +119,11 @@ Overload is expected. The system must support:
 
 - **Auto-sort** — a scoring function over priority, due date, retrievability, type, sibling
   spacing, concept diversity, and session mode.
-- **Auto-postpone** — when due load exceeds the daily budget, postpone lower-priority topics
-  first, then low-priority *mature* cards, while protecting high-priority *fragile* cards.
+- **Auto-postpone** — when estimated due minutes exceed the daily minute budget, postpone
+  lower-priority topics first, then low-priority *mature* cards, while protecting high-priority
+  *fragile* cards. Manual queue auto-postpone trims toward a reserve inside the minute budget;
+  older count-denominated caps in review-session assembly, catch-up/vacation, and workload
+  simulation remain compatibility surfaces until session assembly is reworked.
 - **Catch-up / vacation modes** — recover from backlog / pre-adjust future load, always
   showing the cost of postponement.
 - **Workload simulation** — preview how load changes before changing retention/imports.

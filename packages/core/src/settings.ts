@@ -39,8 +39,10 @@ export type ThemePreference = (typeof THEMES)[number];
 /**
  * The complete, validated user/domain settings.
  *
- * - `dailyReviewBudget` — soft cap on items surfaced per day; overflow
- *   auto-postpones by priority (read by the queue/scheduler, T029/T077).
+ * - `dailyBudgetMinutes` — soft cap on estimated minutes surfaced per day; overflow
+ *   auto-postpones by priority (read by the queue/scheduler, T116).
+ * - `dailyReviewBudget` — legacy item-count cap kept readable for one-release rollback
+ *   and count-only consumers until they migrate to minute budgets.
  * - `defaultDesiredRetention` — FSRS target recall probability `0.0`–`1.0`
  *   (read by the FSRS scheduler, T036).
  * - `defaultTopicIntervalDays` — how often a topic resurfaces on the attention
@@ -81,6 +83,7 @@ export type ThemePreference = (typeof THEMES)[number];
  *   on-device identity label, persisted like any other setting.
  */
 export interface AppSettings {
+  readonly dailyBudgetMinutes: number;
   readonly dailyReviewBudget: number;
   readonly defaultDesiredRetention: Priority;
   readonly defaultTopicIntervalDays: number;
@@ -261,6 +264,7 @@ export function projectToRendererSettings(settings: AppSettings): RendererSettin
  * strings are persisted and synced — do NOT rename without a migration.
  */
 export const SETTINGS_KEYS = {
+  dailyBudgetMinutes: "review.dailyBudgetMinutes",
   dailyReviewBudget: "review.dailyBudget",
   defaultDesiredRetention: "review.defaultDesiredRetention",
   defaultTopicIntervalDays: "scheduler.defaultTopicIntervalDays",
@@ -337,6 +341,7 @@ export function coerceAiProviderKind(raw: unknown): AiProviderKind {
  * complete settings object. Chosen to match the prototype's defaults.
  */
 export const DEFAULT_APP_SETTINGS: AppSettings = {
+  dailyBudgetMinutes: 60,
   dailyReviewBudget: 60,
   defaultDesiredRetention: 0.9,
   defaultTopicIntervalDays: 7,
@@ -414,7 +419,12 @@ export function coerceFsrsParams(raw: unknown): number[] | null {
   return [...(raw as number[])];
 }
 
-/** Inclusive UI bounds for the daily review budget slider. */
+/** Inclusive UI bounds for the minute-denominated daily budget (T116). */
+export const DAILY_BUDGET_MINUTES_MIN = 5;
+export const DAILY_BUDGET_MINUTES_MAX = 300;
+export const DAILY_BUDGET_MINUTE_PRESETS = [15, 30, 60, 120] as const;
+
+/** Inclusive UI bounds for the legacy daily review budget slider. */
 export const DAILY_REVIEW_BUDGET_MIN = 10;
 export const DAILY_REVIEW_BUDGET_MAX = 300;
 
@@ -508,6 +518,12 @@ export function coerceSettingValue<K extends keyof AppSettings>(
 ): AppSettings[K] {
   const fallback = DEFAULT_APP_SETTINGS[key];
   switch (key) {
+    case "dailyBudgetMinutes":
+      return (
+        isFiniteNumber(raw)
+          ? clampInt(raw, DAILY_BUDGET_MINUTES_MIN, DAILY_BUDGET_MINUTES_MAX)
+          : fallback
+      ) as AppSettings[K];
     case "dailyReviewBudget":
       return (
         isFiniteNumber(raw)
@@ -629,11 +645,19 @@ export function coerceSettingValue<K extends keyof AppSettings>(
  * and filling gaps with {@link DEFAULT_APP_SETTINGS}.
  */
 export function appSettingsFromStored(stored: Readonly<Record<string, unknown>>): AppSettings {
+  const hasMinuteBudget = Object.hasOwn(stored, SETTINGS_KEYS.dailyBudgetMinutes);
+  const legacyBudget = coerceSettingValue(
+    "dailyReviewBudget",
+    stored[SETTINGS_KEYS.dailyReviewBudget],
+  );
   return {
-    dailyReviewBudget: coerceSettingValue(
-      "dailyReviewBudget",
-      stored[SETTINGS_KEYS.dailyReviewBudget],
+    dailyBudgetMinutes: coerceSettingValue(
+      "dailyBudgetMinutes",
+      hasMinuteBudget
+        ? stored[SETTINGS_KEYS.dailyBudgetMinutes]
+        : stored[SETTINGS_KEYS.dailyReviewBudget],
     ),
+    dailyReviewBudget: legacyBudget,
     defaultDesiredRetention: coerceSettingValue(
       "defaultDesiredRetention",
       stored[SETTINGS_KEYS.defaultDesiredRetention],
@@ -753,6 +777,18 @@ export function settingsPatchToStored(
     if (value !== undefined) {
       out[SETTINGS_KEYS[key]] = value;
     }
+  }
+  if (patch.dailyBudgetMinutes !== undefined && patch.dailyReviewBudget === undefined) {
+    out[SETTINGS_KEYS.dailyReviewBudget] = coerceSettingValue(
+      "dailyReviewBudget",
+      patch.dailyBudgetMinutes,
+    );
+  }
+  if (patch.dailyReviewBudget !== undefined && patch.dailyBudgetMinutes === undefined) {
+    out[SETTINGS_KEYS.dailyBudgetMinutes] = coerceSettingValue(
+      "dailyBudgetMinutes",
+      patch.dailyReviewBudget,
+    );
   }
   return out;
 }

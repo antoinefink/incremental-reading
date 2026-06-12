@@ -412,6 +412,11 @@ export function QueueScreen() {
   const [priorityDismissError, setPriorityDismissError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterId>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilterId>("all");
+  const activeStatuses = STATUS_FILTERS.find((s) => s.id === statusFilter)?.statuses;
+  const activeTypes = useMemo(
+    () => (filter !== "all" && filter !== "high" ? ([filter] as readonly string[]) : undefined),
+    [filter],
+  );
   const [error, setError] = useState<string | null>(null);
   /** The id of the row whose action is currently in flight (its buttons disable). */
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -439,11 +444,11 @@ export function QueueScreen() {
       // happens main-side (`QueueQuery.matchesFilters`), never in React. `all` sends
       // no `statuses` (the full due set). The `concept` param is forwarded too (when
       // present) so the documented T041 filter surface is genuinely wired end-to-end.
-      const statuses = STATUS_FILTERS.find((s) => s.id === statusFilter)?.statuses;
       const [queueResult, workResult, priorityResult, noticeResult] = await Promise.allSettled([
         appApi.listQueue({
           ...(asOf ? { asOf } : {}),
-          ...(statuses ? { statuses } : {}),
+          ...(activeTypes ? { types: activeTypes } : {}),
+          ...(activeStatuses ? { statuses: activeStatuses } : {}),
           ...(concept ? { concept } : {}),
           includeTimeEstimate: true,
         }),
@@ -490,7 +495,7 @@ export function QueueScreen() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [asOf, statusFilter, concept]);
+  }, [asOf, activeTypes, activeStatuses, concept]);
 
   useEffect(() => {
     if (!priorityDismissed) return;
@@ -921,7 +926,11 @@ export function QueueScreen() {
 
         {/* overload-management strip: budget meter + at-risk metrics */}
         <div className="q-panel q-panel-pad q-overload" style={{ marginBottom: 14 }}>
-          <BudgetMeter used={data?.budget.used ?? 0} target={data?.budget.target ?? 0} />
+          <BudgetMeter
+            used={data?.minuteBudget?.usedMinutes ?? data?.budget.used ?? 0}
+            target={data?.minuteBudget?.targetMinutes ?? data?.budget.target ?? 0}
+            confidence={data?.minuteBudget?.confidence ?? "learned"}
+          />
           <div className="q-overload__div" />
           <div className="q-metrics">
             <div className="q-metric">
@@ -949,11 +958,17 @@ export function QueueScreen() {
         {/* overload valve (T077): when the due load exceeds today's budget, offer an
             auto-postpone of the lowest-priority topics + mature cards (high-priority fragile
             cards are protected). The preview shows the cost before committing. */}
-        {data ? (
+        {data && filter !== "high" ? (
           <OverloadBanner
-            used={data.budget.used}
-            target={data.budget.target}
+            used={data.minuteBudget?.usedMinutes ?? data.budget.used}
+            target={data.minuteBudget?.targetMinutes ?? data.budget.target}
+            confidence={data.minuteBudget?.confidence ?? "learned"}
             {...(asOf ? { asOf } : {})}
+            filters={{
+              ...(activeTypes ? { types: activeTypes } : {}),
+              ...(activeStatuses ? { statuses: activeStatuses } : {}),
+              ...(concept ? { concept } : {}),
+            }}
             onPostponed={onPostponed}
           />
         ) : null}

@@ -89,6 +89,7 @@ function deferred<T>() {
 }
 
 const settings: RendererSettings = {
+  dailyBudgetMinutes: 60,
   dailyReviewBudget: 60,
   defaultDesiredRetention: 0.9,
   defaultTopicIntervalDays: 7,
@@ -229,14 +230,19 @@ describe("Settings", () => {
   it("loads settings and persists setting changes through the bridge", async () => {
     const { getByTestId, findByTestId, queryByTestId } = render(<Settings />);
 
-    expect(await findByTestId("setting-budget-value")).toHaveTextContent("60/day");
+    expect(await findByTestId("setting-budget-value")).toHaveTextContent("60 min");
     fireEvent.change(getByTestId("setting-budget"), { target: { value: "75" } });
 
     await waitFor(() =>
-      expect(h.updateAppSettings).toHaveBeenCalledWith({ patch: { dailyReviewBudget: 75 } }),
+      expect(h.updateAppSettings).toHaveBeenCalledWith({ patch: { dailyBudgetMinutes: 75 } }),
     );
     expect(queryByTestId("settings-saved")).not.toBeInTheDocument();
-    expect(getByTestId("setting-budget-value")).toHaveTextContent("75/day");
+    expect(getByTestId("setting-budget-value")).toHaveTextContent("75 min");
+
+    fireEvent.click(getByTestId("setting-budget-preset-option-120"));
+    await waitFor(() =>
+      expect(h.updateAppSettings).toHaveBeenCalledWith({ patch: { dailyBudgetMinutes: 120 } }),
+    );
 
     fireEvent.change(getByTestId("setting-parked-resurface"), { target: { value: "120" } });
     await waitFor(() =>

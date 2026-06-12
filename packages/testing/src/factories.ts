@@ -421,6 +421,7 @@ export const DEMO_FIXTURES = {
   },
   /** Settings the seed writes so the scheduler/UI have sane dev defaults. */
   settings: {
+    "review.dailyBudgetMinutes": 60,
     "review.dailyBudget": 60,
     "review.defaultDesiredRetention": 0.9,
     "scheduler.defaultTopicIntervalDays": 7,

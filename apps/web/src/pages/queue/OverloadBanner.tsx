@@ -2,8 +2,8 @@
  * OverloadBanner (T077) — the daily queue's overload valve, wiring the kit's
  * `Banner variant="info"` slot (`design/kit/app/screen-queue.jsx`, left unwired in M5).
  *
- * When the due load exceeds today's review budget (`budget.used > budget.target`), this
- * surfaces "N items over today's budget" + an **"Auto-postpone N"** action. Clicking it
+ * When the due load exceeds today's minute budget, this
+ * surfaces "N min over today's budget" + an **"Auto-postpone"** action. Clicking it
  * fetches the READ-ONLY preview (`queue.autoPostpone`) — exactly WHAT would move
  * (low-priority topics first, then low-priority *mature* cards; high-priority *fragile*
  * cards PROTECTED), from→to, and why — so the user sees the cost BEFORE committing. The
@@ -18,15 +18,23 @@
 
 import { useCallback, useState } from "react";
 import { Icon } from "../../components/Icon";
-import { type AutoPostponePreview, appApi, isDesktop } from "../../lib/appApi";
+import {
+  type AutoPostponePreview,
+  appApi,
+  isDesktop,
+  type QueueAutoPostponeRequest,
+} from "../../lib/appApi";
 
 export interface OverloadBannerProps {
-  /** Items currently due (the budget gauge's `used`). */
+  /** Estimated minutes currently due. */
   readonly used: number;
-  /** The daily review budget target. */
+  /** The daily minute budget target. */
   readonly target: number;
+  readonly confidence?: "learned" | "default";
   /** The clock the due reads + plan compare against (ISO-8601), or undefined for "now". */
   readonly asOf?: string;
+  /** Main-side queue filters, matching the visible queue universe. */
+  readonly filters?: Omit<QueueAutoPostponeRequest, "asOf">;
   /**
    * Called after a successful apply with the postponed count — the parent re-reads the
    * queue and shows the "Postponed N · Undo" snackbar (undo via the batch `undo.last`).
@@ -43,8 +51,17 @@ function moveLabel(fromDueAt: string | null, toDueAt: string): string {
   return `+${days}d`;
 }
 
-export function OverloadBanner({ used, target, asOf, onPostponed }: OverloadBannerProps) {
+export function OverloadBanner({
+  used,
+  target,
+  confidence = "learned",
+  asOf,
+  filters,
+  onPostponed,
+}: OverloadBannerProps) {
   const over = used - target;
+  const approx = confidence === "default" ? "~" : "";
+  const overLabel = Math.max(0, Math.round(over));
   const [preview, setPreview] = useState<AutoPostponePreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,21 +71,27 @@ export function OverloadBanner({ used, target, asOf, onPostponed }: OverloadBann
     setBusy(true);
     setError(null);
     try {
-      const next = await appApi.previewAutoPostpone(asOf ? { asOf } : undefined);
+      const request = { ...(filters ?? {}), ...(asOf ? { asOf } : {}) };
+      const next = await appApi.previewAutoPostpone(
+        Object.keys(request).length > 0 ? request : undefined,
+      );
       setPreview(next);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [asOf, busy]);
+  }, [asOf, busy, filters]);
 
   const confirm = useCallback(async () => {
     if (!isDesktop() || busy) return;
     setBusy(true);
     setError(null);
     try {
-      const result = await appApi.applyAutoPostpone(asOf ? { asOf } : undefined);
+      const request = { ...(filters ?? {}), ...(asOf ? { asOf } : {}) };
+      const result = await appApi.applyAutoPostpone(
+        Object.keys(request).length > 0 ? request : undefined,
+      );
       setPreview(null);
       onPostponed(result.postponed);
     } catch (e) {
@@ -76,7 +99,7 @@ export function OverloadBanner({ used, target, asOf, onPostponed }: OverloadBann
     } finally {
       setBusy(false);
     }
-  }, [asOf, busy, onPostponed]);
+  }, [asOf, busy, filters, onPostponed]);
 
   // Within budget — the valve is hidden.
   if (over <= 0) return null;
@@ -86,7 +109,8 @@ export function OverloadBanner({ used, target, asOf, onPostponed }: OverloadBann
       <Icon name="gauge" size={16} />
       <div className="q-overload-banner__main">
         <div className="q-overload-banner__title" data-testid="queue-overload-count">
-          {over} item{over === 1 ? "" : "s"} over today's budget
+          {approx}
+          {overLabel} min over today's budget
         </div>
         <div className="q-overload-banner__body">
           High-priority fragile cards are protected. Auto-postpone the lowest-priority topics &amp;
@@ -108,8 +132,8 @@ export function OverloadBanner({ used, target, asOf, onPostponed }: OverloadBann
               <>
                 <div className="q-overload-banner__body">
                   {preview.willPostpone.length} item
-                  {preview.willPostpone.length === 1 ? "" : "s"} will move ({preview.remainingAfter}{" "}
-                  left after):
+                  {preview.willPostpone.length === 1 ? "" : "s"} will move (~
+                  {Math.round(preview.remainingMinutesAfter)} min left after):
                 </div>
                 <div className="q-postpone-preview__list">
                   {preview.willPostpone.map((row) => (
@@ -162,7 +186,7 @@ export function OverloadBanner({ used, target, asOf, onPostponed }: OverloadBann
             onClick={() => void openPreview()}
           >
             <Icon name="postpone" size={14} />
-            Auto-postpone {over}
+            Auto-postpone
           </button>
         </div>
       )}

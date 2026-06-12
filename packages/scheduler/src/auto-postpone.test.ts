@@ -30,6 +30,7 @@ function attention(
   priority: number,
   type = "topic",
   dueAt: string | null = "2027-05-01T12:00:00.000Z",
+  estimatedMinutes = 1,
 ): AutoPostponeInput {
   return {
     id,
@@ -47,6 +48,7 @@ function attention(
     siblingGroupId: null,
     sourceId: null,
     protected: priority >= 0.75,
+    estimatedMinutes,
   };
 }
 
@@ -61,6 +63,7 @@ function card(
     lapses: number | null;
   },
   dueAt: string | null = "2027-05-01T12:00:00.000Z",
+  estimatedMinutes = 1,
 ): AutoPostponeInput {
   return {
     id,
@@ -73,6 +76,7 @@ function card(
     siblingGroupId: null,
     sourceId: null,
     protected: priority >= 0.75,
+    estimatedMinutes,
   };
 }
 
@@ -122,7 +126,7 @@ describe("isCardMature / isCardFragile", () => {
 describe("planAutoPostpone", () => {
   it("does nothing when the due set is within budget", () => {
     const items = [attention("a1", 0.375), attention("a2", 0.375)];
-    const plan = planAutoPostpone(items, { budget: 5, asOf: NOW });
+    const plan = planAutoPostpone(items, { budget: 5, asOf: NOW, reserveRatio: 1 });
     expect(plan.count).toBe(0);
     expect(plan.items).toEqual([]);
     expect(plan.remainingAfter).toBe(2);
@@ -139,7 +143,7 @@ describe("planAutoPostpone", () => {
       attention("topicHigh", 0.875), // protected (band A)
       card("cardHigh", 0.875, matureSignals), // protected (band A)
     ];
-    const plan = planAutoPostpone(items, { budget: 2, asOf: NOW });
+    const plan = planAutoPostpone(items, { budget: 2, asOf: NOW, reserveRatio: 1 });
     expect(plan.count).toBe(3);
     expect(plan.remainingAfter).toBe(2);
     // Attention items lead; the mature card is last.
@@ -165,7 +169,7 @@ describe("planAutoPostpone", () => {
       card("fragileHigh", 0.875, fragileSignals),
       card("fragileHigh2", 0.875, fragileSignals),
     ];
-    const plan = planAutoPostpone(items, { budget: 0, asOf: NOW });
+    const plan = planAutoPostpone(items, { budget: 0, asOf: NOW, reserveRatio: 1 });
     // Only the one low-priority attention item can recede; the fragile high cards stay.
     expect(plan.items.map((p) => p.id)).toEqual(["t1"]);
     // Budget can't be fully met without sacrificing protected memory — that's correct.
@@ -178,7 +182,7 @@ describe("planAutoPostpone", () => {
       card("matureLow", 0.375, matureSignals),
       attention("filler", 0.375),
     ];
-    const plan = planAutoPostpone(items, { budget: 1, asOf: NOW });
+    const plan = planAutoPostpone(items, { budget: 1, asOf: NOW, reserveRatio: 1 });
     const ids = plan.items.map((p) => p.id);
     // The fragile low card is protected; the attention filler + the mature low card recede.
     expect(ids).not.toContain("fragileLow");
@@ -192,7 +196,7 @@ describe("planAutoPostpone", () => {
       card("leechLow", 0.375, leechSignals),
       card("matureLow", 0.375, matureSignals),
     ];
-    const plan = planAutoPostpone(items, { budget: 0, asOf: NOW });
+    const plan = planAutoPostpone(items, { budget: 0, asOf: NOW, reserveRatio: 1 });
     const ids = plan.items.map((p) => p.id);
     expect(ids).not.toContain("leechLow");
     expect(ids).toContain("matureLow");
@@ -203,7 +207,7 @@ describe("planAutoPostpone", () => {
       { ...attention("pinnedLow", 0.375), protected: true },
       attention("plainLow", 0.375),
     ];
-    const plan = planAutoPostpone(items, { budget: 1, asOf: NOW });
+    const plan = planAutoPostpone(items, { budget: 1, asOf: NOW, reserveRatio: 1 });
     expect(plan.items.map((p) => p.id)).toEqual(["plainLow"]);
   });
 
@@ -214,9 +218,52 @@ describe("planAutoPostpone", () => {
       attention("a3", 0.375),
       attention("a4", 0.375),
     ];
-    const plan = planAutoPostpone(items, { budget: 2, asOf: NOW });
+    const plan = planAutoPostpone(items, { budget: 2, asOf: NOW, reserveRatio: 1 });
     expect(plan.count).toBe(2); // only 2 recede to reach the budget
     expect(plan.remainingAfter).toBe(2);
+  });
+
+  it("uses minute costs and the default reserve target when trimming overload", () => {
+    const items = [
+      attention("sourceHeavy", 0.375, "source", "2027-05-30T12:00:00.000Z", 10),
+      attention("extractSmall1", 0.375, "extract", "2027-05-01T12:00:00.000Z", 1),
+      attention("extractSmall2", 0.375, "extract", "2027-05-01T12:00:00.000Z", 1),
+      card("protectedFragile", 0.875, fragileSignals, "2027-05-01T12:00:00.000Z", 2),
+    ];
+    const plan = planAutoPostpone(items, { budget: 10, asOf: NOW });
+
+    expect(plan.usedMinutes).toBe(14);
+    expect(plan.targetMinutes).toBe(10);
+    expect(plan.reserveTargetMinutes).toBe(9);
+    expect(plan.items.map((p) => p.id)).toEqual(["sourceHeavy"]);
+    expect(plan.remainingMinutesAfter).toBe(4);
+    expect(plan.remainingAfter).toBe(3);
+  });
+
+  it("reports unreachable minute overflow when only protected items remain", () => {
+    const items = [
+      attention("small", 0.375, "topic", "2027-05-01T12:00:00.000Z", 1),
+      card("fragileHigh", 0.875, fragileSignals, "2027-05-01T12:00:00.000Z", 20),
+    ];
+    const plan = planAutoPostpone(items, { budget: 10, asOf: NOW });
+
+    expect(plan.items.map((p) => p.id)).toEqual(["small"]);
+    expect(plan.remainingMinutesAfter).toBe(20);
+    expect(plan.remainingAfter).toBe(1);
+  });
+
+  it("uses raw fractional minutes for reserve math", () => {
+    const items = [
+      attention("a", 0.375, "topic", "2027-05-30T12:00:00.000Z", 1.4),
+      attention("b", 0.375, "topic", "2027-05-30T12:00:00.000Z", 1.4),
+      attention("c", 0.375, "topic", "2027-05-30T12:00:00.000Z", 1.1),
+    ];
+    const plan = planAutoPostpone(items, { budget: 3, asOf: NOW });
+
+    expect(plan.usedMinutes).toBeCloseTo(3.9);
+    expect(plan.reserveTargetMinutes).toBeCloseTo(2.7);
+    expect(plan.items).toHaveLength(1);
+    expect(plan.remainingMinutesAfter).toBeCloseTo(2.5);
   });
 
   it("ranks victims by value (least valuable first) within a tier — deterministic", () => {
@@ -228,7 +275,7 @@ describe("planAutoPostpone", () => {
       attention("filler1", 0.375),
       attention("filler2", 0.375),
     ];
-    const plan = planAutoPostpone(items, { budget: 3, asOf: NOW });
+    const plan = planAutoPostpone(items, { budget: 3, asOf: NOW, reserveRatio: 1 });
     expect(plan.count).toBe(1);
     // The least urgent (lowest score) recedes — the slightly-overdue one, not the ancient one.
     expect(plan.items[0]?.id).toBe("slightlyOverdue");
@@ -240,8 +287,8 @@ describe("planAutoPostpone", () => {
       attention("a2", 0.375),
       card("c1", 0.375, matureSignals),
     ];
-    const plan1 = planAutoPostpone(items, { budget: 1, asOf: NOW });
-    const plan2 = planAutoPostpone(items, { budget: 1, asOf: NOW });
+    const plan1 = planAutoPostpone(items, { budget: 1, asOf: NOW, reserveRatio: 1 });
+    const plan2 = planAutoPostpone(items, { budget: 1, asOf: NOW, reserveRatio: 1 });
     expect(plan2).toEqual(plan1);
   });
 });

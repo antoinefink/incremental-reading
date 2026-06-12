@@ -30,6 +30,8 @@ import {
   CHRONIC_POSTPONE_THRESHOLD_MIN,
   CONFIDENCE_LEVELS,
   type ConfidenceLevel,
+  DAILY_BUDGET_MINUTES_MAX,
+  DAILY_BUDGET_MINUTES_MIN,
   DAILY_REVIEW_BUDGET_MAX,
   DAILY_REVIEW_BUDGET_MIN,
   DESIRED_RETENTION_MAX,
@@ -223,6 +225,11 @@ export interface SettingsGetAllResult {
  */
 export const SettingsPatchSchema = z
   .object({
+    dailyBudgetMinutes: z
+      .number()
+      .int()
+      .min(DAILY_BUDGET_MINUTES_MIN)
+      .max(DAILY_BUDGET_MINUTES_MAX),
     dailyReviewBudget: z.number().int().min(DAILY_REVIEW_BUDGET_MIN).max(DAILY_REVIEW_BUDGET_MAX),
     defaultDesiredRetention: z.number().min(DESIRED_RETENTION_MIN).max(DESIRED_RETENTION_MAX),
     defaultTopicIntervalDays: z.number().int().positive(),
@@ -859,7 +866,7 @@ export interface QueueVisibleTimeEstimate {
   readonly basis: string;
 }
 
-/** Trusted aggregate pricing for the filtered due queue. Budget remains item-count based in T115. */
+/** Trusted aggregate pricing for the filtered due queue. */
 export interface QueueTimeEstimate {
   readonly confidence: QueueTimeEstimateConfidence;
   readonly totalMinutes: number;
@@ -867,11 +874,20 @@ export interface QueueTimeEstimate {
   readonly items: readonly QueueVisibleTimeEstimate[];
 }
 
+/** Trusted minute-denominated budget gauge for the filtered due queue (T116). */
+export interface QueueMinuteBudget {
+  readonly usedMinutes: number;
+  readonly targetMinutes: number;
+  readonly confidence: QueueTimeEstimateConfidence;
+}
+
 export interface QueueListResult {
   readonly items: readonly QueueItemSummary[];
   readonly counts: QueueCounts;
   /** The daily review budget gauge: items due vs the configured target. */
   readonly budget: { readonly used: number; readonly target: number };
+  /** Minute-denominated daily budget gauge, included when `includeTimeEstimate` is requested. */
+  readonly minuteBudget?: QueueMinuteBudget;
   /** Full filtered due-set time estimate, priced on the trusted side when requested. */
   readonly timeEstimate?: QueueTimeEstimate;
 }
@@ -1030,16 +1046,17 @@ export interface QueueUndoResult {
 // ---------------------------------------------------------------------------
 
 /**
- * The overload AUTO-POSTPONE surface (T077). When the due load exceeds the daily review
- * budget (`getAppSettings().dailyReviewBudget`), the user can relieve the overflow — and the
- * system chooses victims DETERMINISTICALLY by value: low-priority topics/sources/extracts
- * first, then low-priority *mature* cards, while NEVER touching high-priority *fragile* cards
- * (or leeches, or explicitly protected items). Selection is the pure `planAutoPostpone`
- * (`@interleave/scheduler`); application is transactional through the `AutoPostponeService`,
- * routing each item to its CORRECT scheduler — attention items reschedule on the attention
- * scheduler (`reschedule_element`); cards defer on FSRS (`review_states.due_at` only, memory
- * state untouched, no review log) — all under ONE shared `batchId` so the whole sweep undoes
- * as one (T044). No new op types (the closed 15-op set is unchanged), no schema migration.
+ * The overload AUTO-POSTPONE surface (T077/T116). When the estimated due work exceeds the
+ * daily minute budget (`getAppSettings().dailyBudgetMinutes`), the user can relieve the
+ * overflow — and the system chooses victims DETERMINISTICALLY by value: low-priority
+ * topics/sources/extracts first, then low-priority *mature* cards, while NEVER touching
+ * high-priority *fragile* cards (or leeches, or explicitly protected items). Selection is
+ * the pure `planAutoPostpone` (`@interleave/scheduler`); application is transactional
+ * through the `AutoPostponeService`, routing each item to its CORRECT scheduler — attention
+ * items reschedule on the attention scheduler (`reschedule_element`); cards defer on FSRS
+ * (`review_states.due_at` only, memory state untouched, no review log) — all under ONE
+ * shared `batchId` so the whole sweep undoes as one (T044). No new op types (the closed
+ * 15-op set is unchanged), no schema migration.
  *
  * `preview` is READ-ONLY (no mutation, no op); `apply` is transactional. Undo reuses the
  * existing command-level/`batchId` undo (`undo.last`) — the `reschedule_element` pre-images
@@ -1049,6 +1066,16 @@ export interface QueueUndoResult {
 export const QueueAutoPostponeRequestSchema = z.object({
   /** "Now" the due reads + plan compare against (ISO-8601); defaults to the server clock. */
   asOf: IsoTimestampInputSchema.optional(),
+  /** Keep only these element types, matching `queue.list`. */
+  types: z.array(z.enum(ELEMENT_TYPES)).optional(),
+  /** Keep only rows that are a member of this concept, by concept NAME. */
+  concept: z.string().trim().max(256).optional(),
+  /** Keep only rows tagged with this tag name. */
+  tag: z.string().trim().max(256).optional(),
+  /** Keep only these lifecycle statuses, matching `queue.list`. */
+  statuses: z.array(z.enum(ELEMENT_STATUSES)).optional(),
+  /** Session mode for value ranking, matching `queue.list`. */
+  mode: z.enum(["full", "review", "read"]).optional(),
 });
 export type QueueAutoPostponeRequest = z.infer<typeof QueueAutoPostponeRequestSchema>;
 
@@ -1068,26 +1095,44 @@ export interface AutoPostponePreviewRow {
   /** The projected due time after the postpone (ISO-8601). */
   readonly toDueAt: string;
   readonly reason: AutoPostponeReason;
+  /** Estimated time removed by this postpone, in minutes. */
+  readonly estimatedMinutes: number;
+  /** Whether this estimate is learned from review timings or a documented default. */
+  readonly estimateConfidence: QueueTimeEstimateConfidence;
 }
 
 /** The read-only auto-postpone preview the renderer shows BEFORE committing. */
 export interface AutoPostponePreview {
-  /** How many items are over today's budget (`used - target`, clamped at 0). */
+  /** Legacy count overflow (`used - target`, clamped at 0). Minute consumers use `overBudgetMinutes`. */
   readonly overBudget: number;
-  /** The daily review budget target. */
+  /** Legacy count target. Minute consumers use `targetMinutes`. */
   readonly target: number;
-  /** The current due count. */
+  /** Legacy due count. Minute consumers use `usedMinutes`. */
   readonly used: number;
+  /** Estimated minutes over today's budget (`usedMinutes - targetMinutes`, clamped at 0). */
+  readonly overBudgetMinutes: number;
+  /** The daily minute budget target. */
+  readonly targetMinutes: number;
+  /** Estimated minutes currently due. */
+  readonly usedMinutes: number;
+  /** Aggregate estimate confidence for the due universe. */
+  readonly confidence: QueueTimeEstimateConfidence;
   /** The ordered postpone victims (cheapest value first). */
   readonly willPostpone: readonly AutoPostponePreviewRow[];
   /** The due count remaining after applying the plan. */
   readonly remainingAfter: number;
+  /** Estimated due minutes remaining after applying the plan. */
+  readonly remainingMinutesAfter: number;
 }
 
 /** The result of applying the auto-postpone sweep. */
 export interface AutoPostponeApplyResult {
   /** How many items were postponed. */
   readonly postponed: number;
+  /** Estimated minutes postponed. */
+  readonly postponedMinutes: number;
+  /** Estimated due minutes remaining after applying the plan. */
+  readonly remainingMinutesAfter: number;
   /** The shared batch id (the whole sweep undoes as one via `undo.last`). */
   readonly batchId: string;
 }

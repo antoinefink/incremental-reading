@@ -121,6 +121,7 @@ const h = vi.hoisted(() => {
       protected: 2,
     },
     budget: { used: 3, target: 30 },
+    minuteBudget: { usedMinutes: 18, targetMinutes: 30, confidence: "default" },
     timeEstimate: {
       confidence: "default",
       totalMinutes: 18,

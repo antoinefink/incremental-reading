@@ -75,6 +75,7 @@ export type ThemePreference = "system" | "light" | "dark";
  * numeric `0.0`–`1.0`; the UI derives the A/B/C/D label.
  */
 export interface AppSettings {
+  readonly dailyBudgetMinutes: number;
   readonly dailyReviewBudget: number;
   readonly defaultDesiredRetention: number;
   readonly defaultTopicIntervalDays: number;
@@ -697,7 +698,7 @@ export interface QueueVisibleTimeEstimate {
   readonly basis: string;
 }
 
-/** Trusted aggregate pricing for the filtered due queue. Budget remains item-count based in T115. */
+/** Trusted aggregate pricing for the filtered due queue. */
 export interface QueueTimeEstimate {
   readonly confidence: QueueTimeEstimateConfidence;
   readonly totalMinutes: number;
@@ -705,10 +706,17 @@ export interface QueueTimeEstimate {
   readonly items: readonly QueueVisibleTimeEstimate[];
 }
 
+export interface QueueMinuteBudget {
+  readonly usedMinutes: number;
+  readonly targetMinutes: number;
+  readonly confidence: QueueTimeEstimateConfidence;
+}
+
 export interface QueueListResult {
   readonly items: readonly QueueItemSummary[];
   readonly counts: QueueCounts;
   readonly budget: { readonly used: number; readonly target: number };
+  readonly minuteBudget?: QueueMinuteBudget;
   readonly timeEstimate?: QueueTimeEstimate;
 }
 
@@ -716,10 +724,8 @@ export interface QueueListResult {
 // queue.autoPostpone() / queue.autoPostponeApply()  (T077 — the overload valve)
 // ---------------------------------------------------------------------------
 
-/** The auto-postpone request — an optional clock for the due reads + plan. */
-export interface QueueAutoPostponeRequest {
-  readonly asOf?: string;
-}
+/** The auto-postpone request — the same due universe as queue.list, priced internally. */
+export interface QueueAutoPostponeRequest extends Omit<QueueListRequest, "includeTimeEstimate"> {}
 
 /** Why a victim was chosen (for the preview). */
 export type AutoPostponeReason = "low-priority-topic" | "low-priority-mature-card";
@@ -734,6 +740,8 @@ export interface AutoPostponePreviewRow {
   readonly fromDueAt: string | null;
   readonly toDueAt: string;
   readonly reason: AutoPostponeReason;
+  readonly estimatedMinutes: number;
+  readonly estimateConfidence: QueueTimeEstimateConfidence;
 }
 
 /** The read-only auto-postpone preview shown BEFORE committing. */
@@ -741,13 +749,20 @@ export interface AutoPostponePreview {
   readonly overBudget: number;
   readonly target: number;
   readonly used: number;
+  readonly overBudgetMinutes: number;
+  readonly targetMinutes: number;
+  readonly usedMinutes: number;
+  readonly confidence: QueueTimeEstimateConfidence;
   readonly willPostpone: readonly AutoPostponePreviewRow[];
   readonly remainingAfter: number;
+  readonly remainingMinutesAfter: number;
 }
 
 /** The result of applying the auto-postpone sweep. */
 export interface AutoPostponeApplyResult {
   readonly postponed: number;
+  readonly postponedMinutes: number;
+  readonly remainingMinutesAfter: number;
   readonly batchId: string;
 }
 

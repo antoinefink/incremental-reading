@@ -204,6 +204,11 @@ export interface QueueListData {
   readonly timeCostSummary: QueueTimeCostSummary;
 }
 
+export interface QueueAutoPostponeCandidateData {
+  readonly items: readonly QueueItemSummary[];
+  readonly timeCostSummary: QueueTimeCostSummary;
+}
+
 /** The FSRS forgetting-curve constants (factor=19/81, decay=-0.5). */
 const FSRS_DECAY = -0.5;
 const FSRS_FACTOR = 19 / 81;
@@ -254,6 +259,10 @@ function dueStateFor(dueAt: string | null, asOf: number): QueueDueState {
     return dueDay < nowDay ? "overdue" : "today";
   }
   return "soon";
+}
+
+function typeMatches(element: Element, filters: QueueFilters): boolean {
+  return !filters.types || filters.types.length === 0 || filters.types.includes(element.type);
 }
 
 /** A short human label for a due time relative to `asOf`. */
@@ -497,6 +506,58 @@ export class QueueQuery {
     return element.type === "card"
       ? this.toCardSummary(element, asOfMs)
       : this.toAttentionSummary(element, asOfMs);
+  }
+
+  /**
+   * Full due-candidate read for auto-postpone planning (T116). Unlike `list()`, this
+   * intentionally does not apply the display score-candidate cap or visible-row limit:
+   * the planner needs every filtered due row so minute trimming can reach the reserve
+   * without falsely reporting that no safe victims exist.
+   */
+  autoPostponeCandidates(
+    options: { asOf?: IsoTimestamp; filters?: QueueFilters; mode?: SessionMode } = {},
+  ): QueueAutoPostponeCandidateData {
+    const asOfIso = options.asOf ?? (new Date().toISOString() as IsoTimestamp);
+    const asOfMs = Date.parse(asOfIso);
+    const filters = options.filters ?? {};
+    const mode = options.mode ?? "full";
+    const dueCardsFull = this.repos.queue.dueCardsWithState(asOfIso);
+    const dueAttention = this.repos.queue.dueAttentionItems(asOfIso);
+    const conceptMatch = filters.concept ? this.buildConceptMatcher(filters.concept) : null;
+    const batch: BatchContext = {
+      siblingGroups: this.repos.elements.liveSiblingGroupMap(),
+      conceptNames: this.repos.concepts.firstConceptNameMap(),
+    };
+
+    let timeCostSummary = createEmptyQueueTimeCostSummary();
+    const cardRows = dueCardsFull.map(({ element, state, card }) => {
+      if (
+        this.matchesElementFilters(element, filters, conceptMatch) &&
+        typeMatches(element, filters)
+      ) {
+        timeCostSummary = queueTimeCostSummaryWithItem(timeCostSummary, element, {
+          kind: card.kind,
+          mediaRef: card.mediaRef,
+        });
+      }
+      return this.toCardSummary(element, asOfMs, batch, state);
+    });
+    const attentionRows = dueAttention.map((element) => {
+      if (
+        this.matchesElementFilters(element, filters, conceptMatch) &&
+        typeMatches(element, filters)
+      ) {
+        timeCostSummary = queueTimeCostSummaryWithItem(timeCostSummary, element);
+      }
+      return this.toAttentionSummary(element, asOfMs, batch);
+    });
+    let rows = [...cardRows, ...attentionRows].filter((row) =>
+      this.matchesFilters(row, filters, conceptMatch),
+    );
+    rows = scoreQueueItems(rows, { mode, asOf: asOfIso }).map((row) =>
+      this.decorateDisplay(row, asOfMs),
+    );
+    return { items: rows, timeCostSummary };
   }
 
   /**

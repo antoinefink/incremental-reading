@@ -7,9 +7,9 @@
  * leech, or a `protected` item). This service is the only thing that PERSISTS that plan.
  * It composes:
  *
- *  - {@link QueueQuery.list} — the merged due set (the same rows the renderer sees, already
- *    decorated with priority/retrievability/stability/`fsrsState`/lapses) + the `budget`
- *    gauge (target = `getAppSettings().dailyReviewBudget`; the overflow is `used - target`);
+ *  - {@link QueueQuery.autoPostponeCandidates} — the FULL merged due set (not the display-capped
+ *    rows), decorated with priority/retrievability/stability/`fsrsState`/lapses and priced by
+ *    {@link TimeCostQuery} so the planner trims real minutes, not item counts;
  *  - the pure {@link planAutoPostpone} — deterministic victim selection;
  *  - the TWO apply seams, one per scheduler (the load-bearing split):
  *      · attention item → {@link SchedulerService.rescheduleForAction}(id,"postpone",now,batchId)
@@ -36,8 +36,9 @@ import {
 import { newRowId, nowIso } from "./ids";
 import type { Repositories } from "./index";
 import { QueueActionService } from "./queue-action-service";
-import { type QueueItemSummary, QueueQuery } from "./queue-query";
+import { type QueueFilters, type QueueItemSummary, QueueQuery } from "./queue-query";
 import { SchedulerService } from "./scheduler-service";
+import { type TimeCostConfidence, TimeCostQuery } from "./time-cost-query";
 
 /** How many days a mature card is deferred per auto-postpone cycle (the single-shot valve). */
 export const AUTO_POSTPONE_CARD_DEFER_DAYS = 7;
@@ -56,63 +57,140 @@ export interface PostponePreviewRow {
   readonly toDueAt: string;
   /** Why this item was sacrificed. */
   readonly reason: PostponeReason;
+  /** Estimated time removed by this postpone, in minutes. */
+  readonly estimatedMinutes: number;
+  /** Whether the estimate came from learned review timings or documented defaults. */
+  readonly estimateConfidence: TimeCostConfidence;
 }
 
 /** The JSON-serializable preview the renderer shows BEFORE committing. */
 export interface AutoPostponePreview {
-  /** How many items are over today's budget (`used - target`, clamped at 0). */
+  /** Legacy count overflow (`used - target`, clamped at 0). Minute consumers use `overBudgetMinutes`. */
   readonly overBudget: number;
-  /** The daily review budget target. */
+  /** Legacy count target. Minute consumers use `targetMinutes`. */
   readonly target: number;
-  /** The current due count (the budget gauge's `used`). */
+  /** Legacy due count. Minute consumers use `usedMinutes`. */
   readonly used: number;
+  /** Estimated minutes over today's budget (`usedMinutes - targetMinutes`, clamped at 0). */
+  readonly overBudgetMinutes: number;
+  /** The daily review budget target, in minutes. */
+  readonly targetMinutes: number;
+  /** The current due cost, in minutes. */
+  readonly usedMinutes: number;
+  /** Aggregate estimate confidence for the due universe. */
+  readonly confidence: TimeCostConfidence;
   /** The ordered postpone victims (cheapest value first). */
   readonly willPostpone: readonly PostponePreviewRow[];
   /** The due count that remains after applying the plan. */
   readonly remainingAfter: number;
+  /** Estimated due minutes remaining after applying the plan. */
+  readonly remainingMinutesAfter: number;
 }
 
 /** The result of applying the auto-postpone sweep. */
 export interface AutoPostponeApplyResult {
   /** How many items were postponed. */
   readonly postponed: number;
+  /** Estimated minutes postponed. */
+  readonly postponedMinutes: number;
+  /** Estimated due minutes remaining after applying the plan. */
+  readonly remainingMinutesAfter: number;
   /** The shared batch id, so the whole sweep undoes as one (T044). */
   readonly batchId: string;
 }
 
 const DAY_MS = 86_400_000;
 
+interface AutoPostponeReadOptions {
+  readonly asOf?: IsoTimestamp;
+  readonly filters?: QueueFilters;
+  readonly mode?: "full" | "review" | "read";
+}
+
 export class AutoPostponeService {
   private readonly queue: QueueQuery;
+  private readonly timeCost: TimeCostQuery;
   private readonly scheduler: SchedulerService;
   private readonly queueActions: QueueActionService;
+  private readonly repos: Repositories;
 
   constructor(db: InterleaveDatabase, repos: Repositories) {
     this.queue = new QueueQuery(repos);
+    this.timeCost = new TimeCostQuery(db);
     this.scheduler = new SchedulerService(db);
     this.queueActions = new QueueActionService(db);
+    this.repos = repos;
   }
 
   /**
-   * The merged due set as the planner's input. `QueueItemSummary` is structurally a superset
-   * of {@link AutoPostponeInput} (it carries priority/scheduler/`schedulerSignals`/`protected`
-   * + the de-clumping keys), so the cast is a widening — no DB access in the planner.
+   * The full merged due set as the planner's input. `QueueItemSummary` is structurally a
+   * superset of {@link AutoPostponeInput} after we attach T115's `estimatedMinutes`, so the
+   * cast is a widening — no DB access in the planner.
    */
-  private dueInputs(asOf: IsoTimestamp): {
-    items: readonly QueueItemSummary[];
-    budget: { used: number; target: number };
+  private dueInputs(
+    options: Required<Pick<AutoPostponeReadOptions, "asOf">> &
+      Omit<AutoPostponeReadOptions, "asOf">,
+  ): {
+    items: readonly (QueueItemSummary & {
+      readonly estimatedMinutes: number;
+      readonly estimateConfidence: TimeCostConfidence;
+    })[];
+    minuteBudget: {
+      readonly usedMinutes: number;
+      readonly targetMinutes: number;
+      readonly confidence: TimeCostConfidence;
+    };
+    countBudget: { readonly used: number; readonly target: number };
   } {
-    const data = this.queue.list({ asOf });
-    return { items: data.items, budget: data.budget };
+    const { asOf, filters, mode } = options;
+    const candidates = this.queue.autoPostponeCandidates({
+      asOf,
+      ...(filters ? { filters } : {}),
+      ...(mode ? { mode } : {}),
+    });
+    const estimate = this.timeCost.estimateQueue(candidates.timeCostSummary, {
+      asOf,
+      visibleItems: candidates.items.map((item) => ({
+        id: item.id,
+        type: item.type,
+        stage: item.stage,
+      })),
+    });
+    const estimatesById = new Map(estimate.items.map((item) => [item.id, item]));
+    const items = candidates.items.map((item) => {
+      const itemEstimate = estimatesById.get(item.id);
+      return {
+        ...item,
+        estimatedMinutes: itemEstimate?.estimatedMinutes ?? 0,
+        estimateConfidence: itemEstimate?.confidence ?? estimate.confidence,
+      };
+    });
+    return {
+      items,
+      minuteBudget: {
+        usedMinutes: estimate.totalMinutes,
+        targetMinutes: this.repos.settings.getAppSettings().dailyBudgetMinutes,
+        confidence: estimate.confidence,
+      },
+      countBudget: {
+        used: items.length,
+        target: this.repos.settings.getAppSettings().dailyReviewBudget,
+      },
+    };
   }
 
   /** Run the pure planner over the current due set + budget. */
   private plan(
-    items: readonly QueueItemSummary[],
-    budget: number,
+    items: readonly (QueueItemSummary & { readonly estimatedMinutes: number })[],
+    budgetMinutes: number,
     asOf: IsoTimestamp,
+    mode?: "full" | "review" | "read",
   ): AutoPostponePlan {
-    return planAutoPostpone(items as readonly AutoPostponeInput[], { budget, asOf });
+    return planAutoPostpone(items as readonly AutoPostponeInput[], {
+      budget: budgetMinutes,
+      asOf,
+      ...(mode ? { mode } : {}),
+    });
   }
 
   /**
@@ -120,10 +198,14 @@ export class AutoPostponeService {
    * planner, and project each victim's new due (the attention scheduler / card defer math),
    * returning a flat, JSON-serializable preview the renderer shows before committing.
    */
-  preview({ asOf }: { asOf?: IsoTimestamp } = {}): AutoPostponePreview {
+  preview({ asOf, filters, mode }: AutoPostponeReadOptions = {}): AutoPostponePreview {
     const now = asOf ?? nowIso();
-    const { items, budget } = this.dueInputs(now);
-    const plan = this.plan(items, budget.target, now);
+    const { items, minuteBudget, countBudget } = this.dueInputs({
+      asOf: now,
+      ...(filters ? { filters } : {}),
+      ...(mode ? { mode } : {}),
+    });
+    const plan = this.plan(items, minuteBudget.targetMinutes, now, mode);
     const byId = new Map(items.map((row) => [row.id, row]));
     const willPostpone: PostponePreviewRow[] = plan.items.map((victim) => {
       const row = byId.get(victim.id);
@@ -137,14 +219,22 @@ export class AutoPostponeService {
         fromDueAt,
         toDueAt: this.projectDueAt(victim, fromDueAt, now),
         reason: victim.reason,
+        estimatedMinutes: row?.estimatedMinutes ?? 0,
+        estimateConfidence: row?.estimateConfidence ?? minuteBudget.confidence,
       };
     });
+    const overBudgetMinutes = Math.max(0, minuteBudget.usedMinutes - minuteBudget.targetMinutes);
     return {
-      overBudget: Math.max(0, budget.used - budget.target),
-      target: budget.target,
-      used: budget.used,
+      overBudget: Math.max(0, countBudget.used - countBudget.target),
+      target: countBudget.target,
+      used: countBudget.used,
+      overBudgetMinutes,
+      targetMinutes: minuteBudget.targetMinutes,
+      usedMinutes: minuteBudget.usedMinutes,
+      confidence: minuteBudget.confidence,
       willPostpone,
       remainingAfter: plan.remainingAfter,
+      remainingMinutesAfter: plan.remainingMinutesAfter,
     };
   }
 
@@ -177,12 +267,18 @@ export class AutoPostponeService {
    * untouched, no review log). Each item runs in its own transaction under the shared
    * `batchId`, so the whole sweep undoes as one (T044). Returns the count + the `batchId`.
    */
-  apply({ asOf }: { asOf?: IsoTimestamp } = {}): AutoPostponeApplyResult {
+  apply({ asOf, filters, mode }: AutoPostponeReadOptions = {}): AutoPostponeApplyResult {
     const now = asOf ?? nowIso();
-    const { items, budget } = this.dueInputs(now);
-    const plan = this.plan(items, budget.target, now);
+    const { items, minuteBudget } = this.dueInputs({
+      asOf: now,
+      ...(filters ? { filters } : {}),
+      ...(mode ? { mode } : {}),
+    });
+    const plan = this.plan(items, minuteBudget.targetMinutes, now, mode);
+    const byId = new Map(items.map((row) => [row.id, row]));
     const batchId = newRowId();
     let postponed = 0;
+    let postponedMinutes = 0;
     for (const victim of plan.items) {
       const id = victim.id as ElementId;
       if (victim.postponeKind === "cardDefer") {
@@ -191,7 +287,13 @@ export class AutoPostponeService {
         this.scheduler.rescheduleForAction(id, "postpone", now, batchId);
       }
       postponed += 1;
+      postponedMinutes += byId.get(victim.id)?.estimatedMinutes ?? 0;
     }
-    return { postponed, batchId };
+    return {
+      postponed,
+      postponedMinutes,
+      remainingMinutesAfter: plan.remainingMinutesAfter,
+      batchId,
+    };
   }
 }

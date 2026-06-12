@@ -217,6 +217,7 @@ const h = vi.hoisted(() => {
       protected: 1,
     },
     budget: { used: 4, target: 30 },
+    minuteBudget: { usedMinutes: 19, targetMinutes: 30, confidence: "default" },
     timeEstimate: {
       confidence: "default",
       totalMinutes: 19,
@@ -362,8 +363,8 @@ describe("HomeScreen", () => {
     expect(screen.getByTestId("home-overdue-count").textContent).toBe("2");
     expect(screen.getByTestId("home-protected-count").textContent).toBe("1");
     // The budget gauge renders used / target from the read.
-    expect(screen.getByTestId("budget-meter").textContent).toContain("4");
-    expect(screen.getByTestId("budget-meter").textContent).toContain("30");
+    expect(screen.getByTestId("budget-meter").textContent).toContain("19");
+    expect(screen.getByTestId("budget-meter").textContent).toContain("30 min");
   });
 
   it("does not invent estimated minutes before the queue read resolves", () => {
