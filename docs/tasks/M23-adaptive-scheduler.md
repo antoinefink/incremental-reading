@@ -34,7 +34,7 @@
 # T111 — Consume recency (`lastSeenAt`)
 
 - **Milestone:** M23 — Adaptive attention scheduler
-- **Status:** `[x]` complete
+- **Status:** `[x]` complete in `d4489520`
 - **Depends on:** T028, T076
 - **Roadmap line:** `lastSeenAt` feeds interval computation so untouched-but-due elements stop
   interleaving identically with just-processed ones; deterministic, unit-tested, with a
