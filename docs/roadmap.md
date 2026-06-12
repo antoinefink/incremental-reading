@@ -419,9 +419,9 @@ Detailed specs: [`tasks/M22-receipts.md`](./tasks/M22-receipts.md)
 ## M23 — The adaptive attention scheduler (T111–T114)
 Detailed specs: [`tasks/M23-adaptive-scheduler.md`](./tasks/M23-adaptive-scheduler.md)
 
-- [x] **T111 — Consume recency (`lastSeenAt`)** · _deps: T028, T076_
+- [x] **T111 — Consume recency (`lastSeenAt`)** · _deps: T028, T076_ · (`7e22c59f`)
   Done when: `lastSeenAt` feeds interval computation so untouched-but-due elements stop interleaving identically with just-processed ones; deterministic, unit-tested, with a drift-diagnostic case.
-  Completed in this commit. Verification: focused scheduler/local-db tests for `attention-scheduler`, `scheduler-service`, `scheduler-consistency-query`, and `element-repository`; full gates recorded in the final commit summary. Downstream: T112 can build the adaptive interval multiplier on a real recency input and a scheduler-specific drift diagnostic.
+  Completed in `7e22c59f`. Verification: `pnpm lint`; `pnpm typecheck`; `pnpm test`; `pnpm e2e -- tests/electron/queue.spec.ts tests/electron/scale-smoke.spec.ts`. Downstream: T112 can build the adaptive interval multiplier on a real recency input and a scheduler-specific drift diagnostic.
 - [ ] **T112 — Yield-adaptive interval multiplier** · _deps: T104, T111_
   Done when: each source/extract carries a bounded per-element interval multiplier (≈×0.5–×4 of the band base) updated on every processed visit from v2 yield (extracts/statements/cards/synthesis produced, unresolved ratio) with priority modulating growth — replacing the two binary `adjustForSourceProcessing` branches; a 50-pass productive A-source and a barren one no longer share a cadence.
 - [ ] **T113 — Schedule explainability** · _deps: T112_
