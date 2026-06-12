@@ -255,7 +255,7 @@ overruns a choice instead of a surprise.
 
 - Do not let session assembly become a parallel scheduler: it selects from what is due/eligible
   by existing rules; it never changes due dates.
-- Completed in this commit with a read-only `queue.sessionPlan` bridge, short-lived accepted-plan
+- Completed in `512f6a5d` with a read-only `queue.sessionPlan` bridge, short-lived accepted-plan
   handoff into ProcessQueue, high-priority/protection filtering owned by trusted queue reads, and
   guarded preview/assembled-session lifecycle handling so refreshes and stale preview responses do
   not restart or mis-size a session.
