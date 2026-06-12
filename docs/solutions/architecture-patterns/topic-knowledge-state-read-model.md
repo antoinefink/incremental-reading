@@ -1,6 +1,7 @@
 ---
 title: "Model topic knowledge state as current read-only maturity receipts"
 date: 2026-06-12
+last_updated: 2026-06-12
 category: architecture-patterns
 module: topic-knowledge-state
 problem_type: architecture_pattern
@@ -11,11 +12,14 @@ related_components:
   - "testing_framework"
   - "ipc-contract"
   - "renderer-api"
+  - "renderer-ui"
+  - "settings"
 applies_when:
   - "A topic or concept needs a maturity receipt derived from existing durable local facts."
   - "Analytics must combine live hierarchy, concept membership, review logs, review state, retention targets, and verification tasks without storing snapshots."
   - "Graduation events should be deterministic current-state receipts rather than persisted mutations."
   - "The renderer needs a typed analytics surface without raw SQLite or filesystem access."
+  - "A current-state receipt needs to appear in Home or another summary without repeating forever."
 tags: [topic-knowledge-state, analytics, read-model, maturity, graduation, retention, concepts, ipc]
 ---
 
@@ -87,6 +91,33 @@ Expose the receipt through the analytics bridge namespace. The renderer gets
 `analytics.topicKnowledgeState` and a convenience wrapper; it never groups raw rows, bypasses Zod
 validation, or receives arbitrary database or filesystem capability.
 
+When surfacing graduation in daily work, keep the read side pure and make acknowledgement explicit.
+`dailyWork.summary` should return only unacknowledged current candidates; it should not mutate
+settings or operation history merely because a route read the summary. The UI that actually renders
+the line should call a narrow acknowledgement command with the rendered event ids:
+
+```ts
+await appApi.ackDailyWorkGraduationEvents({
+  asOf: summary.asOf,
+  eventIds: summary.graduationEvents.map((event) => event.id),
+});
+```
+
+Store acknowledgement as observed current state, not a graduation ledger. The observation records
+the subject id, subject type, last observed status, threshold version, and timestamp. If a subject
+falls out of graduation and later graduates again, the next summary can emit the current candidate
+again because the observed status changed in between.
+
+Renderers should request ordering from the trusted read model when a surface needs attention-first
+rows. For concept-retention analytics, pass `order: "needs_attention"` instead of re-sorting
+receipt fields in React. Keep the same typed request path through contract, IPC, preload, and
+`appApi`.
+
+Receipt panels are dense. In split concept/map layouts, give the selected-concept panel ownership of
+overflow when adding maturity receipts above member rows; otherwise a tiny nested member scroller can
+cause rows to be clipped under earlier receipt content or the shell status bar. The panel should
+scroll as one unit when the maturity receipt consumes the available height.
+
 ## Why This Matters
 
 Maturity analytics are easy to overstate. If concept rollups use provenance as membership, unrelated
@@ -96,8 +127,9 @@ history before a ledger exists, the app invents lifecycle events it cannot faith
 reconcile.
 
 Keeping the model current and read-only preserves provenance. Every number traces back to durable
-local state, while T109 and T110 can render or compose the receipt without reimplementing maturity
-semantics in React.
+local state, while surfaces render or compose the receipt without reimplementing maturity semantics
+in React. Explicit acknowledgement also prevents daily summaries from becoming hidden write paths:
+the user only stops seeing a graduation line after the renderer actually displayed it.
 
 ## When to Apply
 
@@ -105,6 +137,8 @@ semantics in React.
 - The read crosses hierarchy, lineage, review logs, scheduler state, and settings.
 - The result may later drive a surface, warning, daily summary, or weekly ritual.
 - The app needs a typed Electron bridge read without exposing raw SQLite or filesystem access.
+- The same current-state candidate should be visible once per observation, but should reappear after
+  the underlying state regresses and graduates again.
 
 Do not apply this pattern to commands, scheduling changes, cleanup, or anything that needs undo.
 Those paths should stay command-shaped, transactional, and operation-logged.
@@ -147,9 +181,13 @@ const openTask =
 Test the full boundary, not only the query:
 
 - local-db fixtures for ratios, stability buckets, retention snapshots, and graduation edges
+- local-db fixtures for observed graduation acknowledgement, including re-graduation after
+  regression and id-filtered acknowledgement
 - contract tests for valid and rejected request payloads
 - IPC/preload/appApi forwarding tests
 - a non-desktop renderer fallback that returns an empty typed receipt
+- renderer tests for analytics rows, selected concept/topic panels, daily receipt rendering, and
+  stale-selection clearing while receipt reads are pending
 - Electron E2E proving `window.appApi.analytics.topicKnowledgeState` exists and no generic
   `db.query` is exposed
 

@@ -5648,11 +5648,14 @@ export const TopicKnowledgeStateGetRequestSchema = z
     subjectType: z.enum(["concept", "topic"]).optional(),
     /** Optional exact subject id filter. */
     subjectId: z.string().min(1).optional(),
+    /** Optional trusted-side ordering; use needs_attention for weak-topic surfaces. */
+    order: z.enum(["default", "needs_attention"]).optional(),
   })
   .optional();
 export type TopicKnowledgeStateGetRequest = z.infer<typeof TopicKnowledgeStateGetRequestSchema>;
 
 export type TopicKnowledgeStateSubjectType = "concept" | "topic";
+export type TopicKnowledgeStateOrder = "default" | "needs_attention";
 export type TopicKnowledgeGraduationStatus =
   | "insufficient_evidence"
   | "building"
@@ -5782,6 +5785,23 @@ export interface DailyWorkSummaryResult {
   readonly activeUnscheduledSources: number;
   readonly resumeSource: DailyWorkResumeSource | null;
   readonly recommendedAction: DailyWorkRecommendedAction;
+  readonly graduationEvents: readonly KnowledgeGraduationEvent[];
+}
+
+export const DailyWorkGraduationAckRequestSchema = z
+  .object({
+    /** The instant to observe current maturity state for (ISO-8601); defaults to now. */
+    asOf: IsoTimestampInputSchema.optional(),
+    /** Graduation event ids that were rendered by the daily summary. */
+    eventIds: z.array(z.string().min(1)).optional(),
+  })
+  .optional();
+export type DailyWorkGraduationAckRequest = z.infer<typeof DailyWorkGraduationAckRequestSchema>;
+
+export interface DailyWorkGraduationAckResult {
+  readonly asOf: string;
+  readonly acknowledgedEventIds: readonly string[];
+  readonly observedSubjectCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -6816,6 +6836,13 @@ export interface AppApi {
      * triage, then active unscheduled source resume, then true clear. Read-only.
      */
     summary(request?: DailyWorkSummaryRequest): Promise<DailyWorkSummaryResult>;
+    /**
+     * Mark the maturity states rendered by the daily summary as observed. This is
+     * a UI receipt acknowledgement stored in settings, not a domain mutation.
+     */
+    ackGraduationEvents(
+      request?: DailyWorkGraduationAckRequest,
+    ): Promise<DailyWorkGraduationAckResult>;
   };
   readonly sourceYield: {
     /**

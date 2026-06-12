@@ -19,6 +19,7 @@ import type {
   AnalyticsGetResult,
   AnalyticsReviewActivityResult,
   PriorityIntegrityGetResult,
+  TopicKnowledgeStateGetResult,
 } from "../lib/appApi";
 
 const h = vi.hoisted(() => {
@@ -149,9 +150,53 @@ const h = vi.hoisted(() => {
       postponeDebtHigh: false,
     },
   };
+  const conceptKnowledge: TopicKnowledgeStateGetResult = {
+    asOf: summary.asOf,
+    windowDays: 90,
+    subjects: [
+      {
+        subjectType: "concept",
+        subjectId: "concept-bayes",
+        title: "Bayesian statistics",
+        priority: null,
+        priorityLabel: null,
+        directMemberCount: 6,
+        includedElementCount: 12,
+        funnel: {
+          read: 4,
+          extracted: 4,
+          distilled: 3,
+          carded: 3,
+          mature: 2,
+          extractedOfRead: 1,
+          distilledOfExtracted: 0.75,
+          cardedOfDistilled: 1,
+          matureOfCarded: 2 / 3,
+        },
+        stability: { young: 0, maturing: 1, mature: 2, retired: 0 },
+        retention: {
+          windowDays: 90,
+          reviewCount: 11,
+          measuredRetention: 0.89,
+          retentionTarget: 0.92,
+          directConceptTarget: 0.92,
+          deltaFromTarget: -0.03,
+          snapshots: [],
+        },
+        staleness: { staleItems: 0, needsReverify: 0 },
+        graduationState: {
+          status: "needs_attention",
+          reason: "Measured retention is below target.",
+          thresholdVersion: "v1",
+        },
+      },
+    ],
+    graduationEvents: [],
+  };
   return {
     summary,
     priorityIntegrity,
+    conceptKnowledge,
     activityForYear,
     deferredActivity,
     getAnalytics: vi.fn(),
@@ -159,6 +204,7 @@ const h = vi.hoisted(() => {
     getSourceYield: vi.fn(),
     getExtractStagnation: vi.fn(),
     getPriorityIntegrity: vi.fn(),
+    getTopicKnowledgeState: vi.fn(),
     navigateSpy: vi.fn(),
   };
 });
@@ -178,6 +224,7 @@ vi.mock("../lib/appApi", async () => {
       getSourceYield: h.getSourceYield,
       getExtractStagnation: h.getExtractStagnation,
       getPriorityIntegrity: h.getPriorityIntegrity,
+      getTopicKnowledgeState: h.getTopicKnowledgeState,
     },
   };
 });
@@ -201,6 +248,7 @@ beforeEach(() => {
   // …and the stagnant-extract count (T084) for its banner.
   h.getExtractStagnation.mockResolvedValue({ asOf: h.summary.asOf, rows: [], stagnantCount: 0 });
   h.getPriorityIntegrity.mockResolvedValue(h.priorityIntegrity);
+  h.getTopicKnowledgeState.mockResolvedValue(h.conceptKnowledge);
 });
 
 describe("AnalyticsScreen", () => {
@@ -470,6 +518,39 @@ describe("AnalyticsScreen", () => {
     expect(screen.getByTestId("metric-reviews").textContent).toContain("124");
     expect(await screen.findByTestId("priority-integrity-error")).toHaveTextContent(
       "priority read failed",
+    );
+    expect(screen.queryByTestId("analytics-error")).toBeNull();
+  });
+
+  it("renders concept-level retention receipts and links to the selected concept", async () => {
+    render(<AnalyticsScreen />);
+
+    const panel = await screen.findByTestId("concept-retention-panel");
+    expect(panel).toHaveTextContent("Bayesian statistics");
+    expect(panel).toHaveTextContent("89%");
+    expect(panel).toHaveTextContent("target 92%");
+    expect(panel).toHaveTextContent("Needs attention");
+    expect(h.getTopicKnowledgeState).toHaveBeenCalledWith({
+      subjectType: "concept",
+      limit: 6,
+      order: "needs_attention",
+    });
+
+    fireEvent.click(screen.getByTestId("concept-retention-row"));
+    expect(h.navigateSpy).toHaveBeenCalledWith({
+      to: "/concepts",
+      search: { conceptId: "concept-bayes" },
+    });
+  });
+
+  it("keeps existing metrics visible when concept retention loading fails", async () => {
+    h.getTopicKnowledgeState.mockRejectedValue(new Error("knowledge read failed"));
+    render(<AnalyticsScreen />);
+
+    expect(await screen.findByTestId("analytics-body")).toBeTruthy();
+    expect(screen.getByTestId("metric-reviews").textContent).toContain("124");
+    expect(await screen.findByTestId("concept-retention-error")).toHaveTextContent(
+      "knowledge read failed",
     );
     expect(screen.queryByTestId("analytics-error")).toBeNull();
   });

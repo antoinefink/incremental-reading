@@ -3,6 +3,14 @@ import { priorityToLabel } from "@interleave/core";
 import type { BlockProcessingService } from "./block-processing-service";
 import { nowIso } from "./ids";
 import type { Repositories } from "./index";
+import type {
+  KnowledgeGraduationEvent,
+  TopicKnowledgeGraduationStatus,
+  TopicKnowledgeStateSubjectType,
+} from "./topic-knowledge-state-query";
+
+const OBSERVED_GRADUATION_STATE_KEY = "dailyWork.observedGraduationState.v1";
+const DAILY_GRADUATION_SUBJECT_LIMIT = 200;
 
 export type DailyWorkRecommendedAction =
   | "process_due_queue"
@@ -28,6 +36,30 @@ export interface DailyWorkSummary {
   readonly activeUnscheduledSources: number;
   readonly resumeSource: DailyWorkResumeSource | null;
   readonly recommendedAction: DailyWorkRecommendedAction;
+  readonly graduationEvents: readonly KnowledgeGraduationEvent[];
+}
+
+export interface DailyWorkGraduationAckRequest {
+  readonly asOf?: IsoTimestamp;
+  readonly eventIds?: readonly string[];
+}
+
+export interface DailyWorkGraduationAckResult {
+  readonly asOf: IsoTimestamp;
+  readonly acknowledgedEventIds: readonly string[];
+  readonly observedSubjectCount: number;
+}
+
+interface ObservedGraduationSubject {
+  readonly subjectType: TopicKnowledgeStateSubjectType;
+  readonly subjectId: string;
+  readonly status: TopicKnowledgeGraduationStatus;
+  readonly thresholdVersion: "v1";
+  readonly observedAt: IsoTimestamp;
+}
+
+interface ObservedGraduationState {
+  readonly subjects: Record<string, ObservedGraduationSubject>;
 }
 
 export class DailyWorkQuery {
@@ -42,6 +74,7 @@ export class DailyWorkQuery {
     const inboxSources = this.repos.queue.inboxCount("source");
     const resumeSources = this.activeUnscheduledSources();
     const resumeSource = resumeSources[0] ?? null;
+    const graduationEvents = this.unacknowledgedGraduationEvents(asOf);
     return {
       asOf,
       dueQueueItems,
@@ -53,6 +86,42 @@ export class DailyWorkQuery {
         inboxSources,
         activeUnscheduledSources: resumeSources.length,
       }),
+      graduationEvents,
+    };
+  }
+
+  acknowledgeGraduationEvents(
+    request: DailyWorkGraduationAckRequest = {},
+  ): DailyWorkGraduationAckResult {
+    const asOf = request.asOf ?? nowIso();
+    const summary = this.repos.topicKnowledgeState.getTopicKnowledgeState(asOf, {
+      limit: DAILY_GRADUATION_SUBJECT_LIMIT,
+    });
+    const currentEventIds = new Set(summary.graduationEvents.map((event) => event.eventId));
+    const requested = request.eventIds ?? [];
+    const acknowledgedEventIds =
+      requested.length === 0 ? [] : requested.filter((eventId) => currentEventIds.has(eventId));
+    const subjects: Record<string, ObservedGraduationSubject> = {
+      ...this.observedGraduationState().subjects,
+    };
+    const acknowledged = new Set(acknowledgedEventIds);
+    for (const subject of summary.subjects) {
+      const eventId = `${subject.subjectType}:${subject.subjectId}:graduated:${subject.graduationState.thresholdVersion}`;
+      if (requested.length > 0 && !acknowledged.has(eventId)) continue;
+      subjects[graduationSubjectKey(subject.subjectType, subject.subjectId)] = {
+        subjectType: subject.subjectType,
+        subjectId: subject.subjectId,
+        status: subject.graduationState.status,
+        thresholdVersion: subject.graduationState.thresholdVersion,
+        observedAt: asOf,
+      };
+    }
+    this.repos.settings.set<ObservedGraduationState>(OBSERVED_GRADUATION_STATE_KEY, { subjects });
+
+    return {
+      asOf,
+      acknowledgedEventIds,
+      observedSubjectCount: summary.subjects.length,
     };
   }
 
@@ -93,6 +162,30 @@ export class DailyWorkQuery {
       return null;
     }
   }
+
+  private unacknowledgedGraduationEvents(asOf: IsoTimestamp): KnowledgeGraduationEvent[] {
+    const observed = this.observedGraduationState();
+    const summary = this.repos.topicKnowledgeState.getTopicKnowledgeState(asOf, {
+      limit: DAILY_GRADUATION_SUBJECT_LIMIT,
+    });
+    return summary.graduationEvents.filter((event) => {
+      const prior = observed.subjects[graduationSubjectKey(event.subjectType, event.subjectId)];
+      return prior?.status !== "graduated" || prior.thresholdVersion !== event.thresholdVersion;
+    });
+  }
+
+  private observedGraduationState(): ObservedGraduationState {
+    const value = this.repos.settings.get<ObservedGraduationState>(OBSERVED_GRADUATION_STATE_KEY);
+    if (
+      !value ||
+      typeof value !== "object" ||
+      !value.subjects ||
+      typeof value.subjects !== "object"
+    ) {
+      return { subjects: {} };
+    }
+    return value;
+  }
 }
 
 function recommendedAction(input: {
@@ -104,4 +197,11 @@ function recommendedAction(input: {
   if (input.inboxSources > 0) return "triage_inbox";
   if (input.activeUnscheduledSources > 0) return "resume_unscheduled_source";
   return "clear";
+}
+
+function graduationSubjectKey(
+  subjectType: TopicKnowledgeStateSubjectType,
+  subjectId: string,
+): string {
+  return `${subjectType}:${subjectId}`;
 }

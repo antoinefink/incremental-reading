@@ -47,6 +47,7 @@ import {
   ConceptsCreateRequestSchema,
   ConceptsMembersRequestSchema,
   ConceptsUnassignRequestSchema,
+  DailyWorkGraduationAckRequestSchema,
   DocumentBlockInputSchema,
   DocumentMarksAddRequestSchema,
   DocumentMarksListRequestSchema,
@@ -323,6 +324,7 @@ describe("IPC channels", () => {
         "analytics:topicKnowledgeState",
         "balance:get",
         "dailyWork:summary",
+        "dailyWork:ackGraduationEvents",
         "backups:create",
         "backups:openFolder",
         "backups:list",
@@ -409,6 +411,7 @@ describe("TopicKnowledgeStateGetRequestSchema (T108)", () => {
         limit: 25,
         subjectType: "concept",
         subjectId: "concept-1",
+        order: "needs_attention",
       }),
     ).toEqual({
       asOf: "2026-06-08T09:00:00.000Z",
@@ -416,6 +419,7 @@ describe("TopicKnowledgeStateGetRequestSchema (T108)", () => {
       limit: 25,
       subjectType: "concept",
       subjectId: "concept-1",
+      order: "needs_attention",
     });
   });
 
@@ -424,6 +428,28 @@ describe("TopicKnowledgeStateGetRequestSchema (T108)", () => {
     expect(() => TopicKnowledgeStateGetRequestSchema.parse({ windowDays: 0 })).toThrow();
     expect(() => TopicKnowledgeStateGetRequestSchema.parse({ limit: 201 })).toThrow();
     expect(() => TopicKnowledgeStateGetRequestSchema.parse({ subjectType: "source" })).toThrow();
+    expect(() => TopicKnowledgeStateGetRequestSchema.parse({ order: "priority" })).toThrow();
+  });
+});
+
+describe("DailyWorkGraduationAckRequestSchema (T109)", () => {
+  it("accepts omitted or bounded acknowledgement payloads", () => {
+    expect(DailyWorkGraduationAckRequestSchema.parse(undefined)).toBeUndefined();
+    expect(DailyWorkGraduationAckRequestSchema.parse({})).toEqual({});
+    expect(
+      DailyWorkGraduationAckRequestSchema.parse({
+        asOf: "2026-06-08T09:00:00.000Z",
+        eventIds: ["concept:c1:graduated:v1"],
+      }),
+    ).toEqual({
+      asOf: "2026-06-08T09:00:00.000Z",
+      eventIds: ["concept:c1:graduated:v1"],
+    });
+  });
+
+  it("rejects malformed clocks and blank event ids", () => {
+    expect(() => DailyWorkGraduationAckRequestSchema.parse({ asOf: "not-a-date" })).toThrow();
+    expect(() => DailyWorkGraduationAckRequestSchema.parse({ eventIds: [""] })).toThrow();
   });
 });
 

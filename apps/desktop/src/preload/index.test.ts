@@ -218,6 +218,12 @@ describe("preload bridge", () => {
     await api().dailyWork.summary();
     expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.dailyWorkSummary, {});
 
+    await api().dailyWork.ackGraduationEvents();
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(
+      IPC_CHANNELS.dailyWorkAckGraduationEvents,
+      {},
+    );
+
     await api().review.sessionNext();
     expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.reviewSessionNext, {});
 

@@ -51,6 +51,7 @@ import {
   ConceptsListRequestSchema,
   ConceptsMembersRequestSchema,
   ConceptsUnassignRequestSchema,
+  DailyWorkGraduationAckRequestSchema,
   DailyWorkSummaryRequestSchema,
   DbStatusRequestSchema,
   DocumentMarksAddRequestSchema,
@@ -1401,6 +1402,11 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.dailyWorkSummary, (_event, rawRequest: unknown) => {
     const request = DailyWorkSummaryRequestSchema.parse(rawRequest);
     return dbService.getDailyWorkSummary(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.dailyWorkAckGraduationEvents, (_event, rawRequest: unknown) => {
+    const request = DailyWorkGraduationAckRequestSchema.parse(rawRequest);
+    return dbService.ackDailyWorkGraduationEvents(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.sourceYieldList, (_event, rawRequest: unknown) => {

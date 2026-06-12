@@ -24,6 +24,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   DailyWorkSummaryResult,
+  KnowledgeGraduationEvent,
   QueueItemSummary,
   QueueListResult,
   ReviewCardView,
@@ -32,6 +33,9 @@ import type {
 } from "../../lib/appApi";
 
 const h = vi.hoisted(() => {
+  type DailyWorkWithGraduations = DailyWorkSummaryResult & {
+    readonly graduationEvents?: readonly KnowledgeGraduationEvent[];
+  };
   const mk = (over: Partial<QueueItemSummary> & { id: string }): QueueItemSummary => ({
     type: "extract",
     status: "scheduled",
@@ -115,13 +119,14 @@ const h = vi.hoisted(() => {
     },
     budget: { used: 3, target: 30 },
   };
-  const dailyWork: DailyWorkSummaryResult = {
+  const dailyWork: DailyWorkWithGraduations = {
     asOf: "2026-05-30T18:00:00.000Z",
     dueQueueItems: 3,
     inboxSources: 0,
     activeUnscheduledSources: 0,
     resumeSource: null,
     recommendedAction: "process_due_queue",
+    graduationEvents: [],
   };
   // The full reveal-ready view for card-1 (the answer + source ref ship with the
   // card; the renderer hides them until reveal — exactly like the review session).

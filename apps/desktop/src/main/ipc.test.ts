@@ -78,6 +78,15 @@ function fakeDbService() {
       activeUnscheduledSources: 0,
       resumeSource: null,
       recommendedAction: "clear",
+      graduationEvents: [],
+    })),
+    ackDailyWorkGraduationEvents: vi.fn((request?: unknown) => ({
+      asOf: "2026-06-08T09:00:00.000Z",
+      acknowledgedEventIds:
+        request && typeof request === "object" && "eventIds" in request
+          ? ((request as { eventIds?: readonly string[] }).eventIds ?? [])
+          : [],
+      observedSubjectCount: 0,
     })),
     getPriorityIntegrity: vi.fn((request?: unknown) => ({
       asOf: "2026-06-08T09:00:00.000Z",
@@ -216,6 +225,30 @@ describe("registerIpcHandlers", () => {
 
     expect(() => handler?.({}, { asOf: "not-a-date" })).toThrow();
     expect(db.getDailyWorkSummary).not.toHaveBeenCalled();
+  });
+
+  it("validates and forwards daily work graduation acknowledgement requests", () => {
+    const db = fakeDbService();
+    registerIpcHandlers(db as never);
+    const request = {
+      asOf: "2026-06-08T09:00:00.000Z",
+      eventIds: ["concept:c1:graduated:v1"],
+    };
+    const handler = electron.handlers.get(IPC_CHANNELS.dailyWorkAckGraduationEvents);
+
+    expect(handler?.({}, request)).toMatchObject({
+      acknowledgedEventIds: ["concept:c1:graduated:v1"],
+    });
+    expect(db.ackDailyWorkGraduationEvents).toHaveBeenCalledWith(request);
+  });
+
+  it("rejects malformed daily work graduation acknowledgement payloads", () => {
+    const db = fakeDbService();
+    registerIpcHandlers(db as never);
+    const handler = electron.handlers.get(IPC_CHANNELS.dailyWorkAckGraduationEvents);
+
+    expect(() => handler?.({}, { eventIds: ["ok", ""] })).toThrow();
+    expect(db.ackDailyWorkGraduationEvents).not.toHaveBeenCalled();
   });
 
   it("validates and forwards priority integrity requests", () => {

@@ -35,6 +35,7 @@ import {
   appApi,
   type DailyWorkSummaryResult,
   isDesktop,
+  type KnowledgeGraduationEvent,
   type QueueItemSummary,
   type QueueListResult,
   type ReviewModeSelector,
@@ -66,6 +67,7 @@ function greeting(): string {
 
 /** How many top-due rows the read-only preview shows (a glance, not the full list). */
 const PREVIEW_LIMIT = 5;
+const EMPTY_GRADUATION_EVENTS: readonly KnowledgeGraduationEvent[] = [];
 
 /** A quick-navigation tile (calm at-a-glance affordance into a key surface). */
 const TILES: readonly {
@@ -157,6 +159,49 @@ function PreviewRow({
         </span>
       </span>
     </button>
+  );
+}
+
+function GraduationReceipts({
+  events,
+  onOpenConcept,
+}: {
+  events: readonly KnowledgeGraduationEvent[];
+  onOpenConcept: (conceptId: string) => void;
+}) {
+  if (events.length === 0) return null;
+  return (
+    <div className="home-graduations" data-testid="home-graduation-events">
+      <span className="home-graduations__icon">
+        <Icon name="checkCircle" size={15} />
+      </span>
+      <div className="home-graduations__lines">
+        {events.map((event) =>
+          event.subjectType === "concept" ? (
+            <button
+              type="button"
+              key={event.eventId}
+              className="home-graduations__line home-graduations__line--link"
+              data-testid="home-graduation-link"
+              onClick={() => onOpenConcept(event.subjectId)}
+            >
+              <span>{event.title}</span>
+              <small>concept reached mature knowledge state</small>
+              <Icon name="chevronRight" size={13} />
+            </button>
+          ) : (
+            <span
+              key={event.eventId}
+              className="home-graduations__line"
+              data-testid="home-graduation-line"
+            >
+              <span>{event.title}</span>
+              <small>topic reached mature knowledge state</small>
+            </span>
+          ),
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -276,6 +321,16 @@ export function HomeScreen() {
     // Due scheduled work is the only case that starts the T031 one-at-a-time loop.
     void navigate({ to: "/process", search: asOf ? { asOf } : {} });
   }, [navigate, select, asOf, dailyWork, queue]);
+
+  const graduationEvents = dailyWork?.graduationEvents ?? EMPTY_GRADUATION_EVENTS;
+
+  useEffect(() => {
+    if (!dailyWork) return;
+    void appApi.ackDailyWorkGraduationEvents({
+      asOf: dailyWork.asOf,
+      eventIds: graduationEvents.map((event) => event.eventId),
+    });
+  }, [dailyWork, graduationEvents]);
 
   if (!desktop) {
     return (
@@ -458,6 +513,11 @@ export function HomeScreen() {
           ) : null}
           <span className="sessionbar__note">{sessionNote}</span>
         </div>
+
+        <GraduationReceipts
+          events={graduationEvents}
+          onOpenConcept={(conceptId) => void navigate({ to: "/concepts", search: { conceptId } })}
+        />
 
         {/* Today's-status metric tiles (analytics chrome). */}
         <div className="an-metrics an-metrics--sm" style={{ marginBottom: 14 }}>

@@ -386,6 +386,19 @@ describe("TopicKnowledgeStateQuery.getTopicKnowledgeState", () => {
     expect(subject?.funnel.read).toBe(2);
   });
 
+  it("orders attention-needed subjects by higher priority when urgency ties", () => {
+    const low = seedElement("A low priority topic", { type: "topic", priority: 0.1 });
+    const high = seedElement("Z high priority topic", { type: "topic", priority: 0.9 });
+
+    const summary = new TopicKnowledgeStateQuery(handle.db).getTopicKnowledgeState(ASOF, {
+      subjectType: "topic",
+      order: "needs_attention",
+      limit: 2,
+    });
+
+    expect(summary.subjects.map((subject) => subject.subjectId)).toEqual([high, low]);
+  });
+
   it("ignores soft-deleted verification tasks when computing reverify staleness", () => {
     const concept = conceptsRepo.createConcept({ name: "Verification liveness" });
     const sourceId = seedSourceWithReadPoint("Verification source");

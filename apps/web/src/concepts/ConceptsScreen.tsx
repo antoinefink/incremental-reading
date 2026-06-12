@@ -16,7 +16,7 @@
  * calm EmptyState.
  */
 
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConceptGraph } from "../components/ConceptGraph";
 import { Icon } from "../components/Icon";
@@ -28,7 +28,14 @@ import {
   typeLabel,
 } from "../components/inspector/primitives";
 import "../components/inspector/inspector.css";
-import { appApi, type ConceptMemberSummary, type ConceptNode, isDesktop } from "../lib/appApi";
+import {
+  appApi,
+  type ConceptMemberSummary,
+  type ConceptNode,
+  isDesktop,
+  type TopicKnowledgeStateGetRequest,
+  type TopicKnowledgeStateSubject,
+} from "../lib/appApi";
 import "../library/library.css";
 import { ReviewModeButton } from "../review/ReviewModeButton";
 import "../review/review.css";
@@ -136,13 +143,120 @@ function ConceptRetentionEditor({
   );
 }
 
+function pct(value: number | null): string {
+  return value === null ? "—" : `${Math.round(value * 100)}%`;
+}
+
+function statusText(status: TopicKnowledgeStateSubject["graduationState"]["status"]): string {
+  switch (status) {
+    case "graduated":
+      return "Mature";
+    case "near_graduation":
+      return "Near mature";
+    case "needs_attention":
+      return "Needs attention";
+    case "building":
+      return "Building";
+    case "insufficient_evidence":
+      return "Insufficient evidence";
+  }
+}
+
+function ConceptMaturityPanel({
+  conceptId,
+  subject,
+  loading,
+  error,
+}: {
+  conceptId: string;
+  subject: TopicKnowledgeStateSubject | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  return (
+    <div className="cm-maturity" data-testid="concept-maturity-panel">
+      <div className="cm-maturity__head">
+        <span className="cm-maturity__title">Knowledge state</span>
+        {subject ? (
+          <span
+            className={`cm-maturity__status cm-maturity__status--${subject.graduationState.status}`}
+          >
+            {statusText(subject.graduationState.status)}
+          </span>
+        ) : null}
+      </div>
+      {loading && !subject ? (
+        <p className="lib-loading" data-testid="concept-maturity-loading">
+          Loading maturity…
+        </p>
+      ) : error ? (
+        <p className="lib-error" data-testid="concept-maturity-error">
+          {error}
+        </p>
+      ) : subject ? (
+        <>
+          <div className="cm-maturity__grid">
+            <div className="cm-maturity__metric">
+              <span>{pct(subject.funnel.extractedOfRead)}</span>
+              <small>extracted / read</small>
+            </div>
+            <div className="cm-maturity__metric">
+              <span>{pct(subject.funnel.matureOfCarded)}</span>
+              <small>
+                {subject.funnel.mature}/{subject.funnel.carded} mature
+              </small>
+            </div>
+            <div className="cm-maturity__metric">
+              <span>{pct(subject.retention.measuredRetention)}</span>
+              <small>target {pct(subject.retention.retentionTarget)}</small>
+            </div>
+          </div>
+          <div className="cm-maturity__buckets" data-testid="concept-maturity-buckets">
+            <span>Young {subject.stability.young}</span>
+            <span>Maturing {subject.stability.maturing}</span>
+            <span>Mature {subject.stability.mature}</span>
+            <span>Retired {subject.stability.retired}</span>
+          </div>
+          {subject.staleness.staleItems > 0 || subject.staleness.needsReverify > 0 ? (
+            <p className="cm-maturity__note" data-testid="concept-maturity-flags">
+              {subject.staleness.staleItems} stale · {subject.staleness.needsReverify} need reverify
+            </p>
+          ) : null}
+          <p className="cm-maturity__note">{subject.graduationState.reason}</p>
+          {subject.graduationState.status === "needs_attention" ? (
+            <div className="cm-maturity__cta" data-testid="concept-maturity-weak-cta">
+              <ReviewModeButton
+                selector={{ kind: "concept", conceptId }}
+                hideWhileLoading
+                icon="target"
+                label={(n) => `Review ${n} weak-topic card${n === 1 ? "" : "s"}`}
+                testId="concept-maturity-review"
+              />
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <p className="cm-maturity__note" data-testid="concept-maturity-empty">
+          No maturity receipt for this concept yet.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function ConceptsScreen() {
   const desktop = isDesktop();
   const navigate = useNavigate();
+  const routeSearch = useSearch({ strict: false }) as { conceptId?: string };
+  const routeConceptId = typeof routeSearch.conceptId === "string" ? routeSearch.conceptId : null;
 
   const [concepts, setConcepts] = useState<readonly ConceptNode[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [appliedRouteConceptId, setAppliedRouteConceptId] = useState<string | null>(null);
   const [members, setMembers] = useState<readonly ConceptMemberSummary[]>([]);
+  const [maturity, setMaturity] = useState<TopicKnowledgeStateSubject | null>(null);
+  const [maturityLoading, setMaturityLoading] = useState(false);
+  const [maturityError, setMaturityError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [membersLoading, setMembersLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -174,6 +288,7 @@ export function ConceptsScreen() {
       return;
     }
     let cancelled = false;
+    setMembers([]);
     setMembersLoading(true);
     void appApi
       .conceptMembers({ conceptId: selectedId })
@@ -183,7 +298,10 @@ export function ConceptsScreen() {
         setError(null);
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) {
+          setMembers([]);
+          setError(e instanceof Error ? e.message : String(e));
+        }
       })
       .finally(() => {
         if (!cancelled) setMembersLoading(false);
@@ -203,6 +321,55 @@ export function ConceptsScreen() {
     () => (selectedId ? (byId.get(selectedId) ?? null) : null),
     [selectedId, byId],
   );
+
+  useEffect(() => {
+    if (!routeConceptId && appliedRouteConceptId) {
+      setAppliedRouteConceptId(null);
+      return;
+    }
+    if (routeConceptId && routeConceptId !== appliedRouteConceptId && byId.has(routeConceptId)) {
+      setSelectedId(routeConceptId);
+      setAppliedRouteConceptId(routeConceptId);
+    }
+  }, [routeConceptId, appliedRouteConceptId, byId]);
+
+  useEffect(() => {
+    if (!isDesktop() || selectedId === null) {
+      setMaturity(null);
+      setMaturityError(null);
+      return;
+    }
+    let cancelled = false;
+    const request: TopicKnowledgeStateGetRequest & {
+      readonly order?: "needs_attention" | "default";
+    } = {
+      subjectType: "concept",
+      subjectId: selectedId,
+      limit: 1,
+      order: "default",
+    };
+    setMaturityLoading(true);
+    setMaturity(null);
+    void appApi
+      .getTopicKnowledgeState(request)
+      .then((res) => {
+        if (cancelled) return;
+        setMaturity(res.subjects[0] ?? null);
+        setMaturityError(null);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setMaturity(null);
+          setMaturityError(e instanceof Error ? e.message : String(e));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setMaturityLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId]);
 
   /** Open a member element in the right surface for its type. */
   const open = useCallback(
@@ -328,6 +495,12 @@ export function ConceptsScreen() {
                 conceptId={selected.id}
                 target={selected.desiredRetention}
                 onChanged={() => void loadConcepts()}
+              />
+              <ConceptMaturityPanel
+                conceptId={selected.id}
+                subject={maturity}
+                loading={maturityLoading}
+                error={maturityError}
               />
               <div className="cm-members__list">
                 {membersLoading && members.length === 0 ? (

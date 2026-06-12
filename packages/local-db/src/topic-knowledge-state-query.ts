@@ -39,6 +39,7 @@ export const DEFAULT_TOPIC_KNOWLEDGE_STATE_LIMIT = 50;
 const DAY_MS = 86_400_000;
 
 export type TopicKnowledgeStateSubjectType = "concept" | "topic";
+export type TopicKnowledgeStateOrder = "default" | "needs_attention";
 export type TopicKnowledgeGraduationStatus =
   | "insufficient_evidence"
   | "building"
@@ -51,6 +52,7 @@ export interface TopicKnowledgeStateOptions {
   readonly limit?: number;
   readonly subjectType?: TopicKnowledgeStateSubjectType;
   readonly subjectId?: string;
+  readonly order?: TopicKnowledgeStateOrder;
 }
 
 export interface KnowledgeFunnel {
@@ -199,11 +201,9 @@ export class TopicKnowledgeStateQuery {
     const openTasksByLinked = this.openVerificationTasksByLinkedElement();
     const retentionTargets = this.retention.targets();
 
-    const seeds = this.subjectSeeds(liveElements, childIdsByParent, membership, options).slice(
-      0,
-      limit,
-    );
-    const subjects = seeds.map((seed) =>
+    const seeds = this.subjectSeeds(liveElements, childIdsByParent, membership, options);
+    const seedPage = options.order === "needs_attention" ? seeds : seeds.slice(0, limit);
+    const builtSubjects = seedPage.map((seed) =>
       this.buildSubject(
         seed,
         liveElements,
@@ -217,6 +217,10 @@ export class TopicKnowledgeStateQuery {
         windowDays,
       ),
     );
+    const subjects =
+      options.order === "needs_attention"
+        ? [...builtSubjects].sort(compareNeedsAttention).slice(0, limit)
+        : builtSubjects;
 
     const graduationEvents = subjects
       .filter((s) => s.graduationState.status === "graduated")
@@ -680,4 +684,43 @@ function retentionFor(reviews: readonly ReviewInfo[]): number | null {
 function safeMs(iso: string): number | null {
   const ms = Date.parse(iso);
   return Number.isFinite(ms) ? ms : null;
+}
+
+function compareNeedsAttention(
+  a: TopicKnowledgeStateSubject,
+  b: TopicKnowledgeStateSubject,
+): number {
+  const status = statusRank(a) - statusRank(b);
+  if (status !== 0) return status;
+  const stale =
+    b.staleness.needsReverify +
+    b.staleness.staleItems -
+    (a.staleness.needsReverify + a.staleness.staleItems);
+  if (stale !== 0) return stale;
+  const retention = retentionNeed(a) - retentionNeed(b);
+  if (retention !== 0) return retention;
+  const priority =
+    (b.priority ?? Number.NEGATIVE_INFINITY) - (a.priority ?? Number.NEGATIVE_INFINITY);
+  if (priority !== 0) return priority;
+  return a.title.localeCompare(b.title) || a.subjectId.localeCompare(b.subjectId);
+}
+
+function statusRank(subject: TopicKnowledgeStateSubject): number {
+  switch (subject.graduationState.status) {
+    case "needs_attention":
+      return 0;
+    case "near_graduation":
+      return 1;
+    case "building":
+      return 2;
+    case "insufficient_evidence":
+      return 3;
+    case "graduated":
+      return 4;
+  }
+}
+
+function retentionNeed(subject: TopicKnowledgeStateSubject): number {
+  const delta = subject.retention.deltaFromTarget;
+  return delta === null ? Number.MAX_SAFE_INTEGER : delta;
 }

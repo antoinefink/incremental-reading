@@ -18,12 +18,16 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   DailyWorkSummaryResult,
+  KnowledgeGraduationEvent,
   PriorityIntegrityGetResult,
   QueueItemSummary,
   QueueListResult,
 } from "../../lib/appApi";
 
 const h = vi.hoisted(() => {
+  type DailyWorkWithGraduations = DailyWorkSummaryResult & {
+    readonly graduationEvents?: readonly KnowledgeGraduationEvent[];
+  };
   const noFallow = {
     fallowState: null,
     fallowUntil: null,
@@ -224,13 +228,14 @@ const h = vi.hoisted(() => {
     },
     budget: { used: 4, target: 30 },
   };
-  const dailyWork: DailyWorkSummaryResult = {
+  const dailyWork: DailyWorkWithGraduations = {
     asOf: "2026-05-30T18:00:00.000Z",
     dueQueueItems: 4,
     inboxSources: 0,
     activeUnscheduledSources: 0,
     resumeSource: null,
     recommendedAction: "process_due_queue",
+    graduationEvents: [],
   };
   const priorityIntegrity: PriorityIntegrityGetResult = {
     asOf: "2026-05-30T18:00:00.000Z",

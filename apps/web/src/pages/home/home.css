@@ -60,6 +60,62 @@
   color: var(--text);
 }
 
+/* ---------- Quiet graduation receipts ---------- */
+.home-graduations {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s-3);
+  align-items: start;
+  margin: var(--s-3) 0 var(--s-4);
+  padding: var(--s-3);
+  border: 1px solid color-mix(in oklch, var(--success) 30%, var(--border));
+  border-radius: var(--r-md);
+  background: color-mix(in oklch, var(--success) 6%, var(--surface));
+}
+.home-graduations__icon {
+  display: inline-flex;
+  color: var(--success);
+}
+.home-graduations__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.home-graduations__line {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+  gap: var(--s-2);
+  align-items: center;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--t-sm);
+  text-align: left;
+}
+.home-graduations__line span {
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-graduations__line small {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--t-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-graduations__line--link {
+  cursor: pointer;
+}
+.home-graduations__line--link:hover span {
+  text-decoration: underline;
+}
+
 /* ---------- Section heading (shared by preview + tiles) ---------- */
 .home-section {
   display: flex;

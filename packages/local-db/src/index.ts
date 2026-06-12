@@ -115,6 +115,8 @@ export {
   type CreateConceptInput,
 } from "./concept-repository";
 export {
+  type DailyWorkGraduationAckRequest,
+  type DailyWorkGraduationAckResult,
   DailyWorkQuery,
   type DailyWorkRecommendedAction,
   type DailyWorkResumeSource,
@@ -473,6 +475,7 @@ export {
   type KnowledgeStaleness,
   type TopicKnowledgeGraduationStatus,
   type TopicKnowledgeStateOptions,
+  type TopicKnowledgeStateOrder,
   TopicKnowledgeStateQuery,
   type TopicKnowledgeStateSubject,
   type TopicKnowledgeStateSubjectType,

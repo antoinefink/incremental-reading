@@ -223,7 +223,16 @@ function installAppApi(overrides: Partial<AppApi> = {}): AppApi {
         activeUnscheduledSources: 0,
         resumeSource: null,
         recommendedAction: "triage_inbox",
+        graduationEvents: [],
         request,
+      })),
+      ackGraduationEvents: vi.fn(async (request?: unknown) => ({
+        asOf: "2026-06-08T09:00:00.000Z",
+        acknowledgedEventIds:
+          request && typeof request === "object" && "eventIds" in request
+            ? ((request as { eventIds?: readonly string[] }).eventIds ?? [])
+            : [],
+        observedSubjectCount: 0,
       })),
     },
     library: {
@@ -374,6 +383,15 @@ describe("renderer appApi wrapper", () => {
     await appApi.getDailyWorkSummary({ asOf: "2026-06-08T09:00:00.000Z" });
     expect(bridge.dailyWork.summary).toHaveBeenCalledWith({
       asOf: "2026-06-08T09:00:00.000Z",
+    });
+
+    await appApi.ackDailyWorkGraduationEvents({
+      asOf: "2026-06-08T09:00:00.000Z",
+      eventIds: ["topic:topic-1:graduated:v1"],
+    });
+    expect(bridge.dailyWork.ackGraduationEvents).toHaveBeenCalledWith({
+      asOf: "2026-06-08T09:00:00.000Z",
+      eventIds: ["topic:topic-1:graduated:v1"],
     });
 
     await appApi.createSynthesisNote({ title: "New note" });

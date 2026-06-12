@@ -186,6 +186,8 @@ import type {
   ConceptsMembersResult,
   ConceptsUnassignRequest,
   ConceptsUnassignResult,
+  DailyWorkGraduationAckRequest,
+  DailyWorkGraduationAckResult,
   DailyWorkSummaryRequest,
   DailyWorkSummaryResult,
   DbStatus,
@@ -5380,6 +5382,7 @@ export class DbService {
       ...(request?.limit !== undefined ? { limit: request.limit } : {}),
       ...(request?.subjectType !== undefined ? { subjectType: request.subjectType } : {}),
       ...(request?.subjectId !== undefined ? { subjectId: request.subjectId } : {}),
+      ...(request?.order !== undefined ? { order: request.order } : {}),
     });
   }
 
@@ -5428,6 +5431,18 @@ export class DbService {
     }
     const asOf = (request?.asOf ?? nowIso()) as IsoTimestamp;
     return this.dailyWork.summary(asOf);
+  }
+
+  ackDailyWorkGraduationEvents(
+    request?: DailyWorkGraduationAckRequest,
+  ): DailyWorkGraduationAckResult {
+    if (!this.dailyWork) {
+      throw new Error("DbService: database is not open");
+    }
+    return this.dailyWork.acknowledgeGraduationEvents({
+      ...(request?.asOf !== undefined ? { asOf: request.asOf as IsoTimestamp } : {}),
+      ...(request?.eventIds !== undefined ? { eventIds: request.eventIds } : {}),
+    });
   }
 
   /**

@@ -12,9 +12,8 @@
  * the work over `review_logs`/`elements`/`review_states`), so the numbers are
  * correct, survive an app restart, and match what the user actually graded.
  *
- * The kit's "7-day forecast" + "Retention by concept" panels need a forecast model
- * + concept-level retention — both deferred to M17/T083; M9 renders only the data
- * we actually have. T046 will add the import/process balance `Banner` here.
+ * T109 adds concept-level maturity/retention receipts from the read-only
+ * topic-knowledge-state bridge. The renderer still does no aggregation.
  */
 
 import { useNavigate } from "@tanstack/react-router";
@@ -26,6 +25,9 @@ import {
   appApi,
   isDesktop,
   type PriorityIntegrityGetResult,
+  type TopicKnowledgeStateGetRequest,
+  type TopicKnowledgeStateGetResult,
+  type TopicKnowledgeStateSubject,
 } from "../lib/appApi";
 import { UNDO_EVENT } from "../shell/nav";
 import "./analytics.css";
@@ -41,6 +43,91 @@ function formatRetention(value: number | null): string {
 /** A small whole-number formatter with thousands separators. */
 function formatCount(value: number): string {
   return Math.round(value).toLocaleString();
+}
+
+function formatPct(value: number | null): string {
+  return value === null ? "—" : `${Math.round(value * 100)}%`;
+}
+
+function graduationLabel(status: TopicKnowledgeStateSubject["graduationState"]["status"]): string {
+  switch (status) {
+    case "graduated":
+      return "Mature";
+    case "near_graduation":
+      return "Near mature";
+    case "needs_attention":
+      return "Needs attention";
+    case "building":
+      return "Building";
+    case "insufficient_evidence":
+      return "Insufficient evidence";
+  }
+}
+
+function ConceptRetentionPanel({
+  data,
+  error,
+  onOpenConcept,
+}: {
+  data: TopicKnowledgeStateGetResult | null;
+  error: string | null;
+  onOpenConcept: (conceptId: string) => void;
+}) {
+  const subjects = data?.subjects ?? [];
+  return (
+    <div className="an-panel an-knowledge" data-testid="concept-retention-panel">
+      <div className="an-panel__head">
+        <span className="an-panel__title">Concept retention</span>
+        <span className="an-panel__meta">{data?.windowDays ?? 90} days</span>
+      </div>
+      {error ? (
+        <p className="an-priority__error" data-testid="concept-retention-error">
+          {error}
+        </p>
+      ) : subjects.length === 0 ? (
+        <p className="an-knowledge__empty" data-testid="concept-retention-empty">
+          No concept retention receipts yet.
+        </p>
+      ) : (
+        <div className="an-knowledge__rows" data-testid="concept-retention-rows">
+          {subjects.map((subject) => (
+            <button
+              type="button"
+              key={subject.subjectId}
+              className={`an-knowledge__row an-knowledge__row--${subject.graduationState.status}`}
+              data-testid="concept-retention-row"
+              onClick={() => onOpenConcept(subject.subjectId)}
+            >
+              <span className="an-knowledge__main">
+                <span className="an-knowledge__title">{subject.title}</span>
+                <span className="an-knowledge__meta">
+                  {graduationLabel(subject.graduationState.status)} ·{" "}
+                  {subject.retention.reviewCount} reviews
+                </span>
+              </span>
+              <span className="an-knowledge__metric">
+                <span className="an-knowledge__value">
+                  {formatPct(subject.retention.measuredRetention)}
+                </span>
+                <span className="an-knowledge__label">
+                  target {formatPct(subject.retention.retentionTarget)}
+                </span>
+              </span>
+              <span className="an-knowledge__metric">
+                <span className="an-knowledge__value">
+                  {formatPct(subject.funnel.matureOfCarded)}
+                </span>
+                <span className="an-knowledge__label">
+                  {subject.funnel.mature}/{subject.funnel.carded} mature
+                </span>
+              </span>
+              <Icon name="chevronRight" size={14} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function AnalyticsScreen() {
@@ -62,6 +149,10 @@ export function AnalyticsScreen() {
     null,
   );
   const [priorityIntegrityError, setPriorityIntegrityError] = useState<string | null>(null);
+  const [conceptKnowledge, setConceptKnowledge] = useState<TopicKnowledgeStateGetResult | null>(
+    null,
+  );
+  const [conceptKnowledgeError, setConceptKnowledgeError] = useState<string | null>(null);
   const loadRequestId = useRef(0);
   const activityRequestId = useRef(0);
   const priorityIntegrityRef = useRef<HTMLElement>(null);
@@ -74,12 +165,16 @@ export function AnalyticsScreen() {
     const requestId = loadRequestId.current + 1;
     loadRequestId.current = requestId;
     setLoading(true);
-    const [analyticsResult, yieldResult, stagnationResult, priorityResult] =
+    const conceptKnowledgeRequest: TopicKnowledgeStateGetRequest & {
+      readonly order?: "needs_attention" | "default";
+    } = { subjectType: "concept", limit: 6, order: "needs_attention" };
+    const [analyticsResult, yieldResult, stagnationResult, priorityResult, conceptResult] =
       await Promise.allSettled([
         appApi.getAnalytics(),
         appApi.getSourceYield(),
         appApi.getExtractStagnation(),
         appApi.getPriorityIntegrity(),
+        appApi.getTopicKnowledgeState(conceptKnowledgeRequest),
       ]);
     if (loadRequestId.current !== requestId) return;
 
@@ -108,6 +203,17 @@ export function AnalyticsScreen() {
         priorityResult.reason instanceof Error
           ? priorityResult.reason.message
           : String(priorityResult.reason),
+      );
+    }
+    if (conceptResult.status === "fulfilled") {
+      setConceptKnowledge(conceptResult.value);
+      setConceptKnowledgeError(null);
+    } else {
+      setConceptKnowledge(null);
+      setConceptKnowledgeError(
+        conceptResult.reason instanceof Error
+          ? conceptResult.reason.message
+          : String(conceptResult.reason),
       );
     }
     setLoading(false);
@@ -275,6 +381,12 @@ export function AnalyticsScreen() {
             ref={priorityIntegrityRef}
             data={priorityIntegrity}
             error={priorityIntegrityError}
+          />
+
+          <ConceptRetentionPanel
+            data={conceptKnowledge}
+            error={conceptKnowledgeError}
+            onOpenConcept={(conceptId) => void navigate({ to: "/concepts", search: { conceptId } })}
           />
 
           {/* Reviews per day spark */}

@@ -1,11 +1,14 @@
 import type { ElementId, IsoTimestamp } from "@interleave/core";
 import type { DbHandle } from "@interleave/db";
-import { elements, reviewStates } from "@interleave/db";
+import { cards, elements, reviewLogs, reviewStates } from "@interleave/db";
+import { CARD_MATURE_STABILITY_DAYS } from "@interleave/scheduler";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BlockProcessingService } from "./block-processing-service";
+import { ConceptRepository } from "./concept-repository";
 import { DailyWorkQuery } from "./daily-work-query";
 import { ElementRepository } from "./element-repository";
+import { newReviewLogId } from "./ids";
 import { createRepositories } from "./index";
 import { ReviewRepository } from "./review-repository";
 import { SourceRepository } from "./source-repository";
@@ -15,6 +18,7 @@ let handle: DbHandle;
 let elementsRepo: ElementRepository;
 let sources: SourceRepository;
 let reviews: ReviewRepository;
+let concepts: ConceptRepository;
 let query: DailyWorkQuery;
 
 const NOW = "2026-06-08T09:00:00.000Z" as IsoTimestamp;
@@ -26,6 +30,7 @@ beforeEach(() => {
   elementsRepo = new ElementRepository(handle.db);
   sources = new SourceRepository(handle.db);
   reviews = new ReviewRepository(handle.db);
+  concepts = new ConceptRepository(handle.db);
   query = new DailyWorkQuery(createRepositories(handle.db), new BlockProcessingService(handle.db));
 });
 
@@ -90,6 +95,66 @@ function createActiveScheduledSource(title: string, dueAt: IsoTimestamp): Elemen
   }).element.id;
   handle.db.update(elements).set({ dueAt }).where(eq(elements.id, id)).run();
   return id;
+}
+
+function createGraduatedConcept(name = "Graduated concept"): ElementId {
+  const concept = concepts.createConcept({ name });
+  concepts.setConceptRetention(concept.id, 0.9);
+  const sourceId = elementsRepo.create({
+    type: "source",
+    status: "active",
+    stage: "raw_source",
+    priority: 0.7,
+    title: `${name} source`,
+  }).id;
+  const extractId = elementsRepo.create({
+    type: "extract",
+    status: "done",
+    stage: "clean_extract",
+    priority: 0.7,
+    title: `${name} extract`,
+    parentId: sourceId,
+    sourceId,
+  }).id;
+  elementsRepo.update(extractId, { extractFate: "synthesized" });
+  for (let index = 0; index < 3; index += 1) {
+    const cardId = elementsRepo.create({
+      type: "card",
+      status: "active",
+      stage: "active_card",
+      priority: 0.7,
+      title: `${name} card ${index + 1}`,
+      parentId: extractId,
+      sourceId,
+    }).id;
+    handle.db.insert(cards).values({ elementId: cardId, kind: "qa", isRetired: false }).run();
+    handle.db
+      .insert(reviewStates)
+      .values({
+        elementId: cardId,
+        fsrsState: "review",
+        stability: CARD_MATURE_STABILITY_DAYS + 1,
+        reps: 3,
+      })
+      .run();
+    handle.db
+      .insert(reviewLogs)
+      .values({
+        id: newReviewLogId(),
+        elementId: cardId,
+        rating: "good",
+        reviewedAt: "2026-06-07T09:00:00.000Z",
+        responseMs: 800,
+        prevState: "review",
+        nextState: "review",
+        nextStability: CARD_MATURE_STABILITY_DAYS + 1,
+        nextDifficulty: 5,
+        nextDueAt: "2026-07-07T09:00:00.000Z",
+      })
+      .run();
+  }
+  concepts.assignConcept(sourceId, concept.id);
+  return concept.id;
 }
 
 describe("DailyWorkQuery", () => {
@@ -220,5 +285,56 @@ describe("DailyWorkQuery", () => {
       resumeSource: null,
       recommendedAction: "clear",
     });
+  });
+
+  it("emits graduation lines until observed and emits again after an observed regression", () => {
+    const conceptId = createGraduatedConcept("Spaced repetition");
+
+    const first = query.summary(NOW);
+
+    expect(first.graduationEvents).toHaveLength(1);
+    expect(first.graduationEvents[0]).toMatchObject({
+      subjectType: "concept",
+      subjectId: conceptId,
+      title: "Spaced repetition",
+    });
+
+    query.acknowledgeGraduationEvents({
+      asOf: NOW,
+      eventIds: first.graduationEvents.map((event) => event.eventId),
+    });
+    expect(query.summary(NOW).graduationEvents).toHaveLength(0);
+
+    handle.db.update(reviewStates).set({ stability: 1 }).run();
+    query.acknowledgeGraduationEvents({
+      asOf: "2026-06-09T09:00:00.000Z" as IsoTimestamp,
+      eventIds: [],
+    });
+    expect(query.summary("2026-06-09T09:00:00.000Z" as IsoTimestamp).graduationEvents).toHaveLength(
+      0,
+    );
+
+    handle.db
+      .update(reviewStates)
+      .set({ stability: CARD_MATURE_STABILITY_DAYS + 1 })
+      .run();
+    const regraduated = query.summary("2026-06-10T09:00:00.000Z" as IsoTimestamp);
+
+    expect(regraduated.graduationEvents).toHaveLength(1);
+    expect(regraduated.graduationEvents[0]?.eventId).toBe(first.graduationEvents[0]?.eventId);
+  });
+
+  it("does not suppress graduation lines when acknowledgement event ids do not match", () => {
+    createGraduatedConcept("Invalid acknowledgement");
+    const first = query.summary(NOW);
+
+    query.acknowledgeGraduationEvents({
+      asOf: NOW,
+      eventIds: ["concept:missing:graduated:v1"],
+    });
+
+    expect(query.summary(NOW).graduationEvents.map((event) => event.eventId)).toEqual(
+      first.graduationEvents.map((event) => event.eventId),
+    );
   });
 });

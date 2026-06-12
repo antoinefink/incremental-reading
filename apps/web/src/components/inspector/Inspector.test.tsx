@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ElementSummary, InspectorData } from "../../lib/appApi";
+import type { ElementSummary, InspectorData, TopicKnowledgeStateGetResult } from "../../lib/appApi";
 
 const h = vi.hoisted(() => ({
   desktop: true,
@@ -16,6 +16,7 @@ const h = vi.hoisted(() => ({
   scheduleQueueItem: vi.fn(),
   fallowTopic: vi.fn(),
   unfallowTopic: vi.fn(),
+  getTopicKnowledgeState: vi.fn(),
   semanticRelated: vi.fn(),
   listTasks: vi.fn(),
   createTask: vi.fn(),
@@ -34,7 +35,11 @@ vi.mock("../../reader/navigateToLocation", () => ({
 }));
 
 vi.mock("../../review/ReviewModeButton", () => ({
-  ReviewModeButton: () => <button type="button" data-testid="review-mode-button" />,
+  ReviewModeButton: ({ label, testId }: { label?: (count: number) => string; testId?: string }) => (
+    <button type="button" data-testid={testId ?? "review-mode-button"}>
+      {label ? label(4) : "Review"}
+    </button>
+  ),
 }));
 
 vi.mock("../../shell/selection", () => ({
@@ -59,6 +64,7 @@ vi.mock("../../lib/appApi", async () => {
       scheduleQueueItem: h.scheduleQueueItem,
       fallowTopic: h.fallowTopic,
       unfallowTopic: h.unfallowTopic,
+      getTopicKnowledgeState: h.getTopicKnowledgeState,
       semanticRelated: h.semanticRelated,
       listTasks: h.listTasks,
       createTask: h.createTask,
@@ -127,6 +133,52 @@ function topicData(title: string): InspectorData {
     concepts: [],
     review: null,
     lifetime: null,
+  };
+}
+
+function topicKnowledge(): TopicKnowledgeStateGetResult {
+  return {
+    asOf: "2026-06-12T10:00:00.000Z",
+    windowDays: 90,
+    subjects: [
+      {
+        subjectType: "topic",
+        subjectId: "topic-1",
+        title: "Topic one",
+        priority: 0.5,
+        priorityLabel: "C",
+        directMemberCount: null,
+        includedElementCount: 8,
+        funnel: {
+          read: 4,
+          extracted: 3,
+          distilled: 2,
+          carded: 2,
+          mature: 1,
+          extractedOfRead: 0.75,
+          distilledOfExtracted: 2 / 3,
+          cardedOfDistilled: 1,
+          matureOfCarded: 0.5,
+        },
+        stability: { young: 1, maturing: 1, mature: 1, retired: 0 },
+        retention: {
+          windowDays: 90,
+          reviewCount: 7,
+          measuredRetention: 0.84,
+          retentionTarget: 0.92,
+          directConceptTarget: null,
+          deltaFromTarget: -0.08,
+          snapshots: [],
+        },
+        staleness: { staleItems: 1, needsReverify: 1 },
+        graduationState: {
+          status: "needs_attention",
+          reason: "Retention is below target.",
+          thresholdVersion: "v1",
+        },
+      },
+    ],
+    graduationEvents: [],
   };
 }
 
@@ -316,6 +368,8 @@ beforeEach(() => {
   h.getInspectorData.mockResolvedValue({ data: topicData("Topic one") });
   h.getLineage.mockReset();
   h.getLineage.mockResolvedValue({ lineage: { rootId: "topic-1", nodes: [] } });
+  h.getTopicKnowledgeState.mockReset();
+  h.getTopicKnowledgeState.mockResolvedValue(topicKnowledge());
   h.setElementPriority.mockReset();
   h.setElementPriority.mockResolvedValue({ element: null });
   h.scheduleQueueItem.mockReset();
@@ -392,6 +446,29 @@ describe("Inspector", () => {
     );
     expect(h.getInspectorData).toHaveBeenCalledWith({ id: "topic-1" });
     expect(h.listInspectableElements).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders the topic maturity receipt and weak-topic subset review CTA", async () => {
+    h.selectedId = "topic-1";
+    render(<Inspector />);
+
+    await screen.findByTestId("topic-maturity-status");
+    const panel = screen.getByTestId("topic-maturity-section");
+    expect(h.getTopicKnowledgeState).toHaveBeenCalledWith({
+      subjectType: "topic",
+      subjectId: "topic-1",
+      limit: 1,
+      order: "default",
+    });
+    expect(panel).toHaveTextContent("Needs attention");
+    expect(panel).toHaveTextContent("84%");
+    expect(panel).toHaveTextContent("target 92%");
+    expect(panel).toHaveTextContent("Retention is below target.");
+    expect(screen.getByTestId("topic-maturity-buckets")).toHaveTextContent("Young 1");
+    expect(screen.getByTestId("topic-maturity-flags")).toHaveTextContent("1 stale");
+    expect(screen.getByTestId("topic-maturity-review")).toHaveTextContent(
+      "Review 4 weak-topic cards",
+    );
   });
 
   it("renders source provenance URLs as clickable external links", async () => {

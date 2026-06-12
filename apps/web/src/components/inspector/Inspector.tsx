@@ -49,6 +49,8 @@ import {
   type TaskType,
   type TopicFallowRequest,
   type TopicFallowResult,
+  type TopicKnowledgeStateGetRequest,
+  type TopicKnowledgeStateSubject,
   type TopicUnfallowRequest,
 } from "../../lib/appApi";
 import { useNavigateToLocation } from "../../reader/navigateToLocation";
@@ -981,6 +983,135 @@ function ResolvedRetentionRow({ cardId }: { cardId: string }) {
         </span>
       ) : null}
     </MetaRow>
+  );
+}
+
+function maturityPct(value: number | null): string {
+  return value === null ? "—" : `${Math.round(value * 100)}%`;
+}
+
+function maturityStatusLabel(
+  status: TopicKnowledgeStateSubject["graduationState"]["status"],
+): string {
+  switch (status) {
+    case "graduated":
+      return "Mature";
+    case "near_graduation":
+      return "Near mature";
+    case "needs_attention":
+      return "Needs attention";
+    case "building":
+      return "Building";
+    case "insufficient_evidence":
+      return "Insufficient evidence";
+  }
+}
+
+function TopicMaturitySection({ topicId }: { topicId: string }) {
+  const [subject, setSubject] = useState<TopicKnowledgeStateSubject | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const request: TopicKnowledgeStateGetRequest & {
+      readonly order?: "needs_attention" | "default";
+    } = {
+      subjectType: "topic",
+      subjectId: topicId,
+      limit: 1,
+      order: "default",
+    };
+    setLoading(true);
+    void appApi
+      .getTopicKnowledgeState(request)
+      .then((res) => {
+        if (cancelled) return;
+        setSubject(res.subjects[0] ?? null);
+        setError(null);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setSubject(null);
+        setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [topicId]);
+
+  return (
+    <div className="insp-sec insp-maturity" data-testid="topic-maturity-section">
+      <div className="insp-sec__title">
+        <span>Knowledge state</span>
+        {subject ? (
+          <span
+            className={`insp-maturity__status insp-maturity__status--${subject.graduationState.status}`}
+            data-testid="topic-maturity-status"
+          >
+            {maturityStatusLabel(subject.graduationState.status)}
+          </span>
+        ) : null}
+      </div>
+      {loading && !subject ? (
+        <p className="insp-empty" data-testid="topic-maturity-loading">
+          Loading maturity…
+        </p>
+      ) : error ? (
+        <p className="insp-empty text-danger" data-testid="topic-maturity-error">
+          {error}
+        </p>
+      ) : subject ? (
+        <>
+          <div className="insp-maturity__grid">
+            <div className="insp-maturity__metric">
+              <span>{maturityPct(subject.funnel.extractedOfRead)}</span>
+              <small>extracted / read</small>
+            </div>
+            <div className="insp-maturity__metric">
+              <span>{maturityPct(subject.funnel.matureOfCarded)}</span>
+              <small>
+                {subject.funnel.mature}/{subject.funnel.carded} mature
+              </small>
+            </div>
+            <div className="insp-maturity__metric">
+              <span>{maturityPct(subject.retention.measuredRetention)}</span>
+              <small>target {maturityPct(subject.retention.retentionTarget)}</small>
+            </div>
+          </div>
+          <div className="insp-maturity__buckets" data-testid="topic-maturity-buckets">
+            <span>Young {subject.stability.young}</span>
+            <span>Maturing {subject.stability.maturing}</span>
+            <span>Mature {subject.stability.mature}</span>
+            <span>Retired {subject.stability.retired}</span>
+          </div>
+          {subject.staleness.staleItems > 0 || subject.staleness.needsReverify > 0 ? (
+            <p className="insp-maturity__note" data-testid="topic-maturity-flags">
+              {subject.staleness.staleItems} stale · {subject.staleness.needsReverify} need reverify
+            </p>
+          ) : null}
+          <p className="insp-maturity__note">{subject.graduationState.reason}</p>
+          {subject.graduationState.status === "needs_attention" ? (
+            <div className="insp-branch-review" data-testid="topic-maturity-weak-cta">
+              <ReviewModeButton
+                selector={{ kind: "branch", rootId: topicId }}
+                hideWhileLoading
+                icon="target"
+                label={(n) => `Review ${n} weak-topic card${n === 1 ? "" : "s"}`}
+                testId="topic-maturity-review"
+              />
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <p className="insp-empty" data-testid="topic-maturity-empty">
+          No maturity receipt yet.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -2205,6 +2336,10 @@ function InspectorBody({
           onFallow={onFallowTopic}
           onUnfallow={onUnfallowTopic}
         />
+      ) : null}
+
+      {element.type === "topic" ? (
+        <TopicMaturitySection key={`${element.id}:${refreshTick}`} topicId={element.id} />
       ) : null}
 
       {/* Scheduler — the FSRS vs attention split, surfaced explicitly. */}

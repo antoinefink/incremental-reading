@@ -50,6 +50,7 @@ import type {
   ConceptsCreateRequest,
   ConceptsMembersRequest,
   ConceptsUnassignRequest,
+  DailyWorkGraduationAckRequest,
   DailyWorkSummaryRequest,
   DocumentMarksAddRequest,
   DocumentMarksListRequest,
@@ -489,6 +490,8 @@ const appApi: AppApi = {
   dailyWork: {
     summary: (request?: DailyWorkSummaryRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.dailyWorkSummary, request ?? {}),
+    ackGraduationEvents: (request?: DailyWorkGraduationAckRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.dailyWorkAckGraduationEvents, request ?? {}),
   },
   sourceYield: {
     list: (request?: SourceYieldListRequest) =>

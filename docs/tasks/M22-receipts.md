@@ -338,14 +338,14 @@ for graduation moments.
 
 ## Deliverables
 
-- [ ] Topic/concept page: knowledge-state panel (funnel ratios, stability buckets, retention
+- [x] Topic/concept page: knowledge-state panel (funnel ratios, stability buckets, retention
       trend vs target, flags) following the design kit.
-- [ ] Analytics: concept-level retention view wired to T108 (replace the stub comment).
-- [ ] Daily summary: graduation events as quiet celebratory lines ("'Bayesian statistics'
+- [x] Analytics: concept-level retention view wired to T108 (replace the stub comment).
+- [x] Daily summary: graduation events as quiet celebratory lines ("'Bayesian statistics'
       reached mature"), each linking to the topic panel; no event spam (one per crossing).
-- [ ] T096 hook: from a weak-topic panel, one click starts a subset review session scoped to it
+- [x] T096 hook: from a weak-topic panel, one click starts a subset review session scoped to it
       (consume the existing review-modes machinery — no new session type).
-- [ ] Tests: renderer units; e2e — seeded topic shows the panel, a graduation event renders in
+- [x] Tests: renderer units; e2e — seeded topic shows the panel, a graduation event renders in
       the daily summary, click-through to subset review works.
 
 ## Done when

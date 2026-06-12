@@ -31,6 +31,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AnalyticsGetResult,
   DailyWorkSummaryResult,
+  KnowledgeGraduationEvent,
   QueueItemSummary,
   QueueListResult,
 } from "../../lib/appApi";
@@ -44,6 +45,9 @@ import type {
 const UNDO_EVENT = "interleave:undo";
 
 const h = vi.hoisted(() => {
+  type DailyWorkWithGraduations = DailyWorkSummaryResult & {
+    readonly graduationEvents?: readonly KnowledgeGraduationEvent[];
+  };
   const noFallow = {
     fallowState: null,
     fallowUntil: null,
@@ -259,13 +263,14 @@ const h = vi.hoisted(() => {
     retired: 0,
     dayStreak: 5,
   };
-  const dailyWork: DailyWorkSummaryResult = {
+  const dailyWork: DailyWorkWithGraduations = {
     asOf: "2026-05-30T18:00:00.000Z",
     dueQueueItems: 4,
     inboxSources: 0,
     activeUnscheduledSources: 0,
     resumeSource: null,
     recommendedAction: "process_due_queue",
+    graduationEvents: [],
   };
   return {
     queue,
@@ -274,6 +279,7 @@ const h = vi.hoisted(() => {
     listQueue: vi.fn(),
     getAnalytics: vi.fn(),
     getDailyWorkSummary: vi.fn(),
+    ackDailyWorkGraduationEvents: vi.fn(),
     navigateSpy: vi.fn(),
     selectSpy: vi.fn(),
     // Flipped per-test so the non-desktop fallback can be exercised without a
@@ -303,6 +309,7 @@ vi.mock("../../lib/appApi", async () => {
       listQueue: h.listQueue,
       getAnalytics: h.getAnalytics,
       getDailyWorkSummary: h.getDailyWorkSummary,
+      ackDailyWorkGraduationEvents: h.ackDailyWorkGraduationEvents,
     },
   };
 });
@@ -320,6 +327,11 @@ beforeEach(() => {
   h.listQueue.mockResolvedValue(h.queue);
   h.getAnalytics.mockResolvedValue(h.analytics);
   h.getDailyWorkSummary.mockResolvedValue(h.dailyWork);
+  h.ackDailyWorkGraduationEvents.mockResolvedValue({
+    asOf: h.dailyWork.asOf,
+    acknowledgedEventIds: [],
+    observedSubjectCount: 0,
+  });
 });
 
 describe("HomeScreen", () => {
@@ -348,6 +360,42 @@ describe("HomeScreen", () => {
 
     // The spark renders one bar per window day.
     expect(screen.getByTestId("home-spark").querySelectorAll(".an-spark__bar").length).toBe(30);
+  });
+
+  it("renders quiet graduation receipts, links concepts, and acknowledges after render", async () => {
+    h.getDailyWorkSummary.mockResolvedValue({
+      ...h.dailyWork,
+      graduationEvents: [
+        {
+          eventId: "concept:concept-bayes:graduated:v1",
+          eventType: "current_graduated",
+          subjectType: "concept",
+          subjectId: "concept-bayes",
+          title: "Bayesian statistics",
+          asOf: h.dailyWork.asOf,
+          thresholdVersion: "v1",
+        },
+      ],
+    });
+
+    render(<HomeScreen />);
+
+    const receipts = await screen.findByTestId("home-graduation-events");
+    expect(receipts).toHaveTextContent("Bayesian statistics");
+    expect(receipts).toHaveTextContent("concept reached mature knowledge state");
+
+    fireEvent.click(screen.getByTestId("home-graduation-link"));
+    expect(h.navigateSpy).toHaveBeenCalledWith({
+      to: "/concepts",
+      search: { conceptId: "concept-bayes" },
+    });
+
+    await waitFor(() =>
+      expect(h.ackDailyWorkGraduationEvents).toHaveBeenCalledWith({
+        asOf: h.dailyWork.asOf,
+        eventIds: ["concept:concept-bayes:graduated:v1"],
+      }),
+    );
   });
 
   it("renders a top-due preview (read-only) with the sorted items, not the full list", async () => {

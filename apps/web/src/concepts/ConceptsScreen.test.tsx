@@ -17,7 +17,11 @@
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConceptMemberSummary, ConceptNode } from "../lib/appApi";
+import type {
+  ConceptMemberSummary,
+  ConceptNode,
+  TopicKnowledgeStateGetResult,
+} from "../lib/appApi";
 
 const h = vi.hoisted(() => {
   const attention: ConceptMemberSummary["scheduler"] = {
@@ -108,21 +112,69 @@ const h = vi.hoisted(() => {
     queueEligible: true,
     notInQueueReason: null,
   };
+  const knowledge: TopicKnowledgeStateGetResult = {
+    asOf: "2026-06-12T10:00:00.000Z",
+    windowDays: 90,
+    subjects: [
+      {
+        subjectType: "concept",
+        subjectId: child.id,
+        title: child.name,
+        priority: null,
+        priorityLabel: null,
+        directMemberCount: 2,
+        includedElementCount: 5,
+        funnel: {
+          read: 4,
+          extracted: 3,
+          distilled: 2,
+          carded: 2,
+          mature: 1,
+          extractedOfRead: 0.75,
+          distilledOfExtracted: 2 / 3,
+          cardedOfDistilled: 1,
+          matureOfCarded: 0.5,
+        },
+        stability: { young: 1, maturing: 1, mature: 1, retired: 0 },
+        retention: {
+          windowDays: 90,
+          reviewCount: 7,
+          measuredRetention: 0.84,
+          retentionTarget: 0.92,
+          directConceptTarget: 0.92,
+          deltaFromTarget: -0.08,
+          snapshots: [],
+        },
+        staleness: { staleItems: 1, needsReverify: 0 },
+        graduationState: {
+          status: "needs_attention",
+          reason: "Retention is below the concept target.",
+          thresholdVersion: "v1",
+        },
+      },
+    ],
+    graduationEvents: [],
+  };
   return {
     parent,
     child,
     sourceMember,
     extractMember,
     cardMember,
+    knowledge,
     navigateSpy: vi.fn(),
     listConcepts: vi.fn(),
     conceptMembers: vi.fn(),
+    getTopicKnowledgeState: vi.fn(),
+    reviewModeCount: vi.fn(),
     desktop: { value: true },
+    search: { value: {} as { conceptId?: string } },
   };
 });
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => h.navigateSpy,
+  useSearch: () => h.search.value,
 }));
 
 vi.mock("../lib/appApi", async () => {
@@ -133,11 +185,21 @@ vi.mock("../lib/appApi", async () => {
     appApi: {
       listConcepts: h.listConcepts,
       conceptMembers: h.conceptMembers,
+      getTopicKnowledgeState: h.getTopicKnowledgeState,
+      reviewModeCount: h.reviewModeCount,
     },
   };
 });
 
 import { ConceptsScreen } from "./ConceptsScreen";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -146,6 +208,9 @@ beforeEach(() => {
   h.conceptMembers.mockResolvedValue({
     members: [h.sourceMember, h.extractMember, h.cardMember],
   });
+  h.getTopicKnowledgeState.mockResolvedValue(h.knowledge);
+  h.reviewModeCount.mockResolvedValue({ total: 3, label: "Concept subset" });
+  h.search.value = {};
 });
 
 describe("ConceptsScreen", () => {
@@ -184,11 +249,58 @@ describe("ConceptsScreen", () => {
     expect(screen.getAllByTestId("concepts-member")).toHaveLength(3);
   });
 
+  it("opens the route conceptId from search and renders its maturity receipt", async () => {
+    h.search.value = { conceptId: "c-child" };
+    render(<ConceptsScreen />);
+
+    await waitFor(() => expect(h.conceptMembers).toHaveBeenCalledWith({ conceptId: "c-child" }));
+    expect(h.getTopicKnowledgeState).toHaveBeenCalledWith({
+      subjectType: "concept",
+      subjectId: "c-child",
+      limit: 1,
+      order: "default",
+    });
+
+    const panel = await screen.findByTestId("concept-maturity-panel");
+    expect(panel).toHaveTextContent("Needs attention");
+    expect(panel).toHaveTextContent("84%");
+    expect(panel).toHaveTextContent("target 92%");
+    expect(panel).toHaveTextContent("Retention is below the concept target.");
+    expect(await screen.findByTestId("concept-maturity-review")).toHaveTextContent(
+      "Review 3 weak-topic cards",
+    );
+  });
+
   it("selecting a concept via the hierarchy filterbar also drills in", async () => {
     render(<ConceptsScreen />);
     fireEvent.click(await screen.findByTestId("concepts-tree-c-child"));
     await waitFor(() => expect(h.conceptMembers).toHaveBeenCalledWith({ conceptId: "c-child" }));
     expect((await screen.findAllByTestId("concepts-member")).length).toBeGreaterThan(0);
+  });
+
+  it("clears previous members and maturity while the next selected concept loads", async () => {
+    render(<ConceptsScreen />);
+    fireEvent.click(await screen.findByTestId("concepts-rail-c-child"));
+    expect(await screen.findAllByTestId("concepts-member")).toHaveLength(3);
+    expect(await screen.findByTestId("concept-maturity-panel")).toHaveTextContent(
+      "Retention is below the concept target.",
+    );
+
+    const pendingMembers = deferred<{ members: readonly ConceptMemberSummary[] }>();
+    const pendingKnowledge = deferred<TopicKnowledgeStateGetResult>();
+    h.conceptMembers.mockReturnValueOnce(pendingMembers.promise);
+    h.getTopicKnowledgeState.mockReturnValueOnce(pendingKnowledge.promise);
+
+    fireEvent.click(screen.getByTestId("concepts-rail-c-root"));
+
+    expect(await screen.findByTestId("concepts-members-loading")).toBeTruthy();
+    expect(screen.queryByText("On the Measure of Intelligence")).toBeNull();
+    expect(screen.getByTestId("concept-maturity-panel")).toHaveTextContent("Loading maturity");
+
+    pendingMembers.resolve({ members: [] });
+    pendingKnowledge.resolve({ ...h.knowledge, subjects: [] });
+    expect(await screen.findByTestId("concepts-members-empty")).toBeTruthy();
+    expect(await screen.findByTestId("concept-maturity-empty")).toBeTruthy();
   });
 
   it("shows the empty-state when the selected concept has no live members", async () => {

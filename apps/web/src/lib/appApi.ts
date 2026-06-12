@@ -3717,6 +3717,7 @@ export interface TopicKnowledgeStateGetRequest {
   readonly limit?: number;
   readonly subjectType?: "concept" | "topic";
   readonly subjectId?: string;
+  readonly order?: "default" | "needs_attention";
 }
 
 export type TopicKnowledgeStateSubjectType = "concept" | "topic";
@@ -3838,6 +3839,18 @@ export interface DailyWorkSummaryResult {
   readonly activeUnscheduledSources: number;
   readonly resumeSource: DailyWorkResumeSource | null;
   readonly recommendedAction: DailyWorkRecommendedAction;
+  readonly graduationEvents: readonly KnowledgeGraduationEvent[];
+}
+
+export interface DailyWorkGraduationAckRequest {
+  readonly asOf?: string;
+  readonly eventIds?: readonly string[];
+}
+
+export interface DailyWorkGraduationAckResult {
+  readonly asOf: string;
+  readonly acknowledgedEventIds: readonly string[];
+  readonly observedSubjectCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -4268,6 +4281,9 @@ export interface AppApi {
   };
   readonly dailyWork: {
     summary(request?: DailyWorkSummaryRequest): Promise<DailyWorkSummaryResult>;
+    ackGraduationEvents(
+      request?: DailyWorkGraduationAckRequest,
+    ): Promise<DailyWorkGraduationAckResult>;
   };
   readonly sourceYield: {
     list(request?: SourceYieldListRequest): Promise<SourceYieldListResult>;
@@ -5338,6 +5354,18 @@ export const appApi = {
    */
   getDailyWorkSummary(request?: DailyWorkSummaryRequest): Promise<DailyWorkSummaryResult> {
     return requireAppApi().dailyWork.summary(request);
+  },
+  ackDailyWorkGraduationEvents(
+    request?: DailyWorkGraduationAckRequest,
+  ): Promise<DailyWorkGraduationAckResult> {
+    if (!isDesktop() || !window.appApi?.dailyWork?.ackGraduationEvents) {
+      return Promise.resolve({
+        asOf: request?.asOf ?? new Date().toISOString(),
+        acknowledgedEventIds: request?.eventIds ?? [],
+        observedSubjectCount: 0,
+      });
+    }
+    return requireAppApi().dailyWork.ackGraduationEvents(request);
   },
   /**
    * The per-source yield rollup (T083) — for every live source, its read %,
