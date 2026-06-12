@@ -33,6 +33,11 @@ import {
   SchedulerChip,
   TypeIcon,
 } from "../../components/inspector/primitives";
+import { LineageDeleteMenu } from "../../components/lineage/LineageDeleteMenu";
+import {
+  type LineageDeleteActions,
+  useLineageDelete,
+} from "../../components/lineage/useLineageDelete";
 import {
   dismissNoticeUntil,
   isNoticeDismissed,
@@ -46,6 +51,7 @@ import { type DoneIntent, DoneIntentMenu } from "../../components/queue/DoneInte
 import { QueueSnackbar } from "../../components/queue/QueueSnackbar";
 import { listenQueueRefresh } from "../../components/queue/queueRefresh";
 import { ScheduleMenu } from "../../components/queue/ScheduleMenu";
+import { Snackbar } from "../../components/Snackbar";
 import { Tooltip } from "../../components/Tooltip";
 import { AutoVirtualList } from "../../components/VirtualList";
 import "../../components/inspector/inspector.css";
@@ -147,6 +153,7 @@ function QueueItem({
   onSelect,
   onOpen,
   onAction,
+  deleteActions,
   onDismissRetirementSuggestion,
   onResolveDone,
   onSchedule,
@@ -158,6 +165,12 @@ function QueueItem({
   onSelect: (item: QueueItemSummary) => void;
   onOpen: (item: QueueItemSummary) => void;
   onAction: (item: QueueItemSummary, kind: RowActionKind) => void;
+  /**
+   * The shared descendant-aware delete controller (T135 / U7). The row's `delete`
+   * action routes through a {@link LineageDeleteMenu} so a node with live descendants
+   * opens the intent menu instead of a silent single-row prune.
+   */
+  deleteActions: LineageDeleteActions;
   onDismissRetirementSuggestion: (item: QueueItemSummary) => void;
   /**
    * Resolve a source's "Done" intent (Finished / Return later / Abandon) chosen in the
@@ -305,6 +318,21 @@ function QueueItem({
               triggerAriaLabel={a.label}
               forceOpenSignal={retirementReviewSignal}
               suggestedIntent={retirementSuggestion?.kind ?? null}
+            />
+          ) : a.kind === "delete" ? (
+            // The row's Delete routes through the descendant-aware intent menu (T135 /
+            // U7): a leaf deletes quietly; a node with live descendants opens the menu.
+            // Keeps the row icon-button look + the `queue-action-delete` testid.
+            <LineageDeleteMenu
+              key={a.kind}
+              target={{ id: item.id, type: item.type, title: item.title }}
+              actions={deleteActions}
+              busy={busy}
+              triggerClassName="qitem__act qitem__act--danger"
+              triggerIcon={a.icon}
+              triggerTestId={`queue-action-${a.kind}`}
+              tooltipLabel={a.label}
+              triggerAriaLabel={a.label}
             />
           ) : (
             // Styled (portaled) tooltip in place of the slow native `title`; the
@@ -480,6 +508,19 @@ export function QueueScreen() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Descendant-aware delete (T135 / U7) for the row `delete` action. A leaf deletes
+  // quietly through the SAME `queue.act` `delete` op (preserving the existing undo); a
+  // node with live descendants opens the intent menu. The branch-delete Undo restores
+  // the exact batch (order-independent, KTD10). After any outcome the queue re-reads.
+  const lineageDelete = useLineageDelete({
+    quietDelete: async (target) => {
+      await appApi.actOnQueueItem({ id: target.id, action: { kind: "delete" } });
+    },
+    onAfter: () => {
+      void refresh();
+    },
+  });
 
   useEffect(() => {
     if (!desktop) return;
@@ -980,10 +1021,11 @@ export function QueueScreen() {
                     key={item.id}
                     item={item}
                     active={selectedId === item.id}
-                    busy={busyId !== null}
+                    busy={busyId !== null || lineageDelete.busy}
                     onSelect={onSelect}
                     onOpen={onOpen}
                     onAction={onAction}
+                    deleteActions={lineageDelete.actions}
                     onDismissRetirementSuggestion={onDismissRetirementSuggestion}
                     onResolveDone={onResolveDone}
                     onSchedule={onSchedule}
@@ -999,10 +1041,11 @@ export function QueueScreen() {
                 // about to be re-read + re-sorted, so EVERY row's action buttons
                 // disable — visual honesty (the guard below also drops clicks while
                 // busyId is set, so leaving other rows enabled would silently no-op).
-                busy={busyId !== null}
+                busy={busyId !== null || lineageDelete.busy}
                 onSelect={onSelect}
                 onOpen={onOpen}
                 onAction={onAction}
+                deleteActions={lineageDelete.actions}
                 onDismissRetirementSuggestion={onDismissRetirementSuggestion}
                 onResolveDone={onResolveDone}
                 onSchedule={onSchedule}
@@ -1113,6 +1156,17 @@ export function QueueScreen() {
           onClose={() => setBatchUndoState(null)}
         />
       )}
+
+      {/* The descendant-aware delete outcome (T135 / U7). Its Undo restores the exact
+          batch for a branch delete (order-independent), the last op for a leaf. */}
+      <Snackbar
+        message={lineageDelete.snackbar?.message ?? null}
+        onUndo={lineageDelete.snackbar?.onUndo}
+        onClose={() => lineageDelete.setSnackbar(null)}
+        icon={lineageDelete.snackbar?.icon ?? "trash"}
+        timeoutMs={lineageDelete.snackbar?.timeoutMs}
+        testId="queue-delete-snackbar"
+      />
     </div>
   );
 }

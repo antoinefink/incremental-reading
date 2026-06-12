@@ -24,6 +24,8 @@ const h = vi.hoisted(() => ({
   postponeTask: vi.fn(),
   exportDocumentMarkdown: vi.fn(),
   exportAnki: vi.fn(),
+  restoreFromTrash: vi.fn(),
+  restoreAncestorChain: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -72,6 +74,8 @@ vi.mock("../../lib/appApi", async () => {
       postponeTask: h.postponeTask,
       exportDocumentMarkdown: h.exportDocumentMarkdown,
       exportAnki: h.exportAnki,
+      restoreFromTrash: h.restoreFromTrash,
+      restoreAncestorChain: h.restoreAncestorChain,
       addTag: vi.fn(),
       removeTag: vi.fn(),
       assignConcept: vi.fn(),
@@ -412,6 +416,10 @@ beforeEach(() => {
     directoryLabel: "Downloads",
     cardCount: 1,
   });
+  h.restoreFromTrash.mockReset();
+  h.restoreFromTrash.mockResolvedValue({ item: null });
+  h.restoreAncestorChain.mockReset();
+  h.restoreAncestorChain.mockResolvedValue({ restored: ["ext-dead"], batchId: "restore-batch-1" });
 });
 
 describe("Inspector", () => {
@@ -889,6 +897,7 @@ describe("Inspector", () => {
             depth: 0,
             meta: "source",
             active: false,
+            deleted: false,
           },
           {
             id: "ext-1",
@@ -898,6 +907,7 @@ describe("Inspector", () => {
             depth: 1,
             meta: "clean extract",
             active: true,
+            deleted: false,
           },
           {
             id: "card-1",
@@ -907,6 +917,7 @@ describe("Inspector", () => {
             depth: 2,
             meta: "active card",
             active: false,
+            deleted: false,
           },
         ],
       },
@@ -924,5 +935,160 @@ describe("Inspector", () => {
 
     expect(h.select).toHaveBeenCalledWith(null);
     expect(h.navigate).toHaveBeenCalledWith({ to: "/card/$id", params: { id: "card-1" } });
+  });
+
+  // T135 / U2 — tombstone lineage in the inspector.
+  describe("lineage tombstones (T135)", () => {
+    /** A focused live card under a soft-deleted middle extract (the user's real case). */
+    function lineageWithDeletedAncestor() {
+      return {
+        lineage: {
+          elementId: "card-1",
+          rootId: "src-1",
+          nodes: [
+            {
+              id: "src-1",
+              title: "The Toxoplasma Of Rage",
+              type: "source",
+              stage: "raw_source",
+              depth: 0,
+              meta: "source",
+              active: false,
+              deleted: false,
+            },
+            {
+              id: "ext-dead",
+              title: "The University of Virginia rape case…",
+              type: "extract",
+              stage: "raw_extract",
+              depth: 1,
+              meta: "raw_extract",
+              active: false,
+              deleted: true,
+            },
+            {
+              id: "card-1",
+              title: "Linked card",
+              type: "card",
+              stage: "active_card",
+              depth: 2,
+              meta: "cloze",
+              active: true,
+              deleted: false,
+            },
+          ],
+        },
+      };
+    }
+
+    it("requests lineage with includeTombstones so a focused node keeps its full chain (Covers R1)", async () => {
+      h.selectedId = "card-1";
+      h.getInspectorData.mockResolvedValue({ data: cardDataWithSourceContext() });
+      h.getLineage.mockResolvedValue(lineageWithDeletedAncestor());
+
+      render(<Inspector />);
+
+      await screen.findByTestId("lineage-tree");
+      expect(h.getLineage).toHaveBeenCalledWith({ id: "card-1", includeTombstones: true });
+      // The deleted middle extract is rendered as a tombstone, not pruned.
+      const dead = screen
+        .getAllByTestId("lineage-tree-node")
+        .find((n) => n.getAttribute("data-element-id") === "ext-dead");
+      expect(dead?.getAttribute("data-deleted")).toBe("true");
+    });
+
+    it("hint Restore calls restoreAncestorChain for the FOCUSED element, not a multi-node restore (Covers R3/B1)", async () => {
+      h.selectedId = "card-1";
+      h.getInspectorData.mockResolvedValue({ data: cardDataWithSourceContext() });
+      h.getLineage.mockResolvedValue(lineageWithDeletedAncestor());
+
+      render(<Inspector />);
+
+      const hint = await screen.findByTestId("lineage-ancestor-deleted");
+      expect(hint).toHaveTextContent(/ancestor of this item is deleted/i);
+
+      fireEvent.click(screen.getByTestId("lineage-ancestor-restore"));
+
+      // The CORRECT primitive: restore the focused element's ancestor chain, which the
+      // main side walks up to a live root — never a per-tombstone `restoreFromTrash` that
+      // could resurrect unrelated sibling tombstones.
+      await waitFor(() => expect(h.restoreAncestorChain).toHaveBeenCalledWith({ id: "card-1" }));
+      expect(h.restoreFromTrash).not.toHaveBeenCalled();
+    });
+
+    it("restores a single tombstone via its ancestor chain from the inline row control (Covers R11/B1)", async () => {
+      h.selectedId = "card-1";
+      h.getInspectorData.mockResolvedValue({ data: cardDataWithSourceContext() });
+      h.getLineage.mockResolvedValue(lineageWithDeletedAncestor());
+
+      render(<Inspector />);
+
+      await screen.findByTestId("lineage-tree");
+      fireEvent.click(screen.getByTestId("lineage-tombstone-restore"));
+
+      // The per-tombstone Restore restores THAT node's chain (so it is never left under a
+      // still-tombstoned parent), not a bare single-row restore.
+      await waitFor(() => expect(h.restoreAncestorChain).toHaveBeenCalledWith({ id: "ext-dead" }));
+      expect(h.restoreFromTrash).not.toHaveBeenCalled();
+    });
+
+    it("does NOT show the ancestor hint (nor restore anything) when only a DESCENDANT is a tombstone (B1)", async () => {
+      // Focused live extract `ext-mid` with a live source ancestor and a DELETED child card.
+      // A deleted descendant is not an "ancestor deleted" case — the hint must stay hidden.
+      h.selectedId = "ext-mid";
+      h.getInspectorData.mockResolvedValue({
+        data: {
+          ...cardDataWithSourceContext(),
+          element: {
+            ...element("ext-mid", "Middle extract"),
+            type: "extract",
+            stage: "raw_extract",
+          },
+        },
+      });
+      h.getLineage.mockResolvedValue({
+        lineage: {
+          elementId: "ext-mid",
+          rootId: "src-1",
+          nodes: [
+            {
+              id: "src-1",
+              title: "The Toxoplasma Of Rage",
+              type: "source",
+              stage: "raw_source",
+              depth: 0,
+              meta: "source",
+              active: false,
+              deleted: false,
+            },
+            {
+              id: "ext-mid",
+              title: "Middle extract",
+              type: "extract",
+              stage: "raw_extract",
+              depth: 1,
+              meta: "raw_extract",
+              active: true,
+              deleted: false,
+            },
+            {
+              id: "card-dead",
+              title: "Deleted child card",
+              type: "card",
+              stage: "active_card",
+              depth: 2,
+              meta: "cloze",
+              active: false,
+              deleted: true,
+            },
+          ],
+        },
+      });
+
+      render(<Inspector />);
+
+      await screen.findByTestId("lineage-tree");
+      expect(screen.queryByTestId("lineage-ancestor-deleted")).toBeNull();
+    });
   });
 });

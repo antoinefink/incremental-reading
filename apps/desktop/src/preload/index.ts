@@ -58,7 +58,9 @@ import type {
   DocumentsExportMarkdownRequest,
   DocumentsGetRequest,
   DocumentsSaveRequest,
+  ElementsCountDescendantsRequest,
   ElementsSetPriorityRequest,
+  ElementsSoftDeleteSubtreeRequest,
   ExtractionCreateRequest,
   ExtractStagnationListRequest,
   ExtractsDeleteRequest,
@@ -159,6 +161,8 @@ import type {
   TopicKnowledgeStateGetRequest,
   TopicUnfallowRequest,
   TrashPurgeRequest,
+  TrashRestoreAncestorChainRequest,
+  TrashRestoreBatchRequest,
   TrashRestoreRequest,
   VaultCollectOrphansRequest,
   VaultFindOrphansRequest,
@@ -193,6 +197,10 @@ const appApi: AppApi = {
   elements: {
     setPriority: (request: ElementsSetPriorityRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.elementsSetPriority, request),
+    countDescendants: (request: ElementsCountDescendantsRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.elementsCountDescendants, request),
+    softDeleteSubtree: (request: ElementsSoftDeleteSubtreeRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.elementsSoftDeleteSubtree, request),
   },
   topics: {
     fallow: (request: TopicFallowRequest) => ipcRenderer.invoke(IPC_CHANNELS.topicsFallow, request),
@@ -473,6 +481,10 @@ const appApi: AppApi = {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.trashList),
     restore: (request: TrashRestoreRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.trashRestore, request),
+    restoreBatch: (request: TrashRestoreBatchRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.trashRestoreBatch, request),
+    restoreAncestorChain: (request: TrashRestoreAncestorChainRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.trashRestoreAncestorChain, request),
     purge: (request: TrashPurgeRequest) => ipcRenderer.invoke(IPC_CHANNELS.trashPurge, request),
     empty: () => ipcRenderer.invoke(IPC_CHANNELS.trashEmpty),
   },

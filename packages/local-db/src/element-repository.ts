@@ -34,9 +34,11 @@ import {
   elements,
   elementTags,
   type InterleaveDatabase,
+  reviewStates,
   tags,
 } from "@interleave/db";
 import { and, eq, inArray, isNull } from "drizzle-orm";
+import { liveDescendantsWithin } from "./descendant-query";
 import { newElementId, newRelationId, newRowId, nowIso } from "./ids";
 import { rowToElement } from "./mappers";
 import { OperationLogRepository } from "./operation-log-repository";
@@ -100,6 +102,17 @@ export interface OpContext {
   readonly batchId?: string;
   /** Command-specific audit/undo metadata merged into the existing op payload. */
   readonly extras?: Readonly<Record<string, unknown>>;
+  /**
+   * Opt-in for the lineage-delete path (T135 / U4): when `true`, a soft-delete also
+   * CLEARS the element's active attention schedule (`elements.due_at`) and — for a
+   * `card` — its FSRS `review_states.due_at`, recording BOTH cleared values as
+   * `prevDueAt`/`prevReviewDueAt` PRE-IMAGES in the `soft_delete_element` payload so
+   * a restore re-establishes the exact pre-delete schedule (the deleted node never
+   * lingers as a phantom "Due today"). Off by default, so every existing
+   * `softDeleteWithin` caller keeps its single-row, schedule-untouched behaviour and
+   * the optional payload fields stay absent.
+   */
+  readonly clearSchedule?: boolean;
 }
 
 export interface RescheduleOptions {
@@ -107,6 +120,35 @@ export interface RescheduleOptions {
   readonly updatedAt?: IsoTimestamp;
   /** Optional T112 attention cadence multiplier to persist with the schedule. */
   readonly attentionIntervalMultiplier?: number;
+}
+
+/**
+ * The schedule PRE-IMAGE to re-establish on restore (T135 / U5), read from the
+ * `soft_delete_element` op payload that the lineage-delete path recorded.
+ */
+export interface RestoreSchedule {
+  /** The `elements.due_at` to restore (the value cleared at delete time). */
+  readonly dueAt: IsoTimestamp | null;
+  /**
+   * The card's FSRS `review_states.due_at` to restore. Only present (and only
+   * written) for a card whose review due was cleared at delete time; `undefined`
+   * leaves `review_states` untouched (a non-card, or a card with no FSRS state).
+   */
+  readonly reviewDueAt?: IsoTimestamp | null;
+}
+
+/** Options for {@link ElementRepository.restore}. */
+export interface RestoreOptions {
+  /** When set, re-establish the attention (+ FSRS, for cards) schedule from the preimage. */
+  readonly schedule?: RestoreSchedule;
+  /**
+   * Groups the N `restore_element` ops of ONE atomic restore (a `restoreBatch` /
+   * `restoreAncestorChain` call) under a shared id (T135 / A1), threaded into the
+   * `restore_element` payload so `UndoService.undoLast` (which reverses every op
+   * sharing the most-recent op's `batchId`) reverses the WHOLE restore as one unit.
+   * Absent for a single-row restore (which undoes on its own).
+   */
+  readonly batchId?: string;
 }
 
 export class ElementRepository {
@@ -207,6 +249,21 @@ export class ElementRepository {
       .select()
       .from(elements)
       .where(and(eq(elements.parentId, parentId), isNull(elements.deletedAt)))
+      .all()
+      .map(rowToElement);
+  }
+
+  /**
+   * List direct children of a parent element INCLUDING soft-deleted ones. Used by
+   * the tombstone-aware lineage walk so a deleted middle node still surfaces its
+   * (live or deleted) descendants; the default lineage path uses {@link
+   * listChildren} (live-only) and is unaffected.
+   */
+  listChildrenIncludingDeleted(parentId: ElementId): Element[] {
+    return this.db
+      .select()
+      .from(elements)
+      .where(eq(elements.parentId, parentId))
       .all()
       .map(rowToElement);
   }
@@ -418,10 +475,33 @@ export class ElementRepository {
     }
     const prevStatus = before.status;
     const ts = nowIso();
-    tx.update(elements)
-      .set({ deletedAt: ts, status: "deleted", updatedAt: ts })
-      .where(eq(elements.id, id))
-      .run();
+
+    // The lineage-delete path (U4) clears the element's active schedule in the SAME
+    // transaction and records the cleared values as PRE-IMAGES so restore is exact.
+    // For a CARD the governing due date is the FSRS `review_states.due_at`, not only
+    // `elements.due_at` — so both stores must be read+cleared (mirrors the queue-exit
+    // and `cardDefer` two-store precedent). Off by default: every other caller keeps
+    // the legacy single-row, schedule-untouched behaviour (these fields stay absent).
+    const clearSchedule = opContext?.clearSchedule === true;
+    const prevDueAt = clearSchedule ? (before.dueAt ?? null) : undefined;
+    let prevReviewDueAt: IsoTimestamp | null | undefined;
+    if (clearSchedule && before.type === "card") {
+      const reviewRow = tx
+        .select({ dueAt: reviewStates.dueAt })
+        .from(reviewStates)
+        .where(eq(reviewStates.elementId, id))
+        .get();
+      // `null` means a review_states row exists but is un-due; `undefined` means no
+      // row at all (don't write a phantom preimage for a card that has no FSRS state).
+      prevReviewDueAt = reviewRow ? ((reviewRow.dueAt ?? null) as IsoTimestamp | null) : undefined;
+    }
+
+    const set: Record<string, unknown> = { deletedAt: ts, status: "deleted", updatedAt: ts };
+    if (clearSchedule) set.dueAt = null;
+    tx.update(elements).set(set).where(eq(elements.id, id)).run();
+    if (clearSchedule && prevReviewDueAt !== undefined) {
+      tx.update(reviewStates).set({ dueAt: null }).where(eq(reviewStates.elementId, id)).run();
+    }
     const row = tx.select().from(elements).where(eq(elements.id, id)).get();
     if (!row) throw new Error(`ElementRepository.softDelete: element ${id} not found`);
     new OperationLogRepository(tx).append(tx, {
@@ -432,36 +512,133 @@ export class ElementRepository {
         deletedAt: ts,
         prev: { status: prevStatus },
         ...(opContext?.batchId ? { batchId: opContext.batchId } : {}),
+        ...(prevDueAt !== undefined ? { prevDueAt } : {}),
+        ...(prevReviewDueAt !== undefined ? { prevReviewDueAt } : {}),
       },
     });
     return rowToElement(row);
   }
 
   /**
+   * Soft-delete a target node and OPTIONALLY its entire live subtree in ONE
+   * transaction under a single shared `batchId` (T135 / U4). This is the one path
+   * behind BOTH lineage-delete intents (KTD7):
+   *  - "keep descendants" (`includeSubtree: false`) tombstones only the target node;
+   *  - "delete the whole branch" (`includeSubtree: true`) soft-deletes the node AND
+   *    every live descendant (walked via the shared {@link liveDescendantsWithin}
+   *    DFS, the same set the fallow walk and the blast-radius inventory use).
+   *
+   * Every per-node delete is PREIMAGE-AWARE ({@link OpContext.clearSchedule}): it
+   * clears `elements.due_at` (+ a card's `review_states.due_at`) and records the
+   * cleared values in the `soft_delete_element` payload, so no deleted node lingers
+   * as a phantom "Due today" and restore re-establishes the exact pre-delete
+   * schedule. Synthesis direction (a) is inherited for free — `softDeleteWithin`
+   * already clears a `synthesis_note`'s cached `synthesized` fates on its still-live
+   * targets; direction (b) (a deleted TARGET extract whose live note stays outside
+   * the set) is reconciled by the {@link ExtractService} entry that wraps this.
+   *
+   * DELETE ORDER is root-first (the root, then descendants in DFS order). The op
+   * rows therefore appear root-first within the batch; the batch restore inverts
+   * them root-first too (see {@link TrashRepository.restoreBatch}). Rows already
+   * soft-deleted are skipped (idempotent) rather than re-stamped, so a partial
+   * subtree that was deleted earlier does not get a duplicate tombstone op.
+   *
+   * Returns the ids actually soft-deleted by THIS call (excludes already-deleted
+   * rows) so the caller can report the affected count.
+   */
+  softDeleteSubtreeWithin(
+    tx: DbClient,
+    id: ElementId,
+    options: { readonly batchId: string; readonly includeSubtree: boolean },
+  ): { readonly affected: readonly ElementId[] } {
+    const root = tx.select().from(elements).where(eq(elements.id, id)).get();
+    if (!root) throw new Error(`ElementRepository.softDeleteSubtree: element ${id} not found`);
+
+    // Root first, then live descendants (only when cascading). The descendant walk
+    // already skips soft-deleted rows, so the set is exactly the live subtree.
+    const targets: ElementId[] = [id];
+    if (options.includeSubtree) {
+      for (const descendant of liveDescendantsWithin(tx, id)) {
+        targets.push(descendant.id as ElementId);
+      }
+    }
+
+    const affected: ElementId[] = [];
+    for (const targetId of targets) {
+      const row = tx.select().from(elements).where(eq(elements.id, targetId)).get();
+      // Revalidate inside the tx: skip a row that is missing or already in the trash
+      // rather than re-stamping it (maintenance-sweep shape — never fail the batch).
+      if (!row || row.deletedAt) continue;
+      this.softDeleteWithin(tx, targetId, { batchId: options.batchId, clearSchedule: true });
+      affected.push(targetId);
+    }
+    return { affected };
+  }
+
+  /**
    * Restore a soft-deleted element to the given status (default `active`), clear
    * `deletedAt`, and log `restore_element`.
+   *
+   * {@link RestoreOptions.schedule} (T135 / U5) re-establishes the element's
+   * attention schedule from the PRE-IMAGE the lineage-delete path recorded: it
+   * writes `elements.due_at` back to `prevDueAt` and, for a card, `review_states.due_at`
+   * back to `prevReviewDueAt`, IN THE SAME transaction as the restore. Without it,
+   * restore (the legacy behaviour) touches only `status`/`deletedAt`, which would
+   * leave a lineage-deleted node out of its queue because its due was cleared at
+   * delete time. Callers pass the preimage they read from the `soft_delete_element`
+   * op payload; absent (the legacy callers), restore leaves the schedule untouched.
    */
-  restore(id: ElementId, status: ElementStatus = "active"): Element {
-    return this.db.transaction((tx) => {
-      const before = tx.select().from(elements).where(eq(elements.id, id)).get();
-      if (!before) throw new Error(`ElementRepository.restore: element ${id} not found`);
-      if (before.type === "synthesis_note") {
-        this.setSynthesisFatesForNoteWithin(tx, id);
-      }
-      const ts = nowIso();
-      tx.update(elements)
-        .set({ deletedAt: null, status, updatedAt: ts })
-        .where(eq(elements.id, id))
+  restore(id: ElementId, status: ElementStatus = "active", options?: RestoreOptions): Element {
+    return this.db.transaction((tx) => this.restoreWithin(tx, id, status, options));
+  }
+
+  /**
+   * Restore using an EXISTING transaction, logging `restore_element` on the SAME
+   * `tx` (so a batch restore reuses one op-logging path). See {@link restore}.
+   */
+  restoreWithin(
+    tx: DbClient,
+    id: ElementId,
+    status: ElementStatus = "active",
+    options?: RestoreOptions,
+  ): Element {
+    const before = tx.select().from(elements).where(eq(elements.id, id)).get();
+    if (!before) throw new Error(`ElementRepository.restore: element ${id} not found`);
+    if (before.type === "synthesis_note") {
+      this.setSynthesisFatesForNoteWithin(tx, id);
+    }
+    const ts = nowIso();
+    const set: Record<string, unknown> = { deletedAt: null, status, updatedAt: ts };
+    const schedule = options?.schedule;
+    if (schedule) set.dueAt = schedule.dueAt ?? null;
+    tx.update(elements).set(set).where(eq(elements.id, id)).run();
+    // A card's governing due lives in FSRS `review_states` — re-establish it too so a
+    // restored card returns to the FSRS due queue exactly where it was before delete.
+    if (schedule && before.type === "card" && schedule.reviewDueAt !== undefined) {
+      tx.update(reviewStates)
+        .set({ dueAt: schedule.reviewDueAt ?? null })
+        .where(eq(reviewStates.elementId, id))
         .run();
-      const row = tx.select().from(elements).where(eq(elements.id, id)).get();
-      if (!row) throw new Error(`ElementRepository.restore: element ${id} not found`);
-      new OperationLogRepository(tx).append(tx, {
-        opType: "restore_element",
-        elementId: id,
-        payload: { id, status },
-      });
-      return rowToElement(row);
+    }
+    const row = tx.select().from(elements).where(eq(elements.id, id)).get();
+    if (!row) throw new Error(`ElementRepository.restore: element ${id} not found`);
+    new OperationLogRepository(tx).append(tx, {
+      opType: "restore_element",
+      elementId: id,
+      payload: {
+        id,
+        status,
+        // Group the ops of one atomic restore (a `restoreBatch` / `restoreAncestorChain`
+        // call) so `UndoService.undoLast` reverses the WHOLE restore as one unit (T135 / A1).
+        ...(options?.batchId ? { batchId: options.batchId } : {}),
+        // Mark that this restore re-established a schedule from a preimage, so the
+        // inverse (undo-the-undo) re-clears the schedule symmetrically (T135 / U5):
+        // a re-trash of a node whose due was set by THIS restore must clear that due
+        // again (and record it as the next preimage) instead of leaving a phantom.
+        ...(schedule ? { scheduleRestored: true } : {}),
+      },
     });
+    return rowToElement(row);
   }
 
   private clearSynthesisFatesForNoteWithin(tx: DbClient, noteId: ElementId): void {

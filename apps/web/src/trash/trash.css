@@ -171,6 +171,60 @@
   background: color-mix(in oklch, var(--danger, #e5484d) 12%, var(--surface));
 }
 
+/* ---------- Branch grouping (T135 / U8) ---------- */
+/* A branch-deleted subtree shows as ONE entry with a child count + source context and a
+   single "Restore branch" — Notion/Finder restore-as-unit. Calm accent-soft tint marks
+   it as a grouped unit distinct from a single row. Tokens only. */
+.trash-group {
+  background: color-mix(in oklch, var(--accent-soft) 35%, var(--surface));
+  border-radius: var(--r-md, 8px);
+}
+.trash-list--virtual .trash-group {
+  /* keep the per-row divider on the virtualized path */
+  border-bottom: 1px solid var(--border-faint, var(--border));
+}
+.trash-group__count {
+  font-weight: 600;
+  color: var(--accent-text);
+}
+
+/* ---------- Purge-guard recovery (T135 / U8 / R12) ---------- */
+/* When a purge is refused (the tombstone still anchors live descendants), the dead-end
+   error is replaced by this inline recovery block — calm but visible --warn tint, with
+   Restore + Delete-branch next steps. */
+.trash-guard {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 10px;
+  border-radius: var(--r-md, 8px);
+  border: 1px solid color-mix(in oklch, var(--warn) 45%, var(--border));
+  background: var(--warn-soft);
+}
+.trash-guard__msg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-sm, 13px);
+  color: var(--warn);
+  min-width: 0;
+}
+.trash-guard__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.trash-btn--warn {
+  color: var(--warn);
+  border-color: color-mix(in oklch, var(--warn) 45%, var(--border));
+  background: var(--surface);
+}
+.trash-btn--warn:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--warn) 14%, var(--surface));
+}
+
 .trash-empty {
   display: flex;
   flex-direction: column;

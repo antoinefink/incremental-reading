@@ -16,13 +16,14 @@
  *    logged), so the log stays append-only.
  */
 
-import type { ElementId, IsoTimestamp } from "@interleave/core";
+import type { BlockId, ElementId, IsoTimestamp } from "@interleave/core";
 import type { DbHandle } from "@interleave/db";
 import { reviewStates } from "@interleave/db";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CardEditService } from "./card-edit-service";
 import { ElementRepository } from "./element-repository";
+import { ExtractService } from "./extract-service";
 import { createRepositories } from "./index";
 import { OperationLogRepository } from "./operation-log-repository";
 import { QueueActionService } from "./queue-action-service";
@@ -489,5 +490,116 @@ describe("UndoService.undoLast", () => {
     expect(
       repos.queue.dueCards("2026-05-30T12:00:00.000Z" as IsoTimestamp).map((c) => c.id),
     ).toContain(id);
+  });
+});
+
+describe("UndoService.undoLast — lineage branch delete (T135/U5)", () => {
+  /** A `source → extract → card` chain; the card is DUE in both stores. */
+  function seedBranch(): { extractId: ElementId; cardId: ElementId; reviewDue: string } {
+    const repos = createRepositories(handle.db);
+    const sourceId = repos.sources.create({ title: "Src", priority: 0.875, status: "active" })
+      .element.id;
+    const extractId = repos.sources.createExtract({
+      sourceElementId: sourceId,
+      title: "Extract",
+      priority: 0.625,
+      selectedText: "…",
+      blockIds: ["blk" as BlockId],
+      startOffset: 0,
+      endOffset: 10,
+      label: "¶1",
+    }).element.id;
+    const reviewDue = "2026-06-15T00:00:00.000Z";
+    const cardId = repos.review.createCard({
+      kind: "qa",
+      title: "Card",
+      priority: 0.625,
+      prompt: "Q?",
+      answer: "A.",
+      parentId: extractId,
+      sourceId,
+      stage: "active_card",
+      firstScheduledAt: reviewDue as IsoTimestamp,
+    }).element.id;
+    return { extractId, cardId, reviewDue };
+  }
+
+  it("R10/R11: undoLast restores every node to prior status AND re-establishes the card's review_states.due_at", () => {
+    const { extractId, cardId, reviewDue } = seedBranch();
+    const repos = createRepositories(handle.db);
+    const review = new ReviewRepository(handle.db);
+    const extractStatusBefore = repos.elements.findById(extractId)?.status;
+    const cardStatusBefore = repos.elements.findById(cardId)?.status;
+
+    new ExtractService(handle.db).deleteSubtree(extractId, { includeSubtree: true });
+    // Both stores are cleared by the delete.
+    expect(repos.elements.findById(cardId)?.dueAt).toBeNull();
+    expect(review.findReviewState(cardId)?.dueAt).toBeNull();
+
+    const result = new UndoService(handle.db).undoLast();
+    expect(result.undone).toBe(true);
+    expect(result.count).toBe(2); // extract + card
+
+    // Both nodes are live again at their EXACT prior status…
+    expect(repos.elements.findById(extractId)?.status).toBe(extractStatusBefore);
+    expect(repos.elements.findById(extractId)?.deletedAt).toBeNull();
+    expect(repos.elements.findById(cardId)?.status).toBe(cardStatusBefore);
+    // …and the card's FSRS due is re-established EXACTLY (back in the due queue).
+    expect(review.findReviewState(cardId)?.dueAt).toBe(reviewDue);
+    expect(
+      repos.queue.dueCards("2026-06-20T00:00:00.000Z" as IsoTimestamp).map((c) => c.id),
+    ).toContain(cardId);
+  });
+
+  it("R10: undoLast restores the branch even after an intervening logged action (batch-scoped)", () => {
+    const { extractId, cardId } = seedBranch();
+    const repos = createRepositories(handle.db);
+
+    new ExtractService(handle.db).deleteSubtree(extractId, { includeSubtree: true });
+    // An unrelated logged action happens AFTER the delete.
+    const otherId = repos.sources.create({ title: "Other", priority: 0.5, status: "active" })
+      .element.id;
+    repos.elements.update(otherId, { title: "Renamed" });
+
+    // undoLast reverses the most-recent op (the rename), not the branch — so the
+    // batch-scoped restore is what the snackbar Undo (restoreBatch) is for. Here we
+    // assert the rename is undone and the branch is still deleted (documents the
+    // global-undo semantics the plan calls out: snackbar uses restoreBatch).
+    const result = new UndoService(handle.db).undoLast();
+    expect(result.undone).toBe(true);
+    expect(repos.elements.findById(otherId)?.title).toBe("Other");
+    expect(repos.elements.findById(extractId)?.deletedAt).toBeTruthy();
+    expect(repos.elements.findById(cardId)?.deletedAt).toBeTruthy();
+  });
+
+  it("undo-the-undo is symmetric: re-trashing a restored card re-clears its FSRS due", () => {
+    const { cardId, reviewDue } = seedBranch();
+    const review = new ReviewRepository(handle.db);
+    const repos = createRepositories(handle.db);
+    const cardStatusBefore = repos.elements.findById(cardId)?.status;
+
+    // Single-node lineage delete of the card (preimage-aware): clears both due stores.
+    new ExtractService(handle.db).deleteSubtree(cardId, { includeSubtree: false });
+    expect(review.findReviewState(cardId)?.dueAt).toBeNull();
+    const undo = new UndoService(handle.db);
+
+    // Undo the delete → card live again + FSRS due re-established EXACTLY.
+    const restored = undo.undoLast();
+    expect(restored.undone).toBe(true);
+    expect(repos.elements.findById(cardId)?.status).toBe(cardStatusBefore);
+    expect(review.findReviewState(cardId)?.dueAt).toBe(reviewDue);
+
+    // Undo-the-undo → the restore is inverted (re-trash). The card must go back to
+    // deleted AND have its FSRS due cleared again (no phantom "Due today").
+    const redo = undo.undoLast();
+    expect(redo.undone).toBe(true);
+    expect(repos.elements.findById(cardId)?.deletedAt).toBeTruthy();
+    expect(repos.elements.findById(cardId)?.status).toBe("deleted");
+    expect(review.findReviewState(cardId)?.dueAt).toBeNull();
+
+    // …and undo-the-undo-the-undo restores it once more (the preimage round-trips).
+    const reRestored = undo.undoLast();
+    expect(reRestored.undone).toBe(true);
+    expect(review.findReviewState(cardId)?.dueAt).toBe(reviewDue);
   });
 });

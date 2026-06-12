@@ -42,6 +42,26 @@ export interface LineageNode {
   readonly meta: string;
   /** True for the element the lineage was requested for (the inspector's focus). */
   readonly active: boolean;
+  /**
+   * True when this node is a soft-deleted "tombstone" — a deleted ancestor kept
+   * visible (only when {@link LineageGetOptions.includeTombstones} is set) so a
+   * live descendant never vanishes from its own chain. Always `false` on the
+   * default live-only path. Derived from `deletedAt`; no schema/status change.
+   */
+  readonly deleted: boolean;
+}
+
+/** Options for {@link LineageQuery.get}. */
+export interface LineageGetOptions {
+  /**
+   * When `true`, include soft-deleted nodes as tombstones: `get` no longer
+   * early-returns for a deleted focused node, `resolveRoot` walks THROUGH deleted
+   * ancestors up to the live root, and `walkDown` descends into soft-deleted
+   * nodes (each tagged `deleted: true`). The default (flag absent/false) path is
+   * live-only and behaviorally unchanged, so yield / "review this branch" / other
+   * analytics consumers are unaffected (R2).
+   */
+  readonly includeTombstones?: boolean;
 }
 
 /** The lineage payload for one element: the root id + the flattened tree. */
@@ -77,45 +97,63 @@ export class LineageQuery {
   constructor(private readonly repos: Repositories) {}
 
   /**
-   * The full lineage tree for one element, or `null` when the id is unknown or
-   * soft-deleted. Resolves the lineage ROOT, then flattens the descendant tree
-   * (pre-order DFS, children sorted by creation order) into depth-tagged nodes,
-   * marking the requested element `active`. Soft-deleted descendants are skipped
-   * (they live in the trash, not the lineage).
+   * The full lineage tree for one element, or `null` when the id is unknown (or
+   * soft-deleted, on the default live-only path). Resolves the lineage ROOT, then
+   * flattens the descendant tree (pre-order DFS, children sorted by creation
+   * order) into depth-tagged nodes, marking the requested element `active`.
+   *
+   * By default soft-deleted nodes are skipped (they live in the trash, not the
+   * lineage). With {@link LineageGetOptions.includeTombstones}, a soft-deleted
+   * focused node still resolves, deleted ancestors are walked THROUGH to the live
+   * root, and soft-deleted descendants are emitted as tombstones (`deleted: true`)
+   * so a live element never vanishes from its own chain (R1).
    */
-  get(id: ElementId): LineageData | null {
+  get(id: ElementId, options: LineageGetOptions = {}): LineageData | null {
+    const includeTombstones = options.includeTombstones ?? false;
     const { elements } = this.repos;
     const element = elements.findById(id);
-    if (!element || element.deletedAt) return null;
+    if (!element) return null;
+    // Default path: a soft-deleted focus has no live lineage. With tombstones on,
+    // the focused node is itself surfaced (as the active tombstone) rather than null.
+    if (element.deletedAt && !includeTombstones) return null;
 
-    const root = this.resolveRoot(element);
+    const root = this.resolveRoot(element, includeTombstones);
     const nodes: LineageNode[] = [];
-    this.walkDown(root, 0, id, nodes);
+    this.walkDown(root, 0, id, nodes, includeTombstones);
     return { elementId: id, rootId: root.id, nodes };
   }
 
   /**
    * Resolve the lineage root for an element: a `source`/`topic` is its own root;
    * otherwise follow `sourceId` to the owning source, falling back to walking
-   * `parentId` up to the topmost live ancestor (so an element with no `sourceId`
-   * still roots somewhere sensible). Defends against cycles with {@link MAX_WALK}.
+   * `parentId` up to the topmost ancestor (so an element with no `sourceId` still
+   * roots somewhere sensible). Defends against cycles with {@link MAX_WALK}.
+   *
+   * On the default path a deleted ancestor terminates the walk (live-only). With
+   * `includeTombstones`, the walk passes THROUGH deleted ancestors so resolution
+   * reaches the live lineage root, keeping a deleted middle's descendants under
+   * their true root rather than rooting them at the tombstone (R1).
    */
-  private resolveRoot(element: Element): Element {
+  private resolveRoot(element: Element, includeTombstones: boolean): Element {
     const { elements } = this.repos;
     if (element.type === "source" || element.type === "topic") return element;
 
     if (element.sourceId && element.sourceId !== element.id) {
       const source = elements.findById(element.sourceId);
-      if (source && !source.deletedAt) return source;
+      // The owning source/topic is almost always live; with tombstones on we still
+      // root at it even if intermediate ancestors are deleted.
+      if (source && (includeTombstones || !source.deletedAt)) return source;
     }
 
-    // No usable `sourceId` — walk `parentId` to the topmost live ancestor.
+    // No usable `sourceId` — walk `parentId` to the topmost ancestor. The default
+    // path stops at the first deleted ancestor; tombstone mode walks through them.
     let current = element;
     const seen = new Set<string>([current.id]);
     for (let i = 0; i < MAX_WALK; i++) {
       if (!current.parentId || current.parentId === current.id) break;
       const parent = elements.findById(current.parentId);
-      if (!parent || parent.deletedAt || seen.has(parent.id)) break;
+      if (!parent || seen.has(parent.id)) break;
+      if (parent.deletedAt && !includeTombstones) break;
       seen.add(parent.id);
       current = parent;
     }
@@ -124,15 +162,21 @@ export class LineageQuery {
 
   /**
    * Pre-order DFS down the `parentId` tree from `node`, pushing a depth-tagged
-   * {@link LineageNode} for each live descendant. `activeId` marks the focused
-   * element. A node is a "sub-extract" when it is an `extract` whose parent is
-   * itself an `extract`. Defends against cycles via a visited set.
+   * {@link LineageNode} for each descendant. `activeId` marks the focused element.
+   * A node is a "sub-extract" when it is an `extract` whose parent is itself an
+   * `extract`. Defends against cycles via a visited set.
+   *
+   * Default path: only LIVE children are walked (`listChildren`) and every node is
+   * `deleted: false`. With `includeTombstones`, soft-deleted children are walked
+   * too (`listChildrenIncludingDeleted`) and each node carries its real
+   * `deletedAt`-derived `deleted` flag so the renderer can mute the tombstones.
    */
   private walkDown(
     node: Element,
     depth: number,
     activeId: ElementId,
     out: LineageNode[],
+    includeTombstones: boolean,
     visited: Set<string> = new Set(),
   ): void {
     if (visited.has(node.id)) return;
@@ -148,15 +192,20 @@ export class LineageQuery {
       depth,
       meta: metaFor(node, isSubExtract),
       active: node.id === activeId,
+      deleted: node.deletedAt != null,
     });
 
-    // Live direct children (sorted by id ≈ creation order for determinism).
-    const children = this.repos.elements
-      .listChildren(node.id)
+    // Direct children (sorted by createdAt ≈ creation order for determinism). The
+    // default path keeps live-only; tombstone mode includes soft-deleted children.
+    const children = (
+      includeTombstones
+        ? this.repos.elements.listChildrenIncludingDeleted(node.id)
+        : this.repos.elements.listChildren(node.id)
+    )
       .filter((c) => c.id !== node.id)
       .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
     for (const child of children) {
-      this.walkDown(child, depth + 1, activeId, out, visited);
+      this.walkDown(child, depth + 1, activeId, out, includeTombstones, visited);
     }
   }
 }

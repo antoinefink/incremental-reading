@@ -45,8 +45,11 @@ import { ExternalUrlLink } from "../../components/ExternalUrlLink";
 import { Icon } from "../../components/Icon";
 import { requestInspectorRefresh } from "../../components/inspector/Inspector";
 import { Prio, SchedulerChip, Status } from "../../components/inspector/primitives";
+import { LineageDeleteMenu } from "../../components/lineage/LineageDeleteMenu";
+import { useLineageDelete } from "../../components/lineage/useLineageDelete";
 import { type DoneIntent, DoneIntentMenu } from "../../components/queue/DoneIntentMenu";
 import { ScheduleMenu } from "../../components/queue/ScheduleMenu";
+import { Snackbar } from "../../components/Snackbar";
 import { appApi, type InspectorData, isDesktop, type QueueScheduleChoice } from "../../lib/appApi";
 import { SelectionToolbar, type SelectionToolbarAction } from "../../reader/SelectionToolbar";
 import { useTextSelection } from "../../reader/useTextSelection";
@@ -582,7 +585,7 @@ export function SourceReader() {
 
   // Apply a chosen done-intent (or the 0-unresolved fast path's implicit "finished").
   // Finished/Abandon exit the source to /queue (staying on a done/dismissed reader is a
-  // dead state — matches `deleteSource`); Return later only reschedules (read-point
+  // dead state — matching the delete path); Return later only reschedules (read-point
   // untouched — where stays decoupled from when) and refreshes the inspector in place.
   const onDoneIntentResolved = useCallback(
     (intent: DoneIntent) => {
@@ -648,22 +651,22 @@ export function SourceReader() {
   }, [id, refreshSourceInspector, toast, withExitAction]);
 
   /**
-   * Soft-delete this source (T044) — moves it to the Trash (recoverable). Routes
-   * through the typed `queue.act` delete path (`soft_delete_element`, recoverable),
-   * the SAME mutation the queue uses, so no new write path is invented; the renderer
-   * never touches SQLite. Accidental deletion is recoverable from `/trash` or via the
-   * shell's global ⌘Z undo. After deleting we leave the (now-trashed) reader.
+   * Descendant-aware delete for this source (T135 / U7). A source with no live
+   * descendants deletes quietly (the SAME `queue.act` `delete` op the queue uses, so
+   * ⌘Z / Trash are unchanged); a source that still anchors live extracts/cards opens
+   * the intent menu (Keep descendants / Delete the whole branch) rather than silently
+   * tombstoning the source out from under its live work. Any outcome leaves the
+   * (now-trashed) reader for the queue.
    */
-  const deleteSource = useCallback(async () => {
-    await withExitAction(async () => {
-      try {
-        await appApi.actOnQueueItem({ id, action: { kind: "delete" } });
-        void navigate({ to: "/queue" });
-      } catch {
-        toast("Could not delete source");
-      }
-    });
-  }, [id, navigate, toast, withExitAction]);
+  const lineageDelete = useLineageDelete({
+    quietDelete: async (target) => {
+      await appApi.actOnQueueItem({ id: target.id, action: { kind: "delete" } });
+    },
+    onAfter: () => {
+      requestInspectorRefresh();
+      void navigate({ to: "/queue" });
+    },
+  });
 
   // Keyboard: Space sets the read-point (ignored while typing in a field/modal).
   useEffect(() => {
@@ -789,17 +792,29 @@ export function SourceReader() {
     </>
   );
   const sourceDeleteAction = (
-    <button
-      type="button"
-      className="reader-btn reader-btn--danger reader-btn--icon"
-      disabled={!desktop || exitActionBusy}
-      title="Delete source (recoverable from Trash · ⌘Z to undo)"
-      aria-label="Delete source"
-      data-testid="reader-delete"
-      onClick={() => void deleteSource()}
-    >
-      <Icon name="trash" size={14} />
-    </button>
+    <LineageDeleteMenu
+      target={{ id, type: "source", title: inspector?.element.title }}
+      actions={lineageDelete.actions}
+      busy={!desktop || exitActionBusy || lineageDelete.busy}
+      triggerClassName="reader-btn reader-btn--danger reader-btn--icon"
+      triggerIcon="trash"
+      triggerTestId="reader-delete"
+      tooltipLabel="Delete source"
+      triggerAriaLabel="Delete source"
+    />
+  );
+  // The descendant-aware delete outcome (T135 / U7). A successful delete navigates to
+  // /queue (a deleted source's reader is a dead state); this snackbar primarily surfaces
+  // a delete ERROR (which does NOT navigate) so the reader never fails silently.
+  const sourceDeleteSnackbar = (
+    <Snackbar
+      message={lineageDelete.snackbar?.message ?? null}
+      onUndo={lineageDelete.snackbar?.onUndo}
+      onClose={() => lineageDelete.setSnackbar(null)}
+      icon={lineageDelete.snackbar?.icon ?? "trash"}
+      timeoutMs={lineageDelete.snackbar?.timeoutMs}
+      testId="reader-delete-snackbar"
+    />
   );
   const sourceOpenOriginalAction = openOriginalUrl ? (
     <a
@@ -874,6 +889,7 @@ export function SourceReader() {
             </span>
           </div>
         ) : null}
+        {sourceDeleteSnackbar}
       </div>
     );
   }
@@ -943,6 +959,7 @@ export function SourceReader() {
             </span>
           </div>
         ) : null}
+        {sourceDeleteSnackbar}
       </div>
     );
   }
@@ -1092,6 +1109,7 @@ export function SourceReader() {
           </span>
         </div>
       ) : null}
+      {sourceDeleteSnackbar}
     </div>
   );
 }

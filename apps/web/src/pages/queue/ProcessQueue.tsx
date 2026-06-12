@@ -53,11 +53,17 @@ import {
   stageLabel,
   TypeIcon,
 } from "../../components/inspector/primitives";
+import { LineageDeleteMenu } from "../../components/lineage/LineageDeleteMenu";
+import {
+  type LineageDeleteActions,
+  useLineageDelete,
+} from "../../components/lineage/useLineageDelete";
 import { type DoneIntent, DoneIntentMenu } from "../../components/queue/DoneIntentMenu";
 import { QueueSnackbar } from "../../components/queue/QueueSnackbar";
 import { listenQueueRefresh } from "../../components/queue/queueRefresh";
 import { ScheduleMenu } from "../../components/queue/ScheduleMenu";
 import { RefBlock } from "../../components/RefBlock";
+import { Snackbar } from "../../components/Snackbar";
 import "../../components/inspector/inspector.css";
 import {
   appApi,
@@ -599,6 +605,27 @@ export function ProcessQueue() {
    * `doneIntentSignal`), so this never carries the `confirmUnresolvedBlocks` override.
    */
   const act = useCallback((kind: LoopActionKind) => runAction({ kind }), [runAction]);
+
+  // Descendant-aware delete (T135 / U7) for the loop's Delete action. A leaf routes
+  // through the existing `runAction({delete})` path (advances the cursor + keeps the
+  // loop's own undo recipe, so we suppress the controller's leaf snackbar); a node with
+  // live descendants opens the intent menu. A keep/branch/mark-done outcome advances the
+  // cursor and refreshes; the branch-delete Undo restores the exact batch (KTD10).
+  const lineageDelete = useLineageDelete({
+    quietDelete: async () => {
+      await runAction({ kind: "delete" });
+    },
+    hostOwnsQuietUndo: true,
+    onAfter: (_target, kind) => {
+      if (kind === "quiet") return; // runAction already advanced + bookkept.
+      setProcessed((p) => p + 1);
+      clearUndo();
+      advance();
+      requestInspectorRefresh();
+    },
+  });
+  // The `delete` key bumps this so the loop's LineageDeleteMenu runs the same flow.
+  const [deleteSignal, setDeleteSignal] = useState(0);
 
   /**
    * Fetch the current source's block-processing summary for {@link DoneIntentMenu}. The
@@ -1248,7 +1275,12 @@ export function ProcessQueue() {
         else void act("markDone");
       },
       dismiss: () => void act("dismiss"),
-      delete: () => void act("delete"),
+      // Delete routes through the descendant-aware intent menu (T135 / U7): a leaf
+      // deletes quietly, a node with live descendants opens the menu. Bumping the
+      // trigger signal runs the exact same flow the Delete button does.
+      delete: () => {
+        if (!busy) setDeleteSignal((n) => n + 1);
+      },
       raise: () => void act("raise"),
       lower: () => void act("lower"),
       open,
@@ -1402,9 +1434,11 @@ export function ProcessQueue() {
             cardView={cardView}
             revealed={revealed}
             previews={previews}
-            busy={busy}
+            busy={busy || lineageDelete.busy}
             canUndo={undoState !== null}
             onAction={act}
+            deleteActions={lineageDelete.actions}
+            deleteSignal={deleteSignal}
             onSchedule={schedule}
             onSkip={skip}
             onOpen={open}
@@ -1445,6 +1479,17 @@ export function ProcessQueue() {
         message={doneIntentSnackbar}
         onUndo={undoState ? () => void undoLastProcessAction() : undefined}
         onClose={dismissDoneIntentSnackbar}
+      />
+
+      {/* The descendant-aware delete outcome (T135 / U7). The branch-delete Undo restores
+          the exact batch (order-independent), the leaf path uses the loop's own undo. */}
+      <Snackbar
+        message={lineageDelete.snackbar?.message ?? null}
+        onUndo={lineageDelete.snackbar?.onUndo}
+        onClose={() => lineageDelete.setSnackbar(null)}
+        icon={lineageDelete.snackbar?.icon ?? "trash"}
+        timeoutMs={lineageDelete.snackbar?.timeoutMs}
+        testId="process-delete-snackbar"
       />
     </div>
   );
@@ -2015,6 +2060,8 @@ function ProcessCard({
   busy,
   canUndo,
   onAction,
+  deleteActions,
+  deleteSignal,
   onSchedule,
   onSkip,
   onOpen,
@@ -2059,6 +2106,10 @@ function ProcessCard({
   busy: boolean;
   canUndo: boolean;
   onAction: (kind: LoopActionKind) => void;
+  /** The shared descendant-aware delete controller (T135 / U7) for the Delete action. */
+  deleteActions: LineageDeleteActions;
+  /** Bumped by the `delete` key to run the Delete intent flow from the keyboard. */
+  deleteSignal: number;
   /** Explicit (tomorrow/next-week/next-month/manual) scheduling — attention items only. */
   onSchedule: (choice: QueueScheduleChoice) => void;
   onSkip: () => void;
@@ -2391,16 +2442,21 @@ function ProcessCard({
           <Icon name="x" size={14} />
           Dismiss
         </button>
-        <button
-          type="button"
-          className="pq-btn pq-btn--danger"
-          disabled={busy}
-          data-testid="process-action-delete"
-          onClick={() => onAction("delete")}
-        >
-          <Icon name="trash" size={14} />
-          Delete
-        </button>
+        {/* Descendant-aware delete (T135 / U7): a leaf deletes quietly; a node with live
+            descendants opens the intent menu. Keeps the `process-action-delete` testid +
+            the danger button look + advances via the controller's onAfter. */}
+        <LineageDeleteMenu
+          target={{ id: item.id, type: item.type, title: item.title }}
+          actions={deleteActions}
+          busy={busy}
+          triggerSignal={deleteSignal}
+          triggerClassName="pq-btn pq-btn--danger"
+          triggerIcon="trash"
+          triggerLabel="Delete"
+          triggerTestId="process-action-delete"
+          tooltipLabel="Delete"
+          triggerAriaLabel="Delete"
+        />
         <button
           type="button"
           className="pq-btn"

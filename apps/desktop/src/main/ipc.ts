@@ -60,7 +60,9 @@ import {
   DocumentsExportMarkdownRequestSchema,
   DocumentsGetRequestSchema,
   DocumentsSaveRequestSchema,
+  ElementsCountDescendantsRequestSchema,
   ElementsSetPriorityRequestSchema,
+  ElementsSoftDeleteSubtreeRequestSchema,
   ExtractionCreateRequestSchema,
   ExtractStagnationListRequestSchema,
   ExtractsDeleteRequestSchema,
@@ -177,6 +179,8 @@ import {
   TrashEmptyRequestSchema,
   TrashListRequestSchema,
   TrashPurgeRequestSchema,
+  TrashRestoreAncestorChainRequestSchema,
+  TrashRestoreBatchRequestSchema,
   TrashRestoreRequestSchema,
   UndoLastRequestSchema,
   VaultCollectOrphansRequestSchema,
@@ -302,6 +306,16 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
     return dbService.setElementPriority(request);
   });
 
+  ipcMain.handle(IPC_CHANNELS.elementsCountDescendants, (_event, rawRequest: unknown) => {
+    const request = ElementsCountDescendantsRequestSchema.parse(rawRequest);
+    return dbService.countDescendants(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.elementsSoftDeleteSubtree, (_event, rawRequest: unknown) => {
+    const request = ElementsSoftDeleteSubtreeRequestSchema.parse(rawRequest);
+    return dbService.softDeleteSubtree(request);
+  });
+
   ipcMain.handle(IPC_CHANNELS.queueList, (_event, rawRequest: unknown) => {
     const request = QueueListRequestSchema.parse(rawRequest ?? {});
     return dbService.listQueue(request);
@@ -364,7 +378,12 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
 
   ipcMain.handle(IPC_CHANNELS.lineageGet, (_event, rawRequest: unknown) => {
     const request = LineageGetRequestSchema.parse(rawRequest);
-    return dbService.getLineage(request.id);
+    return dbService.getLineage(
+      request.id,
+      request.includeTombstones === undefined
+        ? {}
+        : { includeTombstones: request.includeTombstones },
+    );
   });
 
   ipcMain.handle(IPC_CHANNELS.sourcesImportManual, (_event, rawRequest: unknown) => {
@@ -1361,6 +1380,16 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.trashRestore, (_event, rawRequest: unknown) => {
     const request = TrashRestoreRequestSchema.parse(rawRequest);
     return dbService.restoreFromTrash(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.trashRestoreBatch, (_event, rawRequest: unknown) => {
+    const request = TrashRestoreBatchRequestSchema.parse(rawRequest);
+    return dbService.restoreBatchFromTrash(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.trashRestoreAncestorChain, (_event, rawRequest: unknown) => {
+    const request = TrashRestoreAncestorChainRequestSchema.parse(rawRequest);
+    return dbService.restoreAncestorChainFromTrash(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.trashPurge, (_event, rawRequest: unknown) => {

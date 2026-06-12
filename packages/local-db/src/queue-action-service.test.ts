@@ -298,6 +298,87 @@ describe("QueueActionService.act", () => {
     expect(opCount(handle, id, "restore_element")).toBe(1);
   });
 
+  it("R15: deleting a LEAF stays single-row (undo carries no schedule preimage)", () => {
+    const id = seedExtract(handle); // a leaf extract — no live descendants
+    const service = new QueueActionService(handle.db);
+    const res = service.act(id, "delete");
+    // Behaviorally identical to before: a plain restore recipe, no descendant-aware fields.
+    expect(res.undo).toEqual({ kind: "restore", previousStatus: "scheduled" });
+    expect(Object.hasOwn(res.undo ?? {}, "previousDueAt")).toBe(false);
+    // The leaf delete did NOT clear its schedule (no preimage recorded in the op).
+    const payload = handle.db
+      .select()
+      .from(operationLog)
+      .where(eq(operationLog.elementId, id))
+      .all()
+      .filter((op) => op.opType === "soft_delete_element")
+      .map((op) => JSON.parse(op.payload) as Record<string, unknown>)
+      .at(-1);
+    expect(Object.hasOwn(payload ?? {}, "prevDueAt")).toBe(false);
+  });
+
+  it("R15: deleting a MID-TREE node with live descendants is descendant-aware (tombstones the node, keeps descendants, restores faithfully)", () => {
+    // extract → sub-extract (the sub-extract is a mid-tree node with a live child card).
+    const sourceId = seedSource(handle);
+    const blocks = new DocumentRepository(handle.db)
+      .listBlocks(sourceId)
+      .map((b) => b.stableBlockId as BlockId);
+    const extraction = new ExtractionService(handle.db);
+    const parentExtractId = extraction.createExtraction({
+      sourceElementId: sourceId,
+      selectedText: "The definition paragraph two.",
+      blockIds: [blocks[1] as BlockId],
+      startOffset: 0,
+      endOffset: 29,
+      priority: 0.625,
+    }).element.id;
+    const review = new ReviewRepository(handle.db);
+    const childCardId = review.createCard({
+      kind: "qa",
+      title: "Child card",
+      priority: 0.625,
+      prompt: "Q?",
+      answer: "A.",
+      parentId: parentExtractId,
+      sourceId,
+      stage: "active_card",
+      firstScheduledAt: "2026-06-15T00:00:00.000Z" as IsoTimestamp,
+    }).element.id;
+
+    const service = new QueueActionService(handle.db);
+    const elements = new ElementRepository(handle.db);
+    const dueBefore = elements.findById(parentExtractId)?.dueAt ?? null;
+
+    const res = service.act(parentExtractId, "delete");
+    expect(res.removed).toBe(true);
+    // Descendant-aware: the recipe carries the schedule preimage (the subtree path cleared it).
+    expect(res.undo?.kind).toBe("restore");
+    expect(Object.hasOwn(res.undo ?? {}, "previousDueAt")).toBe(true);
+
+    // The node is tombstoned with its schedule cleared + recorded (not single-row pruned).
+    const deleted = elements.findById(parentExtractId);
+    expect(deleted?.deletedAt).toBeTruthy();
+    expect(deleted?.dueAt).toBeNull();
+    const payload = handle.db
+      .select()
+      .from(operationLog)
+      .where(eq(operationLog.elementId, parentExtractId))
+      .all()
+      .filter((op) => op.opType === "soft_delete_element")
+      .map((op) => JSON.parse(op.payload) as Record<string, unknown>)
+      .at(-1);
+    expect(Object.hasOwn(payload ?? {}, "prevDueAt")).toBe(true);
+    // The live child card stays LIVE and connected (never silently hidden from its lineage).
+    expect(elements.findById(childCardId)?.deletedAt).toBeNull();
+    expect(elements.findById(childCardId)?.parentId).toBe(parentExtractId);
+
+    // Undo re-establishes the cleared schedule (faithful restore, no past-due phantom).
+    if (res.undo) service.undo(parentExtractId, res.undo);
+    const restored = elements.findById(parentExtractId);
+    expect(restored?.deletedAt).toBeNull();
+    expect(restored?.dueAt).toBe(dueBefore);
+  });
+
   it("postponing an EXTRACT reschedules elements.due_at (attention) — exactly one reschedule_element op", () => {
     const id = seedExtract(handle);
     const service = new QueueActionService(handle.db);

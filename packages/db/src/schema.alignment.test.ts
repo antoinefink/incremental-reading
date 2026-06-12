@@ -27,14 +27,30 @@ import {
   type VaultRoot,
 } from "@interleave/core";
 import { describe, expect, it } from "vitest";
-import type {
-  AssetRow,
-  CardRow,
-  ElementRow,
-  OperationLogRow,
-  ReviewLogRow,
-  ReviewStateRow,
+import {
+  type AssetRow,
+  type CardRow,
+  type DbHandle,
+  type ElementRow,
+  MIGRATIONS_DIR,
+  migrateDatabase,
+  type OperationLogRow,
+  openDatabase,
+  type ReviewLogRow,
+  type ReviewStateRow,
 } from "./index";
+
+/** One row of `PRAGMA foreign_key_list(<table>)`. */
+interface ForeignKeyListRow {
+  readonly id: number;
+  readonly seq: number;
+  readonly table: string;
+  readonly from: string;
+  readonly to: string;
+  readonly on_update: string;
+  readonly on_delete: string;
+  readonly match: string;
+}
 
 /**
  * The persisted enum columns are typed as `string` by Drizzle (SQLite text), but
@@ -90,5 +106,35 @@ describe("Drizzle ⇄ @interleave/core alignment", () => {
     expect(CARD_KINDS).toEqual(["qa", "cloze", "image_occlusion"]);
     expect(ASSET_KINDS).toContain("source_pdf");
     expect(OPERATION_TYPES).toContain("create_card");
+  });
+});
+
+describe("elements self-referencing foreign keys (T135 purge-guard invariant)", () => {
+  // The T135 purge guard (`TrashRepository`) blocks a hard-delete of a tombstone with live
+  // descendants because the `onDelete: "set null"` self-FKs (`parentId`, `sourceId`) would
+  // otherwise NULL a live element's lineage links — the 0030-wipe mechanism. The guard
+  // checks EXACTLY those two links. If a future migration adds a THIRD self-referencing
+  // `set null` FK to `elements`, the guard must be revisited to cover it — so this test
+  // fails (against the live, migrated schema) the moment that count changes.
+  it("has EXACTLY two self-referencing `set null` FKs: parent_id and source_id", () => {
+    const handle: DbHandle = openDatabase(":memory:");
+    try {
+      migrateDatabase(handle.db, MIGRATIONS_DIR);
+      const fks = handle.sqlite
+        .prepare("PRAGMA foreign_key_list(elements)")
+        .all() as ForeignKeyListRow[];
+
+      // Self-referencing FKs (target table is `elements` itself).
+      const selfFks = fks.filter((fk) => fk.table === "elements");
+      const selfSetNull = selfFks.filter((fk) => fk.on_delete.toUpperCase() === "SET NULL");
+      const fromColumns = selfSetNull.map((fk) => fk.from).sort();
+
+      expect(fromColumns).toEqual(["parent_id", "source_id"]);
+      // No self-referencing FK on `elements` uses any OTHER on-delete action (e.g. CASCADE),
+      // which would be a separate lineage-loss hazard the guard does not model.
+      expect(selfFks).toHaveLength(2);
+    } finally {
+      handle.sqlite.close();
+    }
   });
 });

@@ -11,16 +11,26 @@
  */
 
 import { useEffect } from "react";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 
 /** The auto-dismiss window (ms) — matches the kit's 5s. */
 export const SNACKBAR_TIMEOUT_MS = 5000;
+
+/**
+ * A longer auto-dismiss window for a snackbar whose Undo restores a LARGE,
+ * order-independent batch (T135 — a branch delete of many nodes). The extra time
+ * keeps the only cheap "undo the whole branch" affordance reachable a bit longer
+ * than an everyday single-row delete.
+ */
+export const SNACKBAR_TIMEOUT_LONG_MS = 9000;
 
 export function Snackbar({
   message,
   onUndo,
   onClose,
   testId = "snackbar",
+  icon = "trash",
+  timeoutMs = SNACKBAR_TIMEOUT_MS,
 }: {
   /** The toast message, or `null`/empty to render nothing. */
   message: string | null;
@@ -30,17 +40,25 @@ export function Snackbar({
   onClose: () => void;
   /** Test hook id (the queue keeps its `queue-snackbar` id for existing specs). */
   testId?: string;
+  /**
+   * The leading icon (default `trash` — the delete/undo toast). Pass `check`
+   * (CircleCheck per icon-map) for the honorable mark-done / topic-rest variant so a
+   * "kept alive" outcome doesn't read as a destructive one (T135).
+   */
+  icon?: IconName;
+  /** Override the auto-dismiss window (e.g. {@link SNACKBAR_TIMEOUT_LONG_MS} for a big batch). */
+  timeoutMs?: number | undefined;
 }) {
   useEffect(() => {
     if (!message) return;
-    const t = setTimeout(onClose, SNACKBAR_TIMEOUT_MS);
+    const t = setTimeout(onClose, timeoutMs);
     return () => clearTimeout(t);
-  }, [message, onClose]);
+  }, [message, onClose, timeoutMs]);
 
   if (!message) return null;
   return (
     <div className="snackbar fade-up" role="status" data-testid={testId}>
-      <Icon name="trash" size={14} />
+      <Icon name={icon} size={14} />
       <span>{message}</span>
       {onUndo ? (
         <button

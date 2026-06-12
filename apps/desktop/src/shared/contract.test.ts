@@ -56,7 +56,10 @@ import {
   type DocumentsExportMarkdownResult,
   DocumentsGetRequestSchema,
   DocumentsSaveRequestSchema,
+  ElementsCountDescendantsRequestSchema,
   ElementsSetPriorityRequestSchema,
+  ElementsSoftDeleteSubtreeRequestSchema,
+  type ElementsSoftDeleteSubtreeResult,
   ExtractionCreateRequestSchema,
   ExtractStagnationListRequestSchema,
   ExtractsDeleteRequestSchema,
@@ -163,6 +166,12 @@ import {
   TopicFallowRequestSchema,
   TopicKnowledgeStateGetRequestSchema,
   TopicUnfallowRequestSchema,
+  type TrashEmptyResult,
+  type TrashPurgeResult,
+  TrashRestoreAncestorChainRequestSchema,
+  type TrashRestoreAncestorChainResult,
+  TrashRestoreBatchRequestSchema,
+  type TrashRestoreBatchResult,
   VaultCollectOrphansRequestSchema,
   type VaultCollectOrphansResult,
   type VaultOrphansResult,
@@ -184,6 +193,8 @@ describe("IPC channels", () => {
         "inspector:list",
         "inspector:get",
         "elements:setPriority",
+        "elements:countDescendants",
+        "elements:softDeleteSubtree",
         "topics:fallow",
         "topics:unfallow",
         "queue:list",
@@ -315,6 +326,8 @@ describe("IPC channels", () => {
         "readPoint:set",
         "trash:list",
         "trash:restore",
+        "trash:restoreBatch",
+        "trash:restoreAncestorChain",
         "trash:purge",
         "trash:empty",
         "undo:last",
@@ -1213,6 +1226,96 @@ describe("ElementsSetPriorityRequestSchema (T027)", () => {
 
   it("rejects a missing id", () => {
     expect(() => ElementsSetPriorityRequestSchema.parse({ action: { kind: "raise" } })).toThrow();
+  });
+});
+
+describe("Lineage-aware delete schemas (T135)", () => {
+  it("ElementsCountDescendants accepts a valid id and rejects a missing/blank one", () => {
+    expect(ElementsCountDescendantsRequestSchema.parse({ id: "el_1" })).toEqual({ id: "el_1" });
+    expect(() => ElementsCountDescendantsRequestSchema.parse({})).toThrow();
+    expect(() => ElementsCountDescendantsRequestSchema.parse({ id: "" })).toThrow();
+  });
+
+  it("ElementsSoftDeleteSubtree accepts id with optional includeSubtree and rejects bad shapes", () => {
+    // includeSubtree omitted (keep-descendants) and explicit true (delete-branch) both parse.
+    expect(ElementsSoftDeleteSubtreeRequestSchema.parse({ id: "el_1" })).toEqual({ id: "el_1" });
+    expect(
+      ElementsSoftDeleteSubtreeRequestSchema.parse({ id: "el_1", includeSubtree: true }),
+    ).toEqual({ id: "el_1", includeSubtree: true });
+    expect(() => ElementsSoftDeleteSubtreeRequestSchema.parse({})).toThrow();
+    expect(() => ElementsSoftDeleteSubtreeRequestSchema.parse({ id: "" })).toThrow();
+    // A non-boolean includeSubtree is rejected at the boundary.
+    expect(() =>
+      ElementsSoftDeleteSubtreeRequestSchema.parse({ id: "el_1", includeSubtree: "yes" }),
+    ).toThrow();
+  });
+
+  it("TrashRestoreBatch requires a BOUNDED non-empty batchId (C2)", () => {
+    expect(TrashRestoreBatchRequestSchema.parse({ batchId: "batch_1" })).toEqual({
+      batchId: "batch_1",
+    });
+    expect(() => TrashRestoreBatchRequestSchema.parse({})).toThrow();
+    expect(() => TrashRestoreBatchRequestSchema.parse({ batchId: "" })).toThrow();
+    // The id is length-capped (not an unbounded string) at the IPC boundary.
+    expect(() => TrashRestoreBatchRequestSchema.parse({ batchId: "x".repeat(129) })).toThrow();
+  });
+
+  it("TrashRestoreAncestorChain accepts a valid id and rejects missing/blank/over-long (C2)", () => {
+    expect(TrashRestoreAncestorChainRequestSchema.parse({ id: "el_1" })).toEqual({ id: "el_1" });
+    expect(() => TrashRestoreAncestorChainRequestSchema.parse({})).toThrow();
+    expect(() => TrashRestoreAncestorChainRequestSchema.parse({ id: "" })).toThrow();
+    expect(() => TrashRestoreAncestorChainRequestSchema.parse({ id: "x".repeat(129) })).toThrow();
+  });
+
+  it("TrashRestoreAncestorChainResult round-trips the restored ids + batchId", () => {
+    const result: TrashRestoreAncestorChainResult = {
+      restored: ["el_root", "el_mid"],
+      batchId: "restore_batch_1",
+    };
+    expect(result.restored).toHaveLength(2);
+    expect(result.batchId).toBe("restore_batch_1");
+    const noop: TrashRestoreAncestorChainResult = { restored: [], batchId: null };
+    expect(noop.batchId).toBeNull();
+  });
+
+  it("ElementsSoftDeleteSubtreeResult round-trips the batchId + affected + skipped shape", () => {
+    const result: ElementsSoftDeleteSubtreeResult = {
+      batchId: "batch_1",
+      affected: ["el_root", "el_child", "el_card"],
+      skipped: [{ id: "el_gone", reason: "already-deleted" }],
+    };
+    expect(result.batchId).toBe("batch_1");
+    expect(result.affected).toHaveLength(3);
+    expect(result.skipped[0]?.reason).toBe("already-deleted");
+  });
+
+  it("TrashRestoreBatchResult round-trips the partial-chain (skipped) shape", () => {
+    const result: TrashRestoreBatchResult = {
+      restored: ["el_root", "el_child"],
+      skipped: [{ id: "el_newer", reason: "newer-intent" }],
+      rootRestored: true,
+    };
+    expect(result.rootRestored).toBe(true);
+    expect(result.restored).toHaveLength(2);
+    expect(result.skipped[0]?.reason).toBe("newer-intent");
+  });
+
+  it("TrashPurgeResult discriminates a clean purge, an unknown id, and a blocked purge (T135)", () => {
+    const purged: TrashPurgeResult = { purged: 1, blocked: false, liveDependents: 0 };
+    const unknown: TrashPurgeResult = { purged: 0, blocked: false, liveDependents: 0 };
+    // The structured "blocked by live descendants" outcome the renderer needs to tell
+    // apart from a real failure — NOT a thrown error.
+    const blocked: TrashPurgeResult = { purged: 0, blocked: true, liveDependents: 2 };
+    expect(purged.purged).toBe(1);
+    expect(unknown.blocked).toBe(false);
+    expect(blocked.blocked).toBe(true);
+    expect(blocked.liveDependents).toBe(2);
+  });
+
+  it("TrashEmptyResult surfaces the skipped count alongside purged (T135)", () => {
+    const result: TrashEmptyResult = { purged: 3, skipped: 1 };
+    expect(result.purged).toBe(3);
+    expect(result.skipped).toBe(1);
   });
 });
 

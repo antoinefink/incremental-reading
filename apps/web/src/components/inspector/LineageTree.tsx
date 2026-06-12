@@ -13,45 +13,89 @@
  * Pixel-for-pixel with the kit: a `tree-indent` spacer per depth level (the
  * vertical guide line), the `TypeIcon`, a truncated title, the active node's
  * `tree-node--on` accent highlight, and a faint mono `meta` suffix.
+ *
+ * Tombstones (T135 / U2): when the lineage is requested with `includeTombstones`, a
+ * soft-deleted ancestor (or the focused node itself) carries `deleted: true`. Such a
+ * node renders MUTED + with a struck-through title (mirroring `.badge--dismissed`) so
+ * it reads as clearly-deleted — distinct from a live-but-inactive node AND from the
+ * retired/expired card treatments that also use `--text-3` — and carries an
+ * ALWAYS-VISIBLE (keyboard-reachable, never hover-only) inline "Restore" control so a
+ * focused live card never silently loses its own chain.
  */
 
 import type { LineageNode } from "../../lib/appApi";
+import { Icon } from "../Icon";
 import { TypeIcon } from "./primitives";
 
 /** Render an array of depth-tagged lineage nodes as the kit's `LineageTree`. */
 export function LineageTree({
   nodes,
   onPick,
+  onRestore,
+  restoringId = null,
 }: {
   readonly nodes: readonly LineageNode[];
   /** Called with the picked node; the caller re-selects + navigates. */
   onPick: (node: LineageNode) => void;
+  /**
+   * Restore a soft-deleted tombstone node (T135). Omit to hide the inline Restore
+   * control entirely (e.g. surfaces that only ever render live lineage).
+   */
+  onRestore?: (node: LineageNode) => void;
+  /** The id of the tombstone whose restore is in flight (its control shows a busy state). */
+  restoringId?: string | null;
 }) {
   return (
     <div className="tree" data-testid="lineage-tree">
-      {nodes.map((n) => (
-        <div className="tree-row" key={n.id}>
-          {/* One indent spacer per depth level (the kit's vertical guide line). */}
-          {Array.from({ length: n.depth }).map((_, d) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: pure spacers, count == depth
-            <span className="tree-indent" key={d} aria-hidden />
-          ))}
-          <button
-            type="button"
-            className={`tree-node${n.active ? " tree-node--on" : ""}`}
-            data-testid="lineage-tree-node"
-            data-element-id={n.id}
-            data-element-type={n.type}
-            data-active={n.active ? "true" : "false"}
-            aria-current={n.active ? "true" : undefined}
-            onClick={() => onPick(n)}
-          >
-            <TypeIcon type={n.type} />
-            <span className="tree-node__title">{n.title}</span>
-            {n.meta ? <span className="tree-node__meta">{n.meta}</span> : null}
-          </button>
-        </div>
-      ))}
+      {nodes.map((n) => {
+        const restoring = restoringId === n.id;
+        return (
+          <div className="tree-row" key={n.id}>
+            {/* One indent spacer per depth level (the kit's vertical guide line). */}
+            {Array.from({ length: n.depth }).map((_, d) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: pure spacers, count == depth
+              <span className="tree-indent" key={d} aria-hidden />
+            ))}
+            <button
+              type="button"
+              className={`tree-node${n.active ? " tree-node--on" : ""}${
+                n.deleted ? " tree-node--deleted" : ""
+              }`}
+              data-testid="lineage-tree-node"
+              data-element-id={n.id}
+              data-element-type={n.type}
+              data-active={n.active ? "true" : "false"}
+              data-deleted={n.deleted ? "true" : "false"}
+              aria-current={n.active ? "true" : undefined}
+              onClick={() => onPick(n)}
+            >
+              <TypeIcon type={n.type} />
+              <span className="tree-node__title">{n.title}</span>
+              {n.deleted ? (
+                <span className="tree-node__tomb" data-testid="lineage-tombstone-tag">
+                  deleted
+                </span>
+              ) : n.meta ? (
+                <span className="tree-node__meta">{n.meta}</span>
+              ) : null}
+            </button>
+            {n.deleted && onRestore ? (
+              <button
+                type="button"
+                className="tree-node__restore"
+                data-testid="lineage-tombstone-restore"
+                data-element-id={n.id}
+                disabled={restoring}
+                aria-label={`Restore ${n.title}`}
+                onClick={() => onRestore(n)}
+              >
+                <Icon name="restore" size={12} />
+                {restoring ? "Restoring…" : "Restore"}
+              </button>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -33,11 +33,13 @@
 import type { Element, ElementId, ElementStatus, IsoTimestamp, Priority } from "@interleave/core";
 import { isSystemTaskType, lowerPriority, raisePriority } from "@interleave/core";
 import type { InterleaveDatabase } from "@interleave/db";
-import { reviewStates, tasks as tasksTable } from "@interleave/db";
+import { elements as elementsTable, reviewStates, tasks as tasksTable } from "@interleave/db";
 import { eq } from "drizzle-orm";
 import { BlockProcessingService } from "./block-processing-service";
+import { liveDescendantsWithin } from "./descendant-query";
 import { ElementRepository } from "./element-repository";
 import { newRowId, nowIso } from "./ids";
+import { rowToElement } from "./mappers";
 import { ReviewRepository } from "./review-repository";
 import { SchedulerService } from "./scheduler-service";
 import type { DbClient } from "./types";
@@ -362,13 +364,49 @@ export class QueueActionService {
    * SOFT-delete a row (`soft_delete_element`): `deletedAt` + status `deleted`, never
    * a hard DELETE — user data is never destroyed. The row leaves the list; the undo
    * snackbar restores it via {@link ElementRepository.restore} to its prior status.
+   *
+   * Descendant-aware (T135 / R15): a node that still anchors LIVE descendants is NOT
+   * single-row-pruned here — that would silently hide the live work beneath it from
+   * its own lineage and (on restore) lose its schedule. Instead it routes through the
+   * preimage-aware {@link ElementRepository.softDeleteSubtreeWithin} (`includeSubtree:
+   * false`) so it is tombstoned the SAME way the lineage-delete "keep descendants" path
+   * tombstones it: schedule cleared + recorded, restored faithfully. A LEAF (no live
+   * descendants) keeps the original bare single-row soft-delete — behaviorally identical
+   * to before — and its undo needs no schedule re-establishment (nothing was cleared).
    */
   private softDelete(element: Element): QueueActionResult {
-    const deleted = this.elements.softDelete(element.id);
+    const hasLiveDescendants =
+      this.db.transaction((tx) => liveDescendantsWithin(tx, element.id).length) > 0;
+    if (!hasLiveDescendants) {
+      const deleted = this.elements.softDelete(element.id);
+      return {
+        element: deleted,
+        removed: true,
+        undo: { kind: "restore", previousStatus: element.status },
+      };
+    }
+
+    // Capture the schedule preimage so the snackbar undo re-establishes it (the subtree
+    // path clears `elements.due_at` + a card's `review_states.due_at`).
+    const previousDueAt = element.dueAt;
+    const previousReviewDueAt =
+      element.type === "card" ? reviewDueOf(this.review, element.id) : undefined;
+    const batchId = newRowId();
+    const deleted = this.db.transaction((tx) => {
+      this.elements.softDeleteSubtreeWithin(tx, element.id, { batchId, includeSubtree: false });
+      const row = tx.select().from(elementsTable).where(eq(elementsTable.id, element.id)).get();
+      if (!row) throw new Error(`QueueActionService.softDelete: element ${element.id} not found`);
+      return rowToElement(row);
+    });
     return {
       element: deleted,
       removed: true,
-      undo: { kind: "restore", previousStatus: element.status },
+      undo: {
+        kind: "restore",
+        previousStatus: element.status,
+        previousDueAt,
+        ...(previousReviewDueAt !== undefined ? { previousReviewDueAt } : {}),
+      },
     };
   }
 
@@ -379,7 +417,19 @@ export class QueueActionService {
    */
   undo(id: ElementId, undo: QueueActionUndo): Element {
     if (undo.kind === "restore") {
-      return this.elements.restore(id, undo.previousStatus);
+      // A descendant-aware tombstone (T135) cleared the node's schedule and recorded a
+      // preimage in the recipe; re-establish it so the restored row returns to its exact
+      // pre-delete schedule (a card to the FSRS queue), not a stale past-due phantom. A
+      // LEAF delete carries no `previousDueAt`, so restore stays schedule-untouched.
+      const schedule = Object.hasOwn(undo, "previousDueAt")
+        ? {
+            dueAt: undo.previousDueAt ?? null,
+            ...(undo.previousReviewDueAt !== undefined
+              ? { reviewDueAt: undo.previousReviewDueAt }
+              : {}),
+          }
+        : undefined;
+      return this.elements.restore(id, undo.previousStatus, schedule ? { schedule } : undefined);
     }
     return this.db.transaction((tx) => {
       const currentReviewDueAt =

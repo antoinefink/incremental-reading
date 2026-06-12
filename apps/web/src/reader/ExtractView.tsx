@@ -47,7 +47,10 @@ import { Icon } from "../components/Icon";
 import { requestInspectorRefresh } from "../components/inspector/Inspector";
 import { LineageTree } from "../components/inspector/LineageTree";
 import { Prio, SchedulerChip, Stage, Status, stageLabel } from "../components/inspector/primitives";
+import { LineageDeleteMenu } from "../components/lineage/LineageDeleteMenu";
+import { useLineageDelete } from "../components/lineage/useLineageDelete";
 import { RefBlock } from "../components/RefBlock";
+import { Snackbar } from "../components/Snackbar";
 import { HelpLink } from "../help/Contextual";
 import type { CardKind } from "../lib/appApi";
 import {
@@ -363,24 +366,35 @@ export function ExtractView() {
     }
   }, [id, busy, toast, reload]);
 
-  const onDelete = useCallback(async () => {
-    if (!id || busy) return;
-    setBusy(true);
-    try {
-      await appApi.deleteExtract({ id });
+  // Descendant-aware delete (T135 / U7). Replaces the old single-row prune: deleting
+  // an extract that still anchors live descendants opens the intent menu (Mark
+  // processed / Keep descendants / Delete branch); a leaf deletes quietly. The quiet
+  // path keeps using the existing `deleteExtract` op so ⌘Z / Trash are unchanged. After
+  // a destructive outcome we route back to the owning source (the deleted extract's
+  // reader is a dead state); after "Mark processed" the node stays alive, so we refresh
+  // in place instead of navigating away.
+  const lineageDelete = useLineageDelete({
+    quietDelete: async (target) => {
+      await appApi.deleteExtract({ id: target.id });
+    },
+    onAfter: (_target, kind) => {
       requestInspectorRefresh();
-      toast("Extract deleted");
-      // Soft-deleted — leave the view; route back to the owning source when known.
+      // Mark processed keeps the extract alive (provenance) — refresh in place.
+      // A KEEP/BRANCH outcome raises an Undo snackbar whose restoreBatch is order-
+      // independent (KTD10); navigating away here would UNMOUNT that affordance, so we
+      // stay on the reader (it degrades to its "no longer available" state behind the
+      // snackbar) and the user can Undo or navigate manually. Only the QUIET leaf delete
+      // (whose undo is the immediate ⌘Z case) routes back to the owning source.
+      if (kind === "markDone" || kind === "keep" || kind === "branch") {
+        reload();
+        return;
+      }
       const sourceId = currentInspector?.source?.id ?? currentInspector?.element.id ?? null;
       if (sourceId && sourceId !== id) {
         void navigate({ to: "/source/$id", params: { id: sourceId } });
       }
-    } catch {
-      toast("Could not delete");
-    } finally {
-      setBusy(false);
-    }
-  }, [id, busy, currentInspector, navigate, toast]);
+    },
+  });
 
   // Convert to a card (T033) — open the card builder as the third column, defaulting
   // to the Q&A tab. The builder authors a card from THIS extract via `cards.create`;
@@ -952,16 +966,22 @@ export function ExtractView() {
               >
                 <Icon name="checkCircle" size={14} /> Mark done
               </button>
-              <button
-                type="button"
-                className="reader-btn reader-btn--danger reader-btn--icon"
-                aria-label="Delete extract"
-                data-testid="extract-delete"
-                disabled={busy}
-                onClick={() => void onDelete()}
-              >
-                <Icon name="trash" size={14} />
-              </button>
+              {/* Descendant-aware delete (T135 / U7): a leaf deletes quietly; an extract
+                  that still anchors live descendants opens the intent menu. The trigger
+                  keeps the reader's danger-icon look + the `extract-delete` testid so
+                  existing tests/e2e still find it. */}
+              <LineageDeleteMenu
+                target={
+                  element ? { id: element.id, type: element.type, title: element.title } : null
+                }
+                actions={lineageDelete.actions}
+                busy={busy || lineageDelete.busy}
+                triggerClassName="reader-btn reader-btn--danger reader-btn--icon"
+                triggerIcon="trash"
+                triggerTestId="extract-delete"
+                tooltipLabel="Delete extract"
+                triggerAriaLabel="Delete extract"
+              />
             </div>
 
             <div className="extract-fate" data-testid="extract-fate-controls">
@@ -1074,6 +1094,17 @@ export function ExtractView() {
           </span>
         </div>
       ) : null}
+
+      {/* The descendant-aware delete outcome (T135 / U7) — its Undo restores the exact
+          batch for a branch delete (order-independent), or the last op for a leaf. */}
+      <Snackbar
+        message={lineageDelete.snackbar?.message ?? null}
+        onUndo={lineageDelete.snackbar?.onUndo}
+        onClose={() => lineageDelete.setSnackbar(null)}
+        icon={lineageDelete.snackbar?.icon ?? "trash"}
+        timeoutMs={lineageDelete.snackbar?.timeoutMs}
+        testId="extract-delete-snackbar"
+      />
     </div>
   );
 }

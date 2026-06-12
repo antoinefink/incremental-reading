@@ -1,5 +1,6 @@
 /**
- * Trash view (T044) — recover or permanently delete soft-deleted elements.
+ * Trash view (T044, extended for T135 / U8) — recover or permanently delete
+ * soft-deleted elements.
  *
  * Rebuilt from the design kit's `TrashScreen` (`design/kit/app/screen-extra.jsx`):
  * a centered column of `result` rows, each with a `TypeIcon`, a dimmed title, a
@@ -10,13 +11,19 @@
  * Architecture (non-negotiable): this is UI ONLY — no SQL, no soft-delete/restore
  * logic. The trash list comes from `appApi.listTrash()` (read-only); Restore /
  * Purge / Empty are typed `appApi.*` calls over the preload bridge, and the main
- * process owns the transaction + the `operation_log` op (restore appends
- * `restore_element`; purge is the only hard delete and appends no op). Restore +
- * the general undo (`appApi.undoLast()`) make accidental deletion recoverable;
- * permanent delete + Empty trash are confirmation-gated (the only destruction).
+ * process owns the transaction + the `operation_log` op.
+ *
+ * T135 / U8 additions:
+ *  - Branch grouping: rows sharing a delete `batchId` are grouped under one entry
+ *    with a child count + the source for context, and ONE Restore that calls
+ *    `restoreBatchFromTrash` (root-first, atomic) — Notion/Finder restore-as-unit.
+ *  - Purge-guard recovery (R12): when `purgeFromTrash` returns `{ blocked: true }`
+ *    (the tombstone still anchors live descendants), the dead-end is replaced by an
+ *    inline `--warn` recovery row with Restore + Delete-branch next steps.
+ *  - Empty Trash surfaces how many rows it SKIPPED (still anchor live items).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon, type IconName } from "../components/Icon";
 import { Snackbar } from "../components/Snackbar";
 import { AutoVirtualList } from "../components/VirtualList";
@@ -54,6 +61,48 @@ function deletedAgo(iso: string, now = Date.now()): string {
   return `${days}d ago`;
 }
 
+/** One displayed entry: a single trashed row, or a grouped branch delete. */
+type TrashEntry =
+  | { readonly kind: "single"; readonly item: TrashItemSummary }
+  | {
+      readonly kind: "group";
+      readonly batchId: string;
+      readonly header: TrashItemSummary;
+      readonly members: readonly TrashItemSummary[];
+    };
+
+/**
+ * Fold the flat trash list into entries: rows sharing a delete `batchId` (with 2+
+ * members) become ONE group; everything else stays a single row. The newest-deleted
+ * order is preserved; each group sits at the position of its first-seen member.
+ */
+export function groupTrashRows(items: readonly TrashItemSummary[]): readonly TrashEntry[] {
+  const byBatch = new Map<string, TrashItemSummary[]>();
+  for (const item of items) {
+    if (item.deleteBatchId) {
+      const list = byBatch.get(item.deleteBatchId);
+      if (list) list.push(item);
+      else byBatch.set(item.deleteBatchId, [item]);
+    }
+  }
+  const entries: TrashEntry[] = [];
+  const consumed = new Set<string>();
+  for (const item of items) {
+    const batchId = item.deleteBatchId;
+    if (batchId) {
+      const members = byBatch.get(batchId);
+      if (members && members.length > 1) {
+        if (consumed.has(batchId)) continue;
+        consumed.add(batchId);
+        entries.push({ kind: "group", batchId, header: members[0] as TrashItemSummary, members });
+        continue;
+      }
+    }
+    entries.push({ kind: "single", item });
+  }
+  return entries;
+}
+
 export function TrashScreen() {
   const desktop = isDesktop();
   const [items, setItems] = useState<readonly TrashItemSummary[]>([]);
@@ -62,6 +111,9 @@ export function TrashScreen() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirmEmpty, setConfirmEmpty] = useState(false);
   const [confirmPurgeId, setConfirmPurgeId] = useState<string | null>(null);
+  // The id of a row whose purge was BLOCKED by live descendants (R12) — its inline
+  // recovery block (Restore / Delete branch) is shown instead of a dead-end error.
+  const [blockedPurgeId, setBlockedPurgeId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; onUndo?: () => void } | null>(null);
 
   const load = useCallback(async () => {
@@ -84,10 +136,13 @@ export function TrashScreen() {
     void load();
   }, [load]);
 
+  const entries = useMemo(() => groupTrashRows(items), [items]);
+
   const restore = useCallback(
     async (item: TrashItemSummary) => {
       setBusyId(item.id);
       setError(null);
+      setBlockedPurgeId(null);
       try {
         await appApi.restoreFromTrash({ id: item.id });
         await load();
@@ -110,13 +165,77 @@ export function TrashScreen() {
     [load],
   );
 
+  /** Restore a whole branch-delete batch as one unit (root-first, atomic) — T135 / U8. */
+  const restoreBatch = useCallback(
+    async (batchId: string, label: string) => {
+      setBusyId(batchId);
+      setError(null);
+      setBlockedPurgeId(null);
+      try {
+        const res = await appApi.restoreBatchFromTrash({ batchId });
+        await load();
+        // Surface a partial restore (a member with newer intent stays a tombstone)
+        // rather than hiding it.
+        if (res.skipped.length > 0) {
+          setError(
+            `Restored ${res.restored.length} item${res.restored.length === 1 ? "" : "s"} · ${
+              res.skipped.length
+            } kept in Trash (changed since delete).`,
+          );
+        }
+        setToast({
+          message: `Restored ${res.restored.length} item${res.restored.length === 1 ? "" : "s"} · ${label.slice(0, 32)}`,
+          // The batch restore threads ONE fresh `restore_element` batchId through every
+          // restored node (T135 / A1), so `undoLast` (which reverses the whole most-recent
+          // batch) re-trashes the WHOLE group atomically — never a partial single-node undo.
+          onUndo: async () => {
+            await appApi.undoLast();
+            await load();
+            setToast(null);
+          },
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [load],
+  );
+
   const purge = useCallback(
     async (id: string) => {
       setBusyId(id);
       setConfirmPurgeId(null);
       setError(null);
+      setBlockedPurgeId(null);
       try {
-        await appApi.purgeFromTrash({ id });
+        // T135 / U8: a purge that still anchors live descendants is REFUSED at the seam and
+        // returns `{ blocked: true, liveDependents }` (not a throw). Instead of a dead-end
+        // error, surface the inline recovery block (Restore / Delete branch) under the row.
+        const result = await appApi.purgeFromTrash({ id });
+        if (result.blocked) {
+          setBlockedPurgeId(id);
+          return;
+        }
+        await load();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [load],
+  );
+
+  /** The R12 recovery "Delete branch" action — soft-cascade the whole live branch. */
+  const deleteBranchFromGuard = useCallback(
+    async (id: string) => {
+      setBusyId(id);
+      setError(null);
+      try {
+        await appApi.softDeleteSubtree({ id, includeSubtree: true });
+        setBlockedPurgeId(null);
         await load();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -130,16 +249,59 @@ export function TrashScreen() {
   const empty = useCallback(async () => {
     setConfirmEmpty(false);
     setError(null);
+    setBlockedPurgeId(null);
     try {
-      await appApi.emptyTrash();
+      const res = await appApi.emptyTrash();
       await load();
+      // Surface the skipped count (rows that still anchor live items) so Empty Trash is
+      // honest about what it could NOT remove (T135 / U8 / AE7).
+      if (res.skipped > 0) {
+        setError(
+          `Emptied ${res.purged} · ${res.skipped} kept (still anchor live items). Restore or delete those branches first.`,
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [load]);
 
-  /** One trash row — shared by the inline (small-list) + virtualized (large-list) paths. */
-  const renderRow = useCallback(
+  /** The inline purge-guard recovery block (R12) shown under a blocked row. */
+  const renderPurgeGuard = useCallback(
+    (item: TrashItemSummary) => (
+      <div className="trash-guard" data-testid="trash-purge-guard" data-id={item.id}>
+        <span className="trash-guard__msg">
+          <Icon name="warning" size={13} />
+          This item still has live descendants — restore it or delete the full branch first.
+        </span>
+        <div className="trash-guard__actions">
+          <button
+            type="button"
+            className="trash-btn trash-btn--warn"
+            data-testid="trash-guard-restore"
+            disabled={busyId === item.id}
+            onClick={() => void restore(item)}
+          >
+            <Icon name="restore" size={14} />
+            Restore
+          </button>
+          <button
+            type="button"
+            className="trash-btn trash-btn--warn"
+            data-testid="trash-guard-delete-branch"
+            disabled={busyId === item.id}
+            onClick={() => void deleteBranchFromGuard(item.id)}
+          >
+            <Icon name="trash" size={14} />
+            Delete branch
+          </button>
+        </div>
+      </div>
+    ),
+    [busyId, restore, deleteBranchFromGuard],
+  );
+
+  /** One single (ungrouped) trash row — its Restore + two-stage purge + recovery. */
+  const renderSingle = useCallback(
     (item: TrashItemSummary) => (
       <div className="trash-row" key={item.id} data-testid="trash-row" data-id={item.id}>
         <span className="trash-row__icon">
@@ -160,6 +322,7 @@ export function TrashScreen() {
             <span className="trash-row__dot">·</span>
             <span>deleted {deletedAgo(item.deletedAt)}</span>
           </div>
+          {blockedPurgeId === item.id ? renderPurgeGuard(item) : null}
         </div>
         <div className="trash-row__actions">
           <button
@@ -200,7 +363,10 @@ export function TrashScreen() {
               title="Delete permanently"
               aria-label="Delete permanently"
               disabled={busyId === item.id}
-              onClick={() => setConfirmPurgeId(item.id)}
+              onClick={() => {
+                setBlockedPurgeId(null);
+                setConfirmPurgeId(item.id);
+              }}
             >
               <Icon name="trash" size={14} />
             </button>
@@ -208,7 +374,63 @@ export function TrashScreen() {
         </div>
       </div>
     ),
-    [busyId, confirmPurgeId, restore, purge],
+    [busyId, confirmPurgeId, blockedPurgeId, restore, purge, renderPurgeGuard],
+  );
+
+  /** One grouped branch-delete entry — a child count, source context, one Restore. */
+  const renderGroup = useCallback(
+    (entry: Extract<TrashEntry, { kind: "group" }>) => {
+      const { batchId, header, members } = entry;
+      const busy = busyId === batchId;
+      return (
+        <div
+          className="trash-row trash-group"
+          key={batchId}
+          data-testid="trash-group"
+          data-batch-id={batchId}
+        >
+          <span className="trash-row__icon">
+            <Icon name="treeBranch" size={16} />
+          </span>
+          <div className="trash-row__body">
+            <div className="trash-row__title" data-testid="trash-group-title">
+              {header.title}
+            </div>
+            <div className="trash-row__meta">
+              <span className="trash-group__count" data-testid="trash-group-count">
+                Branch · {members.length} items
+              </span>
+              {header.sourceTitle ? (
+                <>
+                  <span className="trash-row__dot">·</span>
+                  <span>from {header.sourceTitle}</span>
+                </>
+              ) : null}
+              <span className="trash-row__dot">·</span>
+              <span>deleted {deletedAgo(header.deletedAt)}</span>
+            </div>
+          </div>
+          <div className="trash-row__actions">
+            <button
+              type="button"
+              className="trash-btn"
+              data-testid="trash-group-restore"
+              disabled={busy}
+              onClick={() => void restoreBatch(batchId, header.title)}
+            >
+              <Icon name="restore" size={14} />
+              Restore branch
+            </button>
+          </div>
+        </div>
+      );
+    },
+    [busyId, restoreBatch],
+  );
+
+  const renderEntry = useCallback(
+    (entry: TrashEntry) => (entry.kind === "group" ? renderGroup(entry) : renderSingle(entry.item)),
+    [renderGroup, renderSingle],
   );
 
   if (!desktop) {
@@ -293,20 +515,21 @@ export function TrashScreen() {
         </div>
       ) : (
         // Virtualized once it crosses the threshold (years-of-use scale, T100); inline
-        // below it so the everyday trash keeps its exact kit layout.
+        // below it so the everyday trash keeps its exact kit layout. Groups + singles are
+        // folded into one entry list so a branch delete reads as a single recoverable unit.
         <AutoVirtualList
-          items={items}
-          itemKey={(item) => item.id}
-          estimateSize={72}
+          items={entries}
+          itemKey={(entry) => (entry.kind === "group" ? `batch:${entry.batchId}` : entry.item.id)}
+          estimateSize={80}
           height={560}
           className="trash-list trash-list--virtual"
           testId="trash-list"
           renderInline={() => (
             <div className="trash-list" data-testid="trash-list">
-              {items.map((item) => renderRow(item))}
+              {entries.map((entry) => renderEntry(entry))}
             </div>
           )}
-          renderItem={(item) => renderRow(item)}
+          renderItem={(entry) => renderEntry(entry)}
         />
       )}
 
@@ -314,6 +537,7 @@ export function TrashScreen() {
         message={toast?.message ?? null}
         onUndo={toast?.onUndo}
         onClose={() => setToast(null)}
+        icon="restore"
         testId="trash-snackbar"
       />
     </div>

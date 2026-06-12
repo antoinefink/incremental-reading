@@ -34,6 +34,7 @@ describe("local-db repository factory", () => {
       "sourceDedup",
       "dedupReport",
       "lineageGap",
+      "descendants",
       "bulkActions",
       "jobs",
       "ocrPages",

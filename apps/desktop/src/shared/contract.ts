@@ -1211,6 +1211,11 @@ export interface LineageNode {
   readonly meta: string;
   /** True for the element the lineage was requested for (the inspector's focus). */
   readonly active: boolean;
+  /**
+   * True when this node is a soft-deleted tombstone (only emitted when the request
+   * sets `includeTombstones`); always `false` on the default live-only path.
+   */
+  readonly deleted: boolean;
 }
 
 /** The lineage payload for one element: the root id + the flattened tree. */
@@ -1225,12 +1230,90 @@ export interface LineageData {
 export const LineageGetRequestSchema = z.object({
   /** The element id whose lineage tree to build. */
   id: ElementIdSchema,
+  /**
+   * When `true`, include soft-deleted nodes as muted tombstones so a focused
+   * element never vanishes from its own lineage (T135). Omitted/false keeps the
+   * default live-only tree for yield / "review this branch" / analytics callers.
+   */
+  includeTombstones: z.boolean().optional(),
 });
 export type LineageGetRequest = z.infer<typeof LineageGetRequestSchema>;
 
 export interface LineageGetResult {
   /** The lineage tree, or `null` when the id is unknown/soft-deleted. */
   readonly lineage: LineageData | null;
+}
+
+// ---------------------------------------------------------------------------
+// elements.countDescendants() / elements.softDeleteSubtree()  (T135 — lineage-aware delete)
+// ---------------------------------------------------------------------------
+
+/**
+ * The lineage-aware delete surface (T135). Deleting an element that sits in the
+ * MIDDLE of the lineage tree must never silently orphan or silently hide live
+ * work, so the renderer first asks for the blast radius:
+ *
+ *  - `countDescendants` → the typed live-descendant breakdown (extracts, cards,
+ *    cards carrying review history, total). `total === 0` means "quiet delete, no
+ *    menu"; otherwise the renderer opens the intent menu and quantifies the cost.
+ *    Read-only — no mutation, no `operation_log`.
+ *  - `softDeleteSubtree` → soft-delete the target node and OPTIONALLY its live
+ *    subtree in ONE transaction under a shared `batchId`, recoverable as a unit.
+ *    `includeSubtree: false` tombstones only the node (keep-descendants);
+ *    `includeSubtree: true` soft-cascades the whole branch. Each per-node delete is
+ *    preimage-aware (clears + records `elements.due_at`, and a card's
+ *    `review_states.due_at`) so restore re-establishes the schedule exactly.
+ *
+ * The main process delegates to the `DescendantQuery` / `ExtractService` behind the
+ * boundary; there is still no generic `db.query`.
+ */
+
+export const ElementsCountDescendantsRequestSchema = z.object({
+  /** The element id whose live descendants to count (any type — lineage is universal). */
+  id: ElementIdSchema,
+});
+export type ElementsCountDescendantsRequest = z.infer<typeof ElementsCountDescendantsRequestSchema>;
+
+/** The live-descendant blast-radius breakdown that drives the delete intent menu. */
+export interface ElementsCountDescendantsResult {
+  /** Live descendant `extract` rows (includes sub-extracts). */
+  readonly extracts: number;
+  /** Live descendant `card` rows. */
+  readonly cards: number;
+  /** Live descendant cards with at least one `review_logs` row (review history). */
+  readonly cardsWithHistory: number;
+  /** Total live descendants of every kind (`0` ⇒ quiet delete, no menu). */
+  readonly total: number;
+}
+
+export const ElementsSoftDeleteSubtreeRequestSchema = z.object({
+  /** The target element id to soft-delete (and optionally its live subtree). */
+  id: ElementIdSchema,
+  /**
+   * When `true`, soft-delete the node AND every live descendant under one shared
+   * `batchId` ("delete the whole branch"). When `false`/omitted, tombstone only the
+   * target node and leave its descendants live and connected ("keep descendants").
+   */
+  includeSubtree: z.boolean().optional(),
+});
+export type ElementsSoftDeleteSubtreeRequest = z.infer<
+  typeof ElementsSoftDeleteSubtreeRequestSchema
+>;
+
+/** Why a node was skipped by a subtree soft-delete (it never fails the batch). */
+export interface SubtreeDeleteSkippedRow {
+  readonly id: string;
+  /** `missing` (gone) or `already-deleted` (already in the trash). */
+  readonly reason: "missing" | "already-deleted";
+}
+
+export interface ElementsSoftDeleteSubtreeResult {
+  /** The shared `batchId` every `soft_delete_element` op in this delete carries. */
+  readonly batchId: string;
+  /** The ids actually soft-deleted by this call (root-first). */
+  readonly affected: readonly string[];
+  /** Ids the in-transaction revalidation skipped (missing / already in the trash). */
+  readonly skipped: readonly SubtreeDeleteSkippedRow[];
 }
 
 // ---------------------------------------------------------------------------
@@ -5341,6 +5424,12 @@ export interface TrashItemSummary {
   readonly originStatus: string;
   /** The owning source's title for the "from {source}" line, or `null`. */
   readonly sourceTitle: string | null;
+  /**
+   * The branch-delete `batchId` this row was soft-deleted under (T135 / U8), or `null`
+   * for a single (non-branch) delete. Rows sharing a `batchId` were deleted as one branch;
+   * the Trash view groups them under the branch root for one atomic `trash.restoreBatch`.
+   */
+  readonly deleteBatchId: string | null;
 }
 
 /** `trash.list()` takes no arguments. */
@@ -5361,15 +5450,81 @@ export interface TrashRestoreResult {
   readonly item: ElementSummary | null;
 }
 
+export const TrashRestoreBatchRequestSchema = z.object({
+  /** The branch-delete `batchId` to restore as one unit (root-first). */
+  batchId: z.string().min(1).max(128),
+});
+export type TrashRestoreBatchRequest = z.infer<typeof TrashRestoreBatchRequestSchema>;
+
+export const TrashRestoreAncestorChainRequestSchema = z.object({
+  /** The element whose DELETED-ancestor chain (up to the first live ancestor) to restore. */
+  id: ElementIdSchema,
+});
+export type TrashRestoreAncestorChainRequest = z.infer<
+  typeof TrashRestoreAncestorChainRequestSchema
+>;
+
+/**
+ * The outcome of an ancestor-chain restore (T135). Restores ONLY the deleted chain
+ * above (and including, when a tombstone) the focused element — never sibling or cousin
+ * tombstones — so a live element reconnects to a live root without resurrecting
+ * unrelated deletions.
+ */
+export interface TrashRestoreAncestorChainResult {
+  /** The ids actually restored (root-first). */
+  readonly restored: readonly string[];
+  /**
+   * The fresh `restore_element` batch id threaded through every restored op, so a
+   * follow-up global undo reverses the whole chain restore as one unit; `null` when
+   * nothing was restored (the focused node and its ancestors were already live).
+   */
+  readonly batchId: string | null;
+}
+
+/** Why a node was left a tombstone by a batch restore (the partial state, surfaced). */
+export interface RestoreSkippedRow {
+  readonly id: string;
+  /**
+   * `missing` (purged/never existed), `not-deleted` (already live), `newer-intent`
+   * (re-deleted under another batch since), or `ancestor-skipped` (its branch root
+   * stayed down, so it stays a tombstone — no orphan restore).
+   */
+  readonly reason: "missing" | "not-deleted" | "newer-intent" | "ancestor-skipped";
+}
+
+/**
+ * The outcome of a batch restore (T135) — surfaces partial/broken chains rather
+ * than silently restoring descendants under a still-tombstoned root.
+ */
+export interface TrashRestoreBatchResult {
+  /** The ids actually restored by this call (root-first). */
+  readonly restored: readonly string[];
+  /** Nodes left as tombstones (with a reason) — the partial state, surfaced not hidden. */
+  readonly skipped: readonly RestoreSkippedRow[];
+  /** Whether the branch root itself was restored (false ⇒ the whole branch stayed down). */
+  readonly rootRestored: boolean;
+}
+
 export const TrashPurgeRequestSchema = z.object({
   /** The soft-deleted element id to PERMANENTLY delete (UI-confirmed). */
   id: ElementIdSchema,
 });
 export type TrashPurgeRequest = z.infer<typeof TrashPurgeRequestSchema>;
 
+/**
+ * The purge outcome (T044 + T135). A purge that would null a LIVE element's lineage
+ * links (the 0030-wipe mechanism) is BLOCKED at the local-db seam; rather than let
+ * that surface as a raw IPC error, the main side catches it and returns a STRUCTURED
+ * result so the renderer can tell "blocked by live descendants" (offer restore /
+ * delete-branch recovery) apart from a genuine failure.
+ */
 export interface TrashPurgeResult {
-  /** `1` when the element was hard-deleted, `0` when the id was unknown. */
+  /** `1` when the element was hard-deleted, `0` when the id was unknown OR the purge was blocked. */
   readonly purged: number;
+  /** `true` when the purge was refused because the tombstone still anchors live descendants. */
+  readonly blocked: boolean;
+  /** How many live descendants blocked the purge (`0` unless `blocked`). */
+  readonly liveDependents: number;
 }
 
 /** `trash.empty()` takes no arguments (UI-confirmed before calling). */
@@ -5378,6 +5533,11 @@ export const TrashEmptyRequestSchema = z.void();
 export interface TrashEmptyResult {
   /** How many elements were permanently deleted. */
   readonly purged: number;
+  /**
+   * How many trashed rows were SKIPPED because they still anchor live descendants
+   * (the purge guard skips-and-reports rather than blocking the whole empty).
+   */
+  readonly skipped: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -6301,6 +6461,23 @@ export interface AppApi {
      * the numeric value + logs `update_element` in one transaction.
      */
     setPriority(request: ElementsSetPriorityRequest): Promise<ElementsSetPriorityResult>;
+    /**
+     * Count an element's LIVE descendants (T135) broken down by kind — the
+     * blast-radius inventory the delete intent menu reads. `total === 0` ⇒ quiet
+     * delete; otherwise the menu opens and quantifies the cost. Read-only.
+     */
+    countDescendants(
+      request: ElementsCountDescendantsRequest,
+    ): Promise<ElementsCountDescendantsResult>;
+    /**
+     * Soft-delete a node and OPTIONALLY its live subtree (T135) in one transaction
+     * under a shared `batchId`, recoverable as a unit. `includeSubtree: false`
+     * tombstones only the node (keep-descendants); `true` soft-cascades the branch.
+     * Preimage-aware so restore re-establishes each node's schedule exactly.
+     */
+    softDeleteSubtree(
+      request: ElementsSoftDeleteSubtreeRequest,
+    ): Promise<ElementsSoftDeleteSubtreeResult>;
   };
   readonly topics: {
     /** Deliberately rest a topic and eligible attention descendants until a return date. */
@@ -6933,7 +7110,27 @@ export interface AppApi {
     list(): Promise<TrashListResult>;
     /** Restore a soft-deleted element to its prior status; logs `restore_element` (T044). */
     restore(request: TrashRestoreRequest): Promise<TrashRestoreResult>;
-    /** PERMANENTLY delete one trashed element — the only hard delete (T044). UI-confirmed. */
+    /**
+     * Restore an entire branch-delete `batchId` as one unit (T135), root-first, with
+     * each node's schedule re-established from its recorded preimage. Surfaces a
+     * partial chain (skipped nodes) rather than silently restoring under a still-
+     * tombstoned root. The snackbar Undo + the Trash group "Restore" call this.
+     */
+    restoreBatch(request: TrashRestoreBatchRequest): Promise<TrashRestoreBatchResult>;
+    /**
+     * Restore only the DELETED-ancestor chain of one element up to the first live
+     * ancestor (T135), under one shared restore batch. The inspector "ancestor deleted"
+     * hint and a per-tombstone Restore call this so sibling/cousin tombstones are never
+     * resurrected and a node is never left under a still-tombstoned parent.
+     */
+    restoreAncestorChain(
+      request: TrashRestoreAncestorChainRequest,
+    ): Promise<TrashRestoreAncestorChainResult>;
+    /**
+     * PERMANENTLY delete one trashed element — the only hard delete (T044). UI-
+     * confirmed. A purge that would null a live element's lineage links is refused
+     * and reported via `{ blocked: true, liveDependents }` rather than thrown (T135).
+     */
     purge(request: TrashPurgeRequest): Promise<TrashPurgeResult>;
     /** PERMANENTLY delete every trashed element in one transaction (T044). UI-confirmed. */
     empty(): Promise<TrashEmptyResult>;

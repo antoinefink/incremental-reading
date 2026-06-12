@@ -40,6 +40,11 @@ import type { ElementId, ElementStatus, IsoTimestamp, OperationType } from "@int
 import { type InterleaveDatabase, operationLog, reviewStates } from "@interleave/db";
 import { desc, eq, sql } from "drizzle-orm";
 import { ElementRepository } from "./element-repository";
+import {
+  originStatusFromPayload,
+  parsePayload,
+  restoreScheduleFromPayload,
+} from "./op-payload-helpers";
 import { OperationLogRepository } from "./operation-log-repository";
 
 /** The op types the global command-level undo can invert (the MVP scope). */
@@ -223,12 +228,26 @@ export class UndoService {
     if (!id) return null;
     switch (op.opType) {
       case "soft_delete_element": {
-        const origin = this.originStatus(op);
-        const restored = this.elements.restore(id, origin);
+        const origin = originStatusFromPayload(op.payload);
+        // The lineage-delete path (T135 / U4) records schedule PRE-IMAGES in the op
+        // payload (`prevDueAt`, and for a card `prevReviewDueAt`); when present, the
+        // restore must re-establish BOTH stores so an undone card returns to the FSRS
+        // due queue exactly where it was — mirrors the `reschedule_element` `cardDefer`
+        // two-store inverse. A plain (legacy) soft-delete carries neither field, so
+        // restore leaves the schedule untouched (unchanged behaviour).
+        const schedule = restoreScheduleFromPayload(op.payload);
+        const restored = this.elements.restore(id, origin, schedule ? { schedule } : undefined);
         return `Restored "${restored.title}"`;
       }
       case "restore_element": {
-        const deleted = this.elements.softDelete(id);
+        // Symmetric inverse (T135 / U5): if this restore re-established a schedule
+        // from a preimage, re-trashing must clear it again (and record the current
+        // due as the next preimage) so undo-the-undo never leaves a phantom "Due
+        // today". A legacy restore (no flag) re-trashes with the schedule untouched.
+        const clearSchedule = op.payload.scheduleRestored === true;
+        const deleted = clearSchedule
+          ? this.elements.softDelete(id, { clearSchedule: true })
+          : this.elements.softDelete(id);
         return `Moved "${deleted.title}" to trash`;
       }
       case "update_element": {
@@ -343,17 +362,6 @@ export class UndoService {
     }
   }
 
-  /**
-   * The prior status from a `soft_delete_element` op's `prev.status` payload, used
-   * to restore the element to where it was. Defaults to `active` when absent.
-   */
-  private originStatus(op: ParsedOp): ElementStatus {
-    const prev = op.payload.prev as { status?: unknown } | undefined;
-    const prior = prev?.status;
-    if (typeof prior === "string" && prior !== "deleted") return prior as ElementStatus;
-    return "active";
-  }
-
   private appendChronicPostponeReset(id: ElementId, prevEffectivePostponeCount: number): void {
     this.db.transaction((tx) => {
       new OperationLogRepository(tx).append(tx, {
@@ -388,18 +396,11 @@ export class UndoService {
   }
 
   private parse(row: RawOpRow): ParsedOp {
-    let payload: Record<string, unknown> = {};
-    try {
-      const parsed = JSON.parse(row.payload) as unknown;
-      if (parsed && typeof parsed === "object") payload = parsed as Record<string, unknown>;
-    } catch {
-      payload = {};
-    }
     return {
       id: row.id,
       opType: row.opType as OperationType,
       elementId: (row.elementId as ElementId | null) ?? null,
-      payload,
+      payload: parsePayload(row.payload),
     };
   }
 }

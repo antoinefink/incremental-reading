@@ -146,6 +146,7 @@ const h = vi.hoisted(() => {
         depth: 0,
         meta: "source",
         active: false,
+        deleted: false,
       },
       {
         id: "ex_1",
@@ -155,6 +156,7 @@ const h = vi.hoisted(() => {
         depth: 1,
         meta: "this",
         active: true,
+        deleted: false,
       },
       {
         id: "card_1",
@@ -164,6 +166,7 @@ const h = vi.hoisted(() => {
         depth: 2,
         meta: "active_card",
         active: false,
+        deleted: false,
       },
       {
         id: "ex_2",
@@ -173,6 +176,7 @@ const h = vi.hoisted(() => {
         depth: 2,
         meta: "sub-extract",
         active: false,
+        deleted: false,
       },
     ],
   };
@@ -211,6 +215,19 @@ const h = vi.hoisted(() => {
     postpone: vi.fn().mockResolvedValue({ extract: inspectorData.element, postponeCount: 1 }),
     markDone: vi.fn().mockResolvedValue({ extract: inspectorData.element }),
     deleteExtract: vi.fn().mockResolvedValue({ extract: inspectorData.element }),
+    // Descendant-aware delete (T135 / U7): default to a LEAF (total 0) so Delete takes
+    // the quiet single-soft-delete path through `deleteExtract`.
+    countDescendants: vi
+      .fn()
+      .mockResolvedValue({ extracts: 0, cards: 0, cardsWithHistory: 0, total: 0 }),
+    softDeleteSubtree: vi.fn().mockResolvedValue({ batchId: "b", affected: [], skipped: [] }),
+    restoreBatchFromTrash: vi
+      .fn()
+      .mockResolvedValue({ restored: [], skipped: [], rootRestored: true }),
+    undoLast: vi
+      .fn()
+      .mockResolvedValue({ undone: true, opType: null, elementId: null, label: "", count: 1 }),
+    fallowTopic: vi.fn().mockResolvedValue({ applied: 1, skipped: [], batchId: "fb" }),
     setExtractFate: vi.fn().mockResolvedValue({
       extract: { ...inspectorData.element, status: "done", dueAt: null, extractFate: "reference" },
     }),
@@ -270,6 +287,11 @@ vi.mock("../lib/appApi", () => ({
     postponeExtract: h.postpone,
     markExtractDone: h.markDone,
     deleteExtract: h.deleteExtract,
+    countDescendants: h.countDescendants,
+    softDeleteSubtree: h.softDeleteSubtree,
+    restoreBatchFromTrash: h.restoreBatchFromTrash,
+    undoLast: h.undoLast,
+    fallowTopic: h.fallowTopic,
     setExtractFate: h.setExtractFate,
     reactivateExtractFate: h.reactivateExtractFate,
     createExtraction: h.createExtraction,
@@ -665,6 +687,7 @@ describe("ExtractView — lineage navigation", () => {
           depth: 2,
           meta: "stale",
           active: false,
+          deleted: false,
         },
       ],
     };
@@ -685,6 +708,7 @@ describe("ExtractView — lineage navigation", () => {
           depth: 1,
           meta: "this",
           active: true,
+          deleted: false,
         },
         {
           id: "fresh_card",
@@ -694,6 +718,7 @@ describe("ExtractView — lineage navigation", () => {
           depth: 2,
           meta: "fresh",
           active: false,
+          deleted: false,
         },
       ],
     };
@@ -744,6 +769,7 @@ describe("ExtractView — lineage navigation", () => {
             depth: 2,
             meta: "active_card",
             active: false,
+            deleted: false,
           },
         ],
       },

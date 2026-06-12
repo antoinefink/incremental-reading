@@ -1,23 +1,93 @@
-import type { Element, ElementId, SiblingGroupId } from "@interleave/core";
+import type { BlockId, Element, ElementId, IsoTimestamp, SiblingGroupId } from "@interleave/core";
 import type { DbHandle } from "@interleave/db";
+import { operationLog, reviewStates } from "@interleave/db";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ElementRepository } from "./element-repository";
+import { createRepositories, type Repositories } from "./index";
 import { OperationLogRepository } from "./operation-log-repository";
 import { createInMemoryDb } from "./test-db";
 
 let handle: DbHandle;
 let elements: ElementRepository;
 let ops: OperationLogRepository;
+let repos: Repositories;
 
 beforeEach(() => {
   handle = createInMemoryDb();
   elements = new ElementRepository(handle.db);
   ops = new OperationLogRepository(handle.db);
+  repos = createRepositories(handle.db);
 });
 
 afterEach(() => {
   handle.sqlite.close();
 });
+
+/** A `source → extract → sub-extract → card` chain; the card is DUE in both stores. */
+function seedLineage(): {
+  sourceId: ElementId;
+  extractId: ElementId;
+  subExtractId: ElementId;
+  cardId: ElementId;
+} {
+  const sourceId = repos.sources.create({
+    title: "On Memory",
+    priority: 0.875,
+    status: "active",
+  }).element.id;
+  const extractId = repos.sources.createExtract({
+    sourceElementId: sourceId,
+    title: "Extract",
+    priority: 0.625,
+    selectedText: "…",
+    blockIds: ["blk" as BlockId],
+    startOffset: 0,
+    endOffset: 10,
+    label: "¶1",
+  }).element.id;
+  const subExtractId = repos.sources.createExtract({
+    sourceElementId: sourceId,
+    parentId: extractId,
+    title: "Sub-extract",
+    priority: 0.625,
+    selectedText: "…",
+    blockIds: ["blk" as BlockId],
+    startOffset: 0,
+    endOffset: 10,
+    label: "¶1",
+  }).element.id;
+  const cardId = repos.review.createCard({
+    kind: "qa",
+    title: "Card",
+    priority: 0.625,
+    prompt: "Q?",
+    answer: "A.",
+    parentId: subExtractId,
+    sourceId,
+    stage: "active_card",
+    firstScheduledAt: "2026-06-15T00:00:00.000Z" as IsoTimestamp,
+  }).element.id;
+  return { sourceId, extractId, subExtractId, cardId };
+}
+
+function softDeletePayload(id: ElementId): Record<string, unknown> | null {
+  const row = handle.db
+    .select()
+    .from(operationLog)
+    .where(eq(operationLog.elementId, id))
+    .all()
+    .filter((op) => op.opType === "soft_delete_element")
+    .at(-1);
+  return row ? (JSON.parse(row.payload) as Record<string, unknown>) : null;
+}
+
+function reviewDueOf(cardId: ElementId): string | null {
+  return (
+    handle.db.select().from(reviewStates).where(eq(reviewStates.elementId, cardId)).get()?.dueAt ??
+    null
+  );
+}
 
 function createTopic(title: string, parentId?: ElementId | null, sourceId?: ElementId | null) {
   return elements.create({
@@ -184,5 +254,124 @@ describe("ElementRepository direct reads", () => {
     });
 
     expect(elements.liveSiblingGroupMap().get(card.id)).toBe("grp-a");
+  });
+});
+
+describe("ElementRepository.softDeleteSubtreeWithin (T135/U4)", () => {
+  it("R7: subtree delete soft-deletes node + all live descendants under one batchId", () => {
+    const { extractId, subExtractId, cardId } = seedLineage();
+    const batchId = "branch-batch-1";
+
+    const result = handle.db.transaction((tx) =>
+      elements.softDeleteSubtreeWithin(tx, extractId, { batchId, includeSubtree: true }),
+    );
+
+    // All three nodes were soft-deleted (root-first order), under the shared batch.
+    expect(result.affected).toEqual([extractId, subExtractId, cardId]);
+    for (const id of [extractId, subExtractId, cardId]) {
+      const row = elements.findById(id);
+      expect(row?.deletedAt).toBeTruthy();
+      expect(row?.status).toBe("deleted");
+      const payload = softDeletePayload(id);
+      expect(payload?.batchId).toBe(batchId);
+    }
+    // Exactly three soft_delete_element ops carry this batchId.
+    const batchOps = handle.db
+      .select()
+      .from(operationLog)
+      .all()
+      .filter(
+        (op) =>
+          op.opType === "soft_delete_element" &&
+          (JSON.parse(op.payload) as { batchId?: string }).batchId === batchId,
+      );
+    expect(batchOps).toHaveLength(3);
+  });
+
+  it("R8: a descendant card's elements.due_at AND review_states.due_at are cleared with preimages", () => {
+    const { extractId, cardId } = seedLineage();
+    // Sanity: the card is due in BOTH stores before the delete.
+    expect(elements.findById(cardId)?.dueAt).toBe("2026-06-15T00:00:00.000Z");
+    expect(reviewDueOf(cardId)).toBe("2026-06-15T00:00:00.000Z");
+
+    handle.db.transaction((tx) =>
+      elements.softDeleteSubtreeWithin(tx, extractId, {
+        batchId: "b",
+        includeSubtree: true,
+      }),
+    );
+
+    // Both due stores are cleared so the deleted card never reads as "Due today".
+    expect(elements.findById(cardId)?.dueAt).toBeNull();
+    expect(reviewDueOf(cardId)).toBeNull();
+    // Both cleared values are recorded as preimages in the card's soft-delete op.
+    const payload = softDeletePayload(cardId);
+    expect(payload?.prevDueAt).toBe("2026-06-15T00:00:00.000Z");
+    expect(payload?.prevReviewDueAt).toBe("2026-06-15T00:00:00.000Z");
+  });
+
+  it("single-node mode (subtree off) clears + records the node's own due preimage and spares descendants", () => {
+    const { extractId, subExtractId, cardId } = seedLineage();
+    // Give the extract an attention due date to clear.
+    elements.reschedule(extractId, "2026-07-01T00:00:00.000Z" as IsoTimestamp);
+
+    const result = handle.db.transaction((tx) =>
+      elements.softDeleteSubtreeWithin(tx, extractId, {
+        batchId: "single",
+        includeSubtree: false,
+      }),
+    );
+
+    // Only the node itself is deleted; its due is cleared and recorded.
+    expect(result.affected).toEqual([extractId]);
+    expect(elements.findById(extractId)?.dueAt).toBeNull();
+    expect(softDeletePayload(extractId)?.prevDueAt).toBe("2026-07-01T00:00:00.000Z");
+    // Descendants stay live and connected (the "keep descendants" tombstone case).
+    expect(elements.findById(subExtractId)?.deletedAt).toBeNull();
+    expect(elements.findById(cardId)?.deletedAt).toBeNull();
+    expect(elements.findById(cardId)?.parentId).toBe(subExtractId);
+  });
+
+  it("R14: a mid-batch failure rolls back ALL prior soft-deletes (atomic)", () => {
+    const { extractId, subExtractId, cardId } = seedLineage();
+
+    expect(() =>
+      handle.db.transaction((tx) => {
+        elements.softDeleteSubtreeWithin(tx, extractId, {
+          batchId: "doomed",
+          includeSubtree: true,
+        });
+        // Force a failure AFTER the subtree was soft-deleted, inside the same tx.
+        throw new Error("boom");
+      }),
+    ).toThrow("boom");
+
+    // Nothing was committed — every node is still live with its schedule intact.
+    for (const id of [extractId, subExtractId, cardId]) {
+      expect(elements.findById(id)?.deletedAt).toBeNull();
+    }
+    expect(reviewDueOf(cardId)).toBe("2026-06-15T00:00:00.000Z");
+    expect(softDeletePayload(extractId)).toBeNull();
+  });
+
+  it("skips an already-deleted descendant rather than re-stamping it (idempotent)", () => {
+    const { extractId, subExtractId, cardId } = seedLineage();
+    // The sub-extract was already soft-deleted earlier (a partial state).
+    elements.softDelete(subExtractId);
+    // The card now has no LIVE parent chain to the extract, so it is not a live
+    // descendant of the extract anymore — only the extract itself is live.
+    const result = handle.db.transaction((tx) =>
+      elements.softDeleteSubtreeWithin(tx, extractId, {
+        batchId: "partial",
+        includeSubtree: true,
+      }),
+    );
+
+    // The extract is deleted; the already-deleted sub-extract is NOT re-stamped.
+    expect(result.affected).toContain(extractId);
+    expect(result.affected).not.toContain(subExtractId);
+    // The card, orphaned from the live walk by the deleted sub-extract, is untouched.
+    expect(result.affected).not.toContain(cardId);
+    expect(elements.findById(cardId)?.deletedAt).toBeNull();
   });
 });

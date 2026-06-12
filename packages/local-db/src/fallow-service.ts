@@ -8,7 +8,8 @@
 
 import type { ElementId, ElementStatus, IsoTimestamp } from "@interleave/core";
 import { elements, type InterleaveDatabase, operationLog } from "@interleave/db";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { liveDescendantsWithin } from "./descendant-query";
 import { ElementRepository } from "./element-repository";
 import { newRowId } from "./ids";
 import { OperationLogRepository } from "./operation-log-repository";
@@ -277,7 +278,9 @@ export class FallowService {
     },
   ): ElementRow[] {
     const fallowMs = Date.parse(input.fallowUntil);
-    return this.descendantsWithin(tx, input.topicId).filter((row) => {
+    // Shared with the T135 descendant inventory so fallow and the lineage-delete
+    // blast-radius walk agree on the live-descendant set (one DFS, not two).
+    return liveDescendantsWithin(tx, input.topicId).filter((row) => {
       if (row.deletedAt) return false;
       if (row.type === "card" || row.type === "concept") return false;
       if (!isQueueActionableStatus(row.status as ElementStatus)) return false;
@@ -292,27 +295,6 @@ export class FallowService {
       const dueMs = Date.parse(row.dueAt);
       return Number.isFinite(dueMs) && dueMs < fallowMs;
     });
-  }
-
-  private descendantsWithin(tx: DbClient, topicId: ElementId): ElementRow[] {
-    const out: ElementRow[] = [];
-    const stack: ElementId[] = [topicId];
-    const seen = new Set<ElementId>();
-    while (stack.length > 0) {
-      const parentId = stack.pop();
-      if (!parentId || seen.has(parentId)) continue;
-      seen.add(parentId);
-      const children = tx
-        .select()
-        .from(elements)
-        .where(and(eq(elements.parentId, parentId), isNull(elements.deletedAt)))
-        .all();
-      for (const child of children) {
-        out.push(child);
-        stack.push(child.id as ElementId);
-      }
-    }
-    return out;
   }
 
   private fallowReschedulesForBatchWithin(

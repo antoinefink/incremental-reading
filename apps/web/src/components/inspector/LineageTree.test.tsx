@@ -9,7 +9,7 @@
  *    hinge the inspector wires to selection + `/source/$id`).
  */
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LineageNode } from "../../lib/appApi";
 import { LineageTree } from "./LineageTree";
@@ -24,6 +24,7 @@ const NODES: readonly LineageNode[] = [
     depth: 0,
     meta: "source",
     active: false,
+    deleted: false,
   },
   {
     id: "ext-1",
@@ -33,6 +34,7 @@ const NODES: readonly LineageNode[] = [
     depth: 1,
     meta: "atomic_statement",
     active: true,
+    deleted: false,
   },
   {
     id: "sub-1",
@@ -42,6 +44,7 @@ const NODES: readonly LineageNode[] = [
     depth: 2,
     meta: "sub-extract",
     active: false,
+    deleted: false,
   },
 ];
 
@@ -97,5 +100,97 @@ describe("LineageTree", () => {
     if (sub) fireEvent.click(sub);
     expect(onPick).toHaveBeenCalledTimes(2);
     expect(onPick).toHaveBeenLastCalledWith(expect.objectContaining({ id: "sub-1" }));
+  });
+
+  // T135 / U2 — tombstone rendering: a soft-deleted ancestor stays visible (muted +
+  // struck) so a focused live node never disappears from its own lineage.
+  describe("tombstones (T135)", () => {
+    /** source → (deleted) extract → live card focused — the user's real case. */
+    const TOMBSTONE_NODES: readonly LineageNode[] = [
+      {
+        id: "src-1",
+        type: "source",
+        title: "The Toxoplasma Of Rage",
+        stage: "raw_source",
+        depth: 0,
+        meta: "source",
+        active: false,
+        deleted: false,
+      },
+      {
+        id: "ext-dead",
+        type: "extract",
+        title: "The University of Virginia rape case…",
+        stage: "raw_extract",
+        depth: 1,
+        meta: "raw_extract",
+        active: false,
+        deleted: true,
+      },
+      {
+        id: "card-1",
+        type: "card",
+        title: "{{c1::…to discredit}}",
+        stage: "card",
+        depth: 2,
+        meta: "cloze",
+        active: true,
+        deleted: false,
+      },
+    ];
+
+    it("renders a tombstone node muted + struck with a distinguishing test-id (Covers R1)", () => {
+      render(<LineageTree nodes={TOMBSTONE_NODES} onPick={() => {}} onRestore={() => {}} />);
+      const rows = screen.getAllByTestId("lineage-tree-node");
+      const dead = rows.find((r) => r.getAttribute("data-element-id") === "ext-dead");
+      // The tombstone is flagged distinctly from live nodes (data-deleted + class).
+      expect(dead?.getAttribute("data-deleted")).toBe("true");
+      expect(dead?.className).toContain("tree-node--deleted");
+      // The struck "deleted" tag replaces the live mono meta on the tombstone row.
+      expect(within(dead as HTMLElement).getByTestId("lineage-tombstone-tag")).toBeInTheDocument();
+
+      // The focused live card is still present and marked active (never pruned).
+      const card = rows.find((r) => r.getAttribute("data-element-id") === "card-1");
+      expect(card?.getAttribute("data-active")).toBe("true");
+      expect(card?.getAttribute("data-deleted")).toBe("false");
+
+      // A live node is NOT muted/struck and shows no tombstone tag.
+      const src = rows.find((r) => r.getAttribute("data-element-id") === "src-1");
+      expect(src?.className).not.toContain("tree-node--deleted");
+      expect(screen.getAllByTestId("lineage-tombstone-tag")).toHaveLength(1);
+    });
+
+    it("renders an ALWAYS-VISIBLE inline Restore only on tombstone rows and fires onRestore (Covers R11)", () => {
+      const onRestore = vi.fn();
+      render(<LineageTree nodes={TOMBSTONE_NODES} onPick={() => {}} onRestore={onRestore} />);
+      const restores = screen.getAllByTestId("lineage-tombstone-restore");
+      // Exactly one tombstone → exactly one Restore control (not hover-gated; rendered).
+      expect(restores).toHaveLength(1);
+      expect(restores[0]?.getAttribute("data-element-id")).toBe("ext-dead");
+      fireEvent.click(restores[0] as HTMLElement);
+      expect(onRestore).toHaveBeenCalledTimes(1);
+      expect(onRestore).toHaveBeenCalledWith(expect.objectContaining({ id: "ext-dead" }));
+    });
+
+    it("disables the Restore control while that node's restore is in flight", () => {
+      render(
+        <LineageTree
+          nodes={TOMBSTONE_NODES}
+          onPick={() => {}}
+          onRestore={() => {}}
+          restoringId="ext-dead"
+        />,
+      );
+      const restore = screen.getByTestId("lineage-tombstone-restore") as HTMLButtonElement;
+      expect(restore.disabled).toBe(true);
+      expect(restore.textContent).toContain("Restoring");
+    });
+
+    it("omits the Restore control entirely when no onRestore is provided", () => {
+      render(<LineageTree nodes={TOMBSTONE_NODES} onPick={() => {}} />);
+      expect(screen.queryByTestId("lineage-tombstone-restore")).toBeNull();
+      // The tombstone is still rendered (muted) — only the affordance is gone.
+      expect(screen.getByTestId("lineage-tombstone-tag")).toBeInTheDocument();
+    });
   });
 });

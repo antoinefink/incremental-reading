@@ -144,6 +144,11 @@ export {
   MIN_DESCENDANT_LAPSE_RATE,
 } from "./descendant-health-query";
 export {
+  type DescendantCounts,
+  DescendantQuery,
+  liveDescendantsWithin,
+} from "./descendant-query";
+export {
   type AddMarkInput,
   type DocumentBlockInput,
   type DocumentMark,
@@ -177,6 +182,9 @@ export {
   nextExtractStage,
   postponeIntervalDays,
   type RewriteExtractInput,
+  type SubtreeDeleteResult,
+  type SubtreeDeleteSkippedRow,
+  type SubtreeDeleteSkipReason,
   trimExtractText,
 } from "./extract-service";
 export {
@@ -262,6 +270,7 @@ export {
 } from "./lineage-gap-query";
 export {
   type LineageData,
+  type LineageGetOptions,
   type LineageNode,
   LineageQuery,
 } from "./lineage-query";
@@ -490,7 +499,14 @@ export {
   type TopicKnowledgeStateSubjectType,
   type TopicKnowledgeStateSummary,
 } from "./topic-knowledge-state-query";
-export { type TrashItem, TrashRepository } from "./trash-query";
+export {
+  PurgeBlockedByLiveDescendantsError,
+  type RestoreBatchResult,
+  type RestoreSkippedRow,
+  type RestoreSkipReason,
+  type TrashItem,
+  TrashRepository,
+} from "./trash-query";
 export type { DbClient, TransactionClient } from "./types";
 export { type UndoResult, UndoService } from "./undo-service";
 export {
@@ -546,6 +562,12 @@ export interface Repositories {
    * NO op-log; SURFACES gaps, never auto-deletes (lineage is sacred).
    */
   readonly lineageGap: import("./lineage-gap-query").LineageGapQuery;
+  /**
+   * The live-descendant blast-radius inventory (T135) — `countDescendants` drives
+   * the lineage-delete intent menu's show-or-not decision and its quantified copy.
+   * Read-only, NO op-log; shares the live-descendant DFS with the fallow walk.
+   */
+  readonly descendants: import("./descendant-query").DescendantQuery;
   /**
    * The thin BULK cleanup wrappers (T099) — `bulkSoftDelete` / `bulkArchive` /
    * `bulkPostpone`, each minting ONE `batchId` so the whole sweep undoes as one
@@ -630,6 +652,7 @@ import { ChronicPostponeQuery } from "./chronic-postpone-query";
 import { ChronicPostponeService } from "./chronic-postpone-service";
 import { ConceptRepository } from "./concept-repository";
 import { DedupReportQuery } from "./dedup-report-query";
+import { DescendantQuery } from "./descendant-query";
 import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
 import { EmbeddingRepository } from "./embedding-repository";
@@ -707,6 +730,7 @@ export function createRepositories(
     sourceDedup: new SourceDedupQuery(db, assets),
     dedupReport: new DedupReportQuery(db, assets),
     lineageGap: new LineageGapQuery(db),
+    descendants: new DescendantQuery(db),
     bulkActions: new BulkActionService(db),
     jobs: new JobsRepository(db),
     ocrPages: new OcrPagesRepository(db),

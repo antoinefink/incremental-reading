@@ -352,7 +352,7 @@ Detailed specs: [`tasks/M20-maintenance.md`](./tasks/M20-maintenance.md) (T099) 
 
 ---
 
-# Part III — Close the loops (T101–T134)
+# Part III — Close the loops (T101–T135)
 
 Goal: Parts I–II built the gold-standard *mechanics*; Part III makes them *behave*. The 2026-06
 gap analysis ([`ideation/2026-06-09-gold-standard-incremental-reading-ideation.md`](./ideation/2026-06-09-gold-standard-incremental-reading-ideation.md))
@@ -507,6 +507,15 @@ Detailed specs: [`tasks/M29-longform-geometry.md`](./tasks/M29-longform-geometry
   Done when: audio/video sources track per-segment processed state (derived from playback and fragment extraction), feeding the same surfaces — "watched 40%, 2 segments deferred" is durable data, not memory.
 - [ ] **T134 — Structural skim pass** · _deps: T067, T132_
   Done when: long-form sources (PDF outline/TOC, EPUB chapters, long documents by heading) support a skim pass assigning per-section verdicts — extract-worthy / later / ignore — that bulk-set block states (one batch, one undo) and create per-section scheduling, so deep reading starts where the value is instead of at page 1.
+
+## M30 — Lineage-aware deletion (T135)
+Detailed specs: [`plans/2026-06-12-004-feat-lineage-aware-deletion-plan.md`](./plans/2026-06-12-004-feat-lineage-aware-deletion-plan.md)
+
+> The **delete-path** facet of "lineage is sacred" — distinct from M26, which is forward edit-propagation. Deps are already satisfied, so it can land whenever.
+
+- [x] **T135 — Lineage-aware deletion (delete in the middle of the tree)** · _deps: T023, T024, T044, T107_
+  Done when: deleting an element with live descendants no longer silently prunes them from view or orphans them — the lineage view renders a deleted ancestor as a muted tombstone (a focused card never vanishes from its own chain), and a delete with live descendants opens a non-modal intent menu quantifying the blast radius with honorable paths (mark-processed for extracts / rest for topics / keep-descendants-as-tombstone / delete-the-whole-branch); branch delete is one batched, recoverable transaction that preserves descendant FSRS review state (due cleared with a preimage, restored exactly), reconciles the synthesized extract-fate cache, and the purge guard blocks hard-deletion of a tombstone that still anchors live descendants at every seam (manual purge, Empty Trash, auto-purge); every delete entry point (inspector / reader / queue / source / maintenance) routes through the descendant-aware path; covered by local-db, IPC-boundary, and Electron E2E tests with restart persistence; no DB migration. Unit breakdown in the plan doc.
+  Completed across U1–U10 (tombstone-aware `LineageQuery` + `DescendantQuery`, preimage-aware `softDeleteSubtreeWithin` + symmetric restore, purge guard at every seam, typed IPC, the `LineageDeleteMenu` + tombstone rendering + Trash branch grouping, and `tests/electron/lineage-deletion.spec.ts`). Verification: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm e2e tests/electron/lineage-deletion.spec.ts`. Plan: [`plans/2026-06-12-004-feat-lineage-aware-deletion-plan.md`](./plans/2026-06-12-004-feat-lineage-aware-deletion-plan.md).
 
 ---
 

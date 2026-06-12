@@ -18,6 +18,14 @@ export const IPC_CHANNELS = {
   inspectorList: "inspector:list",
   inspectorGet: "inspector:get",
   elementsSetPriority: "elements:setPriority",
+  // Lineage-aware deletion (T135). `elements:countDescendants` is the read-only
+  // blast-radius inventory that decides quiet-delete vs. the intent menu;
+  // `elements:softDeleteSubtree` soft-deletes a node and OPTIONALLY its live
+  // subtree under one shared `batchId` (preimage-aware, recoverable);
+  // `trash:restoreBatch` restores that whole batch root-first. No new op type — all
+  // three ride the existing `soft_delete_element` machinery behind local-db.
+  elementsCountDescendants: "elements:countDescendants",
+  elementsSoftDeleteSubtree: "elements:softDeleteSubtree",
   topicsFallow: "topics:fallow",
   topicsUnfallow: "topics:unfallow",
   queueList: "queue:list",
@@ -187,6 +195,15 @@ export const IPC_CHANNELS = {
   readPointSet: "readPoint:set",
   trashList: "trash:list",
   trashRestore: "trash:restore",
+  // Batch restore (T135) — restore an entire branch-delete `batchId` as one unit,
+  // root-first, schedule re-established from the recorded preimages. The snackbar
+  // Undo + the Trash group "Restore" both call this (order-independent, not
+  // global undo).
+  trashRestoreBatch: "trash:restoreBatch",
+  // Ancestor-chain restore (T135) — restore only the DELETED-ancestor chain of one
+  // element up to the first live ancestor (the inspector "ancestor deleted" hint and a
+  // per-tombstone Restore), so sibling/cousin tombstones are never resurrected.
+  trashRestoreAncestorChain: "trash:restoreAncestorChain",
   trashPurge: "trash:purge",
   trashEmpty: "trash:empty",
   undoLast: "undo:last",

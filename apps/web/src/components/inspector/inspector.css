@@ -910,6 +910,73 @@
   white-space: nowrap;
 }
 
+/* ---------- Lineage tombstone (T135 / U2) ---------- */
+/* A soft-deleted lineage node kept visible so a focused live card never loses its
+   own chain. Muted (--text-3) + reduced opacity + a struck-through title — the
+   strikethrough (mirroring .badge--dismissed) is the disambiguating cue that keeps it
+   distinct from the live-but-inactive, retired, and expired treatments that also use
+   --text-3 alone. Tokens only; legible in light + dark. */
+.tree-node--deleted {
+  color: var(--text-3);
+  opacity: 0.7;
+}
+.tree-node--deleted .tree-node__title {
+  text-decoration: line-through;
+}
+.tree-node--deleted:hover {
+  opacity: 1;
+}
+/* The "deleted" tag replaces the live meta suffix on a tombstone row. */
+.tree-node__tomb {
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+  flex: none;
+  white-space: nowrap;
+  text-transform: lowercase;
+}
+/* The ALWAYS-VISIBLE inline Restore control on a tombstone row (keyboard-reachable,
+   never hover-only). Calm accent-soft pill, matching the inspector's other inline
+   affordances. */
+.tree-node__restore {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  margin-left: 4px;
+  padding: 2px 7px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--accent-soft-bd);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: var(--t-2xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--fast) var(--ease);
+}
+.tree-node__restore:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+.tree-node__restore:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.tree-node__restore:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* R3 — the "an ancestor of this item is deleted" hint above the lineage tree. A calm
+   insp-empty-style note carrying its own inline insp-jump Restore. */
+.insp-ancestor-deleted {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
 /* ---------- Element picker (selection mechanism) ---------- */
 .insp-picker {
   display: flex;

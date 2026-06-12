@@ -46,6 +46,12 @@ The chain that lets a derived element point back to the source evidence it came 
 
 Source lineage is different from general hierarchy: it is evidence grounding, so it must stay coherent when extracts, cards, or media fragments are inspected or reviewed.
 
+### Lineage tombstone
+
+A soft-deleted middle element kept visible in the lineage view as a muted anchor so its live descendants never vanish from their own chain. Deleting an element with live descendants must never silently orphan them (a hard delete would null `parentId`/`sourceId`) or silently hide them (the live-only lineage walk would prune the whole subtree); instead the deleted node is rendered as a tombstone that the descendants still hang from, with one-click restore.
+
+A lineage tombstone is a display state derived from the existing `deleted` status, not a new status or operation. It is the deletion-side sibling of the deliberate, descendant-aware states elsewhere in the system — like Topic fallow (rest) and honorable extract fates — and preserves the "source lineage is sacred" invariant on the delete path.
+
 ### Browser capture
 
 A browser-extension initiated import flow that turns the current page or selected browser content into a Source while leaving validation, activation, and local reader navigation inside the desktop app.

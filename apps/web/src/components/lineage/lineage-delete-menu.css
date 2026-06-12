@@ -1,0 +1,158 @@
+/*
+ * LineageDeleteMenu styles (T135 / U7) — the descendant-aware delete intent popover.
+ *
+ * Token-only (no hard-coded colors/spacing/radii), mirroring done-intent-menu.css: the
+ * popover reuses the surface/border/shadow tokens the rest of the app uses, and is
+ * positioned ABSOLUTE relative to the inline trigger so it tracks the row even inside a
+ * scrollable container. The trigger is usually styled by the host (callers pass their
+ * existing Delete-button class); `.lindel__trigger` is only the standalone fallback.
+ *
+ * The recommended honorable action carries the --ok-soft tint; the branch delete the
+ * --danger tint; Keep descendants (the safe default) stays neutral.
+ */
+
+.lindel {
+  position: relative;
+  display: inline-flex;
+}
+
+.lindel__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all var(--fast) var(--ease);
+}
+.lindel__trigger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.lindel__trigger:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.lindel__pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  min-width: 264px;
+  max-width: 340px;
+  padding: 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lindel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 0;
+}
+.lindel__count {
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.lindel__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lindel__choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--fast) var(--ease);
+}
+.lindel__choice:hover:not(:disabled),
+.lindel__choice:focus-visible {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+  outline: none;
+}
+.lindel__choice:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The recommended honorable action (Mark processed / Rest) — calm --ok tint. */
+.lindel__choice--ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.lindel__choice--ok:hover:not(:disabled),
+.lindel__choice--ok:focus-visible {
+  background: var(--ok-soft);
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+/* The destructive branch delete — --danger tint on hover/focus. */
+.lindel__choice--danger:hover:not(:disabled),
+.lindel__choice--danger:focus-visible {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.lindel__choice--cancel {
+  color: var(--text-3);
+}
+
+.lindel__choice-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.lindel__choice-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.lindel__choice-label {
+  font-size: var(--t-sm);
+  font-weight: 500;
+  line-height: 1.2;
+}
+.lindel__choice-badge {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--ok);
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: var(--t-2xs);
+  font-weight: 600;
+  line-height: 1.2;
+}
+.lindel__choice-hint {
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+  line-height: 1.3;
+}

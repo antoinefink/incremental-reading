@@ -81,12 +81,14 @@ import {
   inboxSourceTypeLabel,
   type LibraryBrowseFilters,
   LibraryQuery,
+  type LineageGetOptions,
   LineageQuery,
   nowIso,
   OcclusionService,
   type OptimizationScope,
   OptimizationService,
   type OptimizationSuggestionWithWorkload,
+  PurgeBlockedByLiveDescendantsError,
   QueueActionService,
   QueueQuery,
   RecoveryModeService,
@@ -204,8 +206,12 @@ import type {
   DocumentsSaveRequest,
   DocumentsSaveResult,
   ElementOrganizeState,
+  ElementsCountDescendantsRequest,
+  ElementsCountDescendantsResult,
   ElementsSetPriorityRequest,
   ElementsSetPriorityResult,
+  ElementsSoftDeleteSubtreeRequest,
+  ElementsSoftDeleteSubtreeResult,
   ExtractActionSummary,
   ExtractionCreateRequest,
   ExtractionCreateResult,
@@ -374,6 +380,10 @@ import type {
   TrashListResult,
   TrashPurgeRequest,
   TrashPurgeResult,
+  TrashRestoreAncestorChainRequest,
+  TrashRestoreAncestorChainResult,
+  TrashRestoreBatchRequest,
+  TrashRestoreBatchResult,
   TrashRestoreRequest,
   TrashRestoreResult,
   UndoLastResult,
@@ -1141,6 +1151,37 @@ export class DbService {
     };
   }
 
+  /**
+   * Count an element's LIVE descendants (T135) broken down by kind via
+   * {@link DescendantQuery.countDescendants}. This is the blast-radius inventory the
+   * delete intent menu reads: `total === 0` means "quiet delete, no menu"; a non-zero
+   * total opens the menu and quantifies the cost (N extracts, M cards, K with review
+   * history). Read-only — no mutation, no `operation_log`.
+   */
+  countDescendants(request: ElementsCountDescendantsRequest): ElementsCountDescendantsResult {
+    return this.repos.descendants.countDescendants(request.id as ElementId);
+  }
+
+  /**
+   * Soft-delete a node and OPTIONALLY its live subtree (T135) via
+   * {@link ExtractService.deleteSubtree}, which runs ONE transaction under a shared
+   * `batchId` and appends `soft_delete_element` per affected node (preimage-aware so
+   * restore re-establishes each schedule exactly). `includeSubtree: false` tombstones
+   * only the target node (keep-descendants); `true` soft-cascades the whole branch,
+   * recoverable as a unit. Type-agnostic — the menu routes a topic/extract/sub-extract
+   * here — and never a hard delete; lineage links are preserved.
+   */
+  softDeleteSubtree(request: ElementsSoftDeleteSubtreeRequest): ElementsSoftDeleteSubtreeResult {
+    const result = this.extractService.deleteSubtree(request.id as ElementId, {
+      includeSubtree: request.includeSubtree === true,
+    });
+    return {
+      batchId: result.batchId,
+      affected: result.affected,
+      skipped: result.skipped.map((row) => ({ id: row.id, reason: row.reason })),
+    };
+  }
+
   /** Read-only lineage query layer (T023), bound to the open database. */
   private get lineageQuery(): LineageQuery {
     if (!this.lineage) {
@@ -1154,9 +1195,13 @@ export class DbService {
    * id is unknown/soft-deleted. The {@link LineageQuery} resolves the lineage ROOT
    * and flattens the `source → extract → sub-extract → card` descendant tree —
    * read-only lineage computed main-side so the renderer only renders + navigates.
+   *
+   * With `includeTombstones` (T135), soft-deleted nodes are surfaced as muted
+   * tombstones so a focused element never vanishes from its own chain; the default
+   * remains live-only for yield / "review this branch" / analytics callers.
    */
-  getLineage(id: string): LineageGetResult {
-    return { lineage: this.lineageQuery.get(id as ElementId) };
+  getLineage(id: string, options: LineageGetOptions = {}): LineageGetResult {
+    return { lineage: this.lineageQuery.get(id as ElementId, options) };
   }
 
   /** Read-only queue query layer (T029), bound to the open database. */
@@ -5238,6 +5283,7 @@ export class DbService {
       deletedAt: it.deletedAt,
       originStatus: it.originStatus,
       sourceTitle: it.sourceTitle,
+      deleteBatchId: it.deleteBatchId,
     }));
     return { items };
   }
@@ -5253,11 +5299,13 @@ export class DbService {
     const id = request.id as ElementId;
     const element = this.repos.elements.findById(id);
     if (!element?.deletedAt) return { item: null };
-    // Reuse the trash read's origin-status resolution so restore returns it to where
-    // it was (the same source of truth the Trash list shows).
-    const trashItem = this.repos.trash.listTrash().find((it) => it.element.id === id);
-    const originStatus = trashItem?.originStatus ?? "active";
-    const restored = this.repos.elements.restore(id, originStatus);
+    // Single-element restore re-establishes the schedule from the recorded preimage
+    // (T135 / U5) — a lineage-deleted node returns to its EXACT pre-delete schedule
+    // (a restored card to the FSRS due queue) instead of lingering as a stale
+    // past-due phantom. `restoreOne` resolves both origin status AND schedule preimage
+    // from the latest `soft_delete_element` op in one place (local-db owns payloads).
+    const restored = this.repos.trash.restoreOne(id);
+    if (!restored) return { item: null };
     return {
       item: {
         id: restored.id,
@@ -5273,19 +5321,73 @@ export class DbService {
   }
 
   /**
+   * Restore an entire branch-delete `batchId` as one unit (T135) via
+   * {@link TrashRepository.restoreBatch}: root-first, each node's schedule
+   * re-established from its recorded `soft_delete_element` preimage. A node carrying
+   * newer manual intent (or sitting under a skipped root) is left a tombstone and
+   * SURFACED in `skipped` rather than silently restored — so a partial/broken chain
+   * is reported, never hidden. The snackbar Undo + the Trash group "Restore" call this
+   * (order-independent, unlike global undo).
+   */
+  restoreBatchFromTrash(request: TrashRestoreBatchRequest): TrashRestoreBatchResult {
+    const result = this.repos.trash.restoreBatch(request.batchId);
+    return {
+      restored: result.restored,
+      skipped: result.skipped.map((row) => ({ id: row.id, reason: row.reason })),
+      rootRestored: result.rootRestored,
+    };
+  }
+
+  /**
+   * Restore only the DELETED-ancestor chain of one element up to the first live
+   * ancestor (T135) via {@link TrashRepository.restoreAncestorChain}: the inspector
+   * "ancestor deleted" hint and a per-tombstone Restore route here so sibling/cousin
+   * tombstones are never resurrected and a node is never left under a still-tombstoned
+   * parent. Schedule is re-established from each node's preimage; the whole chain is one
+   * undoable restore batch.
+   */
+  restoreAncestorChainFromTrash(
+    request: TrashRestoreAncestorChainRequest,
+  ): TrashRestoreAncestorChainResult {
+    const result = this.repos.trash.restoreAncestorChain(request.id as ElementId);
+    return { restored: result.restored, batchId: result.batchId };
+  }
+
+  /**
    * Permanently delete ONE trashed element (T044) — the only hard delete in the
    * app, gated behind explicit UI confirmation — via {@link TrashRepository.purge}.
    * FK cascades + the FTS5 delete trigger clean up dependents; appends no op
-   * (irreversible by design). Returns `{ purged: 1 }` or `{ purged: 0 }`.
+   * (irreversible by design).
+   *
+   * T135 purge guard: `TrashRepository.purge` THROWS
+   * {@link PurgeBlockedByLiveDescendantsError} when the tombstone still anchors live
+   * descendants (a purge would null their lineage links — the 0030-wipe mechanism).
+   * We CATCH it here and return a STRUCTURED `{ purged: 0, blocked: true,
+   * liveDependents }` rather than letting it propagate as a raw IPC error, so the
+   * renderer can distinguish "blocked by live descendants" (offer restore /
+   * delete-branch recovery) from a genuine failure. The happy path returns
+   * `{ purged: 1, blocked: false, liveDependents: 0 }`; an unknown id returns
+   * `{ purged: 0, blocked: false, liveDependents: 0 }`.
    */
   purgeFromTrash(request: TrashPurgeRequest): TrashPurgeResult {
-    const purged = this.repos.trash.purge(request.id as ElementId) ? 1 : 0;
-    return { purged };
+    try {
+      const purged = this.repos.trash.purge(request.id as ElementId) ? 1 : 0;
+      return { purged, blocked: false, liveDependents: 0 };
+    } catch (error) {
+      if (error instanceof PurgeBlockedByLiveDescendantsError) {
+        return { purged: 0, blocked: true, liveDependents: error.liveDescendantCount };
+      }
+      throw error;
+    }
   }
 
   /**
    * Permanently delete EVERY trashed element in one transaction (T044, the "Empty
    * trash" action) via {@link TrashRepository.emptyTrash}. UI-confirmed.
+   *
+   * T135 purge guard: a trashed node that still anchors live descendants is SKIPPED
+   * (never purged) and counted in `skipped`, so Empty Trash can never null a live
+   * element's lineage links — skip-and-report rather than block the whole empty.
    */
   emptyTrash(): TrashEmptyResult {
     return this.repos.trash.emptyTrash();

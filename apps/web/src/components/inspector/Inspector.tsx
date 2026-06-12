@@ -2235,6 +2235,9 @@ function InspectorBody({
   onSelect,
   onOpenLineageItem,
   onPickLineageNode,
+  onRestoreTombstone,
+  onRestoreAncestors,
+  restoringId,
   onJumpToLocation,
   onSetPriority,
   onFallowTopic,
@@ -2251,6 +2254,12 @@ function InspectorBody({
   onSelect: (id: string) => void;
   onOpenLineageItem: (item: LineageItem) => void;
   onPickLineageNode: (node: LineageNode) => void;
+  /** Restore one tombstone node from the lineage tree (T135 / U2) — restores its chain. */
+  onRestoreTombstone: (node: LineageNode) => void;
+  /** Restore the FOCUSED element's tombstoned ancestor chain (root-first) for the R3 hint. */
+  onRestoreAncestors: () => void;
+  /** The tombstone id whose restore is in flight (its control shows busy). */
+  restoringId: string | null;
   onJumpToLocation: (location: NonNullable<InspectorData["location"]>) => void;
   onSetPriority: (action: ElementsSetPriorityAction) => void;
   onFallowTopic: (request: TopicFallowRequest) => Promise<TopicFallowResult>;
@@ -2466,7 +2475,51 @@ function InspectorBody({
             <span>Lineage</span>
             <span className="insp-sec__count">{lineage.nodes.length}</span>
           </div>
-          <LineageTree nodes={lineage.nodes} onPick={onPickLineageNode} />
+          {/* R3 — when an ANCESTOR (a node ABOVE the focused element) in its chain is a
+              tombstone, show a single-line hint with an inline Restore that walks the
+              tombstoned ANCESTOR chain (root-first) up to a live root via
+              `restoreAncestorChain` — restoring ONLY that chain, never sibling/cousin or
+              descendant tombstones. Ancestors precede the active node in the flattened,
+              depth-ordered lineage, so we count deleted nodes BEFORE it (a deleted
+              descendant or the focused node itself is NOT an "ancestor deleted" case). */}
+          {(() => {
+            const activeIndex = lineage.nodes.findIndex((n) => n.active);
+            if (activeIndex < 0) return null;
+            const tombstonedAncestors = lineage.nodes
+              .slice(0, activeIndex)
+              .filter((n) => n.deleted);
+            if (tombstonedAncestors.length === 0) return null;
+            const restoringAncestors = restoringId === element.id;
+            return (
+              <p
+                className="insp-empty insp-ancestor-deleted"
+                data-testid="lineage-ancestor-deleted"
+              >
+                <Icon name="trash" size={12} />
+                <span>
+                  {tombstonedAncestors.length === 1
+                    ? "An ancestor of this item is deleted."
+                    : `${tombstonedAncestors.length} ancestors of this item are deleted.`}
+                </span>
+                <button
+                  type="button"
+                  className="insp-jump"
+                  data-testid="lineage-ancestor-restore"
+                  disabled={restoringAncestors}
+                  onClick={() => onRestoreAncestors()}
+                >
+                  <Icon name="restore" size={12} />
+                  {restoringAncestors ? "Restoring…" : "Restore"}
+                </button>
+              </p>
+            );
+          })()}
+          <LineageTree
+            nodes={lineage.nodes}
+            onPick={onPickLineageNode}
+            onRestore={onRestoreTombstone}
+            restoringId={restoringId}
+          />
           {/* T096 — review the CARDS in this branch (lineage subtree) as a targeted
               session. For a source/topic/extract root this reviews its cards outside
               scheduling; omitted when the subtree has no live cards. */}
@@ -2575,6 +2628,9 @@ export function Inspector() {
   const [error, setError] = useState<string | null>(null);
   const [priorityBusy, setPriorityBusy] = useState(false);
   const [scheduleBusy, setScheduleBusy] = useState(false);
+  // The tombstone whose restore is in flight (T135 / U2) — its inline Restore control
+  // shows a busy state; cleared on settle.
+  const [restoringId, setRestoringId] = useState<string | null>(null);
   const selectedIdRef = useRef<string | null>(selectedId);
   selectedIdRef.current = selectedId;
   // Bumped by the `INSPECTOR_REFRESH_EVENT` so the panel re-fetches the selected
@@ -2643,8 +2699,12 @@ export function Inspector() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+    // Request the lineage WITH tombstones (T135 / U2) so a focused element sitting
+    // under a soft-deleted ancestor still shows its full chain — the deleted ancestor
+    // renders as a muted tombstone with a Restore affordance instead of pruning the
+    // focused node from its own lineage.
     appApi
-      .getLineage({ id: selectedId })
+      .getLineage({ id: selectedId, includeTombstones: true })
       .then((res) => {
         if (!cancelled) setLineage(res.lineage);
       })
@@ -2802,6 +2862,43 @@ export function Inspector() {
     [select, navigate],
   );
 
+  // Restore the DELETED-ancestor chain of one node up to the first live ancestor (T135 /
+  // U2 — R1/R3/R11). This is the CORRECT primitive: it restores ONLY the chain above (and
+  // including, when a tombstone) `id`, never unrelated sibling/cousin tombstones — so a
+  // focused live card reconnects to a live root without resurrecting other deletions. The
+  // schedule is re-established from each node's preimage main-side; we then refresh.
+  const restoreAncestorChainFor = useCallback(
+    async (id: string) => {
+      if (!isDesktop() || restoringId) return;
+      setRestoringId(id);
+      try {
+        await appApi.restoreAncestorChain({ id });
+        setError(null);
+        requestInspectorRefresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setRestoringId(null);
+      }
+    },
+    [restoringId],
+  );
+
+  // Restore one tombstone node (its inline Restore control) — restores that node's
+  // ancestor chain so it is never left under a still-tombstoned parent.
+  const onRestoreTombstone = useCallback(
+    (node: LineageNode) => void restoreAncestorChainFor(node.id),
+    [restoreAncestorChainFor],
+  );
+
+  // R3 — restore the tombstoned ANCESTOR chain of the FOCUSED element up to a live root,
+  // so a live element under a deleted ancestor reconnects in one click (no sibling
+  // tombstones resurrected).
+  const onRestoreAncestors = useCallback(
+    () => void restoreAncestorChainFor(selectedId ?? ""),
+    [restoreAncestorChainFor, selectedId],
+  );
+
   const headerTitle = data ? typeLabel(data.element.type) : "Inspector";
 
   return (
@@ -2845,6 +2942,9 @@ export function Inspector() {
             onSelect={onSelect}
             onOpenLineageItem={onOpenLineageItem}
             onPickLineageNode={onPickLineageNode}
+            onRestoreTombstone={onRestoreTombstone}
+            onRestoreAncestors={onRestoreAncestors}
+            restoringId={restoringId}
             onJumpToLocation={navigateToLocation}
             onSetPriority={onSetPriority}
             onFallowTopic={onFallowTopic}

@@ -191,6 +191,16 @@ const h = vi.hoisted(() => {
     listQueue: vi.fn().mockResolvedValue(result),
     getDailyWorkSummary: vi.fn().mockResolvedValue(dailyWork),
     actOnQueueItem: vi.fn().mockResolvedValue({ item: null, removed: true, undo: null }),
+    // Descendant-aware delete (T135 / U7): default to a LEAF so the loop's Delete takes
+    // the quiet path through `actOnQueueItem({delete})`.
+    countDescendants: vi
+      .fn()
+      .mockResolvedValue({ extracts: 0, cards: 0, cardsWithHistory: 0, total: 0 }),
+    softDeleteSubtree: vi.fn().mockResolvedValue({ batchId: "b", affected: [], skipped: [] }),
+    restoreBatchFromTrash: vi
+      .fn()
+      .mockResolvedValue({ restored: [], skipped: [], rootRestored: true }),
+    fallowTopic: vi.fn().mockResolvedValue({ applied: 1, skipped: [], batchId: "fb" }),
     getBlockProcessingSummary: vi.fn().mockResolvedValue({
       summary: {
         canMarkDoneWithoutConfirmation: true,
@@ -343,6 +353,10 @@ vi.mock("../../lib/appApi", async () => {
       listQueue: h.listQueue,
       getDailyWorkSummary: h.getDailyWorkSummary,
       actOnQueueItem: h.actOnQueueItem,
+      countDescendants: h.countDescendants,
+      softDeleteSubtree: h.softDeleteSubtree,
+      restoreBatchFromTrash: h.restoreBatchFromTrash,
+      fallowTopic: h.fallowTopic,
       getBlockProcessingSummary: h.getBlockProcessingSummary,
       scheduleQueueItem: h.scheduleQueueItem,
       undoQueueAction: h.undoQueueAction,

@@ -46,9 +46,10 @@ import {
   postponeIntervalForPriority,
 } from "@interleave/scheduler";
 import { and, eq, isNull } from "drizzle-orm";
+import { liveDescendantsWithin } from "./descendant-query";
 import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
-import { nowIso } from "./ids";
+import { newRowId, nowIso } from "./ids";
 import { OperationLogRepository } from "./operation-log-repository";
 import { SchedulerService } from "./scheduler-service";
 import { SettingsRepository } from "./settings-repository";
@@ -97,6 +98,24 @@ export interface ExtractActionResult {
   readonly element: Element;
   /** The new plain-text body after a rewrite/trim, when the body changed. */
   readonly plainText?: string;
+}
+
+/** Why a node was skipped by {@link ExtractService.deleteSubtree} (never fails the batch). */
+export type SubtreeDeleteSkipReason = "missing" | "already-deleted";
+
+export interface SubtreeDeleteSkippedRow {
+  readonly id: ElementId;
+  readonly reason: SubtreeDeleteSkipReason;
+}
+
+/** The result of a lineage-aware subtree (or single-node) soft-delete (T135 / U4). */
+export interface SubtreeDeleteResult {
+  /** The shared `batchId` every `soft_delete_element` op in this delete carries. */
+  readonly batchId: string;
+  /** The ids actually soft-deleted by this call (root-first). */
+  readonly affected: readonly ElementId[];
+  /** Ids the in-transaction revalidation skipped (missing / already in the trash). */
+  readonly skipped: readonly SubtreeDeleteSkippedRow[];
 }
 
 /** Direct user-settable extract fates. `synthesized` is owned by synthesis-note lineage. */
@@ -350,6 +369,78 @@ export class ExtractService {
   delete(id: ElementId): ExtractActionResult {
     this.requireExtract(id);
     return { element: this.elements.softDelete(id) };
+  }
+
+  /**
+   * The lineage-aware delete entry (T135 / U4) behind BOTH delete intents:
+   *  - "keep descendants" (`includeSubtree: false`) tombstones only the target node;
+   *  - "delete the whole branch" (`includeSubtree: true`) soft-deletes the node and
+   *    every live descendant — in ONE transaction under a single shared `batchId`,
+   *    recoverable as a unit (the snackbar Undo / Trash batch restore).
+   *
+   * This is type-agnostic (the menu routes a topic/extract/sub-extract here), so it
+   * does NOT require the root to be an extract — it revalidates each id inside the
+   * transaction and SKIPS missing/already-deleted rows with a reason rather than
+   * failing the batch (maintenance-sweep shape). Each per-node delete is
+   * preimage-aware (clears `elements.due_at`, and a card's `review_states.due_at`,
+   * recording both as preimages — {@link ElementRepository.softDeleteSubtreeWithin}).
+   *
+   * Synthesis reconciliation (KTD8): direction (a) is inherited — a deleted
+   * `synthesis_note` in the set auto-clears its still-live targets' cached
+   * `synthesized` fate via `softDeleteWithin`. Direction (b) is handled HERE: any
+   * extract this call soft-deleted that still carries `extractFate = "synthesized"`
+   * is a deleted TARGET whose synthesizing note stayed live (had direction (a)
+   * cleared it the cache would already be gone), so we clear its own stale cache via
+   * {@link clearSynthesizedFateCacheWithin} — WITHOUT rescheduling the deleted row.
+   */
+  deleteSubtree(
+    id: ElementId,
+    options?: { readonly includeSubtree?: boolean },
+  ): SubtreeDeleteResult {
+    const includeSubtree = options?.includeSubtree === true;
+    const batchId = newRowId();
+    return this.db.transaction((tx) => {
+      const root = tx.select().from(elementsTable).where(eq(elementsTable.id, id)).get();
+      if (!root) {
+        return { batchId, affected: [], skipped: [{ id, reason: "missing" as const }] };
+      }
+      if (root.deletedAt) {
+        return { batchId, affected: [], skipped: [{ id, reason: "already-deleted" as const }] };
+      }
+
+      // Pre-compute the would-be subtree so we can report which descendants were
+      // already in the trash (skipped) vs newly deleted, without a second walk.
+      const plannedDescendants = includeSubtree
+        ? liveDescendantsWithin(tx, id).map((row) => row.id as ElementId)
+        : [];
+
+      const { affected } = this.elements.softDeleteSubtreeWithin(tx, id, {
+        batchId,
+        includeSubtree,
+      });
+      const affectedSet = new Set(affected);
+
+      // Direction (b): clear any deleted target extract's now-stale synthesized cache.
+      for (const affectedId of affected) {
+        const row = tx
+          .select({ type: elementsTable.type, extractFate: elementsTable.extractFate })
+          .from(elementsTable)
+          .where(eq(elementsTable.id, affectedId))
+          .get();
+        if (row?.type === "extract" && row.extractFate === "synthesized") {
+          this.clearSynthesizedFateCacheWithin(tx, affectedId);
+        }
+      }
+
+      // A planned descendant not in `affected` was already soft-deleted before this
+      // call — surface it as skipped (the live walk excludes deleted rows, so this is
+      // only ever a race where a row vanished mid-plan; recorded for completeness).
+      const skipped: SubtreeDeleteSkippedRow[] = plannedDescendants
+        .filter((descendantId) => !affectedSet.has(descendantId))
+        .map((descendantId) => ({ id: descendantId, reason: "already-deleted" as const }));
+
+      return { batchId, affected, skipped };
+    });
   }
 
   /**

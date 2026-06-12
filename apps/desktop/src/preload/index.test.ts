@@ -140,6 +140,22 @@ describe("preload bridge", () => {
       topicId: "topic-1",
     });
 
+    // Lineage-aware delete bridge surface (T135) — the three new functions exist on
+    // the typed bridge and route to the right channels with the payload unchanged.
+    await api().elements.countDescendants({ id: "el-1" });
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.elementsCountDescendants, {
+      id: "el-1",
+    });
+    await api().elements.softDeleteSubtree({ id: "el-1", includeSubtree: true });
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.elementsSoftDeleteSubtree, {
+      id: "el-1",
+      includeSubtree: true,
+    });
+    await api().trash.restoreBatch({ batchId: "batch-1" });
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.trashRestoreBatch, {
+      batchId: "batch-1",
+    });
+
     await api().library.parkedAction({ id: "src-1", action: { kind: "queueSoon" } });
     expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.libraryParkedAction, {
       id: "src-1",

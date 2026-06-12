@@ -27,6 +27,9 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../components/Icon";
 import { Prio } from "../components/inspector/primitives";
+import { LineageDeleteMenu } from "../components/lineage/LineageDeleteMenu";
+import { useLineageDelete } from "../components/lineage/useLineageDelete";
+import { Snackbar } from "../components/Snackbar";
 import "../components/inspector/inspector.css";
 import {
   appApi,
@@ -131,14 +134,13 @@ export function StagnantExtracts() {
     [navigate],
   );
 
-  /** Postpone / Delete are direct typed commands; remove the row optimistically. */
+  /** Postpone / Reference / Reactivate are direct typed commands; remove the row optimistically. */
   const act = useCallback(
-    async (id: string, action: "postpone" | "delete" | "reference" | "reactivate") => {
+    async (id: string, action: "postpone" | "reference" | "reactivate") => {
       setBusyId(id);
       setError(null);
       try {
         if (action === "postpone") await appApi.postponeExtract({ id });
-        else if (action === "delete") await appApi.deleteExtract({ id });
         else if (action === "reference") await setExtractFate(id, "reference");
         else await reactivateExtractFate(id);
         setRows((prev) => prev.filter((r) => r.extract.id !== id));
@@ -151,6 +153,19 @@ export function StagnantExtracts() {
     },
     [load],
   );
+
+  // Descendant-aware delete (T135 / U7): a leaf deletes quietly; a stagnant extract
+  // that still anchors live descendants opens the intent menu instead of a silent prune.
+  // Any outcome drops the row (the extract is no longer an active stagnant item) and
+  // re-reads after an undo.
+  const lineageDelete = useLineageDelete({
+    quietDelete: async (target) => {
+      await appApi.deleteExtract({ id: target.id });
+    },
+    onAfter: (target) => {
+      setRows((prev) => prev.filter((r) => r.extract.id !== target.id));
+    },
+  });
 
   if (!desktop) {
     return (
@@ -292,16 +307,25 @@ export function StagnantExtracts() {
                     <Icon name="hourglass" size={14} />
                     Postpone
                   </button>
-                  <button
-                    type="button"
-                    className={`rv-repair__btn${suggestion === "delete" ? " se-btn--suggested" : ""}`}
-                    data-testid="stagnant-delete"
-                    disabled={busyId === row.extract.id}
-                    onClick={() => void act(row.extract.id, "delete")}
-                  >
-                    <Icon name="trash" size={14} />
-                    Delete
-                  </button>
+                  {/* Descendant-aware delete (T135 / U7): a leaf deletes quietly; a row that
+                      still anchors live descendants opens the intent menu. Keeps the
+                      `stagnant-delete` testid + the suggested-highlight + the row look. */}
+                  <LineageDeleteMenu
+                    target={{
+                      id: row.extract.id,
+                      // Every row on this surface is an extract (by construction).
+                      type: "extract",
+                      title: row.extract.title,
+                    }}
+                    actions={lineageDelete.actions}
+                    busy={busyId === row.extract.id || lineageDelete.busy}
+                    triggerClassName={`rv-repair__btn${suggestion === "delete" ? " se-btn--suggested" : ""}`}
+                    triggerIcon="trash"
+                    triggerLabel="Delete"
+                    triggerTestId="stagnant-delete"
+                    tooltipLabel="Delete extract"
+                    triggerAriaLabel="Delete extract"
+                  />
                   <button
                     type="button"
                     className={`rv-repair__btn${suggestion === "keep_as_reference" ? " se-btn--suggested" : ""}`}
@@ -338,6 +362,17 @@ export function StagnantExtracts() {
           })
         )}
       </div>
+
+      {/* The descendant-aware delete outcome (T135 / U7) — Undo restores the batch for a
+          branch delete, the last op for a leaf. */}
+      <Snackbar
+        message={lineageDelete.snackbar?.message ?? null}
+        onUndo={lineageDelete.snackbar?.onUndo}
+        onClose={() => lineageDelete.setSnackbar(null)}
+        icon={lineageDelete.snackbar?.icon ?? "trash"}
+        timeoutMs={lineageDelete.snackbar?.timeoutMs}
+        testId="stagnant-delete-snackbar"
+      />
     </div>
   );
 }

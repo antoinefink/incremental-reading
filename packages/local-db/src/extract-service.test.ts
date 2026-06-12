@@ -33,6 +33,7 @@ import {
 import { postponeIntervalForPriority } from "@interleave/scheduler";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CardService } from "./card-service";
 import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
 import {
@@ -50,6 +51,35 @@ import { SourceRepository } from "./source-repository";
 import { SynthesisService } from "./synthesis-service";
 import { createInMemoryDb } from "./test-db";
 import { UndoService } from "./undo-service";
+
+/** A sub-extract under `parentExtractId`, anchored to the same source. */
+function seedSubExtract(
+  handle: DbHandle,
+  sourceId: ElementId,
+  parentExtractId: ElementId,
+): ElementId {
+  const blocks = blockIdsOf(handle, sourceId);
+  const { element } = new ExtractionService(handle.db).createExtraction({
+    sourceElementId: sourceId,
+    parentId: parentExtractId,
+    selectedText: "A third paragraph.",
+    blockIds: [blocks[2] as BlockId],
+    startOffset: 0,
+    endOffset: 18,
+    priority: 0.625,
+  });
+  return element.id;
+}
+
+/** A Q&A card authored from an extract (carries a `review_states` row). */
+function seedCardFromExtract(handle: DbHandle, extractId: ElementId): ElementId {
+  return new CardService(handle.db).createFromExtract({
+    extractId,
+    kind: "qa",
+    prompt: "Q?",
+    answer: "A.",
+  }).element.id;
+}
 
 let handle: DbHandle;
 
@@ -500,5 +530,159 @@ describe("ExtractService.delete (soft)", () => {
       .get();
     expect(rel?.relationType).toBe("derived_from");
     expect(rel?.toElementId).toBe(sourceId);
+  });
+});
+
+describe("ExtractService.deleteSubtree (T135/U4)", () => {
+  it("R7: branch delete soft-deletes the extract + sub-extract + card under one batchId", () => {
+    const { sourceId, extractId } = seedExtract(handle);
+    const subExtractId = seedSubExtract(handle, sourceId, extractId);
+    const cardId = seedCardFromExtract(handle, subExtractId);
+    const elements_ = new ElementRepository(handle.db);
+
+    const result = new ExtractService(handle.db).deleteSubtree(extractId, { includeSubtree: true });
+
+    expect(result.affected).toEqual([extractId, subExtractId, cardId]);
+    expect(result.batchId).toBeTruthy();
+    for (const id of result.affected) {
+      expect(elements_.findById(id)?.status).toBe("deleted");
+    }
+    // Every soft-delete op shares the announced batchId.
+    const batchOps = handle.db
+      .select()
+      .from(operationLog)
+      .all()
+      .filter(
+        (op) =>
+          op.opType === "soft_delete_element" &&
+          (JSON.parse(op.payload) as { batchId?: string }).batchId === result.batchId,
+      );
+    expect(batchOps).toHaveLength(3);
+  });
+
+  it("keep-descendants (subtree off) tombstones only the node, descendants stay live", () => {
+    const { sourceId, extractId } = seedExtract(handle);
+    const subExtractId = seedSubExtract(handle, sourceId, extractId);
+    const cardId = seedCardFromExtract(handle, subExtractId);
+    const elements_ = new ElementRepository(handle.db);
+
+    const result = new ExtractService(handle.db).deleteSubtree(extractId, {
+      includeSubtree: false,
+    });
+
+    expect(result.affected).toEqual([extractId]);
+    expect(elements_.findById(extractId)?.status).toBe("deleted");
+    // The sub-extract and card remain live and still parented (lineage preserved).
+    expect(elements_.findById(subExtractId)?.deletedAt).toBeNull();
+    expect(elements_.findById(cardId)?.deletedAt).toBeNull();
+    expect(elements_.findById(subExtractId)?.parentId).toBe(extractId);
+  });
+
+  it("R9(a): deleting a branch whose synthesis_note synthesized a still-live extract clears that extract's fate", () => {
+    const { sourceId, extractId } = seedExtract(handle);
+    // A separate, live target extract OUTSIDE the branch we will delete.
+    const liveTargetId = seedSubExtract(handle, sourceId, extractId); // child of extractId…
+    // …but we will delete a DIFFERENT branch root, so re-anchor the target to the source
+    // so it is NOT a descendant of the branch we delete.
+    handle.sqlite
+      .prepare("UPDATE elements SET parent_id = ? WHERE id = ?")
+      .run(sourceId, liveTargetId);
+
+    // A synthesis note that references (synthesizes) the live target extract.
+    const synthesis = new SynthesisService(handle.db);
+    const noteId = synthesis.create({ title: "Synthesis note" }).element.id;
+    synthesis.linkElement(noteId, liveTargetId);
+    // Make the note a DESCENDANT of the branch root so the branch delete sweeps it up.
+    handle.sqlite.prepare("UPDATE elements SET parent_id = ? WHERE id = ?").run(extractId, noteId);
+
+    const elements_ = new ElementRepository(handle.db);
+    expect(elements_.findById(liveTargetId)?.extractFate).toBe("synthesized");
+
+    new ExtractService(handle.db).deleteSubtree(extractId, { includeSubtree: true });
+
+    // The note (in the deleted set) cleared its still-LIVE target's synthesized fate
+    // (inherited from softDeleteWithin); the live target was rescheduled, not deleted.
+    const target = elements_.findById(liveTargetId);
+    expect(target?.deletedAt).toBeNull();
+    expect(target?.extractFate).toBeNull();
+    expect(target?.status).toBe("scheduled");
+    // The deleted note is NOT rescheduled.
+    expect(elements_.findById(noteId)?.deletedAt).toBeTruthy();
+  });
+
+  it("R9(b): deleting a target extract whose synthesizing note stays live clears that extract's own synthesized cache", () => {
+    const { extractId } = seedExtract(handle);
+    const synthesis = new SynthesisService(handle.db);
+    // A LIVE note (outside the deleted set) synthesizes the extract we will delete.
+    const noteId = synthesis.create({ title: "Live synthesis note" }).element.id;
+    synthesis.linkElement(noteId, extractId);
+
+    const elements_ = new ElementRepository(handle.db);
+    expect(elements_.findById(extractId)?.extractFate).toBe("synthesized");
+
+    // Delete ONLY the target extract (keep-descendants); its note stays live.
+    new ExtractService(handle.db).deleteSubtree(extractId, { includeSubtree: false });
+
+    // The deleted target's own stale synthesized cache is cleared (no reschedule of
+    // the deleted row — it stays in the trash).
+    const deletedTarget = elements_.findById(extractId);
+    expect(deletedTarget?.deletedAt).toBeTruthy();
+    expect(deletedTarget?.extractFate).toBeNull();
+    // The synthesizing note is untouched and still live.
+    expect(elements_.findById(noteId)?.deletedAt).toBeNull();
+  });
+
+  it("R14: a mid-batch failure during direction-b reconciliation rolls back the WHOLE batch", () => {
+    // A synthesized extract (so direction-(b) reconciliation RUNS mid-transaction, AFTER
+    // the subtree has been soft-deleted) with a live sub-extract beneath it.
+    const { sourceId, extractId } = seedExtract(handle);
+    const subExtractId = seedSubExtract(handle, sourceId, extractId);
+    const synthesis = new SynthesisService(handle.db);
+    const noteId = synthesis.create({ title: "Live synthesis note" }).element.id;
+    synthesis.linkElement(noteId, extractId);
+
+    const elements_ = new ElementRepository(handle.db);
+    expect(elements_.findById(extractId)?.extractFate).toBe("synthesized");
+
+    const service = new ExtractService(handle.db);
+    // Inject a failure INSIDE the delete transaction, after `softDeleteSubtreeWithin` has
+    // already soft-deleted the subtree (mirrors the repo-level throw pattern). The whole
+    // transaction must roll back — no partial tombstones.
+    const spy = vi.spyOn(service, "clearSynthesizedFateCacheWithin").mockImplementation(() => {
+      throw new Error("boom");
+    });
+
+    expect(() => service.deleteSubtree(extractId, { includeSubtree: true })).toThrow("boom");
+    spy.mockRestore();
+
+    // Nothing committed: every node is still live, the synthesized cache is intact, and
+    // no `soft_delete_element` op was recorded for the root.
+    for (const id of [extractId, subExtractId, noteId]) {
+      expect(elements_.findById(id)?.deletedAt).toBeNull();
+    }
+    expect(elements_.findById(extractId)?.extractFate).toBe("synthesized");
+    const op = handle.db
+      .select()
+      .from(operationLog)
+      .where(eq(operationLog.elementId, extractId))
+      .all()
+      .find((row) => row.opType === "soft_delete_element");
+    expect(op).toBeUndefined();
+  });
+
+  it("skips a missing root with a reason instead of throwing", () => {
+    const result = new ExtractService(handle.db).deleteSubtree("nope_missing" as ElementId, {
+      includeSubtree: true,
+    });
+    expect(result.affected).toHaveLength(0);
+    expect(result.skipped).toEqual([{ id: "nope_missing", reason: "missing" }]);
+  });
+
+  it("skips an already-deleted root with a reason", () => {
+    const { extractId } = seedExtract(handle);
+    new ExtractService(handle.db).delete(extractId);
+    const result = new ExtractService(handle.db).deleteSubtree(extractId, { includeSubtree: true });
+    expect(result.affected).toHaveLength(0);
+    expect(result.skipped).toEqual([{ id: extractId, reason: "already-deleted" }]);
   });
 });

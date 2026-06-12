@@ -500,6 +500,50 @@ export interface ElementsSetPriorityResult {
 }
 
 // ---------------------------------------------------------------------------
+// elements.countDescendants() / elements.softDeleteSubtree()  (T135)
+// ---------------------------------------------------------------------------
+
+export interface ElementsCountDescendantsRequest {
+  readonly id: string;
+}
+
+/** The live-descendant blast-radius breakdown that drives the delete intent menu. */
+export interface ElementsCountDescendantsResult {
+  /** Live descendant `extract` rows (includes sub-extracts). */
+  readonly extracts: number;
+  /** Live descendant `card` rows. */
+  readonly cards: number;
+  /** Live descendant cards with at least one review-history row. */
+  readonly cardsWithHistory: number;
+  /** Total live descendants of every kind (`0` ⇒ quiet delete, no menu). */
+  readonly total: number;
+}
+
+export interface ElementsSoftDeleteSubtreeRequest {
+  readonly id: string;
+  /**
+   * `true` ⇒ delete the whole branch (node + every live descendant under one
+   * `batchId`); `false`/omitted ⇒ tombstone only the node (keep descendants).
+   */
+  readonly includeSubtree?: boolean;
+}
+
+/** Why a node was skipped by a subtree soft-delete (it never fails the batch). */
+export interface SubtreeDeleteSkippedRow {
+  readonly id: string;
+  readonly reason: "missing" | "already-deleted";
+}
+
+export interface ElementsSoftDeleteSubtreeResult {
+  /** The shared `batchId` every `soft_delete_element` op in this delete carries. */
+  readonly batchId: string;
+  /** The ids actually soft-deleted by this call (root-first). */
+  readonly affected: readonly string[];
+  /** Ids the in-transaction revalidation skipped (missing / already in the trash). */
+  readonly skipped: readonly SubtreeDeleteSkippedRow[];
+}
+
+// ---------------------------------------------------------------------------
 // topics.fallow() / topics.unfallow()  (T107 — deliberate topic rest)
 // ---------------------------------------------------------------------------
 
@@ -850,6 +894,11 @@ export interface LineageNode {
   readonly meta: string;
   /** True for the element the lineage was requested for (the inspector's focus). */
   readonly active: boolean;
+  /**
+   * True when this node is a soft-deleted tombstone (only emitted when the request
+   * sets `includeTombstones`); always `false` on the default live-only path.
+   */
+  readonly deleted: boolean;
 }
 
 /** The lineage payload for one element: the root id + the flattened tree. */
@@ -863,6 +912,12 @@ export interface LineageData {
 
 export interface LineageGetRequest {
   readonly id: string;
+  /**
+   * When `true`, include soft-deleted nodes as muted tombstones so a focused
+   * element never vanishes from its own lineage (T135). Omitted/false keeps the
+   * default live-only tree.
+   */
+  readonly includeTombstones?: boolean;
 }
 
 export interface LineageGetResult {
@@ -3559,6 +3614,12 @@ export interface TrashItemSummary {
   /** The status the element had BEFORE delete (what restore returns it to). */
   readonly originStatus: string;
   readonly sourceTitle: string | null;
+  /**
+   * The branch-delete `batchId` this row was soft-deleted under (T135 / U8), or `null`
+   * for a single delete. Rows sharing a `batchId` group under the branch root in the
+   * Trash view for one atomic `restoreBatchFromTrash`.
+   */
+  readonly deleteBatchId: string | null;
 }
 
 export interface TrashListResult {
@@ -3573,16 +3634,60 @@ export interface TrashRestoreResult {
   readonly item: ElementSummary | null;
 }
 
+export interface TrashRestoreBatchRequest {
+  readonly batchId: string;
+}
+
+/** Why a node was left a tombstone by a batch restore (the partial state, surfaced). */
+export interface RestoreSkippedRow {
+  readonly id: string;
+  readonly reason: "missing" | "not-deleted" | "newer-intent" | "ancestor-skipped";
+}
+
+/** The outcome of a batch restore (T135) — surfaces partial/broken chains. */
+export interface TrashRestoreBatchResult {
+  /** The ids actually restored by this call (root-first). */
+  readonly restored: readonly string[];
+  /** Nodes left as tombstones (with a reason) — the partial state, surfaced not hidden. */
+  readonly skipped: readonly RestoreSkippedRow[];
+  /** Whether the branch root itself was restored (false ⇒ the whole branch stayed down). */
+  readonly rootRestored: boolean;
+}
+
+export interface TrashRestoreAncestorChainRequest {
+  /** The element whose DELETED-ancestor chain (up to the first live ancestor) to restore. */
+  readonly id: string;
+}
+
+/**
+ * The outcome of an ancestor-chain restore (T135) — restores ONLY the deleted chain
+ * above (and including, when a tombstone) the focused element, never sibling/cousin
+ * tombstones.
+ */
+export interface TrashRestoreAncestorChainResult {
+  /** The ids actually restored (root-first). */
+  readonly restored: readonly string[];
+  /** The shared restore batch id (so a follow-up undo reverses it as one), or `null`. */
+  readonly batchId: string | null;
+}
+
 export interface TrashPurgeRequest {
   readonly id: string;
 }
 
 export interface TrashPurgeResult {
+  /** `1` when hard-deleted; `0` when the id was unknown OR the purge was blocked. */
   readonly purged: number;
+  /** `true` when the purge was refused because the tombstone still anchors live descendants. */
+  readonly blocked: boolean;
+  /** How many live descendants blocked the purge (`0` unless `blocked`). */
+  readonly liveDependents: number;
 }
 
 export interface TrashEmptyResult {
   readonly purged: number;
+  /** How many trashed rows were skipped because they still anchor live descendants. */
+  readonly skipped: number;
 }
 
 /** The outcome of `undo.last()` — the general command-level undo. */
@@ -4193,6 +4298,12 @@ export interface AppApi {
   };
   readonly elements: {
     setPriority(request: ElementsSetPriorityRequest): Promise<ElementsSetPriorityResult>;
+    countDescendants(
+      request: ElementsCountDescendantsRequest,
+    ): Promise<ElementsCountDescendantsResult>;
+    softDeleteSubtree(
+      request: ElementsSoftDeleteSubtreeRequest,
+    ): Promise<ElementsSoftDeleteSubtreeResult>;
   };
   readonly topics: {
     fallow(request: TopicFallowRequest): Promise<TopicFallowResult>;
@@ -4392,6 +4503,10 @@ export interface AppApi {
   readonly trash: {
     list(): Promise<TrashListResult>;
     restore(request: TrashRestoreRequest): Promise<TrashRestoreResult>;
+    restoreBatch(request: TrashRestoreBatchRequest): Promise<TrashRestoreBatchResult>;
+    restoreAncestorChain(
+      request: TrashRestoreAncestorChainRequest,
+    ): Promise<TrashRestoreAncestorChainResult>;
     purge(request: TrashPurgeRequest): Promise<TrashPurgeResult>;
     empty(): Promise<TrashEmptyResult>;
   };
@@ -4569,6 +4684,25 @@ export const appApi = {
    */
   setElementPriority(request: ElementsSetPriorityRequest): Promise<ElementsSetPriorityResult> {
     return requireAppApi().elements.setPriority(request);
+  },
+  /**
+   * Count an element's LIVE descendants (T135) by kind — the blast-radius inventory
+   * the delete intent menu reads (`total === 0` ⇒ quiet delete, no menu). Read-only.
+   */
+  countDescendants(
+    request: ElementsCountDescendantsRequest,
+  ): Promise<ElementsCountDescendantsResult> {
+    return requireAppApi().elements.countDescendants(request);
+  },
+  /**
+   * Soft-delete a node and OPTIONALLY its live subtree (T135) under one `batchId`.
+   * `includeSubtree: false` tombstones only the node (keep descendants); `true`
+   * soft-cascades the whole branch, recoverable as a unit via `restoreBatchFromTrash`.
+   */
+  softDeleteSubtree(
+    request: ElementsSoftDeleteSubtreeRequest,
+  ): Promise<ElementsSoftDeleteSubtreeResult> {
+    return requireAppApi().elements.softDeleteSubtree(request);
   },
   /** Rest a topic and eligible attention descendants until a deliberate return date. */
   fallowTopic(request: TopicFallowRequest): Promise<TopicFallowResult> {
@@ -5421,7 +5555,29 @@ export const appApi = {
   restoreFromTrash(request: TrashRestoreRequest): Promise<TrashRestoreResult> {
     return requireAppApi().trash.restore(request);
   },
-  /** PERMANENTLY delete one trashed element — the only hard delete (T044). UI-confirmed. */
+  /**
+   * Restore an entire branch-delete `batchId` as one unit (T135), root-first, schedule
+   * re-established per node; surfaces a partial chain rather than silently restoring
+   * under a still-tombstoned root. The snackbar Undo + the Trash group "Restore" use this.
+   */
+  restoreBatchFromTrash(request: TrashRestoreBatchRequest): Promise<TrashRestoreBatchResult> {
+    return requireAppApi().trash.restoreBatch(request);
+  },
+  /**
+   * Restore only the DELETED-ancestor chain of one element up to the first live ancestor
+   * (T135) — the inspector "ancestor deleted" hint and a per-tombstone Restore use this so
+   * sibling/cousin tombstones are never resurrected and no node is left under a tombstone.
+   */
+  restoreAncestorChain(
+    request: TrashRestoreAncestorChainRequest,
+  ): Promise<TrashRestoreAncestorChainResult> {
+    return requireAppApi().trash.restoreAncestorChain(request);
+  },
+  /**
+   * PERMANENTLY delete one trashed element — the only hard delete (T044). UI-confirmed.
+   * A purge that would null a live element's lineage links is refused and reported via
+   * `{ blocked: true, liveDependents }` rather than thrown (T135).
+   */
   purgeFromTrash(request: TrashPurgeRequest): Promise<TrashPurgeResult> {
     return requireAppApi().trash.purge(request);
   },

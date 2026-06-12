@@ -3551,6 +3551,233 @@ describe("DbService — trash & undo (T044)", () => {
   });
 });
 
+describe("DbService — lineage-aware delete IPC surface (T135 / U6)", () => {
+  const ASOF = "2027-06-01T12:00:00.000Z";
+
+  /**
+   * Seed a `source → extract → (sub-extract + qaCard + clozeCard)` subtree through
+   * the SAME production paths the bridge uses. The qaCard is graded once so it
+   * carries review history (a `review_logs` row). Returns the ids the delete flow
+   * acts on.
+   */
+  function seedSubtree(svc: DbService): {
+    sourceId: string;
+    extractId: string;
+    subExtractId: string;
+    qaCardId: string;
+    clozeCardId: string;
+  } {
+    const { id: sourceId } = svc.importManualSource({
+      title: "On the Measure of Intelligence",
+      priority: "A",
+      body: "The definition paragraph.\n\nAnother paragraph.",
+    });
+    const blockId = (
+      svc.raw.sqlite
+        .prepare("SELECT stable_block_id AS b FROM document_blocks WHERE document_id = ? LIMIT 1")
+        .get(sourceId) as { b: string }
+    ).b;
+    const { extract } = svc.createExtraction({
+      sourceElementId: sourceId,
+      selectedText: "The definition paragraph.",
+      blockIds: [blockId],
+      startOffset: 0,
+      endOffset: 25,
+    });
+    // A sub-extract parented under the extract (live descendant #1).
+    const subExtract = svc.repos.sources.createExtract({
+      sourceElementId: sourceId as never,
+      parentId: extract.id as never,
+      title: "A narrower clause",
+      priority: 0.625,
+      selectedText: "definition paragraph.",
+      blockIds: [blockId] as never,
+      startOffset: 4,
+      endOffset: 25,
+    });
+    // Two cards distilled from the extract (live descendants #2 + #3).
+    const { card: qaCard } = svc.createCard({
+      extractId: extract.id,
+      kind: "qa",
+      prompt: "What is it?",
+      answer: "The definition.",
+    });
+    const { card: clozeCard } = svc.createCard({
+      extractId: extract.id,
+      kind: "cloze",
+      cloze: "The {{c1::definition}} paragraph.",
+    });
+    // Give the qaCard review history (a review_logs row) so it counts in cardsWithHistory.
+    svc.reviewGrade({
+      cardId: qaCard.id,
+      rating: "good",
+      promptMs: 1000,
+      responseMs: 2000,
+      asOf: ASOF,
+    });
+    return {
+      sourceId,
+      extractId: extract.id,
+      subExtractId: subExtract.element.id,
+      qaCardId: qaCard.id,
+      clozeCardId: clozeCard.id,
+    };
+  }
+
+  it("countDescendants returns the typed breakdown over a seeded subtree (R5)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const { extractId } = seedSubtree(svc);
+
+    // extract has: 1 sub-extract, 2 cards (1 with review history) ⇒ total 3.
+    expect(svc.countDescendants({ id: extractId })).toEqual({
+      extracts: 1,
+      cards: 2,
+      cardsWithHistory: 1,
+      total: 3,
+    });
+
+    // A leaf (the cloze card, no children) reads as "quiet delete, no menu".
+    const { clozeCardId } = seedSubtree(svc);
+    expect(svc.countDescendants({ id: clozeCardId }).total).toBe(0);
+    svc.close();
+  });
+
+  it("softDeleteSubtree (branch) returns a batchId, and restoreBatchFromTrash restores it (R7/R10)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const { extractId, subExtractId, qaCardId, clozeCardId } = seedSubtree(svc);
+
+    const deleted = svc.softDeleteSubtree({ id: extractId, includeSubtree: true });
+    expect(deleted.batchId).toBeTruthy();
+    expect(deleted.skipped).toHaveLength(0);
+    // The whole branch is soft-deleted under one batch (root-first; 4 nodes).
+    expect(deleted.affected).toEqual(
+      expect.arrayContaining([extractId, subExtractId, qaCardId, clozeCardId]),
+    );
+    for (const id of [extractId, subExtractId, qaCardId, clozeCardId]) {
+      expect(svc.repos.elements.findById(id as never)?.deletedAt).not.toBeNull();
+    }
+
+    // Batch restore brings the whole branch back, root-first.
+    const restored = svc.restoreBatchFromTrash({ batchId: deleted.batchId });
+    expect(restored.rootRestored).toBe(true);
+    expect(restored.skipped).toHaveLength(0);
+    expect(restored.restored).toEqual(
+      expect.arrayContaining([extractId, subExtractId, qaCardId, clozeCardId]),
+    );
+    for (const id of [extractId, subExtractId, qaCardId, clozeCardId]) {
+      expect(svc.repos.elements.findById(id as never)?.deletedAt).toBeNull();
+    }
+    svc.close();
+  });
+
+  it("softDeleteSubtree (keep-descendants) tombstones only the node; descendants stay live", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const { extractId, subExtractId, qaCardId } = seedSubtree(svc);
+
+    const deleted = svc.softDeleteSubtree({ id: extractId, includeSubtree: false });
+    expect(deleted.affected).toEqual([extractId]);
+    expect(svc.repos.elements.findById(extractId as never)?.deletedAt).not.toBeNull();
+    // The descendants remain live and keep their parentId (lineage preserved).
+    expect(svc.repos.elements.findById(subExtractId as never)?.deletedAt).toBeNull();
+    expect(svc.repos.elements.findById(qaCardId as never)?.deletedAt).toBeNull();
+    svc.close();
+  });
+
+  it("restoreAncestorChainFromTrash restores a live descendant's deleted ancestor chain, not siblings (T135)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const { extractId, subExtractId, qaCardId } = seedSubtree(svc);
+
+    // Tombstone ONLY the extract (keep descendants): the cards stay live under the tombstone.
+    svc.softDeleteSubtree({ id: extractId, includeSubtree: false });
+    expect(svc.repos.elements.findById(extractId as never)?.deletedAt).not.toBeNull();
+    expect(svc.repos.elements.findById(qaCardId as never)?.deletedAt).toBeNull();
+
+    // Restore the qaCard's deleted-ancestor chain → just the extract (its only tombstone ancestor).
+    const result = svc.restoreAncestorChainFromTrash({ id: qaCardId });
+    expect(result.restored).toEqual([extractId]);
+    expect(result.batchId).toBeTruthy();
+    expect(svc.repos.elements.findById(extractId as never)?.deletedAt).toBeNull();
+    // The sub-extract sibling was never deleted and is untouched; lineage intact.
+    expect(svc.repos.elements.findById(subExtractId as never)?.parentId).toBe(extractId);
+    const fk = svc.raw.sqlite.prepare("PRAGMA foreign_key_check").all();
+    expect(fk).toHaveLength(0);
+    svc.close();
+  });
+
+  it("purgeFromTrash returns the STRUCTURED blocked result (not a throw) for a live-anchoring tombstone (R12)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const { extractId, subExtractId, qaCardId, clozeCardId } = seedSubtree(svc);
+
+    // Tombstone only the extract (keep descendants) — it now anchors live descendants.
+    svc.softDeleteSubtree({ id: extractId, includeSubtree: false });
+
+    const result = svc.purgeFromTrash({ id: extractId });
+    expect(result.blocked).toBe(true);
+    expect(result.purged).toBe(0);
+    expect(result.liveDependents).toBeGreaterThan(0);
+    // The guard never nulled a live element's lineage links — they still point at the extract.
+    expect(svc.repos.elements.findById(subExtractId as never)?.parentId).toBe(extractId);
+    expect(svc.repos.elements.findById(qaCardId as never)?.parentId).toBe(extractId);
+    expect(svc.repos.elements.findById(clozeCardId as never)?.parentId).toBe(extractId);
+    // The extract is still in the trash (not purged).
+    expect(svc.repos.elements.findById(extractId as never)?.deletedAt).not.toBeNull();
+    svc.close();
+  });
+
+  it("purgeFromTrash succeeds (unblocked) once the descendants are also gone", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const { extractId } = seedSubtree(svc);
+
+    // Delete the whole branch → the extract no longer anchors any LIVE descendant.
+    svc.softDeleteSubtree({ id: extractId, includeSubtree: true });
+    const result = svc.purgeFromTrash({ id: extractId });
+    expect(result).toEqual({ purged: 1, blocked: false, liveDependents: 0 });
+    expect(svc.repos.elements.findById(extractId as never)).toBeNull();
+    svc.close();
+  });
+
+  it("emptyTrash purges safe rows and SKIPS the live-anchoring tombstone, reporting the count (R12)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    const { extractId } = seedSubtree(svc);
+    // A safe, unrelated trashed row alongside the guarded tombstone.
+    const safe = svc.importManualSource({ title: "Disposable" }).id;
+    svc.repos.elements.softDelete(safe as never);
+    // Tombstone the extract while its descendants stay live (the guarded anchor).
+    svc.softDeleteSubtree({ id: extractId, includeSubtree: false });
+
+    const result = svc.emptyTrash();
+    // The safe row is purged; the anchoring tombstone is skipped (count surfaced).
+    expect(result.purged).toBeGreaterThanOrEqual(1);
+    expect(result.skipped).toBeGreaterThanOrEqual(1);
+    expect(svc.repos.elements.findById(safe as never)).toBeNull();
+    expect(svc.repos.elements.findById(extractId as never)?.deletedAt).not.toBeNull();
+    // FK integrity holds after the guarded empty.
+    const fk = svc.raw.sqlite.prepare("PRAGMA foreign_key_check").all();
+    expect(fk).toHaveLength(0);
+    svc.close();
+  });
+
+  it("exposes the new lineage-delete methods on the DbService bridge surface (no generic SQL)", () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    // The new typed methods are present on the service the IPC layer delegates to.
+    expect(typeof svc.countDescendants).toBe("function");
+    expect(typeof svc.softDeleteSubtree).toBe("function");
+    expect(typeof svc.restoreBatchFromTrash).toBe("function");
+    expect(typeof svc.restoreAncestorChainFromTrash).toBe("function");
+    // No generic SQL escape hatch is exposed (the renderer never gets `db.query`).
+    expect((svc as unknown as { query?: unknown }).query).toBeUndefined();
+    svc.close();
+  });
+});
+
 describe("DbService — analytics (T045)", () => {
   /** A future clock so the seeded due cards register as due. */
   const ASOF = "2027-06-01T12:00:00.000Z";

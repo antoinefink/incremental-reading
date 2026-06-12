@@ -320,6 +320,17 @@ const h = vi.hoisted(() => {
     listQueue: vi.fn().mockResolvedValue(result),
     getDailyWorkSummary: vi.fn().mockResolvedValue(dailyWork),
     actOnQueueItem: vi.fn(),
+    // Descendant-aware delete (T135 / U7): default to a LEAF so the row's Delete takes
+    // the quiet single-soft-delete path through `actOnQueueItem({delete})`.
+    countDescendants: vi
+      .fn()
+      .mockResolvedValue({ extracts: 0, cards: 0, cardsWithHistory: 0, total: 0 }),
+    softDeleteSubtree: vi.fn().mockResolvedValue({ batchId: "b", affected: [], skipped: [] }),
+    restoreBatchFromTrash: vi
+      .fn()
+      .mockResolvedValue({ restored: [], skipped: [], rootRestored: true }),
+    setExtractFate: vi.fn().mockResolvedValue({ extract: {} }),
+    fallowTopic: vi.fn().mockResolvedValue({ applied: 1, skipped: [], batchId: "fb" }),
     getBlockProcessingSummary: vi.fn().mockResolvedValue({
       summary: {
         canMarkDoneWithoutConfirmation: true,
@@ -359,6 +370,11 @@ vi.mock("../../lib/appApi", async () => {
       listQueue: h.listQueue,
       getDailyWorkSummary: h.getDailyWorkSummary,
       actOnQueueItem: h.actOnQueueItem,
+      countDescendants: h.countDescendants,
+      softDeleteSubtree: h.softDeleteSubtree,
+      restoreBatchFromTrash: h.restoreBatchFromTrash,
+      setExtractFate: h.setExtractFate,
+      fallowTopic: h.fallowTopic,
       getBlockProcessingSummary: h.getBlockProcessingSummary,
       dismissSourceRetirementSuggestion: h.dismissSourceRetirementSuggestion,
       undoLast: h.undoLast,
@@ -1447,6 +1463,40 @@ describe("QueueScreen", () => {
     await waitFor(() => expect(screen.queryByTestId("queue-item")).toBeNull());
     expect(screen.queryByTestId("queue-snackbar")).toBeNull();
     expect(h.undoQueueAction).not.toHaveBeenCalled();
+  });
+
+  it("deleting an extract WITH live descendants opens the intent menu, not a silent prune (Covers R15/AE8)", async () => {
+    // The queue `delete` path must route a node with live descendants through the
+    // descendant-aware menu instead of the single-row `queue.act` prune.
+    h.countDescendants.mockResolvedValueOnce({
+      extracts: 1,
+      cards: 1,
+      cardsWithHistory: 1,
+      total: 2,
+    });
+    render(<QueueScreen />);
+    const rows = await screen.findAllByTestId("queue-item");
+    const extract = rows.find((el) => el.getAttribute("data-element-id") === "extract-1");
+    const del = extract?.querySelector('[data-testid="queue-action-delete"]') as HTMLElement;
+
+    fireEvent.click(del);
+
+    const pop = await screen.findByTestId("lineage-delete-pop");
+    expect(pop).toBeInTheDocument();
+    expect(screen.getByTestId("lineage-delete-radius").textContent).toContain(
+      "1 extract, 1 card (1 with review history)",
+    );
+    // No silent prune happened — the menu is collecting intent.
+    expect(h.actOnQueueItem).not.toHaveBeenCalledWith({
+      id: "extract-1",
+      action: { kind: "delete" },
+    });
+
+    // Choosing "Delete the whole branch" soft-cascades under one batch.
+    fireEvent.click(screen.getByTestId("lineage-delete-branch"));
+    await waitFor(() =>
+      expect(h.softDeleteSubtree).toHaveBeenCalledWith({ id: "extract-1", includeSubtree: true }),
+    );
   });
 
   it("re-reads the queue after a global undo event", async () => {

@@ -62,6 +62,11 @@ const h = vi.hoisted(() => {
     getExtractStagnation: vi.fn(),
     postponeExtract: vi.fn(),
     deleteExtract: vi.fn(),
+    countDescendants: vi.fn(),
+    softDeleteSubtree: vi.fn(),
+    restoreBatchFromTrash: vi.fn(),
+    undoLast: vi.fn(),
+    fallowTopic: vi.fn(),
     setExtractFate: vi.fn(),
     reactivateExtractFate: vi.fn(),
     navigate: vi.fn(),
@@ -82,6 +87,11 @@ vi.mock("../lib/appApi", async () => {
       getExtractStagnation: h.getExtractStagnation,
       postponeExtract: h.postponeExtract,
       deleteExtract: h.deleteExtract,
+      countDescendants: h.countDescendants,
+      softDeleteSubtree: h.softDeleteSubtree,
+      restoreBatchFromTrash: h.restoreBatchFromTrash,
+      undoLast: h.undoLast,
+      fallowTopic: h.fallowTopic,
       setExtractFate: h.setExtractFate,
       reactivateExtractFate: h.reactivateExtractFate,
     },
@@ -95,6 +105,19 @@ beforeEach(() => {
   h.getExtractStagnation.mockResolvedValue(h.result);
   h.postponeExtract.mockResolvedValue({});
   h.deleteExtract.mockResolvedValue({});
+  // Descendant-aware delete (T135 / U7): default to a LEAF so Delete takes the quiet
+  // single-soft-delete path through `deleteExtract`.
+  h.countDescendants.mockResolvedValue({ extracts: 0, cards: 0, cardsWithHistory: 0, total: 0 });
+  h.softDeleteSubtree.mockResolvedValue({ batchId: "b", affected: [], skipped: [] });
+  h.restoreBatchFromTrash.mockResolvedValue({ restored: [], skipped: [], rootRestored: true });
+  h.undoLast.mockResolvedValue({
+    undone: true,
+    opType: null,
+    elementId: null,
+    label: "",
+    count: 1,
+  });
+  h.fallowTopic.mockResolvedValue({ applied: 1, skipped: [], batchId: "fb" });
   h.setExtractFate.mockResolvedValue({});
   h.reactivateExtractFate.mockResolvedValue({});
 });

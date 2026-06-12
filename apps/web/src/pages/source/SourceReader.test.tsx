@@ -9,6 +9,12 @@ const h = vi.hoisted(() => ({
   select: vi.fn(),
   getInspectorData: vi.fn(),
   actOnQueueItem: vi.fn(),
+  countDescendants: vi.fn(),
+  softDeleteSubtree: vi.fn(),
+  restoreBatchFromTrash: vi.fn(),
+  undoLast: vi.fn(),
+  setExtractFate: vi.fn(),
+  fallowTopic: vi.fn(),
   dismissSourceRetirementSuggestion: vi.fn(),
   scheduleQueueItem: vi.fn(),
   setElementPriority: vi.fn(),
@@ -155,6 +161,12 @@ vi.mock("../../lib/appApi", async () => {
     appApi: {
       getInspectorData: h.getInspectorData,
       actOnQueueItem: h.actOnQueueItem,
+      countDescendants: h.countDescendants,
+      softDeleteSubtree: h.softDeleteSubtree,
+      restoreBatchFromTrash: h.restoreBatchFromTrash,
+      undoLast: h.undoLast,
+      setExtractFate: h.setExtractFate,
+      fallowTopic: h.fallowTopic,
       dismissSourceRetirementSuggestion: h.dismissSourceRetirementSuggestion,
       scheduleQueueItem: h.scheduleQueueItem,
       setElementPriority: h.setElementPriority,
@@ -341,6 +353,24 @@ beforeEach(() => {
   h.select.mockReset();
   h.getInspectorData.mockReset();
   h.actOnQueueItem.mockReset();
+  // The source-delete control now reads the blast radius first (T135 / U7). Default to a
+  // LEAF (total 0) so the quiet path runs the existing `actOnQueueItem({delete})` op.
+  h.countDescendants.mockReset();
+  h.countDescendants.mockResolvedValue({ extracts: 0, cards: 0, cardsWithHistory: 0, total: 0 });
+  h.softDeleteSubtree.mockReset();
+  h.softDeleteSubtree.mockResolvedValue({ batchId: "b", affected: [], skipped: [] });
+  h.restoreBatchFromTrash.mockReset();
+  h.restoreBatchFromTrash.mockResolvedValue({ restored: [], skipped: [], rootRestored: true });
+  h.undoLast.mockReset();
+  h.undoLast.mockResolvedValue({
+    undone: true,
+    opType: null,
+    elementId: null,
+    label: "",
+    count: 1,
+  });
+  h.setExtractFate.mockReset();
+  h.fallowTopic.mockReset();
   h.dismissSourceRetirementSuggestion.mockReset();
   h.scheduleQueueItem.mockReset();
   h.setElementPriority.mockReset();
@@ -483,6 +513,9 @@ describe("SourceReader", () => {
   });
 
   it("keeps the reader open and controls usable after a delete failure", async () => {
+    // A leaf (total 0) takes the quiet delete path; the underlying op rejects, so the
+    // descendant-aware controller surfaces the error in its snackbar (no navigation) and
+    // the reader stays usable (T135 / U7).
     h.actOnQueueItem.mockRejectedValue(new Error("delete failed"));
     const { getByTestId, findByTestId } = render(<SourceReader />);
     await findByTestId("mock-source-editor");
@@ -490,7 +523,7 @@ describe("SourceReader", () => {
     fireEvent.click(getByTestId("reader-delete"));
 
     await waitFor(() =>
-      expect(getByTestId("reader-flash")).toHaveTextContent("Could not delete source"),
+      expect(getByTestId("reader-delete-snackbar")).toHaveTextContent("delete failed"),
     );
     expect(h.navigate).not.toHaveBeenCalledWith({ to: "/queue" });
     expect(getByTestId("reader-postpone")).not.toBeDisabled();
