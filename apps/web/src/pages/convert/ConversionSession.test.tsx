@@ -77,6 +77,7 @@ function preview(): ConversionSessionPreviewResult {
           postponed: 0,
           scheduleReason: null,
           retirementSuggestion: null,
+          needsReverify: false,
         },
         drafts: [
           {
@@ -134,6 +135,7 @@ function preview(): ConversionSessionPreviewResult {
           postponed: 1,
           scheduleReason: null,
           retirementSuggestion: null,
+          needsReverify: false,
         },
         drafts: [],
       },

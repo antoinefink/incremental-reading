@@ -91,6 +91,7 @@ const h = vi.hoisted(() => ({
       ignoredRatio: 0,
       terminalRatio: 0.5,
       staleAfterEditBlocks: 0,
+      needsReverifyOutputs: 0,
       legacyProjectedBlocks: 0,
       canMarkDoneWithoutConfirmation: false,
       stateCounts: {
@@ -320,6 +321,7 @@ function summaryFor(overrides: Record<string, unknown> = {}) {
     ignoredRatio: 0,
     terminalRatio: 0.5,
     staleAfterEditBlocks: 0,
+    needsReverifyOutputs: 0,
     legacyProjectedBlocks: 0,
     canMarkDoneWithoutConfirmation: false,
     stateCounts: {
@@ -412,6 +414,7 @@ beforeEach(() => {
     ignoredRatio: 0,
     terminalRatio: 0.5,
     staleAfterEditBlocks: 0,
+    needsReverifyOutputs: 0,
     legacyProjectedBlocks: 0,
     canMarkDoneWithoutConfirmation: false,
     stateCounts: {

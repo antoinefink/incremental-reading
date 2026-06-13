@@ -427,6 +427,21 @@
   border-color: color-mix(in oklch, var(--warn) 42%, var(--border));
   background: var(--warn-soft);
 }
+/* T123 content-staleness chip — advisory `--warn` severity (not `--danger`), matching a
+   stale extract-age chip. Inert: it informs that the source changed; resolution is T124. */
+.reverify-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in oklch, var(--warn) 42%, var(--border));
+  border-radius: var(--r-full);
+  color: var(--warn);
+  background: var(--warn-soft);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
 .qitem__action {
   display: flex;
   align-items: center;

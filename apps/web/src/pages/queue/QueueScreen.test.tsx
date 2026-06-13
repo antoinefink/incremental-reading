@@ -54,6 +54,7 @@ const h = vi.hoisted(() => {
       postponed: 0,
       scheduleReason: null,
       retirementSuggestion: null,
+      needsReverify: false,
     },
     sourceTitle: "On the Measure of Intelligence",
     author: "François Chollet",
@@ -90,6 +91,7 @@ const h = vi.hoisted(() => {
       postponed: 1,
       scheduleReason: null,
       retirementSuggestion: null,
+      needsReverify: false,
     },
     sourceTitle: "On the Measure of Intelligence",
     author: "François Chollet",
@@ -126,6 +128,7 @@ const h = vi.hoisted(() => {
       postponed: 0,
       scheduleReason: null,
       retirementSuggestion: null,
+      needsReverify: false,
     },
     sourceTitle: "The Bitter Lesson",
     author: "Rich Sutton",
@@ -162,6 +165,7 @@ const h = vi.hoisted(() => {
       postponed: 0,
       scheduleReason: null,
       retirementSuggestion: null,
+      needsReverify: false,
     },
     sourceTitle: null,
     author: null,
@@ -200,6 +204,7 @@ const h = vi.hoisted(() => {
       postponed: 0,
       scheduleReason: null,
       retirementSuggestion: null,
+      needsReverify: false,
     },
     sourceTitle: null,
     author: null,
@@ -523,6 +528,24 @@ describe("QueueScreen", () => {
   it("renders one qitem per due row", async () => {
     render(<QueueScreen />);
     await waitFor(() => expect(screen.getAllByTestId("queue-item")).toHaveLength(4));
+  });
+
+  it("renders the re-verify chip for a row whose source content changed (T123)", async () => {
+    const staleRow: QueueItemSummary = {
+      ...h.extractRow,
+      schedulerSignals: { ...h.extractRow.schedulerSignals, needsReverify: true },
+    };
+    h.listQueue.mockResolvedValue({ ...h.result, items: [staleRow] });
+
+    render(<QueueScreen />);
+
+    expect(await screen.findByTestId("reverify-chip")).toBeInTheDocument();
+  });
+
+  it("omits the re-verify chip for rows that do not need re-verify", async () => {
+    render(<QueueScreen />);
+    await waitFor(() => expect(screen.getAllByTestId("queue-item")).toHaveLength(4));
+    expect(screen.queryByTestId("reverify-chip")).toBeNull();
   });
 
   it("renders backend queue minutes with accessible approximate text", async () => {

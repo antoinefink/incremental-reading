@@ -74,6 +74,20 @@ export function pluralizeBlocks(count: number): string {
 }
 
 /**
+ * T123 — the re-verify breakdown line. Distinct from {@link describeUnresolved}: that
+ * counts unresolved BLOCK states; this counts derived OUTPUTS (extracts/statements/cards)
+ * whose source block was edited and may no longer match. Returns `null` for a zero count
+ * (no empty noise) and pluralizes the noun + verb ("1 output needs" / "N outputs need").
+ * Advisory only — T123 just surfaces the count; resolution is T124.
+ */
+export function describeReverifyOutputs(
+  count: number,
+): { readonly count: number; readonly label: string } | null {
+  if (!Number.isFinite(count) || count <= 0) return null;
+  return { count, label: count === 1 ? "output needs re-verify" : "outputs need re-verify" };
+}
+
+/**
  * The resume location label for the surface, e.g. "block 12 of 68", or `null` when there
  * is no usable read-point/total (never opened, cleared, or — in the list context — no
  * read-point position is available). Keeps read-point (where) separate from due-date (when).

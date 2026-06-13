@@ -26,6 +26,7 @@ import {
   type AnySQLiteColumn,
   check,
   index,
+  integer,
   real,
   sqliteTable,
   text,
@@ -59,6 +60,17 @@ export const elements = sqliteTable(
     fallowBatchId: text("fallow_batch_id"),
     /** Honorable terminal fate for extract rows that exit without a card. */
     extractFate: text("extract_fate"),
+    /**
+     * Content-staleness flag (T123): `true` when this derived element's body may no
+     * longer match its source after a source block edit. Set/cleared as a self-healing
+     * projection of `element_reverify_provenance` (true iff ≥1 provenance row). This is
+     * CONTENT staleness — distinct from T090 CALENDAR staleness (`cards.valid_until`/
+     * `review_by`). Resolution (confirm/rebase/detach) is T124. Type-coupled: only
+     * extract/card/media_fragment elements may carry it.
+     */
+    needsReverify: integer("needs_reverify", { mode: "boolean" }).notNull().default(false),
+    /** ISO-8601 UTC timestamp for when this element first became content-stale (T123). */
+    staleSince: text("stale_since"),
     title: text("title").notNull(),
     /** Origin element this was derived from; `null` for top-level sources. */
     parentId: text("parent_id").references((): AnySQLiteColumn => elements.id, {
@@ -80,6 +92,13 @@ export const elements = sqliteTable(
     check(
       "elements_extract_fate_check",
       sql`${table.extractFate} IS NULL OR (${table.type} = 'extract' AND ${inList(table.extractFate, EXTRACT_FATES)})`,
+    ),
+    // T123: content-staleness may only flag derived artifacts (extracts/statements are
+    // extract rows; cards; media fragments). Sources/topics/tasks/etc. are never the
+    // DERIVED side of a source-block edit, so they can never be content-stale.
+    check(
+      "elements_needs_reverify_check",
+      sql`${table.needsReverify} = 0 OR ${table.type} IN ('extract', 'card', 'media_fragment')`,
     ),
     check("elements_priority_range_check", sql`${table.priority} >= 0 AND ${table.priority} <= 1`),
     check(

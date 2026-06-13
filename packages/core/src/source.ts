@@ -195,7 +195,29 @@ export interface SourceBlockProcessingSummary {
   readonly ignoredRatio: number;
   readonly terminalRatio: number;
   readonly staleAfterEditBlocks: number;
+  /**
+   * T123 — count of LIVE derived outputs (extracts/statements/cards) anchored to
+   * this source that currently need re-verification because a source block they
+   * derive from was edited. This is CONTENT staleness, distinct from the
+   * `staleAfterEditBlocks` *block* count above (one edited block can flag many
+   * downstream outputs, or none if it was never extracted from). Soft-deleted
+   * outputs are excluded.
+   */
+  readonly needsReverifyOutputs: number;
   readonly legacyProjectedBlocks: number;
   readonly canMarkDoneWithoutConfirmation: boolean;
   readonly stateCounts: Readonly<Record<SourceBlockProcessingState, number>>;
+}
+
+/**
+ * T123 — the transitions a single block-reconciliation pass produced. `staled` are
+ * blocks that newly entered `stale_after_edit` this run (content drifted or the block
+ * disappeared); `unStaled` are blocks whose content returned to their pre-stale value
+ * and left `stale_after_edit`. Stale propagation consumes this to flag the live
+ * descendants of `staled` blocks and clear the provenance of `unStaled` blocks, in the
+ * same transaction. Carries stable block ids only — never element ids.
+ */
+export interface SourceBlockReconcileReport {
+  readonly staled: readonly BlockId[];
+  readonly unStaled: readonly BlockId[];
 }

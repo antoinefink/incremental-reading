@@ -297,6 +297,12 @@ export class UndoService {
         return true;
       }
       if (op.payload.reviewPromote === true) return false;
+      // T123 content-staleness flag flips carry a real `prev` (for audit + T124
+      // resolution-undo) but must NOT be inverted by the global undo: the source-edit
+      // `update_document` that caused them is itself non-invertible, so a ⌘Z that
+      // cleared the flags while the blocks stayed stale would desync the two layers.
+      // The clear path is re-reconciliation (edit the block back), not undo.
+      if (op.payload.propagation === true) return false;
       const prev = op.payload.prev;
       return typeof prev === "object" && prev !== null && Object.keys(prev).length > 0;
     }
@@ -435,6 +441,9 @@ export class UndoService {
         // The first-grade draft-card promote rides with a (non-invertible) review —
         // skip it so ⌘Z never partially undoes a review (see {@link isInvertible}).
         if (op.payload.reviewPromote === true) return null;
+        // T123 content-staleness flag flips are non-invertible markers (see
+        // {@link isInvertible}); the clear path is re-reconciliation, not undo.
+        if (op.payload.propagation === true) return null;
         const prev = op.payload.prev;
         // A marker op (leech / flag / body edit) carries no object pre-image — there
         // is nothing to re-apply, so this op is non-invertible (return `null`, not a

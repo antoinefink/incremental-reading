@@ -61,6 +61,16 @@ export interface Element {
   fallowBatchId: string | null;
   /** Honorable terminal fate for extracts that are done without a card; `null` otherwise. */
   extractFate: ExtractFate | null;
+  /**
+   * Content-staleness flag (T123): `true` when this derived element's body may no longer
+   * match its source after a source block it derives from was edited. A self-healing
+   * projection of `element_reverify_provenance`. CONTENT staleness — distinct from T090
+   * CALENDAR staleness. Resolution (confirm/rebase/detach) is T124; only ever true for
+   * extract/card/media_fragment elements.
+   */
+  needsReverify: boolean;
+  /** When this element first became content-stale (T123); `null` unless `needsReverify`. */
+  staleSince: IsoTimestamp | null;
   title: string;
   /** Origin element this was derived from; `null` for top-level sources. */
   parentId: ElementId | null;

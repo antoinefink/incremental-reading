@@ -124,6 +124,27 @@ export function ExtractAgeChip({ item }: { item: QueueItemSummary }): ReactEleme
   );
 }
 
+/**
+ * T123 — the content-staleness chip. Inert (read-only `<span>`, no click/role) for an
+ * advisory, non-terminal signal: a source block this item derives from was edited, so its
+ * body may no longer match. Resolution (confirm/rebase/detach) is T124, so the chip only
+ * informs — its tooltip says so. Styled at the same `--warn` advisory severity as a stale
+ * extract-age chip, NOT `--danger`.
+ */
+export function ReverifyChip({ item }: { item: QueueItemSummary }): ReactElement | null {
+  if (!item.schedulerSignals.needsReverify) return null;
+  return (
+    <span
+      className="reverify-chip"
+      data-testid="reverify-chip"
+      title="Source content changed — re-verify this item (available in a future update)"
+    >
+      <Icon name="warning" size={12} />
+      Re-verify
+    </span>
+  );
+}
+
 /** The open-action icon + label per type (the `next-action` affordance). */
 export function actionFor(item: QueueItemSummary): { icon: IconName; label: string } {
   if (item.type === "card") return { icon: "brain", label: "Review" };

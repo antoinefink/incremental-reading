@@ -4,6 +4,7 @@ import type {
   SourceBlockOutputType,
   SourceBlockProcessingAction,
   SourceBlockProcessingState,
+  SourceBlockReconcileReport,
 } from "@interleave/core";
 import {
   documentBlocks,
@@ -20,12 +21,27 @@ import { newRowId, nowIso } from "./ids";
 import { OperationLogRepository } from "./operation-log-repository";
 import type { DbClient } from "./types";
 
+/**
+ * The processed states a block can hold before going `stale_after_edit` (T123) — the
+ * states the reconcile stale-arm acts on, and the only states the un-stale arm will
+ * auto-restore a block to. Shared so the stale skip-guard and `restorableStateFromMetadata`
+ * cannot drift if the state set ever changes.
+ */
+const RESTORABLE_PROCESSED_STATES: ReadonlySet<SourceBlockProcessingState> = new Set([
+  "extracted",
+  "ignored",
+  "processed_without_output",
+  "needs_later",
+]);
+
 export interface SourceBlockProcessingRow {
   readonly id: string;
   readonly sourceElementId: ElementId;
   readonly stableBlockId: BlockId;
   readonly state: SourceBlockProcessingState;
   readonly blockContentHash: string | null;
+  /** T123 — last-processed hash captured while `stale_after_edit`; `null` otherwise. */
+  readonly preStaleHash: string | null;
   readonly metadata: Readonly<Record<string, unknown>> | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -39,6 +55,12 @@ export interface UpsertBlockStateInput {
   readonly state: SourceBlockProcessingState;
   readonly action: SourceBlockProcessingAction;
   readonly blockContentHash?: string | null;
+  /**
+   * T123 — explicit pre-stale-hash write (only meaningful when `state` is
+   * `stale_after_edit`; ignored/cleared for any other state). When `undefined`, the
+   * existing value is preserved on a stale row.
+   */
+  readonly preStaleHash?: string | null;
   readonly metadata?: Readonly<Record<string, unknown>> | null;
 }
 
@@ -75,6 +97,7 @@ function rowToProcessing(row: typeof sourceBlockProcessing.$inferSelect): Source
     stableBlockId: row.stableBlockId as BlockId,
     state: row.state as SourceBlockProcessingState,
     blockContentHash: row.blockContentHash,
+    preStaleHash: row.preStaleHash,
     metadata: parseMetadata(row.metadata),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -126,11 +149,22 @@ export class BlockProcessingRepository {
       )
       .get();
     const metadata = input.metadata == null ? null : JSON.stringify(input.metadata);
+    // T123 — `pre_stale_hash` is only meaningful while a row is `stale_after_edit`
+    // (it records the last-processed hash so restoration is recognizable). Any
+    // transition to a non-stale state clears it; entering/staying stale writes the
+    // explicit value when given, else preserves the existing capture (capture-once).
+    const preStaleHash =
+      input.state === "stale_after_edit"
+        ? input.preStaleHash !== undefined
+          ? input.preStaleHash
+          : (existing?.preStaleHash ?? null)
+        : null;
     if (existing) {
       tx.update(sourceBlockProcessing)
         .set({
           state: input.state,
           blockContentHash: input.blockContentHash ?? existing.blockContentHash,
+          preStaleHash,
           metadata,
           updatedAt: now,
           lastAction: input.action,
@@ -146,6 +180,7 @@ export class BlockProcessingRepository {
           stableBlockId: input.stableBlockId,
           state: input.state,
           blockContentHash: input.blockContentHash ?? null,
+          preStaleHash,
           metadata,
           createdAt: now,
           updatedAt: now,
@@ -338,31 +373,59 @@ export class BlockProcessingRepository {
     return row?.priority ?? null;
   }
 
+  /**
+   * Reconcile durable block-processing state against the current document block
+   * hashes and report the transitions (T123). A processed block whose content drifted
+   * (or disappeared) goes `stale_after_edit` and is reported in `staled`; a previously
+   * stale block whose content returned to its captured pre-stale hash is restored to
+   * its prior processed state and reported in `unStaled`. Idempotent: an unchanged
+   * document produces an empty report. Stale propagation consumes the report in the
+   * same transaction.
+   */
   reconcileStaleWithin(
     tx: DbClient,
     sourceElementId: ElementId,
     blockHashes: ReadonlyMap<BlockId, string>,
-  ): void {
+  ): SourceBlockReconcileReport {
+    const staled: BlockId[] = [];
+    const unStaled: BlockId[] = [];
     const rows = tx
       .select()
       .from(sourceBlockProcessing)
       .where(eq(sourceBlockProcessing.sourceElementId, sourceElementId))
       .all();
     for (const row of rows) {
-      if (
-        row.state !== "extracted" &&
-        row.state !== "ignored" &&
-        row.state !== "processed_without_output" &&
-        row.state !== "needs_later"
-      ) {
+      const blockId = row.stableBlockId as BlockId;
+      const nextHash = blockHashes.get(blockId);
+
+      // Un-stale arm (NEW in T123): a row already in `stale_after_edit` is restored
+      // when the block's current content hash returns to its captured pre-stale hash.
+      // The pre-T123 loop skipped these rows entirely (no restoration path existed).
+      if (row.state === "stale_after_edit") {
+        const restoredState = this.restorableStateFromMetadata(row.metadata);
+        if (nextHash && row.preStaleHash && nextHash === row.preStaleHash && restoredState) {
+          this.upsertStateWithin(tx, {
+            sourceElementId,
+            stableBlockId: blockId,
+            state: restoredState,
+            action: "reconcile_document_blocks",
+            blockContentHash: nextHash,
+            preStaleHash: null,
+            metadata: { reason: "content_restored", restoredTo: restoredState },
+          });
+          unStaled.push(blockId);
+        }
         continue;
       }
-      const nextHash = blockHashes.get(row.stableBlockId as BlockId);
+
+      if (!RESTORABLE_PROCESSED_STATES.has(row.state as SourceBlockProcessingState)) {
+        continue;
+      }
       if (nextHash && row.blockContentHash === nextHash) continue;
       if (nextHash && row.blockContentHash == null) {
         this.upsertStateWithin(tx, {
           sourceElementId,
-          stableBlockId: row.stableBlockId as BlockId,
+          stableBlockId: blockId,
           state: row.state as SourceBlockProcessingState,
           action: "reconcile_document_blocks",
           blockContentHash: nextHash,
@@ -373,17 +436,40 @@ export class BlockProcessingRepository {
         });
         continue;
       }
+      // processed → stale: capture the last-processed hash ONCE so the un-stale arm
+      // above can recognize a later restoration.
       this.upsertStateWithin(tx, {
         sourceElementId,
-        stableBlockId: row.stableBlockId as BlockId,
+        stableBlockId: blockId,
         state: "stale_after_edit",
         action: "reconcile_document_blocks",
         blockContentHash: nextHash ?? row.blockContentHash,
+        preStaleHash: row.blockContentHash,
         metadata: {
           reason: nextHash ? "content_changed" : "block_missing",
           previousState: row.state,
         },
       });
+      staled.push(blockId);
     }
+    return { staled, unStaled };
+  }
+
+  /**
+   * The processed state to restore a `stale_after_edit` row to, read from the
+   * `previousState` recorded in metadata when the block was staled. Returns `null`
+   * (no restoration) when the recorded state is missing or not a known processed
+   * state — we only auto-restore when the prior state is unambiguous.
+   */
+  private restorableStateFromMetadata(raw: string | null): SourceBlockProcessingState | null {
+    const metadata = parseMetadata(raw);
+    const previousState = metadata?.previousState;
+    if (
+      typeof previousState === "string" &&
+      RESTORABLE_PROCESSED_STATES.has(previousState as SourceBlockProcessingState)
+    ) {
+      return previousState as SourceBlockProcessingState;
+    }
+    return null;
   }
 }

@@ -21,6 +21,8 @@ describe("element model shapes", () => {
       fallowReason: null,
       fallowBatchId: null,
       extractFate: null,
+      needsReverify: false,
+      staleSince: null,
       title: "Selected passage",
       parentId: sourceId,
       sourceId,

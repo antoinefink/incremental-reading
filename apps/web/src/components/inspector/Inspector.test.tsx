@@ -482,6 +482,28 @@ describe("Inspector", () => {
     );
   });
 
+  it("shows the T123 content-staleness advisory when the element needs re-verify", async () => {
+    h.selectedId = "topic-1";
+    const data = topicData("Edited-source extract");
+    h.getInspectorData.mockResolvedValue({
+      data: { ...data, scheduler: { ...data.scheduler, needsReverify: true } },
+    });
+
+    render(<Inspector />);
+
+    expect(await screen.findByTestId("inspector-reverify")).toHaveTextContent(
+      "Source content changed",
+    );
+  });
+
+  it("omits the content-staleness advisory when the element does not need re-verify", async () => {
+    h.selectedId = "topic-1";
+    render(<Inspector />);
+
+    await screen.findByTestId("scheduler-section");
+    expect(screen.queryByTestId("inspector-reverify")).toBeNull();
+  });
+
   it("renders source provenance URLs as clickable external links", async () => {
     h.selectedId = "src-1";
     h.getInspectorData.mockResolvedValue({ data: sourceData() });

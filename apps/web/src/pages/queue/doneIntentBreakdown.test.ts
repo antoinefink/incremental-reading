@@ -4,7 +4,12 @@ import {
   type SourceBlockProcessingState,
 } from "@interleave/core";
 import { describe, expect, it } from "vitest";
-import { describeUnresolved, pluralizeBlocks, resumeLabel } from "./doneIntentBreakdown";
+import {
+  describeReverifyOutputs,
+  describeUnresolved,
+  pluralizeBlocks,
+  resumeLabel,
+} from "./doneIntentBreakdown";
 
 /** Build a full stateCounts record (every state 0) with the given overrides. */
 function counts(
@@ -78,6 +83,19 @@ describe("pluralizeBlocks", () => {
   it("uses the plural for more than one and for zero", () => {
     expect(pluralizeBlocks(3)).toBe("3 blocks");
     expect(pluralizeBlocks(0)).toBe("0 blocks");
+  });
+});
+
+describe("describeReverifyOutputs", () => {
+  it("uses the singular noun and verb for exactly one output", () => {
+    expect(describeReverifyOutputs(1)).toEqual({ count: 1, label: "output needs re-verify" });
+  });
+  it("uses the plural noun and verb for more than one output", () => {
+    expect(describeReverifyOutputs(4)).toEqual({ count: 4, label: "outputs need re-verify" });
+  });
+  it("returns null for a zero or negative count (no empty noise)", () => {
+    expect(describeReverifyOutputs(0)).toBeNull();
+    expect(describeReverifyOutputs(-1)).toBeNull();
   });
 });
 

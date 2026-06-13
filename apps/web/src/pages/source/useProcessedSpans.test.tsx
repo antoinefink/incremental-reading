@@ -62,6 +62,7 @@ function summary(overrides: Partial<SourceBlockProcessingSummaryPayload> = {}) {
     ignoredRatio: 0,
     terminalRatio: 0.5,
     staleAfterEditBlocks: 0,
+    needsReverifyOutputs: 0,
     legacyProjectedBlocks: 0,
     canMarkDoneWithoutConfirmation: false,
     stateCounts: {

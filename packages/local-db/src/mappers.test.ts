@@ -83,6 +83,8 @@ describe("rowToElement attention interval multiplier", () => {
       fallowReason: null,
       fallowBatchId: null,
       extractFate: null,
+      needsReverify: false,
+      staleSince: null,
       title: "Topic",
       parentId: null,
       sourceId: null,

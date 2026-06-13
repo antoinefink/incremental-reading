@@ -429,6 +429,14 @@ export interface SchedulerSignals {
   readonly yield?: SourceYieldSignals | null;
   /** Dismissible source-retirement suggestion for "done with no yield" sources (T103). */
   readonly retirementSuggestion?: SourceRetirementSuggestion | null;
+  /**
+   * T123 content-staleness: this element's body may no longer match its edited source
+   * (resolve via T124). NOT T090 calendar-staleness — `KnowledgeStaleness.needsReverify`
+   * is the topic-knowledge open-task COUNT, a different shape on a different surface.
+   * Optional like `yield`/`retirementSuggestion`: the inspector read model always sets it;
+   * display-only adapters that build this shape may omit it (rendered as not-stale).
+   */
+  readonly needsReverify?: boolean;
 }
 
 /** The per-source yield summary the inspector "yield" chip shows (T083). */
@@ -779,6 +787,12 @@ export interface QueueSchedulerSignals {
   readonly scheduleReason: CurrentScheduleReason | null;
   /** Dismissible source-retirement suggestion for "done with no yield" sources (T103). */
   readonly retirementSuggestion: SourceRetirementSuggestion | null;
+  /**
+   * T123 content-staleness: this row's body may no longer match its edited source
+   * (resolve via T124). NOT T090 calendar-staleness (`KnowledgeStaleness.needsReverify`
+   * is the topic-knowledge open-task COUNT).
+   */
+  readonly needsReverify: boolean;
 }
 
 /** How "due" a row is relative to `asOf`. */
@@ -3226,6 +3240,8 @@ export interface SourceBlockProcessingSummaryPayload {
   readonly ignoredRatio: number;
   readonly terminalRatio: number;
   readonly staleAfterEditBlocks: number;
+  /** T123 — live derived outputs needing re-verify (content staleness). */
+  readonly needsReverifyOutputs: number;
   readonly legacyProjectedBlocks: number;
   readonly canMarkDoneWithoutConfirmation: boolean;
   readonly stateCounts: Readonly<Record<SourceBlockProcessingState, number>>;

@@ -132,6 +132,12 @@ Source block processing is source progress, not decoration: visual marks may dis
 
 The explicit result assigned to a source block, distinguishing unresolved reading work from blocks that produced output, were intentionally ignored, were processed without output, need later attention, or became stale after the source text changed.
 
+### Content staleness
+
+A derived element (Extract, atomic statement, or card) whose body may no longer match its Source because a source block it was distilled from has since been edited — surfaced as a queryable "needs re-verify" flag that the user resolves by confirming, rebasing, or detaching the derived knowledge.
+
+Content staleness is distinct from a block's own *stale after edit* Block processing outcome (which marks the block, not its descendants) and from calendar staleness (a fact going out of date with the passage of time, not with a source edit). It is additive metadata, never a lifecycle status: a content-stale card keeps its schedule until the user resolves it, and the flag clears automatically when the source block's content is restored.
+
 ### Source yield
 
 The durable productive output attributed to processing a Source or Extract, such as derived extracts, cards, synthesis work, and honorable non-card outcomes.

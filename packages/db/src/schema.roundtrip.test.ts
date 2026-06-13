@@ -68,6 +68,8 @@ describe("schema migration", () => {
       "document_marks",
       "documents",
       "element_relations",
+      // T123 content-staleness provenance (which source block staled which derived element).
+      "element_reverify_provenance",
       "element_tags",
       "elements",
       // T087 embedding bookkeeping (the `element_vectors` vec0 table is created

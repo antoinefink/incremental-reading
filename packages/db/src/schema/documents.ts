@@ -110,6 +110,16 @@ export const sourceBlockProcessing = sqliteTable(
      * not carry block text.
      */
     blockContentHash: text("block_content_hash"),
+    /**
+     * The last-PROCESSED content hash, captured ONCE when a block transitions
+     * `processed → stale_after_edit` (T123). It lets reconciliation recognize when an
+     * edited block's content is restored to its pre-stale value (current hash ==
+     * `pre_stale_hash`) so the block — and the derived `needs_reverify` flags it caused —
+     * can be cleared. `null` outside the stale episode; cleared whenever the row leaves
+     * `stale_after_edit`. Distinct from `block_content_hash` (which tracks the CURRENT
+     * hash and is read by the idempotence/hydrate paths), to keep those semantics intact.
+     */
+    preStaleHash: text("pre_stale_hash"),
     metadata: text("metadata"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
@@ -165,6 +175,52 @@ export const sourceBlockProcessingOutputs = sqliteTable(
   ],
 );
 
+/**
+ * T123 — content-staleness provenance. Each row records that source block
+ * `(sourceElementId, stableBlockId)` caused derived element `elementId` to need
+ * re-verification. `elements.needs_reverify` is a self-healing projection of this
+ * table: an element is flagged iff it has ≥1 row here. The unique triple makes
+ * re-propagation idempotent (`ON CONFLICT DO NOTHING`); the clear-by-block index
+ * supports removing all rows for a restored block (across live AND trashed targets).
+ *
+ * Both FKs cascade on HARD purge of the element/source. Soft delete (the common
+ * trash path) does NOT remove the element row, so it does NOT cascade — content
+ * staleness is kept honest for soft-deleted elements at the read layer (live-scoped
+ * counts/signals) and by clear-by-block, not by cascade. `batchId` groups one
+ * reconciliation run's provenance for audit/T124.
+ */
+export const elementReverifyProvenance = sqliteTable(
+  "element_reverify_provenance",
+  {
+    id: text("id").primaryKey(),
+    /** The DERIVED element flagged as content-stale (extract/statement/card). */
+    elementId: text("element_id")
+      .notNull()
+      .references(() => elements.id, { onDelete: "cascade" }),
+    /** The source whose block edit caused the flag. */
+    sourceElementId: text("source_element_id")
+      .notNull()
+      .references(() => elements.id, { onDelete: "cascade" }),
+    /** The specific source block (its content drifted). */
+    stableBlockId: text("stable_block_id").notNull(),
+    /** The reconciliation run that wrote this row (audit + T124 grouping). */
+    batchId: text("batch_id").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("element_reverify_provenance_unique_idx").on(
+      table.elementId,
+      table.sourceElementId,
+      table.stableBlockId,
+    ),
+    index("element_reverify_provenance_element_idx").on(table.elementId),
+    index("element_reverify_provenance_source_block_idx").on(
+      table.sourceElementId,
+      table.stableBlockId,
+    ),
+  ],
+);
+
 export type DocumentRow = typeof documents.$inferSelect;
 export type NewDocumentRow = typeof documents.$inferInsert;
 export type DocumentBlockRow = typeof documentBlocks.$inferSelect;
@@ -175,3 +231,5 @@ export type SourceBlockProcessingRow = typeof sourceBlockProcessing.$inferSelect
 export type NewSourceBlockProcessingRow = typeof sourceBlockProcessing.$inferInsert;
 export type SourceBlockProcessingOutputRow = typeof sourceBlockProcessingOutputs.$inferSelect;
 export type NewSourceBlockProcessingOutputRow = typeof sourceBlockProcessingOutputs.$inferInsert;
+export type ElementReverifyProvenanceRow = typeof elementReverifyProvenance.$inferSelect;
+export type NewElementReverifyProvenanceRow = typeof elementReverifyProvenance.$inferInsert;

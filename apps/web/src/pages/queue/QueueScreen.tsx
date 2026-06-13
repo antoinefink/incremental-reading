@@ -77,7 +77,7 @@ import { HelpLink } from "../../help/Contextual";
 import { jitterOrder } from "./jitter";
 import { OverloadBanner } from "./OverloadBanner";
 import { openQueueItem } from "./openQueueItem";
-import { actionFor, DueBadge, ExtractAgeChip, metaFor, titleFor } from "./queueRow";
+import { actionFor, DueBadge, ExtractAgeChip, metaFor, ReverifyChip, titleFor } from "./queueRow";
 import { RecoveryPanel } from "./RecoveryPanel";
 import { SessionAssemblyPreview } from "./SessionAssemblyPreview";
 
@@ -268,6 +268,12 @@ function QueueItem({
               <>
                 <span className="dot-sep" />
                 <ExtractAgeChip item={item} />
+              </>
+            ) : null}
+            {item.schedulerSignals.needsReverify ? (
+              <>
+                <span className="dot-sep" />
+                <ReverifyChip item={item} />
               </>
             ) : null}
             {item.fallowState ? (

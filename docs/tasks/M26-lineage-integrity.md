@@ -31,7 +31,8 @@
 # T123 — Stale propagation through the lineage DAG
 
 - **Milestone:** M26 — Lineage integrity
-- **Status:** `[ ]` not started
+- **Status:** `[x]` complete — landed on `main` (see `docs/roadmap.md` T123). Learning:
+  [`downward-dirty-bit-propagation-through-lineage-dag.md`](../solutions/architecture-patterns/downward-dirty-bit-propagation-through-lineage-dag.md).
 - **Depends on:** T022, T090
 - **Roadmap line:** when reconciliation marks source blocks `stale_after_edit`, live downstream
   outputs (extracts → statements → cards anchored to those blocks) gain a queryable
@@ -58,18 +59,28 @@ queryable fact on extracts, statements, and cards — not just on blocks nobody 
 
 ## Deliverables
 
-- [ ] Schema: `needs_reverify` (+ `staleSince`, source-block provenance) on derived elements —
-      Drizzle migration; CHECK/enum hygiene per house pattern.
-- [ ] Propagation: reconciliation walks live lineage from each newly-stale block (anchored
-      extracts → their statements/cards) and flags them in the same transaction; re-running
-      reconciliation is idempotent; un-staling a block (content hash restored) clears derived
-      flags it caused (track provenance to do this precisely).
-- [ ] Read surfaces: counts in source progress, the DoneIntentMenu breakdown ("… · 4 outputs
-      need re-verify"), and inventory rows (`schedulerSignals`-adjacent flag for T113-style
-      display).
-- [ ] Tests: unit — edit a fixture block, exactly its live descendants flag (dead/soft-deleted
-      lineage ignored); idempotence; un-stale clears; e2e — edit source text in the app, the
-      derived card shows the flag, restart-safe.
+- [x] Schema: `needs_reverify` + `stale_since` on `elements` (type-coupled CHECK) and a new
+      `element_reverify_provenance` table; `pre_stale_hash` on `source_block_processing`. Additive
+      migration `0037` (hand-edited to `ALTER ADD COLUMN` + `CREATE TABLE` to avoid the 0030
+      `elements`-rebuild lineage wipe); migration test asserts column-value survival + row-count
+      invariance.
+- [x] Propagation: `reconcileStaleWithin` returns a `{ staled, unStaled }` transition report;
+      `ReverifyPropagationRepository.propagateReverify` walks live lineage from each newly-stale
+      block and maintains `needs_reverify` as a self-healing `EXISTS(provenance)` projection in the
+      same `saveDocument`/OCR transaction; idempotent (`ON CONFLICT DO NOTHING` + recompute-no-op);
+      un-staling clears by `(source, block)` across live + soft-deleted targets via the
+      `pre_stale_hash` capture-once recognition. Op-logged with a `propagation` marker the global
+      undo skips.
+- [x] Read surfaces: `needsReverifyOutputs` in source progress (skipped when no block is stale),
+      the DoneIntentMenu breakdown segment (pluralized), and inventory/inspector rows
+      (`needsReverify` on the queue/inspector signals + an inert `ReverifyChip` + inspector
+      advisory).
+- [x] Tests: unit (`reverify-propagation-repository.test.ts`) — flag exactly live descendants,
+      dead/soft-deleted ignored, idempotence, un-stale clears, multi-block, self-heal,
+      block_missing, malformed anchor, undo-skip, transaction rollback; migration test; renderer
+      tests (breakdown, chip, inspector, QueueScreen integration); e2e
+      (`tests/electron/reverify-propagation.spec.ts`) — edit source → derived card flagged →
+      restart-safe → restore clears.
 
 ## Done when
 

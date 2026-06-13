@@ -352,6 +352,7 @@ export type {
   SourceBlockProcessingState,
   SourceBlockProcessingSummary,
   SourceBlockProcessingView,
+  SourceBlockReconcileReport,
 } from "./source";
 export {
   isTerminalSourceBlockProcessingState,

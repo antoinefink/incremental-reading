@@ -2408,6 +2408,13 @@ function InspectorBody({
           <span>{scheduler.kind === "fsrs" ? "Recall (FSRS)" : "Attention"}</span>
           <SchedulerChip scheduler={scheduler} />
         </div>
+        {/* T123 content-staleness advisory — distinct from the T090 topic-knowledge
+            "N need reverify" count above; this is THIS element's own body drift. */}
+        {scheduler.needsReverify ? (
+          <p className="insp-reverify" data-testid="inspector-reverify">
+            <Icon name="warning" size={13} /> Source content changed — re-verify this item
+          </p>
+        ) : null}
         <ScheduleReasonLine scheduler={scheduler} className="insp-schedule-reason" />
         {scheduler.kind === "fsrs" ? (
           review ? (

@@ -6357,6 +6357,7 @@ function emptyBlockProcessingSummary(
     ignoredRatio: 0,
     terminalRatio: 1,
     staleAfterEditBlocks: 0,
+    needsReverifyOutputs: 0,
     legacyProjectedBlocks: 0,
     canMarkDoneWithoutConfirmation: true,
     stateCounts: {

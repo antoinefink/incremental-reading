@@ -20,6 +20,8 @@ describe("element schema", () => {
       "fallowReason",
       "fallowBatchId",
       "extractFate",
+      "needsReverify",
+      "staleSince",
       "title",
       "parentId",
       "sourceId",
@@ -36,6 +38,10 @@ describe("element schema", () => {
     expect(columns.fallowReason.name).toBe("fallow_reason");
     expect(columns.fallowBatchId.name).toBe("fallow_batch_id");
     expect(columns.extractFate.name).toBe("extract_fate");
+    expect(columns.needsReverify.name).toBe("needs_reverify");
+    expect(columns.needsReverify.notNull).toBe(true);
+    expect(columns.needsReverify.default).toBe(false);
+    expect(columns.staleSince.name).toBe("stale_since");
     expect(columns.deletedAt.name).toBe("deleted_at");
   });
 });

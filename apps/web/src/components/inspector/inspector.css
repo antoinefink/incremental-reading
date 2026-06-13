@@ -732,6 +732,16 @@
   align-items: center;
   justify-content: space-between;
 }
+/* T123 content-staleness advisory line in the scheduler section. Advisory `--warn`
+   severity (not `--danger`); informs that the source changed (resolution is T124). */
+.insp-reverify {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-xs);
+  color: var(--warn);
+}
 .insp-sec__count {
   font-family: var(--font-mono);
   color: var(--text-3);

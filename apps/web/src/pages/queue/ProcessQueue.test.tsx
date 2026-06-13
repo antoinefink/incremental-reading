@@ -55,6 +55,7 @@ const h = vi.hoisted(() => {
       postponed: 0,
       scheduleReason: null,
       retirementSuggestion: null,
+      needsReverify: false,
     },
     sourceTitle: "On the Measure of Intelligence",
     author: "François Chollet",
@@ -96,6 +97,7 @@ const h = vi.hoisted(() => {
       postponed: 0,
       scheduleReason: null,
       retirementSuggestion: null,
+      needsReverify: false,
     },
   });
   const extractA = mk({
@@ -2308,6 +2310,7 @@ describe("ProcessQueue", () => {
         postponed: 0,
         scheduleReason: null,
         retirementSuggestion: null,
+        needsReverify: false,
       },
       sourceTitle: null,
       author: null,

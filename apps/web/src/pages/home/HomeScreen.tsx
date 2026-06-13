@@ -57,7 +57,14 @@ import { useSelection } from "../../shell/selection";
 import "../../analytics/analytics.css";
 import "../queue/queue.css";
 import { openQueueItem } from "../queue/openQueueItem";
-import { actionFor, DueBadge, ExtractAgeChip, metaFor, titleFor } from "../queue/queueRow";
+import {
+  actionFor,
+  DueBadge,
+  ExtractAgeChip,
+  metaFor,
+  ReverifyChip,
+  titleFor,
+} from "../queue/queueRow";
 import { SessionAssemblyPreview } from "../queue/SessionAssemblyPreview";
 import "./home.css";
 
@@ -163,6 +170,7 @@ function PreviewRow({
           {item.concept ? <span className="concept-tag">{item.concept}</span> : null}
           <SchedulerChip scheduler={chip} />
           <ExtractAgeChip item={item} />
+          <ReverifyChip item={item} />
         </span>
         {scheduleReasonText ? (
           <ScheduleReasonLine

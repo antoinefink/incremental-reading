@@ -413,6 +413,7 @@ export {
   RetirementSuggestionRepository,
   type VisibleSourceRetirementSuggestion,
 } from "./retirement-suggestion-repository";
+export { ReverifyPropagationRepository } from "./reverify-propagation-repository";
 export {
   type ReviewModeCount,
   type ReviewModeDeck,

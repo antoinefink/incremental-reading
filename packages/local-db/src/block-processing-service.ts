@@ -7,11 +7,14 @@ import type {
   SourceBlockProcessingState,
   SourceBlockProcessingSummary,
   SourceBlockProcessingView,
+  SourceBlockReconcileReport,
 } from "@interleave/core";
 import { isTerminalSourceBlockProcessingState, priorityToLabel } from "@interleave/core";
 import { documentBlocks, documents, elements, type InterleaveDatabase } from "@interleave/db";
 import { and, eq, isNull } from "drizzle-orm";
 import { BlockProcessingRepository } from "./block-processing-repository";
+import { newRowId } from "./ids";
+import { ReverifyPropagationRepository } from "./reverify-propagation-repository";
 import type { DbClient } from "./types";
 
 interface PmNode {
@@ -98,9 +101,11 @@ export interface DoneGateResult {
 
 export class BlockProcessingService {
   private readonly repo: BlockProcessingRepository;
+  private readonly reverify: ReverifyPropagationRepository;
 
   constructor(private readonly db: InterleaveDatabase) {
     this.repo = new BlockProcessingRepository(db);
+    this.reverify = new ReverifyPropagationRepository(db);
   }
 
   markBlockIgnored(input: MarkBlockInput): SourceBlockProcessingView {
@@ -171,9 +176,19 @@ export class BlockProcessingService {
     tx: DbClient,
     sourceElementId: ElementId,
     prosemirrorJson: unknown,
-  ): void {
+  ): SourceBlockReconcileReport {
     this.requireSourceElement(tx, sourceElementId);
-    this.repo.reconcileStaleWithin(tx, sourceElementId, computeBlockContentHashes(prosemirrorJson));
+    const report = this.repo.reconcileStaleWithin(
+      tx,
+      sourceElementId,
+      computeBlockContentHashes(prosemirrorJson),
+    );
+    // T123 — propagate the dirty bit downstream in the SAME transaction. A single
+    // batchId groups this run's flag flips so they audit + (T124) undo as one unit.
+    if (report.staled.length > 0 || report.unStaled.length > 0) {
+      this.reverify.propagateReverify(tx, sourceElementId, report, newRowId());
+    }
+    return report;
   }
 
   getBlockView(sourceElementId: ElementId, stableBlockId: BlockId): SourceBlockProcessingView {
@@ -289,6 +304,13 @@ export class BlockProcessingService {
       ignoredRatio: totalBlocks === 0 ? 0 : ignoredBlocks / totalBlocks,
       terminalRatio: totalBlocks === 0 ? 1 : terminalBlocks / totalBlocks,
       staleAfterEditBlocks: stateCounts.stale_after_edit,
+      // Provenance rows exist ONLY for currently-stale blocks (created on stale, deleted
+      // on un-stale), so a source with zero stale blocks can have no reverify outputs —
+      // skip the count query on the common clean-source summary read (a hot path).
+      needsReverifyOutputs:
+        stateCounts.stale_after_edit === 0
+          ? 0
+          : this.reverify.countLiveReverifyOutputs(sourceElementId),
       legacyProjectedBlocks: 0,
       canMarkDoneWithoutConfirmation: unresolvedBlocks === 0,
       stateCounts,

@@ -33,6 +33,7 @@ function summary(overrides: SummaryOverrides = {}): SourceBlockProcessingSummary
     ignoredRatio: 0,
     terminalRatio: 1,
     staleAfterEditBlocks: 0,
+    needsReverifyOutputs: 0,
     legacyProjectedBlocks: 0,
     canMarkDoneWithoutConfirmation: true,
     ...overrides,
@@ -127,6 +128,48 @@ describe("DoneIntentMenu", () => {
     expect(breakdown).toContain("deferred");
     expect(breakdown).toContain("stale after edit");
     expect(screen.getByTestId("done-intent-resume").textContent).toBe("block 12 of 68");
+  });
+
+  it("shows the re-verify outputs line (plural) when derived outputs need re-verify", async () => {
+    const getSummary = vi.fn().mockResolvedValue(
+      summary({
+        canMarkDoneWithoutConfirmation: false,
+        unresolvedBlocks: 4,
+        stateCounts: { unread: 4 },
+        needsReverifyOutputs: 3,
+      }),
+    );
+    render(<DoneIntentMenu getSummary={getSummary} onResolved={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("done-intent-trigger"));
+    await screen.findByTestId("done-intent-pop");
+    const reverify = screen.getByTestId("done-intent-reverify").textContent ?? "";
+    expect(reverify).toContain("3");
+    expect(reverify).toContain("outputs need re-verify");
+  });
+
+  it("uses the singular re-verify phrasing for exactly one output", async () => {
+    const getSummary = vi.fn().mockResolvedValue(
+      summary({
+        canMarkDoneWithoutConfirmation: false,
+        unresolvedBlocks: 1,
+        stateCounts: { unread: 1 },
+        needsReverifyOutputs: 1,
+      }),
+    );
+    render(<DoneIntentMenu getSummary={getSummary} onResolved={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("done-intent-trigger"));
+    await screen.findByTestId("done-intent-pop");
+    expect(screen.getByTestId("done-intent-reverify").textContent).toContain(
+      "1 output needs re-verify",
+    );
+  });
+
+  it("omits the re-verify line when no outputs need re-verify", async () => {
+    const getSummary = vi.fn().mockResolvedValue(UNRESOLVED);
+    render(<DoneIntentMenu getSummary={getSummary} onResolved={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("done-intent-trigger"));
+    await screen.findByTestId("done-intent-pop");
+    expect(screen.queryByTestId("done-intent-reverify")).toBeNull();
   });
 
   it("omits the resume line when none is provided", async () => {

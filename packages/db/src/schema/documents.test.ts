@@ -59,6 +59,7 @@ describe("document schema", () => {
       "stableBlockId",
       "state",
       "blockContentHash",
+      "preStaleHash",
       "metadata",
       "createdAt",
       "updatedAt",
@@ -68,6 +69,7 @@ describe("document schema", () => {
     expect(columns.sourceElementId.name).toBe("source_element_id");
     expect(columns.stableBlockId.name).toBe("stable_block_id");
     expect(columns.blockContentHash.name).toBe("block_content_hash");
+    expect(columns.preStaleHash.name).toBe("pre_stale_hash");
   });
 
   it("links source block processing rows to multiple durable outputs", () => {

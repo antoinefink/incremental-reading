@@ -1,7 +1,7 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { QueueItemSummary } from "../../lib/appApi";
-import { actionFor, DueBadge, ExtractAgeChip, metaFor, titleFor } from "./queueRow";
+import { actionFor, DueBadge, ExtractAgeChip, metaFor, ReverifyChip, titleFor } from "./queueRow";
 
 function queueItem(overrides: Partial<QueueItemSummary>): QueueItemSummary {
   return {
@@ -124,5 +124,33 @@ describe("queue row helpers", () => {
     );
 
     expect(getByTestId("extract-age-chip")).toHaveTextContent("Stale · return");
+  });
+
+  it("renders an inert re-verify chip when the row's body may no longer match its source", () => {
+    const { getByTestId } = render(
+      <ReverifyChip
+        item={queueItem({
+          type: "card",
+          schedulerSignals: { needsReverify: true } as QueueItemSummary["schedulerSignals"],
+        })}
+      />,
+    );
+    const chip = getByTestId("reverify-chip");
+    expect(chip).toHaveTextContent("Re-verify");
+    // Inert: advisory only — T123 flags, resolution is T124. No button affordance.
+    expect(chip.getAttribute("role")).toBeNull();
+    expect(chip.tagName).toBe("SPAN");
+    expect(chip.getAttribute("title")).toContain("re-verify");
+  });
+
+  it("renders nothing when the row does not need re-verify", () => {
+    const { container } = render(
+      <ReverifyChip
+        item={queueItem({
+          schedulerSignals: { needsReverify: false } as QueueItemSummary["schedulerSignals"],
+        })}
+      />,
+    );
+    expect(container.querySelector('[data-testid="reverify-chip"]')).toBeNull();
   });
 });

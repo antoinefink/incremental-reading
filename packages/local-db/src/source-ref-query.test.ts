@@ -26,6 +26,8 @@ function element(overrides: Partial<Element> & { id: ElementId; type: Element["t
     fallowReason: null,
     fallowBatchId: null,
     extractFate: null,
+    needsReverify: false,
+    staleSince: null,
     title: "Untitled",
     parentId: null,
     sourceId: null,

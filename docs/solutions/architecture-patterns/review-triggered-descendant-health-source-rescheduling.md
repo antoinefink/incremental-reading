@@ -149,6 +149,7 @@ Read-model and UI tests should cover both visibility and suppression:
 
 ## Related
 
+- [Propagate content-staleness down the lineage DAG when a source block is edited](./downward-dirty-bit-propagation-through-lineage-dag.md) — the DOWNWARD/forward counterpart of this back edge: this doc carries review pain *up* the lineage (child → parent); that one carries edit staleness *down* it (source → descendants). Same same-transaction, backend-owned-signal discipline; opposite direction.
 - [Trust schedule reasons only from the governing reschedule operation](./trusted-schedule-reasons-from-governing-reschedule-ops.md)
 - [Persist adaptive attention intervals as bounded, undoable scheduler state](./yield-adaptive-attention-interval-multiplier.md)
 - [Capture review analytics facts in review logs without analytics tables](./review-analytics-data-capture-in-review-logs.md)

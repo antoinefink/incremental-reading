@@ -22,6 +22,7 @@ function queueItem(overrides: Partial<QueueItemSummary>): QueueItemSummary {
       postponed: 0,
       scheduleReason: null,
       retirementSuggestion: null,
+      needsReverify: false,
     },
     sourceTitle: null,
     author: null,

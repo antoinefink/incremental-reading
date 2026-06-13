@@ -80,6 +80,12 @@ export interface SchedulerSignals {
   readonly yield: SourceYieldSignals | null;
   /** Source-only proactive Done/Abandon suggestion (T103); null for other elements. */
   readonly retirementSuggestion: SourceRetirementSuggestion | null;
+  /**
+   * T123 content-staleness: `true` when this element's body may no longer match its
+   * edited source (resolve via T124). NOT T090 calendar-staleness — that is the
+   * topic-knowledge `KnowledgeStaleness.needsReverify` open-task COUNT.
+   */
+  readonly needsReverify: boolean;
 }
 
 /** The per-source yield summary the inspector chip shows (T083). */
@@ -370,6 +376,7 @@ export class InspectorQuery {
         // Yield is a SOURCE concern; a card's panel shows FSRS stats instead.
         yield: null,
         retirementSuggestion: null,
+        needsReverify: element.needsReverify,
       };
       if (state) {
         reviewSummary = {
@@ -424,6 +431,7 @@ export class InspectorQuery {
           element.type === "source"
             ? this.repos.retirementSuggestions.visibleForSource(element.id)
             : null,
+        needsReverify: element.needsReverify,
       };
     }
 

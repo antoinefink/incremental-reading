@@ -180,6 +180,10 @@ export class ElementRepository {
       fallowReason: input.fallowReason ?? null,
       fallowBatchId: input.fallowBatchId ?? null,
       extractFate: null,
+      // T123 — a freshly created element is never content-stale; it gains the flag only
+      // when a source block it derives from is later edited (via propagateReverify).
+      needsReverify: false,
+      staleSince: null,
       title: input.title,
       parentId: input.parentId ?? null,
       sourceId: input.sourceId ?? null,

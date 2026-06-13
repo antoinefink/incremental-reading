@@ -28,7 +28,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SourceBlockProcessingSummaryPayload } from "../../lib/appApi";
-import { describeUnresolved, pluralizeBlocks } from "../../pages/queue/doneIntentBreakdown";
+import {
+  describeReverifyOutputs,
+  describeUnresolved,
+  pluralizeBlocks,
+} from "../../pages/queue/doneIntentBreakdown";
 import { Icon, type IconName } from "../Icon";
 import { Tooltip } from "../Tooltip";
 import "./done-intent-menu.css";
@@ -248,6 +252,7 @@ export function DoneIntentMenu({
   );
 
   const segments = summary ? describeUnresolved(summary.stateCounts) : [];
+  const reverify = summary ? describeReverifyOutputs(summary.needsReverifyOutputs) : null;
 
   return (
     <span className="doneintent" ref={rootRef} data-testid="done-intent">
@@ -285,13 +290,18 @@ export function DoneIntentMenu({
               </span>
             ) : null}
           </div>
-          {segments.length > 0 ? (
+          {segments.length > 0 || reverify ? (
             <ul className="doneintent__breakdown" data-testid="done-intent-breakdown">
               {segments.map((s) => (
                 <li key={s.key}>
                   <span className="doneintent__seg-count">{s.count}</span> {s.label}
                 </li>
               ))}
+              {reverify ? (
+                <li key="needs-reverify" data-testid="done-intent-reverify">
+                  <span className="doneintent__seg-count">{reverify.count}</span> {reverify.label}
+                </li>
+              ) : null}
             </ul>
           ) : null}
           <div className="doneintent__choices">

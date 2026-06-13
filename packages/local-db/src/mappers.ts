@@ -44,6 +44,8 @@ export function rowToElement(row: ElementRow): Element {
     fallowReason: row.fallowReason ?? null,
     fallowBatchId: row.fallowBatchId ?? null,
     extractFate: row.extractFate as Element["extractFate"],
+    needsReverify: row.needsReverify === true,
+    staleSince: row.staleSince ?? null,
     title: row.title,
     parentId: (row.parentId as ElementId | null) ?? null,
     sourceId: (row.sourceId as ElementId | null) ?? null,

@@ -260,6 +260,13 @@
       "when": 1781274000000,
       "tag": "0036_attention_interval_multiplier",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1781385941781,
+      "tag": "0037_nosy_lady_vermin",
+      "breakpoints": true
     }
   ]
 }
