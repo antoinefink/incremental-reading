@@ -64,6 +64,7 @@ export function LineageTree({
               data-testid="lineage-tree-node"
               data-element-id={n.id}
               data-element-type={n.type}
+              data-depth={n.depth}
               data-active={n.active ? "true" : "false"}
               data-deleted={n.deleted ? "true" : "false"}
               aria-current={n.active ? "true" : undefined}

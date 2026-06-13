@@ -413,9 +413,9 @@ test("AE3 — Keep descendants tombstones the mid extract; the live card stays u
   expect(await statusOf(page, cardId)).not.toBeNull(); // card still live after restart
   expect(await cardStillUnderExtract(page, cardId, extractId)).toBe(true); // link intact after restart
 
-  // The inspector renders the tombstone visibly: select the live card in the inspector
-  // (the same selection surface the app uses) → its lineage section shows the struck
-  // "deleted" tombstone tag + the "ancestor deleted" hint (R1/R3 proven in the real UI).
+  // The inspector keeps tombstones recoverable without making them louder than live
+  // lineage: select the live card, confirm deleted nodes are hidden by default, then
+  // reveal them through the Lineage header toggle.
   // Scope to the CARD picker row (its exact title — the seeded verify-claim TASK shares
   // the substring "Chollet's definition of intelligence", so filter by type to disambiguate).
   await page.goto(`${baseUrl}/`);
@@ -426,9 +426,44 @@ test("AE3 — Keep descendants tombstones the mid extract; the live card stays u
   await expect(cardPick).toHaveCount(1);
   await cardPick.click();
   await expect(page.getByTestId("inspector-content")).toHaveAttribute("data-element-type", "card");
-  // The deleted middle extract is a struck tombstone in the card's lineage, not pruned.
+  const lineageSection = page.getByTestId("lineage-section");
+  const showDeleted = lineageSection.getByRole("button", { name: /show deleted/i });
+  await expect(showDeleted).toBeVisible();
+  await expect(page.getByTestId("lineage-tombstone-tag")).toHaveCount(0);
+  await expect(page.getByTestId("lineage-ancestor-deleted")).toHaveCount(0);
+  await expect(page.getByTestId("lineage-tombstone-restore")).toHaveCount(0);
+
+  await showDeleted.click();
+
+  // The deleted middle extract is a struck tombstone in the card's lineage when revealed.
   await expect(page.getByTestId("lineage-tombstone-tag").first()).toBeVisible();
   await expect(page.getByTestId("lineage-ancestor-deleted")).toBeVisible();
+  const ancestorRestore = page.getByTestId("lineage-ancestor-restore");
+  const tombstoneRestore = page.getByTestId("lineage-tombstone-restore").first();
+  await expect(tombstoneRestore).toBeVisible();
+  const ancestorRestoreBox = await ancestorRestore.boundingBox();
+  const tombstoneRestoreBox = await tombstoneRestore.boundingBox();
+  expect(ancestorRestoreBox).not.toBeNull();
+  expect(tombstoneRestoreBox).not.toBeNull();
+  expect(
+    Math.abs((ancestorRestoreBox?.height ?? 0) - (tombstoneRestoreBox?.height ?? 0)),
+  ).toBeLessThanOrEqual(1);
+  expect(tombstoneRestoreBox?.height ?? 0).toBeLessThanOrEqual(20);
+
+  await ancestorRestore.click();
+  await expect(page.getByTestId("lineage-tombstone-tag")).toHaveCount(0);
+  await expect(page.getByTestId("lineage-ancestor-deleted")).toHaveCount(0);
+  await expect(lineageSection.getByRole("button", { name: /show deleted/i })).toHaveCount(0);
+  expect(await statusOf(page, extractId)).not.toBeNull();
+
+  await app.close();
+  app = await launchApp(dir);
+  page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+  expect((await lineageNodes(page, cardId, true)).find((n) => n.id === extractId)?.deleted).toBe(
+    false,
+  );
+  expect(await cardStillUnderExtract(page, cardId, extractId)).toBe(true);
 
   await app.close();
 });

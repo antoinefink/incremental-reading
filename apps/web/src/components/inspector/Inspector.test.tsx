@@ -981,7 +981,7 @@ describe("Inspector", () => {
       };
     }
 
-    it("requests lineage with includeTombstones so a focused node keeps its full chain (Covers R1)", async () => {
+    it("requests tombstone-aware lineage but hides deleted nodes behind the header toggle by default (Covers R1)", async () => {
       h.selectedId = "card-1";
       h.getInspectorData.mockResolvedValue({ data: cardDataWithSourceContext() });
       h.getLineage.mockResolvedValue(lineageWithDeletedAncestor());
@@ -990,11 +990,24 @@ describe("Inspector", () => {
 
       await screen.findByTestId("lineage-tree");
       expect(h.getLineage).toHaveBeenCalledWith({ id: "card-1", includeTombstones: true });
-      // The deleted middle extract is rendered as a tombstone, not pruned.
+      expect(screen.getByRole("button", { name: /show deleted \(1\)/i })).toBeInTheDocument();
+      expect(screen.queryByTestId("lineage-tombstone-tag")).toBeNull();
+      expect(screen.queryByTestId("lineage-tombstone-restore")).toBeNull();
+      expect(screen.queryByTestId("lineage-ancestor-deleted")).toBeNull();
+      const liveCard = screen
+        .getAllByTestId("lineage-tree-node")
+        .find((n) => n.getAttribute("data-element-id") === "card-1");
+      expect(liveCard).toBeInTheDocument();
+      expect(liveCard?.getAttribute("data-depth")).toBe("1");
+
+      fireEvent.click(screen.getByRole("button", { name: /show deleted/i }));
+
+      // The deleted middle extract is revealed as a tombstone, not pruned.
       const dead = screen
         .getAllByTestId("lineage-tree-node")
         .find((n) => n.getAttribute("data-element-id") === "ext-dead");
       expect(dead?.getAttribute("data-deleted")).toBe("true");
+      expect(screen.getByRole("button", { name: /hide deleted/i })).toBeInTheDocument();
     });
 
     it("hint Restore calls restoreAncestorChain for the FOCUSED element, not a multi-node restore (Covers R3/B1)", async () => {
@@ -1004,6 +1017,7 @@ describe("Inspector", () => {
 
       render(<Inspector />);
 
+      fireEvent.click(await screen.findByRole("button", { name: /show deleted/i }));
       const hint = await screen.findByTestId("lineage-ancestor-deleted");
       expect(hint).toHaveTextContent(/ancestor of this item is deleted/i);
 
@@ -1016,6 +1030,136 @@ describe("Inspector", () => {
       expect(h.restoreFromTrash).not.toHaveBeenCalled();
     });
 
+    it("resets the deleted-lineage reveal when the selected element changes", async () => {
+      h.selectedId = "card-1";
+      const secondCard = cardDataWithSourceContext();
+      h.getInspectorData
+        .mockResolvedValueOnce({ data: cardDataWithSourceContext() })
+        .mockResolvedValueOnce({
+          data: {
+            ...secondCard,
+            element: { ...secondCard.element, id: "card-2", title: "Second linked card" },
+          },
+        })
+        .mockResolvedValueOnce({ data: cardDataWithSourceContext() });
+      const secondLineage = {
+        lineage: {
+          elementId: "card-2",
+          rootId: "src-1",
+          nodes: [
+            {
+              id: "src-1",
+              title: "The Toxoplasma Of Rage",
+              type: "source",
+              stage: "raw_source",
+              depth: 0,
+              meta: "source",
+              active: false,
+              deleted: false,
+            },
+            {
+              id: "ext-dead-2",
+              title: "Second deleted extract",
+              type: "extract",
+              stage: "raw_extract",
+              depth: 1,
+              meta: "raw_extract",
+              active: false,
+              deleted: true,
+            },
+            {
+              id: "card-2",
+              title: "Second linked card",
+              type: "card",
+              stage: "active_card",
+              depth: 2,
+              meta: "cloze",
+              active: true,
+              deleted: false,
+            },
+          ],
+        },
+      };
+      h.getLineage
+        .mockResolvedValueOnce(lineageWithDeletedAncestor())
+        .mockResolvedValueOnce(secondLineage)
+        .mockResolvedValueOnce(lineageWithDeletedAncestor());
+
+      const view = render(<Inspector />);
+
+      fireEvent.click(await screen.findByRole("button", { name: /show deleted/i }));
+      expect(screen.getByText("The University of Virginia rape case…")).toBeInTheDocument();
+
+      h.selectedId = "card-2";
+      view.rerender(<Inspector />);
+
+      await waitFor(() =>
+        expect(screen.getByTestId("inspector-title")).toHaveTextContent("Second linked card"),
+      );
+      expect(screen.getByRole("button", { name: /show deleted \(1\)/i })).toBeInTheDocument();
+      expect(screen.queryByText("Second deleted extract")).toBeNull();
+      expect(screen.queryByRole("button", { name: /hide deleted/i })).toBeNull();
+
+      h.selectedId = "card-1";
+      view.rerender(<Inspector />);
+
+      await waitFor(() =>
+        expect(screen.getByTestId("inspector-title")).toHaveTextContent("What is intelligence?"),
+      );
+      expect(screen.getByRole("button", { name: /show deleted \(1\)/i })).toBeInTheDocument();
+      expect(screen.queryByText("The University of Virginia rape case…")).toBeNull();
+      expect(screen.queryByRole("button", { name: /hide deleted/i })).toBeNull();
+    });
+
+    it("does not render stale lineage while the selected element's lineage is still loading", async () => {
+      h.selectedId = "card-1";
+      const pendingSecondLineage = deferred<ReturnType<typeof lineageWithDeletedAncestor>>();
+      const secondCard = cardDataWithSourceContext();
+      h.getInspectorData
+        .mockResolvedValueOnce({ data: cardDataWithSourceContext() })
+        .mockResolvedValueOnce({
+          data: {
+            ...secondCard,
+            element: { ...secondCard.element, id: "card-2", title: "Second linked card" },
+          },
+        });
+      h.getLineage
+        .mockResolvedValueOnce(lineageWithDeletedAncestor())
+        .mockReturnValueOnce(pendingSecondLineage.promise);
+
+      const view = render(<Inspector />);
+
+      expect(
+        await screen.findByRole("button", { name: /show deleted \(1\)/i }),
+      ).toBeInTheDocument();
+
+      h.selectedId = "card-2";
+      view.rerender(<Inspector />);
+
+      await waitFor(() =>
+        expect(screen.getByTestId("inspector-title")).toHaveTextContent("Second linked card"),
+      );
+      expect(screen.queryByRole("button", { name: /show deleted/i })).toBeNull();
+      expect(screen.queryByText("The University of Virginia rape case…")).toBeNull();
+
+      await act(async () => {
+        pendingSecondLineage.resolve({
+          lineage: {
+            ...lineageWithDeletedAncestor().lineage,
+            elementId: "card-2",
+            nodes: lineageWithDeletedAncestor().lineage.nodes.map((node) =>
+              node.id === "card-1" ? { ...node, id: "card-2", title: "Second linked card" } : node,
+            ),
+          },
+        });
+        await pendingSecondLineage.promise;
+      });
+
+      expect(
+        await screen.findByRole("button", { name: /show deleted \(1\)/i }),
+      ).toBeInTheDocument();
+    });
+
     it("restores a single tombstone via its ancestor chain from the inline row control (Covers R11/B1)", async () => {
       h.selectedId = "card-1";
       h.getInspectorData.mockResolvedValue({ data: cardDataWithSourceContext() });
@@ -1024,6 +1168,7 @@ describe("Inspector", () => {
       render(<Inspector />);
 
       await screen.findByTestId("lineage-tree");
+      fireEvent.click(screen.getByRole("button", { name: /show deleted/i }));
       fireEvent.click(screen.getByTestId("lineage-tombstone-restore"));
 
       // The per-tombstone Restore restores THAT node's chain (so it is never left under a
@@ -1088,7 +1233,107 @@ describe("Inspector", () => {
       render(<Inspector />);
 
       await screen.findByTestId("lineage-tree");
+      expect(screen.getByRole("button", { name: /show deleted \(1\)/i })).toBeInTheDocument();
       expect(screen.queryByTestId("lineage-ancestor-deleted")).toBeNull();
+    });
+
+    it("does not treat an earlier deleted sibling as an ancestor", async () => {
+      h.selectedId = "card-1";
+      h.getInspectorData.mockResolvedValue({ data: cardDataWithSourceContext() });
+      h.getLineage.mockResolvedValue({
+        lineage: {
+          elementId: "card-1",
+          rootId: "src-1",
+          nodes: [
+            {
+              id: "src-1",
+              title: "The Toxoplasma Of Rage",
+              type: "source",
+              stage: "raw_source",
+              depth: 0,
+              meta: "source",
+              active: false,
+              deleted: false,
+            },
+            {
+              id: "ext-dead-sibling",
+              title: "Deleted sibling extract",
+              type: "extract",
+              stage: "raw_extract",
+              depth: 1,
+              meta: "raw_extract",
+              active: false,
+              deleted: true,
+            },
+            {
+              id: "ext-live",
+              title: "Live extract",
+              type: "extract",
+              stage: "raw_extract",
+              depth: 1,
+              meta: "raw_extract",
+              active: false,
+              deleted: false,
+            },
+            {
+              id: "card-1",
+              title: "Linked card",
+              type: "card",
+              stage: "active_card",
+              depth: 2,
+              meta: "cloze",
+              active: true,
+              deleted: false,
+            },
+          ],
+        },
+      });
+
+      render(<Inspector />);
+
+      fireEvent.click(await screen.findByRole("button", { name: /show deleted/i }));
+
+      expect(screen.getByText("Deleted sibling extract")).toBeInTheDocument();
+      expect(screen.queryByTestId("lineage-ancestor-deleted")).toBeNull();
+    });
+
+    it("does not show the deleted-lineage toggle for live-only lineage", async () => {
+      h.selectedId = "card-1";
+      h.getInspectorData.mockResolvedValue({ data: cardDataWithSourceContext() });
+      h.getLineage.mockResolvedValue({
+        lineage: {
+          elementId: "card-1",
+          rootId: "src-1",
+          nodes: [
+            {
+              id: "src-1",
+              title: "The Toxoplasma Of Rage",
+              type: "source",
+              stage: "raw_source",
+              depth: 0,
+              meta: "source",
+              active: false,
+              deleted: false,
+            },
+            {
+              id: "card-1",
+              title: "Linked card",
+              type: "card",
+              stage: "active_card",
+              depth: 1,
+              meta: "cloze",
+              active: true,
+              deleted: false,
+            },
+          ],
+        },
+      });
+
+      render(<Inspector />);
+
+      await screen.findByTestId("lineage-tree");
+      expect(screen.queryByRole("button", { name: /show deleted/i })).toBeNull();
+      expect(screen.queryByTestId("lineage-tombstone-tag")).toBeNull();
     });
   });
 });

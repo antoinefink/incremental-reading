@@ -24,7 +24,7 @@
 
 import { taskTypeLabel } from "@interleave/core";
 import { useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   appApi,
   type ConceptNode,
@@ -733,6 +733,37 @@ const BRANCH_REVIEWABLE_TYPES = new Set<ElementSummary["type"]>(["source", "topi
 
 /** Element types expected to preserve source evidence even when the source is missing. */
 const SOURCE_LINEAGE_TYPES = new Set<ElementSummary["type"]>(["extract", "card", "media_fragment"]);
+
+function visibleLineageNodes(
+  nodes: readonly LineageNode[],
+  showDeleted: boolean,
+): readonly LineageNode[] {
+  if (showDeleted) return nodes;
+
+  const visible: LineageNode[] = [];
+  const deletedDepths: number[] = [];
+  for (const node of nodes) {
+    while (deletedDepths.length > 0 && node.depth <= (deletedDepths.at(-1) ?? -1)) {
+      deletedDepths.pop();
+    }
+    if (node.deleted) {
+      deletedDepths.push(node.depth);
+      continue;
+    }
+    visible.push({ ...node, depth: Math.max(0, node.depth - deletedDepths.length) });
+  }
+  return visible;
+}
+
+function deletedAncestorCount(nodes: readonly LineageNode[]): number {
+  const stack: LineageNode[] = [];
+  for (const node of nodes) {
+    while (stack.length > node.depth) stack.pop();
+    if (node.active) return stack.filter((ancestor) => ancestor.deleted).length;
+    stack[node.depth] = node;
+  }
+  return 0;
+}
 
 type AttentionScheduler = InspectorData["scheduler"] & { kind: "attention" };
 
@@ -2284,11 +2315,30 @@ function InspectorBody({
     review,
     lifetime,
   } = data;
+  const [lineageDeletedVisibility, setLineageDeletedVisibility] = useState<{
+    elementId: string;
+    showDeleted: boolean;
+  } | null>(null);
+  const showDeletedLineage =
+    lineageDeletedVisibility?.elementId === element.id
+      ? lineageDeletedVisibility.showDeleted
+      : false;
+  const currentLineage = lineage?.elementId === element.id ? lineage : null;
   const redactCardSourceContext = element.type === "card" && isScopeActive("review");
   const showSourceLineage =
     !redactCardSourceContext &&
     element.type !== "source" &&
     (SOURCE_LINEAGE_TYPES.has(element.type) || Boolean(source || sourceRef || location));
+  const deletedLineageCount = currentLineage?.nodes.filter((n) => n.deleted).length ?? 0;
+  const hasDeletedLineage = deletedLineageCount > 0;
+  const lineageNodes = useMemo(
+    () => (currentLineage ? visibleLineageNodes(currentLineage.nodes, showDeletedLineage) : []),
+    [currentLineage, showDeletedLineage],
+  );
+  const tombstonedAncestorCount = useMemo(() => {
+    if (!currentLineage) return 0;
+    return deletedAncestorCount(currentLineage.nodes);
+  }, [currentLineage]);
   return (
     <div className="insp" data-testid="inspector-content" data-element-type={element.type}>
       {/* Header: identity + one compact state line. */}
@@ -2469,11 +2519,30 @@ function InspectorBody({
       {/* Lineage (T023): the full navigable tree — source → extract → sub-extract
           → card — rooted at the lineage root, with the active element highlighted.
           Clicking any node navigates there (up OR down the chain). */}
-      {!redactCardSourceContext && lineage && lineage.nodes.length > 0 && (
+      {!redactCardSourceContext && currentLineage && currentLineage.nodes.length > 0 && (
         <div className="insp-sec" data-testid="lineage-section">
           <div className="insp-sec__title">
             <span>Lineage</span>
-            <span className="insp-sec__count">{lineage.nodes.length}</span>
+            <span className="insp-sec__tools">
+              {hasDeletedLineage ? (
+                <button
+                  type="button"
+                  className="insp-lineage-toggle"
+                  data-testid="lineage-deleted-toggle"
+                  aria-expanded={showDeletedLineage}
+                  onClick={() =>
+                    setLineageDeletedVisibility({
+                      elementId: element.id,
+                      showDeleted: !showDeletedLineage,
+                    })
+                  }
+                >
+                  <Icon name={showDeletedLineage ? "eye" : "trash"} size={11} />
+                  {showDeletedLineage ? "Hide deleted" : `Show deleted (${deletedLineageCount})`}
+                </button>
+              ) : null}
+              <span className="insp-sec__count">{lineageNodes.length}</span>
+            </span>
           </div>
           {/* R3 — when an ANCESTOR (a node ABOVE the focused element) in its chain is a
               tombstone, show a single-line hint with an inline Restore that walks the
@@ -2482,40 +2551,28 @@ function InspectorBody({
               descendant tombstones. Ancestors precede the active node in the flattened,
               depth-ordered lineage, so we count deleted nodes BEFORE it (a deleted
               descendant or the focused node itself is NOT an "ancestor deleted" case). */}
-          {(() => {
-            const activeIndex = lineage.nodes.findIndex((n) => n.active);
-            if (activeIndex < 0) return null;
-            const tombstonedAncestors = lineage.nodes
-              .slice(0, activeIndex)
-              .filter((n) => n.deleted);
-            if (tombstonedAncestors.length === 0) return null;
-            const restoringAncestors = restoringId === element.id;
-            return (
-              <p
-                className="insp-empty insp-ancestor-deleted"
-                data-testid="lineage-ancestor-deleted"
+          {showDeletedLineage && tombstonedAncestorCount > 0 ? (
+            <p className="insp-empty insp-ancestor-deleted" data-testid="lineage-ancestor-deleted">
+              <Icon name="trash" size={12} />
+              <span>
+                {tombstonedAncestorCount === 1
+                  ? "An ancestor of this item is deleted."
+                  : `${tombstonedAncestorCount} ancestors of this item are deleted.`}
+              </span>
+              <button
+                type="button"
+                className="insp-jump insp-jump--lineage-restore"
+                data-testid="lineage-ancestor-restore"
+                disabled={restoringId === element.id}
+                onClick={() => onRestoreAncestors()}
               >
-                <Icon name="trash" size={12} />
-                <span>
-                  {tombstonedAncestors.length === 1
-                    ? "An ancestor of this item is deleted."
-                    : `${tombstonedAncestors.length} ancestors of this item are deleted.`}
-                </span>
-                <button
-                  type="button"
-                  className="insp-jump"
-                  data-testid="lineage-ancestor-restore"
-                  disabled={restoringAncestors}
-                  onClick={() => onRestoreAncestors()}
-                >
-                  <Icon name="restore" size={12} />
-                  {restoringAncestors ? "Restoring…" : "Restore"}
-                </button>
-              </p>
-            );
-          })()}
+                <Icon name="restore" size={12} />
+                {restoringId === element.id ? "Restoring…" : "Restore"}
+              </button>
+            </p>
+          ) : null}
           <LineageTree
-            nodes={lineage.nodes}
+            nodes={lineageNodes}
             onPick={onPickLineageNode}
             onRestore={onRestoreTombstone}
             restoringId={restoringId}
@@ -2685,6 +2742,7 @@ export function Inspector() {
     }
     let cancelled = false;
     setLoading(true);
+    setLineage(null);
     appApi
       .getInspectorData({ id: selectedId })
       .then((res) => {
@@ -2706,7 +2764,7 @@ export function Inspector() {
     appApi
       .getLineage({ id: selectedId, includeTombstones: true })
       .then((res) => {
-        if (!cancelled) setLineage(res.lineage);
+        if (!cancelled && selectedIdRef.current === selectedId) setLineage(res.lineage);
       })
       .catch(() => {
         if (!cancelled) setLineage(null);
@@ -2936,6 +2994,7 @@ export function Inspector() {
           <p className="insp-empty">Loading…</p>
         ) : selectedId && data ? (
           <InspectorBody
+            key={data.element.id}
             data={data}
             lineage={lineage}
             allConcepts={allConcepts}

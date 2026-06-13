@@ -48,9 +48,9 @@ Source lineage is different from general hierarchy: it is evidence grounding, so
 
 ### Lineage tombstone
 
-A soft-deleted middle element kept visible in the lineage view as a muted anchor so its live descendants never vanish from their own chain. Deleting an element with live descendants must never silently orphan them (a hard delete would null `parentId`/`sourceId`) or silently hide them (the live-only lineage walk would prune the whole subtree); instead the deleted node is rendered as a tombstone that the descendants still hang from, with one-click restore.
+A soft-deleted middle element preserved in tombstone-aware lineage as a muted anchor so its live descendants never vanish from their own chain. Deleting an element with live descendants must never silently orphan them (a hard delete would null `parentId`/`sourceId`) or silently hide them from their own work surface; instead the deleted node remains revealable as a tombstone that the descendants still hang from, with one-click restore.
 
-A lineage tombstone is a display state derived from the existing `deleted` status, not a new status or operation. It is the deletion-side sibling of the deliberate, descendant-aware states elsewhere in the system — like Topic fallow (rest) and honorable extract fates — and preserves the "source lineage is sacred" invariant on the delete path.
+A lineage tombstone is a display state derived from the existing `deleted` status, not a new status or operation. Live descendants can stay visible while tombstones are collapsed by default, but the tombstone-aware lineage must still keep restore and source-lineage recovery available on demand.
 
 ### Browser capture
 
