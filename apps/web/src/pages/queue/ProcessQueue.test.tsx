@@ -290,8 +290,26 @@ const h = vi.hoisted(() => {
     }),
     siblingCardAnswers: vi.fn().mockResolvedValue({ cards: [] }),
     createExtraction: vi.fn().mockResolvedValue({
-      extract: { id: "subextract-1", parentId: "extract-1", sourceId: "source-1" },
-      location: { sourceElementId: "extract-1" },
+      extract: {
+        id: "subextract-1",
+        type: "extract",
+        status: "scheduled",
+        stage: "raw_extract",
+        priority: 0.625,
+        title: "Sub extract",
+        dueAt: "2026-06-10T00:00:00.000Z",
+        parentId: "extract-1",
+        sourceId: "source-1",
+      },
+      location: {
+        id: "loc-subextract-1",
+        sourceElementId: "extract-1",
+        blockIds: ["extract-block-1"],
+        startOffset: 0,
+        endOffset: 1,
+        label: "¶1",
+        selectedText: "Sub extract",
+      },
     }),
     createCard: vi.fn().mockResolvedValue({
       card: { id: "card-new", siblingGroupId: "sib-1" },
@@ -1783,6 +1801,49 @@ describe("ProcessQueue", () => {
     expect(h.actOnQueueItem).not.toHaveBeenCalled();
     expect(h.navigateSpy).not.toHaveBeenCalled();
     expect(h.dismissSelection).toHaveBeenCalled();
+  });
+
+  it("offers convert-now from process queue when a source extraction is born atomic", async () => {
+    h.createExtraction.mockResolvedValueOnce({
+      extract: {
+        id: "atomic-process-extract",
+        type: "extract",
+        status: "scheduled",
+        stage: "atomic_statement",
+        priority: 0.625,
+        title: "Atomic queue fact",
+        dueAt: "2026-06-10T00:00:00.000Z",
+        parentId: "source-1",
+        sourceId: "source-1",
+      },
+      location: {
+        id: "loc-atomic-process-extract",
+        sourceElementId: "source-1",
+        blockIds: ["blk_source"],
+        startOffset: 3,
+        endOffset: 17,
+        label: "¶1",
+        selectedText: "source passage",
+      },
+    });
+    h.selectionLocation.current = {
+      selectedText: "source passage",
+      blockIds: ["blk_source"],
+      startOffset: 3,
+      endOffset: 17,
+    };
+    h.selectionPosition.current = { top: 120, left: 240 };
+    render(<ProcessQueue />);
+    await moveToSource();
+
+    fireEvent.click(await screen.findByTestId("sel-tool-extract"));
+    fireEvent.click(await screen.findByTestId("atomic-extract-convert-now"));
+
+    expect(h.navigateSpy).toHaveBeenCalledWith({
+      to: "/extract/$id",
+      params: { id: "atomic-process-extract" },
+      search: { cardBuilder: "qa" },
+    });
   });
 
   it("highlights selected source text without advancing the process cursor", async () => {

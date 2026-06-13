@@ -71,6 +71,7 @@ import {
   type DailyWorkSummaryResult,
   type DirectExtractFate,
   type ExtractFate,
+  type ExtractionCreateResult,
   type ExtractStage,
   type InspectorData,
   isDesktop,
@@ -91,6 +92,10 @@ import { type UseDocumentResult, useDocument } from "../source/useDocument";
 import { useHighlights } from "../source/useHighlights";
 import { type UseReadPointResult, useReadPoint } from "../source/useReadPoint";
 import "../../review/review.css";
+import {
+  AtomicExtractPrompt,
+  type AtomicExtractPromptState,
+} from "../../reader/AtomicExtractPrompt";
 import { CardBuilder } from "../../reader/CardBuilder";
 import "../../reader/extract-view.css";
 import {
@@ -263,6 +268,7 @@ export function ProcessQueue() {
   // the intent popover. Mirrors `postponeMenuOpenSignal`/`ScheduleMenu`.
   const [doneIntentSignal, setDoneIntentSignal] = useState(0);
   const [flash, setFlash] = useState<string | null>(null);
+  const [atomicPrompt, setAtomicPrompt] = useState<AtomicExtractPromptState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [undoState, setUndoState] = useState<ProcessUndoState | null>(null);
@@ -309,6 +315,8 @@ export function ProcessQueue() {
   const current = cursor < total ? order[cursor] : null;
   const currentId = current?.id ?? null;
   const currentType = current?.type ?? null;
+  const currentItemIdRef = useRef(currentId);
+  currentItemIdRef.current = currentId;
   const done = deckLoaded && (total === 0 || cursor >= total);
   const zeroLoad = deckLoaded && total === 0 && processed === 0;
   const isCard = current?.type === "card";
@@ -341,6 +349,28 @@ export function ProcessQueue() {
     setFlash(message);
     window.setTimeout(() => setFlash(null), 1600);
   }, []);
+
+  const noteCreatedExtract = useCallback((result: ExtractionCreateResult) => {
+    if (result.extract.stage !== "atomic_statement") {
+      setAtomicPrompt(null);
+      return;
+    }
+    setAtomicPrompt({
+      extractId: result.extract.id,
+      title: result.extract.title || "Atomic extract ready",
+    });
+  }, []);
+
+  const openAtomicPrompt = useCallback(() => {
+    const prompt = atomicPrompt;
+    if (!prompt) return;
+    setAtomicPrompt(null);
+    void navigate({
+      to: "/extract/$id",
+      params: { id: prompt.extractId },
+      search: { cardBuilder: "qa" } as Record<string, unknown>,
+    });
+  }, [atomicPrompt, navigate]);
 
   const clearUndo = useCallback(() => {
     setUndoState(null);
@@ -1011,16 +1041,19 @@ export function ProcessQueue() {
       return;
     }
     if (current?.type !== "source" || busy || !isDesktop()) return;
+    const ownerId = current.id;
     clearUndo();
     setBusy(true);
     try {
-      await appApi.createExtraction({
-        sourceElementId: current.id,
+      const result = await appApi.createExtraction({
+        sourceElementId: ownerId,
         selectedText: loc.selectedText,
         blockIds: loc.blockIds,
         startOffset: loc.startOffset,
         endOffset: loc.endOffset,
       });
+      if (currentItemIdRef.current !== ownerId) return;
+      noteCreatedExtract(result);
       doc.markExtracted(loc.blockIds);
       const lastBlockId = loc.blockIds.at(-1);
       if (
@@ -1030,9 +1063,9 @@ export function ProcessQueue() {
       ) {
         void sourceReadPoint.markReadThrough(sourceEditor, lastBlockId);
       }
-      await reloadInspector(current.id);
+      await reloadInspector(ownerId);
       requestInspectorRefresh();
-      toast("Extracted");
+      toast(result.extract.stage === "atomic_statement" ? "Atomic extract ready" : "Extracted");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       toast("Could not extract");
@@ -1051,6 +1084,7 @@ export function ProcessQueue() {
     sourceReadPoint,
     reloadInspector,
     toast,
+    noteCreatedExtract,
   ]);
 
   const highlightProcessSourceSelection = useCallback(async () => {
@@ -1139,21 +1173,28 @@ export function ProcessQueue() {
       extractSelection.dismiss();
       return;
     }
+    const ownerId = current.id;
     clearUndo();
     setBusy(true);
     try {
-      await appApi.createExtraction({
+      const result = await appApi.createExtraction({
         sourceElementId: sourceRootId,
-        parentId: current.id,
+        parentId: ownerId,
         selectedText: loc.selectedText,
         blockIds: loc.blockIds,
         startOffset: loc.startOffset,
         endOffset: loc.endOffset,
       });
+      if (currentItemIdRef.current !== ownerId) return;
+      noteCreatedExtract(result);
       doc.markExtracted(loc.blockIds);
-      await reloadInspector(current.id);
+      await reloadInspector(ownerId);
       requestInspectorRefresh();
-      toast("Sub-extract created");
+      toast(
+        result.extract.stage === "atomic_statement"
+          ? "Atomic sub-extract ready"
+          : "Sub-extract created",
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       toast("Could not create sub-extract");
@@ -1172,6 +1213,7 @@ export function ProcessQueue() {
     doc,
     reloadInspector,
     toast,
+    noteCreatedExtract,
   ]);
 
   const highlightProcessExtractSelection = useCallback(async () => {
@@ -1621,6 +1663,11 @@ export function ProcessQueue() {
           </span>
         </div>
       ) : null}
+      <AtomicExtractPrompt
+        prompt={atomicPrompt}
+        onConvert={openAtomicPrompt}
+        onDismiss={() => setAtomicPrompt(null)}
+      />
       {/* The visible Undo affordance for the destructive source intents (Finished / Abandon).
           Undo hits the SAME op as ⌘Z; auto-dismiss only clears the toast, so ⌘Z still works
           after it fades. Other loop actions stay silent (local ⌘Z only). */}

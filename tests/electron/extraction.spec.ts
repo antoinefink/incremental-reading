@@ -4,9 +4,11 @@
  * Extraction lifts selected source text into a NEW, independent, attention-scheduled
  * `extract` element (its own body + a `source_locations` anchor + a `derived_from`
  * relation + inherited priority/tags + an attention `due_at`), and marks the parent
- * body `extracted_span` — NEVER an FSRS card. This spec launches the BUILT desktop
- * app against a fresh seeded data dir and proves the full T021 round-trip through the
- * real `extractions.create` bridge:
+ * body `extracted_span` — NEVER an FSRS card. T122 may classify a selected one-liner
+ * as `atomic_statement` at birth, but it remains an attention-scheduled extract until
+ * a card is explicitly created. This spec launches the BUILT desktop app against a
+ * fresh seeded data dir and proves the full T021/T122 round-trip through the real
+ * `extractions.create` bridge:
  *
  *   (a) SELECT → EXTRACT: selecting an un-extracted paragraph and pressing Extract
  *       creates exactly one new `extract` element whose `source_id`/`parent_id` are
@@ -100,9 +102,16 @@ async function inspectExtract(page: Page, id: string) {
       inspector: {
         get(req: { id: string }): Promise<{
           data: {
-            element: { type: string; stage: string; status: string; dueAt: string | null };
+            element: {
+              id: string;
+              type: string;
+              stage: string;
+              status: string;
+              dueAt: string | null;
+            };
             scheduler: { kind: string };
             source: { id: string } | null;
+            children: { id: string; type: string }[];
             location: {
               selectedText: string;
               label: string | null;
@@ -166,7 +175,7 @@ test("extracting selected text creates a scheduled extract + lineage that surviv
   expect(selected.trim().length).toBeGreaterThanOrEqual(3);
   await expect(page.getByTestId("selection-toolbar")).toBeVisible();
   await page.getByTestId("sel-tool-extract").click();
-  await expect(page.getByTestId("reader-flash")).toContainText("Extracted");
+  await expect(page.getByTestId("reader-flash")).toContainText("Atomic extract ready");
 
   // Exactly one NEW extract element, and the parent gains an extracted_span mark.
   await expect.poll(() => extractCount(page)).toBe(extractsBefore + 1);
@@ -197,7 +206,7 @@ test("extracting selected text creates a scheduled extract + lineage that surviv
   // The new extract is an attention item with the right lineage + location, NOT FSRS.
   const extract = await inspectExtract(page, newExtractId as string);
   expect(extract?.element.type).toBe("extract");
-  expect(extract?.element.stage).toBe("raw_extract");
+  expect(extract?.element.stage).toBe("atomic_statement");
   expect(extract?.scheduler.kind).toBe("attention");
   expect(extract?.review).toBeNull(); // no FSRS review state
   expect(extract?.source?.id).toBe(sourceId);
@@ -246,4 +255,64 @@ test("extracting selected text creates a scheduled extract + lineage that surviv
   await expect(page.locator('.reader [data-block-id="blk_intro_p1"].jumped')).toBeVisible();
 
   await app.close();
+});
+
+test("atomic one-liner extraction offers convert-now and creates a card in the same session", async () => {
+  const app = await launchApp(dataDir);
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+  await openReader(page, sourceId);
+
+  const extractsBefore = await extractCount(page);
+  const selected = await selectBlockText(page, "blk_def_p2");
+  expect(selected.trim()).toContain("A measure of intelligence must control");
+  await page.getByTestId("sel-tool-extract").click();
+
+  await expect.poll(() => extractCount(page)).toBe(extractsBefore + 1);
+  await expect(page.getByTestId("atomic-extract-prompt")).toBeVisible();
+  await page.getByTestId("atomic-extract-convert-now").click();
+  await expect(page.getByTestId("card-builder")).toBeVisible();
+  await expect(page.getByTestId("cb-qa-front")).toBeVisible();
+  expect(new URL(page.url()).pathname).toMatch(/\/extract\/.+/);
+
+  const extractId = new URL(page.url()).pathname.split("/").at(-1) ?? "";
+  const extract = await inspectExtract(page, extractId);
+  expect(extract?.element.stage).toBe("atomic_statement");
+  expect(extract?.scheduler.kind).toBe("attention");
+  expect(extract?.source?.id).toBe(sourceId);
+
+  await page.getByTestId("cb-qa-front").fill("What must a measure of intelligence control for?");
+  await page.getByTestId("cb-qa-back").fill("It must control for prior knowledge and experience.");
+  await page.getByTestId("cb-create").click();
+  await expect(page.getByText("Q&A card created")).toBeVisible();
+
+  await expect
+    .poll(async () => {
+      const data = await inspectExtract(page, extractId);
+      return (data?.children ?? []).filter((child) => child.type === "card").length;
+    })
+    .toBe(1);
+
+  const created = await inspectExtract(page, extractId);
+  const cardId = created?.children.find((child) => child.type === "card")?.id;
+  expect(cardId).toBeTruthy();
+
+  await app.close();
+  const restarted = await launchApp(dataDir);
+  const restartedPage = await restarted.firstWindow();
+  await restartedPage.waitForLoadState("domcontentloaded");
+
+  const afterRestart = await inspectExtract(restartedPage, extractId);
+  expect(afterRestart?.element.stage).toBe("atomic_statement");
+  expect(afterRestart?.source?.id).toBe(sourceId);
+  expect(afterRestart?.location?.sourceElementId).toBe(sourceId);
+  const afterRestartCardId = afterRestart?.children.find((child) => child.type === "card")?.id;
+  expect(afterRestartCardId).toBe(cardId);
+  const card = await inspectExtract(restartedPage, afterRestartCardId as string);
+  expect(card?.element.type).toBe("card");
+  expect(card?.scheduler.kind).toBe("fsrs");
+  expect(card?.review).toBeTruthy();
+  expect(card?.source?.id).toBe(sourceId);
+
+  await restarted.close();
 });

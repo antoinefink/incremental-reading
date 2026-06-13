@@ -23,7 +23,12 @@ import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy, TextLayer } fr
 import PdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
-import { appApi, isDesktop, type OcrPageSummary } from "../../lib/appApi";
+import {
+  appApi,
+  type ExtractionCreateResult,
+  isDesktop,
+  type OcrPageSummary,
+} from "../../lib/appApi";
 import "./pdf-reader.css";
 
 GlobalWorkerOptions.workerSrc = PdfWorkerUrl;
@@ -53,6 +58,8 @@ export interface PdfReaderProps {
   readonly onActivePageChange?: (page: number, total: number) => void;
   /** Called after a region extract is created (so the shell can refresh the inspector). */
   readonly onRegionExtracted?: () => void;
+  /** Called after a page text extract is created (region/image extracts are separate). */
+  readonly onTextExtracted?: (result: ExtractionCreateResult) => void;
   /** Optional jump target (T065): scroll to + flash a page region (a fraction rect). */
   readonly jump?: { readonly page: number; readonly region?: RegionRect | null } | null;
   /** Toast helper from the parent reader (status messages). */
@@ -88,6 +95,7 @@ export function PdfReader({
   blockPages,
   onActivePageChange,
   onRegionExtracted,
+  onTextExtracted,
   jump,
   toast,
 }: PdfReaderProps) {
@@ -254,18 +262,19 @@ export function PdfReader({
       return;
     }
     try {
-      await appApi.createExtraction({
+      const result = await appApi.createExtraction({
         sourceElementId: elementId,
         selectedText: text,
         blockIds: [firstBlockId],
         page,
       });
+      onTextExtracted?.(result);
       toast(`Extracted from page ${page}`);
       sel.removeAllRanges();
     } catch {
       toast("Could not extract");
     }
-  }, [desktop, elementId, activePage, firstBlockByPage, pageOfNode, toast]);
+  }, [desktop, elementId, activePage, firstBlockByPage, pageOfNode, onTextExtracted, toast]);
 
   /**
    * Receive a freshly cropped region from a page (the rubber-band on mouse-up):

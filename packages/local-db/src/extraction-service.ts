@@ -48,12 +48,17 @@ import type {
   Element,
   ElementId,
   ElementLocation,
+  ExtractShapeResult,
   Priority,
   RegionRect,
 } from "@interleave/core";
-import { plainTextToProseMirrorDoc, richSelectionToProseMirrorDoc } from "@interleave/core";
+import {
+  classifyExtractShape,
+  plainTextToProseMirrorDoc,
+  richSelectionToProseMirrorDoc,
+} from "@interleave/core";
 import type { InterleaveDatabase } from "@interleave/db";
-import { addDays, rawExtractIntervalDays } from "@interleave/scheduler";
+import { addDays, extractStageIntervalDays, rawExtractIntervalDays } from "@interleave/scheduler";
 import { BlockProcessingService } from "./block-processing-service";
 import { DocumentRepository } from "./document-repository";
 import { ElementRepository } from "./element-repository";
@@ -109,6 +114,7 @@ export interface CreateExtractionInput {
 export interface ExtractionResult {
   readonly element: Element;
   readonly location: ElementLocation;
+  readonly shapeClassification?: ExtractShapeResult;
 }
 
 /** Arguments to create a PDF REGION extract (T065 — a `media_fragment`). */
@@ -165,6 +171,22 @@ function titleFromSelection(selectedText: string): string {
   return normalized.length > 80 ? `${normalized.slice(0, 80).trimEnd()}…` : normalized;
 }
 
+function docHasNodeType(doc: unknown, predicate: (type: string) => boolean): boolean {
+  if (doc == null || typeof doc !== "object") return false;
+  const record = doc as { readonly type?: unknown; readonly content?: unknown };
+  if (typeof record.type === "string" && predicate(record.type)) return true;
+  if (!Array.isArray(record.content)) return false;
+  return record.content.some((child) => docHasNodeType(child, predicate));
+}
+
+function countDocumentParagraphs(doc: unknown): number {
+  if (doc == null || typeof doc !== "object") return 0;
+  const record = doc as { readonly type?: unknown; readonly content?: unknown };
+  const self = record.type === "paragraph" ? 1 : 0;
+  if (!Array.isArray(record.content)) return self;
+  return self + record.content.reduce((sum, child) => sum + countDocumentParagraphs(child), 0);
+}
+
 export class ExtractionService {
   private readonly elements: ElementRepository;
   private readonly sources: SourceRepository;
@@ -205,16 +227,32 @@ export class ExtractionService {
     // paragraph boundaries and constrained block atoms such as article images.
     // Fall back to the historical plain-text body if the parent doc cannot be
     // reconstructed, so extraction stays available for malformed/legacy bodies.
-    const conversion =
-      input.startOffset != null && input.endOffset != null
-        ? (richSelectionToProseMirrorDoc({
-            parentDoc: this.documents.findById(locationSource)?.prosemirrorJson ?? null,
-            blockIds: input.blockIds,
-            startOffset: input.startOffset,
-            endOffset: input.endOffset,
-            selectedText: input.selectedText,
-          }) ?? plainTextToProseMirrorDoc(input.selectedText))
-        : plainTextToProseMirrorDoc(input.selectedText);
+    const hasOffsets = input.startOffset != null && input.endOffset != null;
+    const richConversion = hasOffsets
+      ? richSelectionToProseMirrorDoc({
+          parentDoc: this.documents.findById(locationSource)?.prosemirrorJson ?? null,
+          blockIds: input.blockIds,
+          startOffset: input.startOffset as number,
+          endOffset: input.endOffset as number,
+          selectedText: input.selectedText,
+        })
+      : null;
+    const richReconstructionFailed = hasOffsets && richConversion == null;
+    const conversion = richConversion ?? plainTextToProseMirrorDoc(input.selectedText);
+    const blockTypes = conversion.blocks.map((block) => block.blockType);
+    const shapeClassification = classifyExtractShape({
+      normalizedText: conversion.plainText,
+      paragraphCount: countDocumentParagraphs(conversion.doc),
+      blockCount: conversion.blocks.length,
+      blockTypes,
+      hasList: docHasNodeType(conversion.doc, (type) => /list/i.test(type)),
+      hasCode: docHasNodeType(conversion.doc, (type) => /code/i.test(type)),
+      hasMath: docHasNodeType(conversion.doc, (type) => type === "math"),
+      hasMedia: docHasNodeType(conversion.doc, (type) => /image|video|audio/i.test(type)),
+      rich: richConversion != null,
+      fallback: richReconstructionFailed,
+      reconstructionFailed: richReconstructionFailed,
+    });
     // Read the source's inherited tags up front (a read; the writes happen in tx).
     const inheritedTags = this.elements.listTags(input.sourceElementId);
     const sourceBaseline =
@@ -232,7 +270,8 @@ export class ExtractionService {
         locationSourceElementId: locationSource,
         title,
         priority: input.priority,
-        stage: "raw_extract",
+        stage: shapeClassification.stage,
+        shapeClassification,
         selectedText: input.selectedText,
         blockIds: input.blockIds,
         startOffset: input.startOffset ?? null,
@@ -268,7 +307,10 @@ export class ExtractionService {
       // 5) initial ATTENTION due date + status scheduled (reschedule_element).
       //    NEVER FSRS — no review_states row is created for an extract.
       const scheduledAt = nowIso();
-      const dueAt = addDays(scheduledAt, rawExtractIntervalDays(input.priority));
+      const dueAt = addDays(
+        scheduledAt,
+        extractStageIntervalDays(shapeClassification.stage, input.priority),
+      );
       const scheduled = this.elements.rescheduleWithin(tx, element.id, dueAt, "scheduled");
 
       // 6) parent/source extracted_span breadcrumb over the selected range
@@ -310,7 +352,7 @@ export class ExtractionService {
         }
       }
 
-      return { element: scheduled, location };
+      return { element: scheduled, location, shapeClassification };
     });
   }
 

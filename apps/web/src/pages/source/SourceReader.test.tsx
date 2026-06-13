@@ -455,7 +455,28 @@ beforeEach(() => {
   h.setElementPriority.mockResolvedValue({
     element: { ...inspectorData.element, priorityLabel: "B" },
   });
-  h.createExtraction.mockResolvedValue({ id: "ext-1" });
+  h.createExtraction.mockResolvedValue({
+    extract: {
+      id: "ext-1",
+      type: "extract",
+      status: "scheduled",
+      stage: "raw_extract",
+      priority: 0.625,
+      title: "Selected text",
+      dueAt: "2026-06-10T00:00:00.000Z",
+      sourceId: "src-1",
+      parentId: "src-1",
+    },
+    location: {
+      id: "loc-1",
+      sourceElementId: "src-1",
+      blockIds: ["blk-1"],
+      startOffset: 0,
+      endOffset: 1,
+      label: "¶1",
+      selectedText: "selected text",
+    },
+  });
   // The Done surface reads the summary itself (fast-path vs popover); default to the
   // unresolved summary so pressing Done opens the surface. Fast-path tests override it.
   h.getBlockProcessingSummary.mockResolvedValue({ summary: summaryFor() });
@@ -866,6 +887,117 @@ describe("SourceReader", () => {
     expect(h.processedState.reload).toHaveBeenCalled();
     expect(h.selectionState.dismiss).toHaveBeenCalled();
     expect(getByTestId("reader-flash")).toHaveTextContent("Extracted");
+  });
+
+  it("offers same-session conversion when a new extract is born atomic", async () => {
+    h.createExtraction.mockResolvedValueOnce({
+      extract: {
+        id: "ext-atomic",
+        type: "extract",
+        status: "scheduled",
+        stage: "atomic_statement",
+        priority: 0.625,
+        title: "Atomic fact",
+        dueAt: "2026-06-10T00:00:00.000Z",
+        sourceId: "src-1",
+        parentId: "src-1",
+      },
+      location: {
+        id: "loc-atomic",
+        sourceElementId: "src-1",
+        blockIds: ["blk-1"],
+        startOffset: 0,
+        endOffset: 11,
+        label: "¶1",
+        selectedText: "Atomic fact",
+      },
+    });
+    h.selectionState.position = { x: 12, y: 34 };
+    h.selectionState.location = {
+      selectedText: "Atomic fact",
+      blockIds: ["blk-1"],
+      startOffset: 0,
+      endOffset: 11,
+    };
+    const { findByTestId } = render(<SourceReader />);
+
+    fireEvent.click(await findByTestId("mock-toolbar-extract"));
+    fireEvent.click(await findByTestId("atomic-extract-convert-now"));
+
+    expect(h.navigate).toHaveBeenCalledWith({
+      to: "/extract/$id",
+      params: { id: "ext-atomic" },
+      search: { cardBuilder: "qa" },
+    });
+  });
+
+  it("clears an older convert-now prompt when the next extract is raw", async () => {
+    h.createExtraction
+      .mockResolvedValueOnce({
+        extract: {
+          id: "ext-atomic",
+          type: "extract",
+          status: "scheduled",
+          stage: "atomic_statement",
+          priority: 0.625,
+          title: "Atomic fact",
+          dueAt: "2026-06-10T00:00:00.000Z",
+          sourceId: "src-1",
+          parentId: "src-1",
+        },
+        location: {
+          id: "loc-atomic",
+          sourceElementId: "src-1",
+          blockIds: ["blk-1"],
+          startOffset: 0,
+          endOffset: 11,
+          label: "¶1",
+          selectedText: "Atomic fact",
+        },
+      })
+      .mockResolvedValueOnce({
+        extract: {
+          id: "ext-raw",
+          type: "extract",
+          status: "scheduled",
+          stage: "raw_extract",
+          priority: 0.625,
+          title: "Raw prose",
+          dueAt: "2026-06-10T00:00:00.000Z",
+          sourceId: "src-1",
+          parentId: "src-1",
+        },
+        location: {
+          id: "loc-raw",
+          sourceElementId: "src-1",
+          blockIds: ["blk-2"],
+          startOffset: 0,
+          endOffset: 20,
+          label: "¶2",
+          selectedText: "Raw prose",
+        },
+      });
+    h.selectionState.position = { x: 12, y: 34 };
+    h.selectionState.location = {
+      selectedText: "Atomic fact",
+      blockIds: ["blk-1"],
+      startOffset: 0,
+      endOffset: 11,
+    };
+    const { findByTestId, queryByTestId } = render(<SourceReader />);
+
+    fireEvent.click(await findByTestId("mock-toolbar-extract"));
+    expect(await findByTestId("atomic-extract-prompt")).toBeInTheDocument();
+
+    h.selectionState.location = {
+      selectedText: "Raw prose",
+      blockIds: ["blk-2"],
+      startOffset: 0,
+      endOffset: 20,
+    };
+    fireEvent.click(await findByTestId("mock-toolbar-extract"));
+
+    await waitFor(() => expect(queryByTestId("atomic-extract-prompt")).not.toBeInTheDocument());
   });
 
   it("delegates highlight and cloze actions without creating extracts", async () => {

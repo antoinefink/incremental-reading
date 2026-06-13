@@ -49,6 +49,7 @@ import {
   EXTRACT_AGING_RETURN_THRESHOLD_MAX,
   EXTRACT_AGING_RETURN_THRESHOLD_MIN,
   type ExtractFate,
+  type ExtractShapeResult,
   FACT_STABILITY,
   type FactExpiryStatus,
   type FactLifetime,
@@ -95,6 +96,7 @@ export type {
   AppSettings,
   ConfidenceLevel,
   ExtractFate,
+  ExtractShapeResult,
   FactExpiryStatus,
   FactLifetime,
   FactStability,
@@ -3335,6 +3337,8 @@ export interface ExtractLocationSummary {
 export interface ExtractionCreateResult {
   readonly extract: ExtractSummary;
   readonly location: ExtractLocationSummary;
+  /** Text-free audit summary of the deterministic birth-stage classifier. */
+  readonly shapeClassification?: ExtractShapeResult;
 }
 
 // ---------------------------------------------------------------------------

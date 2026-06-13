@@ -104,6 +104,12 @@ A scheduled element created from selected source or extract material so the user
 
 An Extract is not just a highlight: it carries its own lifecycle, priority, distillation stage, due date, body, and source location so it can become cleaner notes, child extracts, or cards.
 
+### Atomic statement
+
+An Extract distillation stage for a single self-contained idea that is ready to become an active-recall card without further prose cleanup.
+
+Atomic statements remain Extracts until a card is explicitly created from them. They use attention scheduling and source lineage, not FSRS card scheduling.
+
 ### Selection toolbar
 
 The floating action surface that appears over a live text selection in a reader or extract workspace and offers selection-scoped actions such as extract, sub-extract, highlight, copy, or card-entry actions.

@@ -263,14 +263,14 @@ its card by days — the opposite of graveyard prevention. The ladder stays for 
 
 ## Deliverables
 
-- [ ] Shape heuristic in `packages/core` (pure, unit-tested): `atomic-ready` vs `prose`
+- [x] Shape heuristic in `packages/core` (pure, unit-tested): `atomic-ready` vs `prose`
       (conservative — when unsure, prose/raw as today).
-- [ ] Creation paths set the birth stage from the heuristic; atomic-born extracts get the
+- [x] Creation paths set the birth stage from the heuristic; atomic-born extracts get the
       atomic-statement due semantics (+1d convert pressure) and surface a convert-now affordance
       in the reader flow.
-- [ ] One-keystroke correction both ways in ExtractView (demote to raw / promote to atomic),
+- [x] One-keystroke correction both ways in ExtractView (demote to raw / promote to atomic),
       op-logged.
-- [ ] Tests: heuristic table-tests (definitions, single facts, formulas → atomic; multi-sentence
+- [x] Tests: heuristic table-tests (definitions, single facts, formulas → atomic; multi-sentence
       paragraphs, lists → raw); service tests (birth stage + due); e2e — extract a one-liner,
       see convert-now, make the card same-session.
 
@@ -285,3 +285,22 @@ its card by days — the opposite of graveyard prevention. The ladder stays for 
 
 - Conservative bias matters: a false "atomic" puts convert pressure on un-distilled material —
   tune the heuristic toward raw and let T120 drain the rest.
+
+## Completion notes
+
+- Completed in commit: this commit.
+- Implemented `classifyExtractShape` in `packages/core` with conservative reason codes, structural
+  input signals, normalized stats, and a deterministic hash.
+- Extraction creation classifies the reconstructed extract body main-side, treats failed rich
+  reconstruction as raw, allows intentional offsetless text/PDF captures to classify, schedules
+  using the born stage, and writes classifier metadata to `create_extract`.
+- `ExtractionCreateResult` now returns the text-free shape classification summary for non-UI/agent
+  callers.
+- Source reader, PDF text extraction, process queue, and sub-extract flows surface convert-now for
+  atomic-born extracts; the route intent waits for the extract document before opening Q&A builder.
+- A/R shortcuts in ExtractView promote/demote through the existing op-logged stage command with
+  duplicate-update guards.
+- Verification: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and
+  `pnpm e2e tests/electron/extraction.spec.ts`.
+- Learning captured in
+  `docs/solutions/architecture-patterns/shape-aware-extract-birth-stage-audit.md`.

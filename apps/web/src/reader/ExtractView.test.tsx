@@ -190,6 +190,16 @@ const h = vi.hoisted(() => {
     lineageData,
     getInspectorData: vi.fn().mockResolvedValue({ data: inspectorData }),
     getLineage: vi.fn().mockResolvedValue({ lineage: lineageData }),
+    getDocument: vi.fn().mockResolvedValue({
+      document: {
+        prosemirrorJson: { type: "doc", content: [] },
+        plainText: "body",
+        schemaVersion: 1,
+        updatedAt: "",
+      },
+      extractedBlockIds: [],
+    }),
+    search: {} as Record<string, unknown>,
     reviewCard: vi.fn().mockResolvedValue({ card: reviewCardData }),
     updateCard: vi.fn().mockResolvedValue({ card: cardSummary }),
     suspendCard: vi.fn().mockResolvedValue({ card: { ...cardSummary, status: "suspended" } }),
@@ -250,8 +260,26 @@ const h = vi.hoisted(() => {
       sourceLocationId: "loc_1",
     }),
     createExtraction: vi.fn().mockResolvedValue({
-      extract: { id: "sub_1", parentId: "ex_1", sourceId: "src_1" },
-      location: { sourceElementId: "ex_1" },
+      extract: {
+        id: "sub_1",
+        type: "extract",
+        status: "scheduled",
+        stage: "raw_extract",
+        priority: 0.625,
+        title: "Sub extract",
+        dueAt: "2026-06-10T00:00:00.000Z",
+        parentId: "ex_1",
+        sourceId: "src_1",
+      },
+      location: {
+        id: "loc_sub_1",
+        sourceElementId: "ex_1",
+        blockIds: ["blk_ex_1"],
+        startOffset: 0,
+        endOffset: 1,
+        label: "¶1",
+        selectedText: "Sub extract",
+      },
     }),
     highlightsState: {
       highlights: [],
@@ -272,15 +300,7 @@ vi.mock("../lib/appApi", () => ({
   appApi: {
     getInspectorData: h.getInspectorData,
     getLineage: h.getLineage,
-    getDocument: vi.fn().mockResolvedValue({
-      document: {
-        prosemirrorJson: { type: "doc", content: [] },
-        plainText: "body",
-        schemaVersion: 1,
-        updatedAt: "",
-      },
-      extractedBlockIds: [],
-    }),
+    getDocument: h.getDocument,
     saveDocument: h.saveDocument,
     updateExtractStage: h.updateStage,
     rewriteExtract: h.rewrite,
@@ -310,6 +330,7 @@ vi.mock("../lib/appApi", () => ({
 // Mock the router seams the component reaches (params + navigation).
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => ({ id: h.routeId }),
+  useSearch: () => h.search,
   useNavigate: () => h.navigateSpy,
 }));
 
@@ -374,10 +395,20 @@ import { ExtractView } from "./ExtractView";
 beforeEach(() => {
   vi.clearAllMocks();
   h.routeId = "ex_1";
+  h.search = {};
   h.selectionLocation.current = null;
   h.selectionPosition.current = null;
   h.getInspectorData.mockResolvedValue({ data: h.inspectorData });
   h.getLineage.mockResolvedValue({ lineage: h.lineageData });
+  h.getDocument.mockResolvedValue({
+    document: {
+      prosemirrorJson: { type: "doc", content: [] },
+      plainText: "body",
+      schemaVersion: 1,
+      updatedAt: "",
+    },
+    extractedBlockIds: [],
+  });
   h.reviewCard.mockResolvedValue({ card: h.reviewCardData });
   h.updateCard.mockResolvedValue({ card: h.cardSummary });
   h.suspendCard.mockResolvedValue({ card: { ...h.cardSummary, status: "suspended" } });
@@ -446,6 +477,47 @@ describe("ExtractView — stage stepper", () => {
     await waitFor(() => expect(h.updateStage).toHaveBeenCalledTimes(1));
     expect(h.updateStage).toHaveBeenCalledWith({ id: "ex_1", stage: "atomic_statement" });
   });
+
+  it("promotes and demotes with guarded A/R correction shortcuts", async () => {
+    const first = render(<ExtractView />);
+    await screen.findByTestId("extract-stage-stepper");
+
+    fireEvent.keyDown(window, { key: "a" });
+    await waitFor(() =>
+      expect(h.updateStage).toHaveBeenCalledWith({ id: "ex_1", stage: "atomic_statement" }),
+    );
+    first.unmount();
+
+    h.updateStage.mockClear();
+    h.getInspectorData.mockResolvedValue({
+      data: {
+        ...h.inspectorData,
+        element: { ...h.inspectorData.element, stage: "atomic_statement" },
+      },
+    });
+    render(<ExtractView />);
+    await screen.findByTestId("extract-stage-stepper");
+    fireEvent.keyDown(window, { key: "r" });
+    await waitFor(() =>
+      expect(h.updateStage).toHaveBeenCalledWith({ id: "ex_1", stage: "raw_extract" }),
+    );
+  });
+
+  it("suppresses repeat A/R updates while the local stage is catching up", async () => {
+    h.updateStage.mockResolvedValueOnce({
+      extract: { ...h.inspectorData.element, stage: "atomic_statement" },
+    });
+    render(<ExtractView />);
+    await screen.findByTestId("extract-stage-stepper");
+
+    fireEvent.keyDown(window, { key: "a" });
+    await waitFor(() =>
+      expect(h.updateStage).toHaveBeenCalledWith({ id: "ex_1", stage: "atomic_statement" }),
+    );
+    fireEvent.keyDown(window, { key: "a" });
+
+    expect(h.updateStage).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("ExtractView — distillation layout", () => {
@@ -480,6 +552,50 @@ describe("ExtractView — distillation layout", () => {
     expect(cssRule(css, ".extract-editor__meta")).toContain("flex: none");
     expect(cssRule(css, ".extract-actions")).toContain("flex: none");
     expect(cssRule(css, ".ai-assist")).toContain("flex: none");
+  });
+
+  it("opens the Q&A builder once from route builder intent after the document is ready", async () => {
+    const loaded = deferred<{
+      document: {
+        prosemirrorJson: unknown;
+        plainText: string;
+        schemaVersion: number;
+        updatedAt: string;
+      };
+      extractedBlockIds: readonly string[];
+    }>();
+    h.search = { cardBuilder: "qa" };
+    h.getDocument.mockReturnValueOnce(loaded.promise);
+    render(<ExtractView />);
+
+    expect(screen.queryByTestId("card-builder")).not.toBeInTheDocument();
+    loaded.resolve({
+      document: {
+        prosemirrorJson: { type: "doc", content: [] },
+        plainText: "Loaded extract answer.",
+        schemaVersion: 1,
+        updatedAt: "",
+      },
+      extractedBlockIds: [],
+    });
+
+    expect(await screen.findByTestId("card-builder")).toBeInTheDocument();
+    expect(screen.getByTestId("cb-qa-back")).toHaveValue("Loaded extract answer.");
+    await waitFor(() =>
+      expect(h.navigateSpy).toHaveBeenCalledWith({
+        to: "/extract/$id",
+        params: { id: "ex_1" },
+        search: {},
+        replace: true,
+      }),
+    );
+  });
+
+  it("still accepts the legacy builder=qa route intent", async () => {
+    h.search = { builder: "qa" };
+    render(<ExtractView />);
+
+    expect(await screen.findByTestId("card-builder")).toBeInTheDocument();
   });
 });
 

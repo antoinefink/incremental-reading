@@ -3670,7 +3670,7 @@ export class DbService {
       ? priorityFromLabel(request.priority)
       : originElement.priority;
 
-    const { element, location } = this.extractionService.createExtraction({
+    const { element, location, shapeClassification } = this.extractionService.createExtraction({
       sourceElementId: lineageSourceId,
       parentId:
         explicitParentId ?? (originElement.type === "source" ? undefined : originElement.id),
@@ -3708,6 +3708,7 @@ export class DbService {
         label: location.label,
         selectedText: location.selectedText,
       },
+      ...(shapeClassification ? { shapeClassification } : {}),
     };
   }
 

@@ -165,6 +165,22 @@ export {
   REVIEW_RATINGS,
   VAULT_ROOTS,
 } from "./enums";
+// Shape-aware extract staging — pure atomic-ready vs raw classifier (./extract-shape, T122).
+export type {
+  ExtractShapeBlockType,
+  ExtractShapeClassification,
+  ExtractShapeInput,
+  ExtractShapeInputSignals,
+  ExtractShapeReasonCode,
+  ExtractShapeResult,
+  ExtractShapeStage,
+  ExtractShapeStats,
+} from "./extract-shape";
+export {
+  classifyExtractShape,
+  EXTRACT_SHAPE_HEURISTIC_VERSION,
+  EXTRACT_SHAPE_REASON_CODES,
+} from "./extract-shape";
 // Fact lifetime + expiry derivation (T090) — the claim-lifetime model + pure status (./fact-lifetime).
 export type { FactExpiryStatus, FactLifetime, FactStability } from "./fact-lifetime";
 export {

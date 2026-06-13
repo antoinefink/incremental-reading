@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   toast: vi.fn(),
   onActivePageChange: vi.fn(),
   onRegionExtracted: vi.fn(),
+  onTextExtracted: vi.fn(),
   textItemsByPage: new Map<number, unknown[]>([
     [1, [{ str: "Page one" }]],
     [2, [{ str: "Page two" }]],
@@ -98,6 +99,7 @@ beforeEach(() => {
   h.toast.mockReset();
   h.onActivePageChange.mockReset();
   h.onRegionExtracted.mockReset();
+  h.onTextExtracted.mockReset();
   h.docDestroy.mockReset();
   h.textItemsByPage = new Map<number, unknown[]>([
     [1, [{ str: "Page one" }]],
@@ -106,7 +108,28 @@ beforeEach(() => {
   h.getSourcePdfData.mockResolvedValue({ bytes: new Uint8Array([1, 2, 3]).buffer });
   h.getOcr.mockResolvedValue({ pages: [] });
   h.setReadPoint.mockResolvedValue({});
-  h.createExtraction.mockResolvedValue({ id: "extract-1" });
+  h.createExtraction.mockResolvedValue({
+    extract: {
+      id: "extract-1",
+      type: "extract",
+      status: "scheduled",
+      stage: "raw_extract",
+      priority: 0.625,
+      title: "Selected PDF text",
+      dueAt: "2026-06-10T00:00:00.000Z",
+      sourceId: "src-1",
+      parentId: "src-1",
+    },
+    location: {
+      id: "loc-1",
+      sourceElementId: "src-1",
+      blockIds: ["blk-page-1"],
+      startOffset: null,
+      endOffset: null,
+      label: "Page 1",
+      selectedText: "Selected PDF text",
+    },
+  });
   h.runOcr.mockResolvedValue({ jobId: "job-1" });
   h.acceptOcr.mockResolvedValue({ accepted: true });
   h.dismissOcr.mockResolvedValue({});
@@ -131,6 +154,7 @@ function renderReader() {
       blockPages={{ "blk-page-1": 1, "blk-page-2": 2 }}
       onActivePageChange={h.onActivePageChange}
       onRegionExtracted={h.onRegionExtracted}
+      onTextExtracted={h.onTextExtracted}
       toast={h.toast}
     />,
   );
@@ -190,6 +214,11 @@ describe("PdfReader", () => {
         selectedText: "Selected PDF text",
         blockIds: ["blk-page-1"],
         page: 1,
+      }),
+    );
+    expect(h.onTextExtracted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extract: expect.objectContaining({ id: "extract-1" }),
       }),
     );
     expect(h.toast).toHaveBeenCalledWith("Extracted from page 1");

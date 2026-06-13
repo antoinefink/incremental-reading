@@ -2307,6 +2307,35 @@ export interface ExtractSummary {
   readonly parentId: string | null;
 }
 
+export interface ExtractShapeInputSignals {
+  readonly hasList: boolean;
+  readonly hasCode: boolean;
+  readonly hasMath: boolean;
+  readonly hasMedia: boolean;
+  readonly rich: boolean;
+  readonly fallback: boolean;
+  readonly reconstructionFailed: boolean;
+}
+
+export interface ExtractShapeStats {
+  readonly normalizedCharCount: number;
+  readonly wordCount: number;
+  readonly sentenceCount: number;
+  readonly paragraphCount: number;
+  readonly blockCount: number;
+  readonly blockTypes: readonly string[];
+}
+
+export interface ExtractShapeClassificationSummary {
+  readonly heuristicVersion: string;
+  readonly classification: "atomic_ready" | "not_atomic_ready";
+  readonly stage: "atomic_statement" | "raw_extract";
+  readonly reasonCodes: readonly string[];
+  readonly stats: ExtractShapeStats;
+  readonly inputSignals: ExtractShapeInputSignals;
+  readonly normalizedInputHash: string;
+}
+
 /** The created extract's stored source-location anchor. */
 export interface ExtractLocationSummary {
   readonly id: string;
@@ -2321,6 +2350,7 @@ export interface ExtractLocationSummary {
 export interface ExtractionCreateResult {
   readonly extract: ExtractSummary;
   readonly location: ExtractLocationSummary;
+  readonly shapeClassification?: ExtractShapeClassificationSummary;
 }
 
 // ---------------------------------------------------------------------------

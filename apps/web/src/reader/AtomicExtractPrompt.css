@@ -1,0 +1,84 @@
+.atomic-extract-prompt {
+  --atomic-extract-prompt-inset: calc(var(--s-8) * 3);
+  --atomic-extract-prompt-inline-max: 65ch;
+  --atomic-extract-prompt-icon-size: calc(var(--s-7) + var(--s-1));
+  --atomic-extract-prompt-control-size: calc(var(--s-8) + var(--s-1));
+
+  position: fixed;
+  right: var(--atomic-extract-prompt-inset);
+  bottom: var(--atomic-extract-prompt-inset);
+  z-index: 92;
+  display: flex;
+  max-width: min(var(--atomic-extract-prompt-inline-max), calc(100vw - (var(--s-8) * 4)));
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2);
+  border: 1px solid var(--accent-soft-bd);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+
+.atomic-extract-prompt__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: var(--atomic-extract-prompt-icon-size);
+  height: var(--atomic-extract-prompt-icon-size);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.atomic-extract-prompt__text {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.atomic-extract-prompt__button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  height: var(--atomic-extract-prompt-control-size);
+  padding: 0 var(--s-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.atomic-extract-prompt__button:hover {
+  background: var(--surface-2);
+  border-color: var(--text-3);
+}
+
+.atomic-extract-prompt__button--primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.atomic-extract-prompt__button--primary:hover {
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
+}
+
+.atomic-extract-prompt__button--icon {
+  width: var(--atomic-extract-prompt-control-size);
+  padding: 0;
+}

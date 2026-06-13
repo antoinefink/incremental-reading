@@ -50,7 +50,17 @@ import { useLineageDelete } from "../../components/lineage/useLineageDelete";
 import { type DoneIntent, DoneIntentMenu } from "../../components/queue/DoneIntentMenu";
 import { ScheduleMenu } from "../../components/queue/ScheduleMenu";
 import { Snackbar } from "../../components/Snackbar";
-import { appApi, type InspectorData, isDesktop, type QueueScheduleChoice } from "../../lib/appApi";
+import {
+  appApi,
+  type ExtractionCreateResult,
+  type InspectorData,
+  isDesktop,
+  type QueueScheduleChoice,
+} from "../../lib/appApi";
+import {
+  AtomicExtractPrompt,
+  type AtomicExtractPromptState,
+} from "../../reader/AtomicExtractPrompt";
 import { SelectionToolbar, type SelectionToolbarAction } from "../../reader/SelectionToolbar";
 import { useTextSelection } from "../../reader/useTextSelection";
 import { useActiveScope } from "../../shell/activeScope";
@@ -196,11 +206,14 @@ export function SourceReader() {
 
   const [inspector, setInspector] = useState<InspectorData | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const [atomicPrompt, setAtomicPrompt] = useState<AtomicExtractPromptState | null>(null);
   const [exitActionBusy, setExitActionBusy] = useState(false);
   const [retirementReviewSignal, setRetirementReviewSignal] = useState(0);
   const exitActionBusyRef = useRef(false);
   const mountedRef = useRef(true);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentSourceIdRef = useRef(id);
+  currentSourceIdRef.current = id;
   // PDF reading mode (T064): the active page N of M, shown in the rail.
   const [pdfPage, setPdfPage] = useState<{ page: number; total: number }>({ page: 1, total: 0 });
   // The live Tiptap editor instance (for read-point capture/jump + decoration).
@@ -226,6 +239,7 @@ export function SourceReader() {
   // lineage, and "Extracts from this source" children show in the right panel.
   useEffect(() => {
     if (!desktop || !id) return;
+    setAtomicPrompt(null);
     select(id);
   }, [desktop, id, select]);
 
@@ -284,6 +298,28 @@ export function SourceReader() {
     }, 1600);
   }, []);
 
+  const noteCreatedExtract = useCallback((result: ExtractionCreateResult) => {
+    if (result.extract.stage !== "atomic_statement") {
+      setAtomicPrompt(null);
+      return;
+    }
+    setAtomicPrompt({
+      extractId: result.extract.id,
+      title: result.extract.title || "Atomic extract ready",
+    });
+  }, []);
+
+  const openAtomicPrompt = useCallback(() => {
+    const prompt = atomicPrompt;
+    if (!prompt) return;
+    setAtomicPrompt(null);
+    void navigate({
+      to: "/extract/$id",
+      params: { id: prompt.extractId },
+      search: { cardBuilder: "qa" } as Record<string, unknown>,
+    });
+  }, [atomicPrompt, navigate]);
+
   const withExitAction = useCallback(
     async (action: () => Promise<void>) => {
       if (!desktop || exitActionBusyRef.current) return;
@@ -317,14 +353,17 @@ export function SourceReader() {
       selection.dismiss();
       return;
     }
+    const ownerId = id;
     try {
-      await appApi.createExtraction({
-        sourceElementId: id,
+      const result = await appApi.createExtraction({
+        sourceElementId: ownerId,
         selectedText: loc.selectedText,
         blockIds: loc.blockIds,
         startOffset: loc.startOffset,
         endOffset: loc.endOffset,
       });
+      if (currentSourceIdRef.current !== ownerId) return;
+      noteCreatedExtract(result);
       doc.markExtracted(loc.blockIds);
       // AUTO-ADVANCE-ON-EXTRACT (the T017 `markReadThrough` seam, wired here in T021
       // per the roadmap's "auto-advances when they extract"): move the read-point to
@@ -339,12 +378,12 @@ export function SourceReader() {
       }
       requestInspectorRefresh();
       void proc.reload();
-      toast("Extracted");
+      toast(result.extract.stage === "atomic_statement" ? "Atomic extract ready" : "Extracted");
     } catch {
       toast("Could not extract");
     }
     selection.dismiss();
-  }, [id, selection, doc, rp, toast, proc]);
+  }, [id, selection, doc, rp, toast, proc, noteCreatedExtract]);
 
   const onSelectionAction = useCallback(
     (action: SelectionToolbarAction) => {
@@ -930,8 +969,17 @@ export function SourceReader() {
             requestInspectorRefresh();
           }}
           onRegionExtracted={() => requestInspectorRefresh()}
+          onTextExtracted={(result) => {
+            noteCreatedExtract(result);
+            requestInspectorRefresh();
+          }}
           jump={jumpPage != null ? { page: jumpPage, region: jumpRegion } : null}
           toast={toast}
+        />
+        <AtomicExtractPrompt
+          prompt={atomicPrompt}
+          onConvert={openAtomicPrompt}
+          onDismiss={() => setAtomicPrompt(null)}
         />
         {flash ? (
           <div className="reader-flash" data-testid="reader-flash" role="status">
@@ -1082,6 +1130,12 @@ export function SourceReader() {
       </div>
 
       <SelectionToolbar position={selection.position} onAction={onSelectionAction} />
+
+      <AtomicExtractPrompt
+        prompt={atomicPrompt}
+        onConvert={openAtomicPrompt}
+        onDismiss={() => setAtomicPrompt(null)}
+      />
 
       {flash ? (
         <div className="reader-flash" data-testid="reader-flash" role="status">

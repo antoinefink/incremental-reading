@@ -41,7 +41,7 @@ import {
   toBlockInputs,
   toPlainText,
 } from "@interleave/editor";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { requestInspectorRefresh } from "../components/inspector/Inspector";
@@ -55,6 +55,7 @@ import { HelpLink } from "../help/Contextual";
 import type { CardKind } from "../lib/appApi";
 import {
   appApi,
+  type ExtractionCreateResult,
   type ExtractStage,
   type InspectorData,
   isDesktop,
@@ -75,6 +76,7 @@ import { useHighlights } from "../pages/source/useHighlights";
 import { CardDetailPanel } from "../review/CardDetailPanel";
 import { useSelection } from "../shell/selection";
 import { AiAssist } from "./AiAssist";
+import { AtomicExtractPrompt, type AtomicExtractPromptState } from "./AtomicExtractPrompt";
 import { CardBuilder } from "./CardBuilder";
 import { ClipMiniPlayer } from "./ClipMiniPlayer";
 import { useNavigateToLocation } from "./navigateToLocation";
@@ -105,8 +107,26 @@ function fmtDate(iso: string | null): string {
   ).padStart(2, "0")}`;
 }
 
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return true;
+  if (target.isContentEditable) return true;
+  return Boolean(
+    target.closest("[contenteditable='true'], .card-builder, [data-testid='card-builder']"),
+  );
+}
+
+function isFormFieldTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);
+}
+
 export function ExtractView() {
   const { id } = useParams({ from: "/extract/$id" });
+  const search = useSearch({ strict: false }) as {
+    builder?: string;
+    cardBuilder?: string;
+    intent?: string;
+  };
   const desktop = isDesktop();
   const navigate = useNavigate();
   const navigateToLocation = useNavigateToLocation();
@@ -119,6 +139,7 @@ export function ExtractView() {
   // through the typed asset-bytes command; the renderer never resolves the path.
   const [regionImageUrl, setRegionImageUrl] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const [atomicPrompt, setAtomicPrompt] = useState<AtomicExtractPromptState | null>(null);
   const [busy, setBusy] = useState(false);
   // Card builder (T033/T034) — null when closed; the tab + any pre-wrapped cloze
   // text are seeded when the user opens it from Convert / the Cloze toolbar action.
@@ -137,6 +158,7 @@ export function ExtractView() {
   const currentExtractIdRef = useRef(id);
   const activeCardIdRef = useRef(activeCardId);
   const reloadSeqRef = useRef(0);
+  const pendingStageRef = useRef<ExtractStage | null>(null);
   currentExtractIdRef.current = id;
   activeCardIdRef.current = activeCardId;
 
@@ -144,6 +166,28 @@ export function ExtractView() {
     setFlash(message);
     setTimeout(() => setFlash(null), 1600);
   }, []);
+
+  const noteCreatedExtract = useCallback((result: ExtractionCreateResult) => {
+    if (result.extract.stage !== "atomic_statement") {
+      setAtomicPrompt(null);
+      return;
+    }
+    setAtomicPrompt({
+      extractId: result.extract.id,
+      title: result.extract.title || "Atomic extract ready",
+    });
+  }, []);
+
+  const openAtomicPrompt = useCallback(() => {
+    const prompt = atomicPrompt;
+    if (!prompt) return;
+    setAtomicPrompt(null);
+    void navigate({
+      to: "/extract/$id",
+      params: { id: prompt.extractId },
+      search: { cardBuilder: "qa" } as Record<string, unknown>,
+    });
+  }, [atomicPrompt, navigate]);
 
   // Load the inspector payload (header chips + provenance + source location) and
   // the full lineage tree through the bridge. `reload` re-fetches both after a
@@ -182,8 +226,25 @@ export function ExtractView() {
     setInspector(null);
     setLineage(null);
     setActiveCardId(null);
+    setAtomicPrompt(null);
+    setBuilder(null);
     select(id);
   }, [id, select]);
+
+  useEffect(() => {
+    if (!id) return;
+    if (doc.status !== "ready") return;
+    if (search.builder !== "qa" && search.cardBuilder !== "qa" && search.intent !== "convert-now") {
+      return;
+    }
+    setBuilder({ tab: "qa" });
+    void navigate({
+      to: "/extract/$id",
+      params: { id },
+      search: {} as Record<string, unknown>,
+      replace: true,
+    });
+  }, [doc.status, id, navigate, search.builder, search.cardBuilder, search.intent]);
 
   // Fetch the cropped region image for a `media_fragment` extract (T065). The bytes
   // come through the typed `sources.getRegionImage` command (no path in the
@@ -240,19 +301,37 @@ export function ExtractView() {
   const stage = (element?.stage ?? "raw_extract") as ExtractStage;
   const stageIdx = Math.max(0, EXTRACT_STAGES.indexOf(stage));
 
+  useEffect(() => {
+    if (pendingStageRef.current === stage) pendingStageRef.current = null;
+  }, [stage]);
+
   // Advance / set the extract's stage through `extracts.updateStage` — the main
   // side persists the stage AND reschedules on the attention scheduler in one
   // transaction. We then re-fetch so the chips + stepper + tree update.
   const setStage = useCallback(
     async (target?: ExtractStage) => {
       if (!id || busy) return;
+      if (pendingStageRef.current) return;
+      if (target) pendingStageRef.current = target;
       setBusy(true);
       try {
         const res = await appApi.updateExtractStage(target ? { id, stage: target } : { id });
+        const nextStage = res.extract.stage as ExtractStage;
+        pendingStageRef.current = nextStage;
+        setInspector((current) =>
+          current?.element.id === id
+            ? {
+                ...current,
+                element: { ...current.element, ...res.extract },
+                scheduler: { ...current.scheduler, stage: nextStage },
+              }
+            : current,
+        );
         toast(`Advanced to ${stageLabel(res.extract.stage)}`);
         reload();
         requestInspectorRefresh();
       } catch {
+        pendingStageRef.current = null;
         toast("Could not change stage");
       } finally {
         setBusy(false);
@@ -456,7 +535,7 @@ export function ExtractView() {
     }
     setBusy(true);
     try {
-      await appApi.createExtraction({
+      const result = await appApi.createExtraction({
         sourceElementId: sourceRootId,
         parentId: id,
         selectedText: loc.selectedText,
@@ -464,17 +543,23 @@ export function ExtractView() {
         startOffset: loc.startOffset,
         endOffset: loc.endOffset,
       });
+      if (currentExtractIdRef.current !== id) return;
+      noteCreatedExtract(result);
       doc.markExtracted(loc.blockIds);
       reload();
       requestInspectorRefresh();
-      toast("Sub-extract created");
+      toast(
+        result.extract.stage === "atomic_statement"
+          ? "Atomic sub-extract ready"
+          : "Sub-extract created",
+      );
     } catch {
       toast("Could not create sub-extract");
     } finally {
       setBusy(false);
       selection.dismiss();
     }
-  }, [id, selection, sourceRootId, busy, doc, reload, toast]);
+  }, [id, selection, sourceRootId, busy, doc, reload, toast, noteCreatedExtract]);
 
   const onHighlightSelection = useCallback(async () => {
     const loc = selection.location;
@@ -553,8 +638,7 @@ export function ExtractView() {
   useEffect(() => {
     if (!desktop || !selection.position) return;
     function onKey(e: KeyboardEvent) {
-      const target = e.target as HTMLElement | null;
-      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (isFormFieldTarget(e.target)) return;
       if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
       const k = e.key.toLowerCase();
       if (k === "e") {
@@ -571,6 +655,22 @@ export function ExtractView() {
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [desktop, selection.position, onSelectionAction]);
+
+  useEffect(() => {
+    if (!desktop || builder || !id || busy) return;
+    function onKey(e: KeyboardEvent) {
+      if (isTypingTarget(e.target)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+      const key = e.key.toLowerCase();
+      if (key !== "a" && key !== "r") return;
+      const targetStage: ExtractStage = key === "a" ? "atomic_statement" : "raw_extract";
+      if (stage === targetStage || pendingStageRef.current === targetStage) return;
+      e.preventDefault();
+      void setStage(targetStage);
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [desktop, builder, id, busy, stage, setStage]);
 
   // Paint the `.extracted` display marker over blocks of this extract that already
   // have a child sub-extract anchored to them (T025), mirroring the source reader.
@@ -1084,6 +1184,12 @@ export function ExtractView() {
         position={selection.position}
         actions={EXTRACT_SELECTION_ACTIONS}
         onAction={onSelectionAction}
+      />
+
+      <AtomicExtractPrompt
+        prompt={atomicPrompt}
+        onConvert={openAtomicPrompt}
+        onDismiss={() => setAtomicPrompt(null)}
       />
 
       {flash ? (

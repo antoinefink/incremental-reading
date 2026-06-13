@@ -24,6 +24,7 @@ import type {
   ElementLocation,
   ElementStatus,
   ElementType,
+  ExtractShapeResult,
   IsoTimestamp,
   MediaKind,
   PlainTextConversion,
@@ -232,6 +233,8 @@ export interface CreateExtractInput {
    * tx-composable seam can create the image-fragment element + its region anchor.
    */
   readonly elementType?: "extract" | "media_fragment";
+  /** Optional audit metadata explaining the birth stage for shape-aware text extraction (T122). */
+  readonly shapeClassification?: ExtractShapeResult | null;
 }
 
 /** An extract element together with the source location anchoring its lineage. */
@@ -741,6 +744,7 @@ export class SourceRepository {
         sourceElementId: input.sourceElementId,
         locationSourceElementId,
         locationId,
+        ...(input.shapeClassification ? { shapeClassification: input.shapeClassification } : {}),
       },
     });
 

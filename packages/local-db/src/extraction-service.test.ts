@@ -57,6 +57,18 @@ function seedSource(handle: DbHandle, priority: Priority = 0.625): ElementId {
   return element.id;
 }
 
+function seedAtomicSource(handle: DbHandle, priority: Priority = 0.625): ElementId {
+  const sources = new SourceRepository(handle.db);
+  const { element } = sources.createWithDocument({
+    title: "Memory notes",
+    priority,
+    status: "active",
+    stage: "raw_source",
+    body: "The hippocampus supports episodic memory consolidation.",
+  });
+  return element.id;
+}
+
 /** The stable block ids of a source body, in document order. */
 function blockIdsOf(handle: DbHandle, sourceId: ElementId): BlockId[] {
   return new DocumentRepository(handle.db)
@@ -72,6 +84,15 @@ function reschedulePayloads(id: ElementId): Record<string, unknown>[] {
     .all()
     .filter((op) => op.opType === "reschedule_element")
     .map((op) => JSON.parse(op.payload) as Record<string, unknown>);
+}
+
+function createExtractPayload(id: ElementId): Record<string, unknown> {
+  const row = handle.db
+    .select()
+    .from(operationLog)
+    .where(and(eq(operationLog.elementId, id), eq(operationLog.opType, "create_extract")))
+    .get();
+  return JSON.parse(row?.payload ?? "{}") as Record<string, unknown>;
 }
 
 function seedRichSource(handle: DbHandle): { sourceId: ElementId; blocks: BlockId[] } {
@@ -177,6 +198,49 @@ describe("ExtractionService.createExtraction", () => {
     expect(element.sourceId).toBe(sourceId);
   });
 
+  it("births clear one-sentence facts as atomic statements with a one-day attention due date", () => {
+    const sourceId = seedAtomicSource(handle, 0.125);
+    const blocks = blockIdsOf(handle, sourceId);
+    const service = new ExtractionService(handle.db);
+
+    const before = Date.now();
+    const { element, shapeClassification } = service.createExtraction({
+      sourceElementId: sourceId,
+      selectedText: "The hippocampus supports episodic memory consolidation.",
+      blockIds: [blocks[0] as BlockId],
+      startOffset: 0,
+      endOffset: 55,
+      priority: 0.125,
+    });
+
+    expect(element.stage).toBe("atomic_statement");
+    expect(element.status).toBe("scheduled");
+    const due = Date.parse(element.dueAt ?? "");
+    expect(due).toBeGreaterThan(before);
+    expect(due - before).toBeLessThanOrEqual(25 * 60 * 60 * 1000);
+
+    const payload = createExtractPayload(element.id);
+    expect(payload.shapeClassification).toMatchObject({
+      heuristicVersion: "extract-shape.v1",
+      classification: "atomic_ready",
+      stage: "atomic_statement",
+      inputSignals: {
+        hasList: false,
+        hasCode: false,
+        hasMath: false,
+        hasMedia: false,
+        rich: true,
+        fallback: false,
+        reconstructionFailed: false,
+      },
+    });
+    expect(shapeClassification).toEqual(payload.shapeClassification);
+    expect(payload.shapeClassification).toHaveProperty("normalizedInputHash");
+    expect(JSON.stringify(payload.shapeClassification)).not.toContain(
+      "The hippocampus supports episodic memory consolidation.",
+    );
+  });
+
   it("records a source_locations row matching the selection", () => {
     const sourceId = seedSource(handle);
     const blocks = blockIdsOf(handle, sourceId);
@@ -277,6 +341,26 @@ describe("ExtractionService.createExtraction", () => {
     expect(childBlocks).toHaveLength(2);
     expect(childBlocks).not.toEqual([blocks[0], blocks[1]]);
     expect(location.blockIds).toEqual([blocks[0], blocks[1]]);
+    expect(element.stage).toBe("raw_extract");
+    const payload = createExtractPayload(element.id);
+    expect(payload.shapeClassification).toMatchObject({
+      classification: "not_atomic_ready",
+      stage: "raw_extract",
+      inputSignals: {
+        hasList: false,
+        hasCode: false,
+        hasMath: false,
+        hasMedia: false,
+        rich: true,
+        fallback: false,
+        reconstructionFailed: false,
+      },
+    });
+    expect(
+      (payload.shapeClassification as { stats?: { blockCount?: number } }).stats,
+    ).toMatchObject({
+      blockCount: 2,
+    });
   });
 
   it("preserves selected article images in the extract body", () => {
@@ -319,6 +403,7 @@ describe("ExtractionService.createExtraction", () => {
         .map((block) => block.blockType),
     ).toEqual(["paragraph", "image", "paragraph"]);
     expect(location.blockIds).toEqual(blocks);
+    expect(element.stage).toBe("raw_extract");
   });
 
   it("preserves a standalone selected article image atom", () => {
@@ -340,6 +425,38 @@ describe("ExtractionService.createExtraction", () => {
     );
     expect(blockIdsOf(handle, element.id)).toHaveLength(1);
     expect(location.blockIds).toEqual([blocks[1]]);
+    expect(element.stage).toBe("raw_extract");
+  });
+
+  it("keeps extracts raw when rich reconstruction fails and records the conservative reason", () => {
+    const sourceId = seedSource(handle);
+    const blocks = blockIdsOf(handle, sourceId);
+    const service = new ExtractionService(handle.db);
+    vi.spyOn(DocumentRepository.prototype, "findById").mockImplementationOnce(() => null);
+
+    const { element } = service.createExtraction({
+      sourceElementId: sourceId,
+      selectedText: "The hippocampus supports episodic memory consolidation.",
+      blockIds: [blocks[1] as BlockId],
+      startOffset: 0,
+      endOffset: 54,
+      priority: 0.875,
+    });
+
+    expect(element.stage).toBe("raw_extract");
+    const payload = createExtractPayload(element.id);
+    expect(payload.shapeClassification).toMatchObject({
+      classification: "not_atomic_ready",
+      stage: "raw_extract",
+      inputSignals: {
+        rich: false,
+        fallback: true,
+        reconstructionFailed: true,
+      },
+    });
+    expect(
+      (payload.shapeClassification as { reasonCodes?: readonly string[] }).reasonCodes,
+    ).toContain("reconstruction_failed");
   });
 
   it("falls back to the selected text instead of widening offsetless partial selections", () => {
@@ -359,6 +476,30 @@ describe("ExtractionService.createExtraction", () => {
     const doc = new DocumentRepository(handle.db).findById(element.id);
     expect(doc?.plainText).toBe("definition");
     expect(paragraphTexts(handle, element.id)).toEqual(["definition"]);
+  });
+
+  it("classifies intentional offsetless text captures instead of treating them as fallback failures", () => {
+    const sourceId = seedSource(handle);
+    const blocks = blockIdsOf(handle, sourceId);
+    const service = new ExtractionService(handle.db);
+
+    const { element, shapeClassification } = service.createExtraction({
+      sourceElementId: sourceId,
+      selectedText: "Retrieval practice strengthens long-term retention.",
+      blockIds: [blocks[1] as BlockId],
+      priority: 0.625,
+    });
+
+    expect(element.stage).toBe("atomic_statement");
+    expect(shapeClassification).toMatchObject({
+      classification: "atomic_ready",
+      stage: "atomic_statement",
+      inputSignals: {
+        rich: false,
+        fallback: false,
+        reconstructionFailed: false,
+      },
+    });
   });
 
   it("adds a derived_from relation extract → source", () => {
