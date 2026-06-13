@@ -70,6 +70,7 @@ export type KeyboardLayout = "qwerty" | "dvorak" | "vim";
 export type ThemePreference = "system" | "light" | "dark";
 
 export type OverloadPolicy = "off" | "suggest" | "automatic";
+export type ExtractAgingPolicy = "off" | "suggest" | "automatic";
 
 /**
  * The complete, validated user/domain settings the scheduler + UI read. Mirrors
@@ -80,6 +81,12 @@ export interface AppSettings {
   readonly dailyBudgetMinutes: number;
   readonly distillationQuotaPercent: number;
   readonly overloadPolicy: OverloadPolicy;
+  /** Extract aging policy (T121). Automatic reference demotion is explicitly opt-in. */
+  readonly extractAgingPolicy: ExtractAgingPolicy;
+  /** Returns without progress before aging can suggest or demote an extract (T121). */
+  readonly extractAgingReturnThreshold: number;
+  /** Days since stage progress before aging can suggest or demote an extract (T121). */
+  readonly extractAgingAgeDays: number;
   readonly dailyReviewBudget: number;
   readonly defaultDesiredRetention: number;
   readonly defaultTopicIntervalDays: number;
@@ -653,6 +660,8 @@ export interface QueueItemSummary {
   readonly fallowUntil: string | null;
   readonly fallowReason: string | null;
   readonly fallowTopicId: string | null;
+  /** Backend-owned extract aging projection; null for non-extract rows or disabled policy. */
+  readonly extractAging: ExtractAgingProjection | null;
 }
 
 /** Per-type counts over the unfiltered due set + the at-risk counts. */
@@ -4219,6 +4228,98 @@ export interface AutoPostponeReceipt {
   readonly undoneAt?: string;
 }
 
+export type ExtractAgeBand = "fresh" | "aging" | "stale" | "graveyard";
+export type ExtractAgingReceiptStatus = "actionable" | "undone";
+export type ExtractAgingApplySkipReason =
+  | "not-selected"
+  | "not-found"
+  | "not-eligible"
+  | "not-due"
+  | "terminal-fate"
+  | "has-children"
+  | "synthesis-referenced"
+  | "atomic-statement";
+
+export interface ExtractAgingThresholdSnapshot {
+  readonly returnThreshold: number;
+  readonly ageDays: number;
+  readonly sweepLimit: number;
+}
+
+export interface ExtractAgingProjection {
+  readonly band: ExtractAgeBand;
+  readonly daysSinceProgress: number;
+  readonly postponeCount: number;
+  readonly thresholdReached: boolean;
+}
+
+export interface ExtractAgingCandidate {
+  readonly id: string;
+  readonly title: string;
+  readonly stage: string;
+  readonly status: string;
+  readonly priority: number;
+  readonly dueAt: string | null;
+  readonly age: ExtractAgingProjection;
+  readonly reasons: readonly string[];
+  readonly suggestion: string;
+}
+
+export interface ExtractAgingReceipt {
+  readonly batchId: string;
+  readonly localDay: string;
+  readonly status: ExtractAgingReceiptStatus;
+  readonly policy: "suggest" | "automatic";
+  readonly demoted: number;
+  readonly skipped: number;
+  readonly remainingCandidateCount: number;
+  readonly thresholds: ExtractAgingThresholdSnapshot;
+  readonly createdAt: string;
+  readonly undoneAt?: string;
+}
+
+export interface ExtractAgingPreviewRequest {
+  readonly asOf?: string;
+  readonly limit?: number;
+}
+
+export interface ExtractAgingPreviewResult {
+  readonly asOf: string;
+  readonly policy: ExtractAgingPolicy;
+  readonly thresholds: ExtractAgingThresholdSnapshot;
+  readonly candidates: readonly ExtractAgingCandidate[];
+  readonly candidateCount: number;
+  readonly remainingCandidateCount: number;
+  readonly receipts: readonly ExtractAgingReceipt[];
+}
+
+export interface ExtractAgingApplyRequest {
+  readonly asOf?: string;
+  readonly ids?: readonly string[];
+}
+
+export interface ExtractAgingSkippedCandidate {
+  readonly id: string;
+  readonly reason: ExtractAgingApplySkipReason;
+}
+
+export interface ExtractAgingApplyResult {
+  readonly batchId: string;
+  readonly demoted: number;
+  readonly skipped: readonly ExtractAgingSkippedCandidate[];
+  readonly remainingCandidateCount: number;
+  readonly receipt: ExtractAgingReceipt | null;
+}
+
+export interface ExtractAgingUndoReceiptRequest {
+  readonly batchId: string;
+}
+
+export interface ExtractAgingUndoReceiptResult {
+  readonly receipt: ExtractAgingReceipt | null;
+  readonly undo: UndoLastResult;
+}
+
 export interface DailyWorkSummaryResult {
   readonly asOf: string;
   readonly dueQueueItems: number;
@@ -4228,6 +4329,7 @@ export interface DailyWorkSummaryResult {
   readonly recommendedAction: DailyWorkRecommendedAction;
   readonly graduationEvents: readonly KnowledgeGraduationEvent[];
   readonly autoPostponeReceipt: AutoPostponeReceipt | null;
+  readonly extractAgingReceipts: readonly ExtractAgingReceipt[];
 }
 
 export interface DailyWorkGraduationAckRequest {
@@ -4792,6 +4894,11 @@ export interface AppApi {
     undoAutoPostponeReceipt(
       request: DailyWorkUndoAutoPostponeReceiptRequest,
     ): Promise<DailyWorkUndoAutoPostponeReceiptResult>;
+  };
+  readonly extractAging: {
+    preview(request?: ExtractAgingPreviewRequest): Promise<ExtractAgingPreviewResult>;
+    apply(request?: ExtractAgingApplyRequest): Promise<ExtractAgingApplyResult>;
+    undoReceipt(request: ExtractAgingUndoReceiptRequest): Promise<ExtractAgingUndoReceiptResult>;
   };
   readonly weeklyReview: {
     summary(request?: WeeklyReviewSummaryRequest): Promise<WeeklyReviewSummaryResult>;
@@ -5970,6 +6077,50 @@ export const appApi = {
       });
     }
     return requireAppApi().dailyWork.undoAutoPostponeReceipt(request);
+  },
+  previewExtractAging(request?: ExtractAgingPreviewRequest): Promise<ExtractAgingPreviewResult> {
+    if (!isDesktop() || !window.appApi?.extractAging?.preview) {
+      return Promise.resolve({
+        asOf: request?.asOf ?? new Date().toISOString(),
+        policy: "off",
+        thresholds: { returnThreshold: 5, ageDays: 30, sweepLimit: request?.limit ?? 50 },
+        candidates: [],
+        candidateCount: 0,
+        remainingCandidateCount: 0,
+        receipts: [],
+      });
+    }
+    return requireAppApi().extractAging.preview(request);
+  },
+  applyExtractAging(request?: ExtractAgingApplyRequest): Promise<ExtractAgingApplyResult> {
+    if (!isDesktop() || !window.appApi?.extractAging?.apply) {
+      return Promise.resolve({
+        batchId: "",
+        demoted: 0,
+        skipped: [],
+        remainingCandidateCount: 0,
+        receipt: null,
+      });
+    }
+    return requireAppApi().extractAging.apply(request);
+  },
+  undoExtractAgingReceipt(
+    request: ExtractAgingUndoReceiptRequest,
+  ): Promise<ExtractAgingUndoReceiptResult> {
+    if (!isDesktop() || !window.appApi?.extractAging?.undoReceipt) {
+      return Promise.resolve({
+        receipt: null,
+        undo: {
+          undone: false,
+          opType: null,
+          elementId: null,
+          label: "",
+          reason: "Desktop bridge unavailable",
+          count: 0,
+        },
+      });
+    }
+    return requireAppApi().extractAging.undoReceipt(request);
   },
   getWeeklyReviewSummary(request?: WeeklyReviewSummaryRequest): Promise<WeeklyReviewSummaryResult> {
     return requireAppApi().weeklyReview.summary(request);

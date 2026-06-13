@@ -20,7 +20,8 @@
 
 import type { BlockId, ElementId, IsoTimestamp } from "@interleave/core";
 import { PRIORITY_LABEL_VALUE } from "@interleave/core";
-import type { DbHandle } from "@interleave/db";
+import { type DbHandle, elements } from "@interleave/db";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BlockProcessingService } from "./block-processing-service";
 import { DocumentRepository } from "./document-repository";
@@ -717,5 +718,57 @@ describe("QueueQuery", () => {
       fallowReason: "Let the thread cool off",
       fallowTopicId: topic.id,
     });
+  });
+
+  it("projects extract aging from stagnation progress age rather than updatedAt", () => {
+    const source = repos.sources.create({
+      title: "Aging source",
+      priority: PRIORITY_LABEL_VALUE.B,
+      status: "active",
+    });
+    const extract = repos.sources.createExtract({
+      sourceElementId: source.element.id,
+      title: "Old but recently postponed extract",
+      priority: PRIORITY_LABEL_VALUE.B,
+      selectedText: "Old thought",
+      blockIds: ["blk_age" as BlockId],
+      label: "Age",
+    });
+    const id = extract.element.id;
+    repos.elements.update(id, { status: "active", stage: "clean_extract" });
+    repos.elements.reschedule(id, iso("2026-08-14T09:00:00.000Z"), {
+      updatedAt: iso("2026-08-14T09:00:00.000Z"),
+    });
+    handle.db
+      .update(elements)
+      .set({
+        createdAt: iso("2026-06-01T09:00:00.000Z"),
+        updatedAt: iso("2026-08-14T09:00:00.000Z"),
+      })
+      .where(eq(elements.id, id))
+      .run();
+    handle.db.transaction((tx) => {
+      for (let i = 0; i < 5; i += 1) {
+        repos.operationLog.append(tx, {
+          opType: "reschedule_element",
+          elementId: id,
+          payload: { postpone: true, postponeCount: i + 1 },
+        });
+      }
+    });
+    repos.settings.updateAppSettings({
+      extractAgingPolicy: "suggest",
+      extractAgingReturnThreshold: 5,
+      extractAgingAgeDays: 30,
+    });
+
+    const row = queue.summaryFor(id, iso("2026-08-15T09:00:00.000Z"));
+
+    expect(row?.extractAging).toMatchObject({
+      band: "graveyard",
+      postponeCount: 5,
+      thresholdReached: true,
+    });
+    expect(row?.extractAging?.daysSinceProgress).toBeGreaterThanOrEqual(30);
   });
 });

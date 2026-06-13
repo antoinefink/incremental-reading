@@ -74,6 +74,7 @@ const h = vi.hoisted(() => {
     fallowUntil: null,
     fallowReason: null,
     fallowTopicId: null,
+    extractAging: null,
     ...over,
   });
   const card = mk({
@@ -139,6 +140,7 @@ const h = vi.hoisted(() => {
     recommendedAction: "process_due_queue",
     graduationEvents: [],
     autoPostponeReceipt: null,
+    extractAgingReceipts: [],
   };
   // The full reveal-ready view for card-1 (the answer + source ref ship with the
   // card; the renderer hides them until reveal — exactly like the review session).
@@ -2264,6 +2266,7 @@ describe("ProcessQueue", () => {
       fallowUntil: null,
       fallowReason: null,
       fallowTopicId: null,
+      extractAging: null,
     };
     h.listQueue.mockResolvedValueOnce({
       items: [task],

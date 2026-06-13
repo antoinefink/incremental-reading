@@ -290,6 +290,17 @@ describe("preload bridge", () => {
       { batchId: "batch-1" },
     );
 
+    await api().extractAging.preview();
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.extractAgingPreview, {});
+
+    await api().extractAging.apply();
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.extractAgingApply, {});
+
+    await api().extractAging.undoReceipt({ batchId: "batch-aging-1" });
+    expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.extractAgingUndoReceipt, {
+      batchId: "batch-aging-1",
+    });
+
     await api().weeklyReview.summary();
     expect(electronMock.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.weeklyReviewSummary, {});
 

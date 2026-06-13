@@ -256,6 +256,12 @@ export interface LaunchOptions {
    */
   readonly seedScale?: boolean;
   /**
+   * Seed the T121 extract-aging fixture (one old, due, repeatedly returned extract)
+   * when the database is empty, so the automatic policy E2E can materialize a
+   * deterministic receipt. Sets `INTERLEAVE_SEED_EXTRACT_AGING=1`.
+   */
+  readonly seedExtractAging?: boolean;
+  /**
    * Show the first-run onboarding overlay (T050). DEFAULTS to suppressed: the
    * existing feature specs start from a fresh, empty data dir, where the welcome
    * overlay would otherwise cover the UI. The dedicated onboarding spec passes
@@ -363,6 +369,7 @@ export async function launchApp(
       ...(options.seedOnEmpty ? { INTERLEAVE_SEED_ON_EMPTY: "1" } : {}),
       ...(options.seedMaintenance ? { INTERLEAVE_SEED_MAINTENANCE: "1" } : {}),
       ...(options.seedScale ? { INTERLEAVE_SEED_SCALE: "1" } : {}),
+      ...(options.seedExtractAging ? { INTERLEAVE_SEED_EXTRACT_AGING: "1" } : {}),
       ...(options.allowLoopbackImport ? { INTERLEAVE_ALLOW_LOOPBACK_IMPORT: "1" } : {}),
       ...(options.captureEnabled ? { INTERLEAVE_CAPTURE_ENABLED: "1" } : {}),
       ...(options.pdfImportPath ? { INTERLEAVE_PDF_IMPORT_PATH: options.pdfImportPath } : {}),

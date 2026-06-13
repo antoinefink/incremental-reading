@@ -253,7 +253,19 @@ function bootstrap(): void {
     }
   }
 
-  // 2b'') Dev/E2E convenience: seed an empty database with the T100 CI-bounded SCALE
+  // 2b'') Dev/E2E convenience: seed an empty database with the T121 extract-aging
+  //       fixture (one old, due, repeatedly returned extract) so the automatic
+  //       policy E2E has a deterministic candidate. Opt-in only; production never seeds.
+  if (process.env.INTERLEAVE_SEED_EXTRACT_AGING === "1") {
+    try {
+      const planted = dbService.seedExtractAgingIfEmpty();
+      if (planted) console.log("[main] seeded extract-aging fixture", planted.extract);
+    } catch (error) {
+      console.error("[main] seed-extract-aging failed:", error);
+    }
+  }
+
+  // 2b''') Dev/E2E convenience: seed an empty database with the T100 CI-bounded SCALE
   //       collection (a few thousand elements via the bulk fast path) so the
   //       `scale-smoke` E2E can verify backup/restore + integrity + the MVP flow after
   //       restart at scale. Opt-in via INTERLEAVE_SEED_SCALE; never seeds a non-empty

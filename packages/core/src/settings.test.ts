@@ -24,6 +24,10 @@ import {
   DESIRED_RETENTION_MIN,
   DISTILLATION_QUOTA_PERCENT_MAX,
   DISTILLATION_QUOTA_PERCENT_MIN,
+  EXTRACT_AGING_AGE_DAYS_MAX,
+  EXTRACT_AGING_AGE_DAYS_MIN,
+  EXTRACT_AGING_RETURN_THRESHOLD_MAX,
+  EXTRACT_AGING_RETURN_THRESHOLD_MIN,
   isKeyboardLayout,
   isThemePreference,
   PARKED_RESURFACE_AFTER_DAYS_MAX,
@@ -46,6 +50,9 @@ describe("AppSettings defaults", () => {
       dailyBudgetMinutes: "review.dailyBudgetMinutes",
       distillationQuotaPercent: "review.distillationQuotaPercent",
       overloadPolicy: "review.overloadPolicy",
+      extractAgingPolicy: "extractAging.policy",
+      extractAgingReturnThreshold: "extractAging.returnThreshold",
+      extractAgingAgeDays: "extractAging.ageDays",
       dailyReviewBudget: "review.dailyBudget",
       defaultDesiredRetention: "review.defaultDesiredRetention",
       defaultTopicIntervalDays: "scheduler.defaultTopicIntervalDays",
@@ -120,6 +127,31 @@ describe("coerceSettingValue", () => {
     expect(coerceSettingValue("overloadPolicy", "off")).toBe("off");
     expect(coerceSettingValue("overloadPolicy", "automatic")).toBe("automatic");
     expect(coerceSettingValue("overloadPolicy", "always")).toBe("suggest");
+  });
+
+  it("validates the opt-in extract aging policy and clamps thresholds (T121)", () => {
+    expect(DEFAULT_APP_SETTINGS.extractAgingPolicy).toBe("off");
+    expect(DEFAULT_APP_SETTINGS.extractAgingReturnThreshold).toBe(5);
+    expect(DEFAULT_APP_SETTINGS.extractAgingAgeDays).toBe(30);
+    expect(coerceSettingValue("extractAgingPolicy", "suggest")).toBe("suggest");
+    expect(coerceSettingValue("extractAgingPolicy", "automatic")).toBe("automatic");
+    expect(coerceSettingValue("extractAgingPolicy", "always")).toBe("off");
+    expect(coerceSettingValue("extractAgingReturnThreshold", 4.6)).toBe(5);
+    expect(coerceSettingValue("extractAgingReturnThreshold", 0)).toBe(
+      DEFAULT_APP_SETTINGS.extractAgingReturnThreshold,
+    );
+    expect(coerceSettingValue("extractAgingReturnThreshold", 0.2)).toBe(
+      EXTRACT_AGING_RETURN_THRESHOLD_MIN,
+    );
+    expect(coerceSettingValue("extractAgingReturnThreshold", 999)).toBe(
+      EXTRACT_AGING_RETURN_THRESHOLD_MAX,
+    );
+    expect(coerceSettingValue("extractAgingAgeDays", 29.6)).toBe(30);
+    expect(coerceSettingValue("extractAgingAgeDays", 0)).toBe(
+      DEFAULT_APP_SETTINGS.extractAgingAgeDays,
+    );
+    expect(coerceSettingValue("extractAgingAgeDays", 0.2)).toBe(EXTRACT_AGING_AGE_DAYS_MIN);
+    expect(coerceSettingValue("extractAgingAgeDays", 99999)).toBe(EXTRACT_AGING_AGE_DAYS_MAX);
   });
 
   it("clamps + rounds the distillation quota percent into range", () => {
@@ -298,6 +330,9 @@ describe("stored ↔ model round-trip", () => {
     const stored = {
       [SETTINGS_KEYS.dailyBudgetMinutes]: 90,
       [SETTINGS_KEYS.distillationQuotaPercent]: 20,
+      [SETTINGS_KEYS.extractAgingPolicy]: "automatic",
+      [SETTINGS_KEYS.extractAgingReturnThreshold]: 8,
+      [SETTINGS_KEYS.extractAgingAgeDays]: 45,
       [SETTINGS_KEYS.dailyReviewBudget]: 120,
       [SETTINGS_KEYS.defaultDesiredRetention]: 0.95,
       [SETTINGS_KEYS.defaultTopicIntervalDays]: 30,
@@ -319,6 +354,9 @@ describe("stored ↔ model round-trip", () => {
       dailyBudgetMinutes: 90,
       distillationQuotaPercent: 20,
       overloadPolicy: "suggest",
+      extractAgingPolicy: "automatic",
+      extractAgingReturnThreshold: 8,
+      extractAgingAgeDays: 45,
       dailyReviewBudget: 120,
       defaultDesiredRetention: 0.95,
       defaultTopicIntervalDays: 30,
@@ -387,6 +425,9 @@ describe("stored ↔ model round-trip", () => {
     const stored = settingsPatchToStored({
       dailyBudgetMinutes: 100,
       distillationQuotaPercent: 25,
+      extractAgingPolicy: "suggest",
+      extractAgingReturnThreshold: 6,
+      extractAgingAgeDays: 60,
       dailyReviewBudget: 100,
       parkedResurfaceAfterDays: 120,
       chronicPostponeThreshold: 6,
@@ -398,6 +439,9 @@ describe("stored ↔ model round-trip", () => {
     expect(stored).toEqual({
       [SETTINGS_KEYS.dailyBudgetMinutes]: 100,
       [SETTINGS_KEYS.distillationQuotaPercent]: 25,
+      [SETTINGS_KEYS.extractAgingPolicy]: "suggest",
+      [SETTINGS_KEYS.extractAgingReturnThreshold]: 6,
+      [SETTINGS_KEYS.extractAgingAgeDays]: 60,
       [SETTINGS_KEYS.dailyReviewBudget]: 100,
       [SETTINGS_KEYS.parkedResurfaceAfterDays]: 120,
       [SETTINGS_KEYS.chronicPostponeThreshold]: 6,
@@ -427,6 +471,9 @@ describe("stored ↔ model round-trip", () => {
       dailyBudgetMinutes: 80,
       distillationQuotaPercent: 20,
       overloadPolicy: "suggest" as const,
+      extractAgingPolicy: "automatic" as const,
+      extractAgingReturnThreshold: 6,
+      extractAgingAgeDays: 60,
       dailyReviewBudget: 80,
       defaultDesiredRetention: 0.92,
       defaultTopicIntervalDays: 3,
@@ -471,6 +518,9 @@ describe("coerceSettingsPatch", () => {
     const patch = coerceSettingsPatch({
       dailyBudgetMinutes: 9999,
       distillationQuotaPercent: 125,
+      extractAgingPolicy: "automatic",
+      extractAgingReturnThreshold: 999,
+      extractAgingAgeDays: 0.2,
       dailyReviewBudget: 9999,
       bogus: "x",
       theme: "system",
@@ -478,6 +528,9 @@ describe("coerceSettingsPatch", () => {
     expect(patch).toEqual({
       dailyBudgetMinutes: DAILY_BUDGET_MINUTES_MAX,
       distillationQuotaPercent: DISTILLATION_QUOTA_PERCENT_MAX,
+      extractAgingPolicy: "automatic",
+      extractAgingReturnThreshold: EXTRACT_AGING_RETURN_THRESHOLD_MAX,
+      extractAgingAgeDays: EXTRACT_AGING_AGE_DAYS_MIN,
       dailyReviewBudget: DAILY_REVIEW_BUDGET_MAX,
       theme: "system",
     });

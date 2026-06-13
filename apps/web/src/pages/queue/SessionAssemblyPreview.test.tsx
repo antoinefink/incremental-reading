@@ -77,6 +77,7 @@ function item(id: string, title: string): QueueItemSummary {
     fallowUntil: null,
     fallowReason: null,
     fallowTopicId: null,
+    extractAging: null,
   };
 }
 

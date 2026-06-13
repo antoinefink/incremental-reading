@@ -934,6 +934,12 @@ export interface MaintenanceCollection {
   readonly chronicPostponeDeleteSource: ElementId;
 }
 
+/** Element ids planted for the T121 extract-aging E2E fixture. */
+export interface ExtractAgingCollection {
+  readonly source: ElementId;
+  readonly extract: ElementId;
+}
+
 /** Options for {@link seedMaintenanceCollection}. */
 export interface SeedMaintenanceOptions {
   /** The `asOf` the low-value staleness is dated against (defaults to a fixed past date). */
@@ -1115,4 +1121,73 @@ export function seedMaintenanceCollection(
     chronicPostponeDoneSource: chronicDone.element.id,
     chronicPostponeDeleteSource: chronicDelete.element.id,
   };
+}
+
+/**
+ * Plant a minimal T121 extract-aging fixture: one due, old, repeatedly returned raw
+ * extract with no children. It is built through repositories first, then test-only
+ * timestamps are backdated so current-day automatic policy materialization has a
+ * deterministic candidate without exposing clock/test controls to production code.
+ */
+export function seedExtractAgingCollection(
+  repos: Repositories,
+  db: InterleaveDatabase,
+): ExtractAgingCollection {
+  const source = repos.sources.create({
+    title: "Extract aging source",
+    priority: PRIORITY_LABEL_VALUE.B,
+    status: "active",
+    reasonAdded: "Fixture for automatic extract aging.",
+  });
+  repos.documents.upsert({
+    elementId: source.element.id,
+    prosemirrorJson: buildProseMirrorDoc(),
+    plainText: DEMO_FIXTURES.paragraphs.join("\n\n"),
+    blocks: DEMO_FIXTURES.blocks.map((b) => ({
+      blockType: b.blockType,
+      order: b.order,
+      stableBlockId: b.stableBlockId,
+    })),
+  });
+
+  const extract = repos.sources.createExtract({
+    sourceElementId: source.element.id,
+    title: "Aging policy raw extract",
+    priority: PRIORITY_LABEL_VALUE.B,
+    selectedText: DEMO_FIXTURES.extract.selectedText,
+    blockIds: DEMO_FIXTURES.extract.blockIds,
+    startOffset: DEMO_FIXTURES.extract.startOffset,
+    endOffset: DEMO_FIXTURES.extract.endOffset,
+    label: "Aging policy fixture",
+  });
+
+  const old = "2026-01-01T00:00:00.000Z" as IsoTimestamp;
+  db.update(elements)
+    .set({
+      status: "scheduled",
+      createdAt: old,
+      updatedAt: old,
+      dueAt: old,
+    })
+    .where(eq(elements.id, extract.element.id))
+    .run();
+
+  for (let i = 0; i < 5; i += 1) {
+    db.transaction((tx) => {
+      repos.operationLog.append(tx, {
+        opType: "reschedule_element",
+        elementId: extract.element.id,
+        payload: {
+          id: extract.element.id,
+          dueAt: old,
+          prevDueAt: old,
+          postpone: true,
+          postponeCount: i + 1,
+          action: "extractAgingSeed:return",
+        },
+      });
+    });
+  }
+
+  return { source: source.element.id, extract: extract.element.id };
 }

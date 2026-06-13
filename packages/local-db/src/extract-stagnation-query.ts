@@ -51,11 +51,12 @@ import { elementRelations, elements, type InterleaveDatabase, operationLog } fro
 import {
   type ExtractStagnationSignals,
   isStagnant,
+  type StagnationOptions,
   type StagnationReason,
   type StagnationSuggestion,
+  type StagnationVerdict,
 } from "@interleave/scheduler";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { OperationLogRepository } from "./operation-log-repository";
 
 /** Default cap so a broad scan can't return an unbounded list (like `LibraryQuery`). */
 export const DEFAULT_EXTRACT_STAGNATION_LIMIT = 200;
@@ -115,6 +116,16 @@ interface OpSignals {
   lastStageAdvanceAt: string | null;
 }
 
+/** One live extract plus the complete stagnation signal bundle before threshold filtering. */
+export interface ExtractStagnationSignalRow {
+  readonly extract: StagnantExtractRef & {
+    readonly status: string;
+    readonly updatedAt: IsoTimestamp;
+  };
+  readonly signals: ExtractStagnationSignals;
+  readonly verdict: StagnationVerdict;
+}
+
 /** Whether an op payload is the stage-advance `{ patch: { stage }, prev: { stage } }` shape. */
 function stageAdvanceTimestamp(op: OperationLogEntry): boolean {
   if (op.opType !== "update_element") return false;
@@ -145,16 +156,18 @@ function isPostponeMarker(op: OperationLogEntry): boolean {
   );
 }
 
+function payloadObject(payload: unknown): Record<string, unknown> | null {
+  return typeof payload === "object" && payload !== null
+    ? (payload as Record<string, unknown>)
+    : null;
+}
+
 /**
  * Read-only extract-stagnation scan. Constructed once per open database (alongside
  * {@link Repositories}); the main process exposes it over validated IPC.
  */
 export class ExtractStagnationQuery {
-  private readonly operationLog: OperationLogRepository;
-
-  constructor(private readonly db: InterleaveDatabase) {
-    this.operationLog = new OperationLogRepository(db);
-  }
+  constructor(private readonly db: InterleaveDatabase) {}
 
   /**
    * Compute the full {@link ExtractStagnationSummary} for `asOf`. Read-only. See the
@@ -166,12 +179,51 @@ export class ExtractStagnationQuery {
   ): ExtractStagnationSummary {
     const limit = options.limit ?? DEFAULT_EXTRACT_STAGNATION_LIMIT;
     const offset = Math.max(0, options.offset ?? 0);
+    const signalRows = this.listSignalRows(asOf);
 
+    const rows = signalRows
+      .filter((row) => row.verdict.stagnant)
+      .map(
+        (row): StagnantExtractRow => ({
+          extract: {
+            id: row.extract.id,
+            title: row.extract.title,
+            stage: row.extract.stage,
+            priority: row.extract.priority,
+            dueAt: row.extract.dueAt,
+            extractFate: row.extract.extractFate,
+            createdAt: row.extract.createdAt,
+          },
+          postponeCount: row.signals.postponeCount,
+          childCount: row.signals.childCount,
+          synthesizedReferenceCount: row.signals.synthesizedReferenceCount,
+          daysSinceProgress: row.verdict.daysSinceProgress,
+          reasons: row.verdict.reasons,
+          suggestion: row.verdict.suggestion,
+        }),
+      );
+
+    const sorted = sortStagnantRows(rows);
+    const stagnantCount = sorted.length;
+    const paged = sorted.slice(offset, offset + limit);
+    return { asOf, rows: paged, stagnantCount };
+  }
+
+  /**
+   * Return every live extract's stagnation signals and verdict. Callers that own their
+   * own threshold settings (T121 extract aging) should use this method and pass their
+   * thresholds, rather than filtering an already-thresholded maintenance summary.
+   */
+  listSignalRows(
+    asOf: IsoTimestamp,
+    stagnationOptions: StagnationOptions = {},
+  ): readonly ExtractStagnationSignalRow[] {
     // 1) Every live extract element (the universe the scan checks).
     const extractRows = this.db
       .select({
         id: elements.id,
         title: elements.title,
+        status: elements.status,
         stage: elements.stage,
         priority: elements.priority,
         dueAt: elements.dueAt,
@@ -184,7 +236,7 @@ export class ExtractStagnationQuery {
       .all();
 
     if (extractRows.length === 0) {
-      return { asOf, rows: [], stagnantCount: 0 };
+      return [];
     }
 
     const extractIds = extractRows.map((e) => e.id);
@@ -258,19 +310,33 @@ export class ExtractStagnationQuery {
           createdAt: row.createdAt,
         }),
       );
-    for (const op of ops) {
+    for (const op of [...ops].reverse()) {
       if (!op.elementId) continue;
       const s = ensure(op.elementId);
       if (isPostponeMarker(op)) {
-        s.postponeCount = this.operationLog.countPostpones(op.elementId);
-      } else if (s.lastStageAdvanceAt === null && stageAdvanceTimestamp(op)) {
-        // Newest-first: the first stage-advance op encountered is the latest advance.
+        s.postponeCount += 1;
+        continue;
+      }
+      const payload = payloadObject(op.payload);
+      if (op.opType === "update_element" && payload?.chronicPostponeReset === true) {
+        s.postponeCount = 0;
+        continue;
+      }
+      if (op.opType === "update_element" && payload?.chronicPostponeResetUndo === true) {
+        const restored = payload.restoredEffectivePostponeCount;
+        if (typeof restored === "number" && Number.isFinite(restored) && restored >= 0) {
+          s.postponeCount = Math.floor(restored);
+        }
+        continue;
+      }
+      if (stageAdvanceTimestamp(op)) {
+        // Chronological pass: the latest matching stage-advance assignment wins.
         s.lastStageAdvanceAt = op.createdAt;
       }
     }
 
-    // 5) Run the PURE heuristic per extract; keep only the stagnant rows.
-    const rows: StagnantExtractRow[] = [];
+    // 5) Run the PURE heuristic per extract; callers decide whether to filter.
+    const rows: ExtractStagnationSignalRow[] = [];
     for (const e of extractRows) {
       const op = opSignals.get(e.id);
       const signals: ExtractStagnationSignals = {
@@ -285,38 +351,33 @@ export class ExtractStagnationQuery {
         synthesizedReferenceCount: synthesizedReferenceCounts.get(e.id) ?? 0,
         lastStageAdvanceAt: (op?.lastStageAdvanceAt as IsoTimestamp | null) ?? null,
       };
-      const verdict = isStagnant(signals, asOf);
-      if (!verdict.stagnant) continue;
+      const verdict = isStagnant(signals, asOf, stagnationOptions);
       rows.push({
         extract: {
           id: e.id,
           title: e.title,
+          status: e.status,
           stage: e.stage,
           priority: e.priority,
           dueAt: (e.dueAt as string | null) ?? null,
           extractFate: (e.extractFate as ExtractFate | null) ?? null,
           createdAt: e.createdAt as IsoTimestamp,
+          updatedAt: e.updatedAt as IsoTimestamp,
         },
-        postponeCount: signals.postponeCount,
-        childCount: signals.childCount,
-        synthesizedReferenceCount: signals.synthesizedReferenceCount,
-        daysSinceProgress: verdict.daysSinceProgress,
-        reasons: verdict.reasons,
-        suggestion: verdict.suggestion,
+        signals,
+        verdict,
       });
     }
-
-    // Sort most-stagnant first: more postpones first, then staler, then id ASC (stable).
-    rows.sort((a, b) => {
-      if (a.postponeCount !== b.postponeCount) return b.postponeCount - a.postponeCount;
-      if (a.daysSinceProgress !== b.daysSinceProgress) {
-        return b.daysSinceProgress - a.daysSinceProgress;
-      }
-      return a.extract.id < b.extract.id ? -1 : a.extract.id > b.extract.id ? 1 : 0;
-    });
-
-    const stagnantCount = rows.length;
-    const paged = rows.slice(offset, offset + limit);
-    return { asOf, rows: paged, stagnantCount };
+    return rows;
   }
+}
+
+function sortStagnantRows(rows: StagnantExtractRow[]): StagnantExtractRow[] {
+  return [...rows].sort((a, b) => {
+    if (a.postponeCount !== b.postponeCount) return b.postponeCount - a.postponeCount;
+    if (a.daysSinceProgress !== b.daysSinceProgress) {
+      return b.daysSinceProgress - a.daysSinceProgress;
+    }
+    return a.extract.id < b.extract.id ? -1 : a.extract.id > b.extract.id ? 1 : 0;
+  });
 }

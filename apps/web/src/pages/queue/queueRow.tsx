@@ -16,7 +16,7 @@
 import type { ReactElement } from "react";
 import { Icon, type IconName } from "../../components/Icon";
 import { Stage } from "../../components/inspector/primitives";
-import type { QueueItemSummary } from "../../lib/appApi";
+import type { ExtractAgeBand, QueueItemSummary } from "../../lib/appApi";
 
 function elementTypeNoun(type: string | null): string {
   if (type === "source") return "source";
@@ -99,6 +99,29 @@ export function metaFor(item: QueueItemSummary): ReactElement | null {
     );
   }
   return null;
+}
+
+function ageBandLabel(band: ExtractAgeBand): string {
+  if (band === "fresh") return "Fresh";
+  if (band === "aging") return "Aging";
+  if (band === "stale") return "Stale";
+  return "Graveyard";
+}
+
+export function ExtractAgeChip({ item }: { item: QueueItemSummary }): ReactElement | null {
+  const aging = item.extractAging;
+  if (!aging) return null;
+  return (
+    <span
+      className={`extract-age-chip extract-age-chip--${aging.band}`}
+      data-testid="extract-age-chip"
+      title={`${aging.daysSinceProgress} days since progress; postponed ${aging.postponeCount} times`}
+    >
+      <Icon name="clock" size={12} />
+      {ageBandLabel(aging.band)}
+      {aging.thresholdReached ? " · return" : ""}
+    </span>
+  );
 }
 
 /** The open-action icon + label per type (the `next-action` affordance). */

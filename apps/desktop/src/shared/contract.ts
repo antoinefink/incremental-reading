@@ -44,6 +44,11 @@ import {
   EMBEDDING_API_KEY_MAX,
   EMBEDDING_MODEL_ID_MAX,
   EMBEDDING_PROVIDERS,
+  EXTRACT_AGING_AGE_DAYS_MAX,
+  EXTRACT_AGING_AGE_DAYS_MIN,
+  EXTRACT_AGING_POLICIES,
+  EXTRACT_AGING_RETURN_THRESHOLD_MAX,
+  EXTRACT_AGING_RETURN_THRESHOLD_MIN,
   type ExtractFate,
   FACT_STABILITY,
   type FactExpiryStatus,
@@ -239,6 +244,17 @@ export const SettingsPatchSchema = z
       .min(DISTILLATION_QUOTA_PERCENT_MIN)
       .max(DISTILLATION_QUOTA_PERCENT_MAX),
     overloadPolicy: z.enum(OVERLOAD_POLICIES),
+    extractAgingPolicy: z.enum(EXTRACT_AGING_POLICIES),
+    extractAgingReturnThreshold: z
+      .number()
+      .int()
+      .min(EXTRACT_AGING_RETURN_THRESHOLD_MIN)
+      .max(EXTRACT_AGING_RETURN_THRESHOLD_MAX),
+    extractAgingAgeDays: z
+      .number()
+      .int()
+      .min(EXTRACT_AGING_AGE_DAYS_MIN)
+      .max(EXTRACT_AGING_AGE_DAYS_MAX),
     dailyReviewBudget: z.number().int().min(DAILY_REVIEW_BUDGET_MIN).max(DAILY_REVIEW_BUDGET_MAX),
     defaultDesiredRetention: z.number().min(DESIRED_RETENTION_MIN).max(DESIRED_RETENTION_MAX),
     defaultTopicIntervalDays: z.number().int().positive(),
@@ -824,6 +840,8 @@ export interface QueueItemSummary {
   readonly fallowReason: string | null;
   /** The topic whose fallow state explains this row, when present. */
   readonly fallowTopicId: string | null;
+  /** Backend-owned extract aging projection; null for non-extract rows or disabled policy. */
+  readonly extractAging: ExtractAgingProjection | null;
 }
 
 /**
@@ -6281,6 +6299,84 @@ export interface AutoPostponeReceipt {
   readonly undoneAt?: string;
 }
 
+export type ExtractAgeBand = "fresh" | "aging" | "stale" | "graveyard";
+export type ExtractAgingReceiptStatus = "actionable" | "undone";
+export type ExtractAgingApplySkipReason =
+  | "not-selected"
+  | "not-found"
+  | "not-eligible"
+  | "not-due"
+  | "terminal-fate"
+  | "has-children"
+  | "synthesis-referenced"
+  | "atomic-statement";
+
+export interface ExtractAgingThresholdSnapshot {
+  readonly returnThreshold: number;
+  readonly ageDays: number;
+  readonly sweepLimit: number;
+}
+
+export interface ExtractAgingProjection {
+  readonly band: ExtractAgeBand;
+  readonly daysSinceProgress: number;
+  readonly postponeCount: number;
+  readonly thresholdReached: boolean;
+}
+
+export interface ExtractAgingCandidate {
+  readonly id: string;
+  readonly title: string;
+  readonly stage: string;
+  readonly status: string;
+  readonly priority: number;
+  readonly dueAt: string | null;
+  readonly age: ExtractAgingProjection;
+  readonly reasons: readonly string[];
+  readonly suggestion: string;
+}
+
+export interface ExtractAgingReceipt {
+  readonly batchId: string;
+  readonly localDay: string;
+  readonly status: ExtractAgingReceiptStatus;
+  readonly policy: "suggest" | "automatic";
+  readonly demoted: number;
+  readonly skipped: number;
+  readonly remainingCandidateCount: number;
+  readonly thresholds: ExtractAgingThresholdSnapshot;
+  readonly createdAt: string;
+  readonly undoneAt?: string;
+}
+
+export interface ExtractAgingPreviewResult {
+  readonly asOf: string;
+  readonly policy: "off" | "suggest" | "automatic";
+  readonly thresholds: ExtractAgingThresholdSnapshot;
+  readonly candidates: readonly ExtractAgingCandidate[];
+  readonly candidateCount: number;
+  readonly remainingCandidateCount: number;
+  readonly receipts: readonly ExtractAgingReceipt[];
+}
+
+export interface ExtractAgingSkippedCandidate {
+  readonly id: string;
+  readonly reason: ExtractAgingApplySkipReason;
+}
+
+export interface ExtractAgingApplyResult {
+  readonly batchId: string;
+  readonly demoted: number;
+  readonly skipped: readonly ExtractAgingSkippedCandidate[];
+  readonly remainingCandidateCount: number;
+  readonly receipt: ExtractAgingReceipt | null;
+}
+
+export interface ExtractAgingUndoReceiptResult {
+  readonly receipt: ExtractAgingReceipt | null;
+  readonly undo: UndoLastResult;
+}
+
 export interface DailyWorkSummaryResult {
   readonly asOf: string;
   readonly dueQueueItems: number;
@@ -6290,6 +6386,7 @@ export interface DailyWorkSummaryResult {
   readonly recommendedAction: DailyWorkRecommendedAction;
   readonly graduationEvents: readonly KnowledgeGraduationEvent[];
   readonly autoPostponeReceipt: AutoPostponeReceipt | null;
+  readonly extractAgingReceipts: readonly ExtractAgingReceipt[];
 }
 
 export const DailyWorkGraduationAckRequestSchema = z
@@ -6322,6 +6419,29 @@ export interface DailyWorkUndoAutoPostponeReceiptResult {
   readonly reason?: string;
   readonly receipt: AutoPostponeReceipt | null;
 }
+
+const EXTRACT_AGING_SWEEP_LIMIT = 50;
+
+export const ExtractAgingPreviewRequestSchema = z
+  .object({
+    asOf: IsoTimestampInputSchema.optional(),
+    limit: z.number().int().min(1).max(EXTRACT_AGING_SWEEP_LIMIT).optional(),
+  })
+  .optional();
+export type ExtractAgingPreviewRequest = z.infer<typeof ExtractAgingPreviewRequestSchema>;
+
+export const ExtractAgingApplyRequestSchema = z
+  .object({
+    asOf: IsoTimestampInputSchema.optional(),
+    ids: z.array(z.string().min(1)).max(EXTRACT_AGING_SWEEP_LIMIT).optional(),
+  })
+  .optional();
+export type ExtractAgingApplyRequest = z.infer<typeof ExtractAgingApplyRequestSchema>;
+
+export const ExtractAgingUndoReceiptRequestSchema = z.object({
+  batchId: z.string().min(1),
+});
+export type ExtractAgingUndoReceiptRequest = z.infer<typeof ExtractAgingUndoReceiptRequestSchema>;
 
 // ---------------------------------------------------------------------------
 // weeklyReview.*  (T110 — weekly ledger & integrity session)
@@ -7530,6 +7650,14 @@ export interface AppApi {
     undoAutoPostponeReceipt(
       request: DailyWorkUndoAutoPostponeReceiptRequest,
     ): Promise<DailyWorkUndoAutoPostponeReceiptResult>;
+  };
+  readonly extractAging: {
+    /** Read-only preview of extracts eligible for the opt-in aging policy (T121). */
+    preview(request?: ExtractAgingPreviewRequest): Promise<ExtractAgingPreviewResult>;
+    /** Demote selected preview candidates to recoverable reference fates in one batch. */
+    apply(request?: ExtractAgingApplyRequest): Promise<ExtractAgingApplyResult>;
+    /** Undo one aging receipt batch after ownership and current-state guards pass. */
+    undoReceipt(request: ExtractAgingUndoReceiptRequest): Promise<ExtractAgingUndoReceiptResult>;
   };
   readonly weeklyReview: {
     /** Weekly ledger/integrity session summary. May create/suppress the system task. */

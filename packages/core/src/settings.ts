@@ -40,6 +40,10 @@ export type ThemePreference = (typeof THEMES)[number];
 export const OVERLOAD_POLICIES = ["off", "suggest", "automatic"] as const;
 export type OverloadPolicy = (typeof OVERLOAD_POLICIES)[number];
 
+/** Extract aging policy for T121. Automatic demotion is explicitly opt-in. */
+export const EXTRACT_AGING_POLICIES = ["off", "suggest", "automatic"] as const;
+export type ExtractAgingPolicy = (typeof EXTRACT_AGING_POLICIES)[number];
+
 /**
  * The complete, validated user/domain settings.
  *
@@ -93,6 +97,9 @@ export interface AppSettings {
   readonly dailyBudgetMinutes: number;
   readonly distillationQuotaPercent: number;
   readonly overloadPolicy: OverloadPolicy;
+  readonly extractAgingPolicy: ExtractAgingPolicy;
+  readonly extractAgingReturnThreshold: number;
+  readonly extractAgingAgeDays: number;
   readonly dailyReviewBudget: number;
   readonly defaultDesiredRetention: Priority;
   readonly defaultTopicIntervalDays: number;
@@ -276,6 +283,9 @@ export const SETTINGS_KEYS = {
   dailyBudgetMinutes: "review.dailyBudgetMinutes",
   distillationQuotaPercent: "review.distillationQuotaPercent",
   overloadPolicy: "review.overloadPolicy",
+  extractAgingPolicy: "extractAging.policy",
+  extractAgingReturnThreshold: "extractAging.returnThreshold",
+  extractAgingAgeDays: "extractAging.ageDays",
   dailyReviewBudget: "review.dailyBudget",
   defaultDesiredRetention: "review.defaultDesiredRetention",
   defaultTopicIntervalDays: "scheduler.defaultTopicIntervalDays",
@@ -355,6 +365,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   dailyBudgetMinutes: 60,
   distillationQuotaPercent: 15,
   overloadPolicy: "suggest",
+  extractAgingPolicy: "off",
+  extractAgingReturnThreshold: 5,
+  extractAgingAgeDays: 30,
   dailyReviewBudget: 60,
   defaultDesiredRetention: 0.9,
   defaultTopicIntervalDays: 7,
@@ -457,6 +470,14 @@ export const PARKED_RESURFACE_AFTER_DAYS_MAX = 3650;
 export const CHRONIC_POSTPONE_THRESHOLD_MIN = 2;
 export const CHRONIC_POSTPONE_THRESHOLD_MAX = 50;
 
+/** Inclusive bounds for extract aging's returns-without-progress threshold (T121). */
+export const EXTRACT_AGING_RETURN_THRESHOLD_MIN = 1;
+export const EXTRACT_AGING_RETURN_THRESHOLD_MAX = 50;
+
+/** Inclusive bounds for extract aging's days-since-progress threshold (T121). */
+export const EXTRACT_AGING_AGE_DAYS_MIN = 1;
+export const EXTRACT_AGING_AGE_DAYS_MAX = 3650;
+
 /** Inclusive bounds for the weekly ledger/integrity cadence (T110). */
 export const WEEKLY_REVIEW_CADENCE_DAYS_MIN = 1;
 export const WEEKLY_REVIEW_CADENCE_DAYS_MAX = 90;
@@ -528,6 +549,11 @@ export function isOverloadPolicy(value: unknown): value is OverloadPolicy {
   return typeof value === "string" && (OVERLOAD_POLICIES as readonly string[]).includes(value);
 }
 
+/** Type guard for {@link ExtractAgingPolicy}. */
+export function isExtractAgingPolicy(value: unknown): value is ExtractAgingPolicy {
+  return typeof value === "string" && (EXTRACT_AGING_POLICIES as readonly string[]).includes(value);
+}
+
 /**
  * Coerce one arbitrary stored value into a valid setting of the given key,
  * falling back to the default when the stored value is missing or malformed.
@@ -560,6 +586,20 @@ export function coerceSettingValue<K extends keyof AppSettings>(
       ) as AppSettings[K];
     case "overloadPolicy":
       return (isOverloadPolicy(raw) ? raw : fallback) as AppSettings[K];
+    case "extractAgingPolicy":
+      return (isExtractAgingPolicy(raw) ? raw : fallback) as AppSettings[K];
+    case "extractAgingReturnThreshold":
+      return (
+        isFiniteNumber(raw) && raw > 0
+          ? clampInt(raw, EXTRACT_AGING_RETURN_THRESHOLD_MIN, EXTRACT_AGING_RETURN_THRESHOLD_MAX)
+          : fallback
+      ) as AppSettings[K];
+    case "extractAgingAgeDays":
+      return (
+        isFiniteNumber(raw) && raw > 0
+          ? clampInt(raw, EXTRACT_AGING_AGE_DAYS_MIN, EXTRACT_AGING_AGE_DAYS_MAX)
+          : fallback
+      ) as AppSettings[K];
     case "defaultDesiredRetention":
       return (
         isFiniteNumber(raw)
@@ -693,6 +733,18 @@ export function appSettingsFromStored(stored: Readonly<Record<string, unknown>>)
     ),
     dailyReviewBudget: legacyBudget,
     overloadPolicy: coerceSettingValue("overloadPolicy", stored[SETTINGS_KEYS.overloadPolicy]),
+    extractAgingPolicy: coerceSettingValue(
+      "extractAgingPolicy",
+      stored[SETTINGS_KEYS.extractAgingPolicy],
+    ),
+    extractAgingReturnThreshold: coerceSettingValue(
+      "extractAgingReturnThreshold",
+      stored[SETTINGS_KEYS.extractAgingReturnThreshold],
+    ),
+    extractAgingAgeDays: coerceSettingValue(
+      "extractAgingAgeDays",
+      stored[SETTINGS_KEYS.extractAgingAgeDays],
+    ),
     defaultDesiredRetention: coerceSettingValue(
       "defaultDesiredRetention",
       stored[SETTINGS_KEYS.defaultDesiredRetention],

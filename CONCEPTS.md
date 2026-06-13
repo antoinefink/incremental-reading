@@ -200,6 +200,12 @@ The opt-in form of Auto-postpone that evaluates the current local day automatica
 
 Standing auto-postpone is not owned by renderer clocks or wall-clock jobs. It writes a durable daily receipt when it moves work, and a day already evaluated by the policy must not be trimmed again unless a future policy explicitly defines re-evaluation.
 
+### Extract aging policy
+
+The opt-in process that moves repeatedly returned, unproductive Extracts out of the Due queue by demoting them to an honorable reference state instead of deleting them.
+
+Extract aging uses backend-owned stagnation and queue-eligibility evidence, writes a durable receipt when it acts automatically or by preview, and must remain reversible without treating the demotion as user-authored distillation progress.
+
 ### Auto-postpone receipt
 
 The daily explanation of an automatic Auto-postpone run, including what was moved, which budget impact remains, and the batch that can be targeted for undo.

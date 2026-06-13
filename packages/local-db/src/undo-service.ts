@@ -74,7 +74,9 @@ export interface UndoResult {
 
 export interface UndoBatchOptions {
   readonly requirePostponeOriginKind?: string;
+  readonly requireUpdateOriginKind?: string;
   readonly requireCurrentDueMatch?: boolean;
+  readonly requireCurrentReferenceFateMatch?: boolean;
   readonly restoredPayloadExtras?: Readonly<Record<string, unknown>>;
   readonly afterUndo?: (tx: TransactionClient) => void;
 }
@@ -206,6 +208,16 @@ export class UndoService {
         count: 0,
       };
     }
+    if (options.requireUpdateOriginKind && !isOwnedUpdateBatch(batch, options)) {
+      return {
+        undone: false,
+        opType: batch[0]?.opType ?? null,
+        elementId: batch[0]?.elementId ?? null,
+        label: "",
+        reason: "Batch is not owned by this receipt",
+        count: 0,
+      };
+    }
 
     let label = "";
     let undoneCount = 0;
@@ -213,6 +225,10 @@ export class UndoService {
     this.db.transaction((tx) => {
       if (options.requireCurrentDueMatch) {
         conflict = batch.some((op) => !this.currentDueMatchesAppliedWithin(tx, op));
+        if (conflict) return;
+      }
+      if (options.requireCurrentReferenceFateMatch) {
+        conflict = batch.some((op) => !this.currentReferenceFateMatchesAppliedWithin(tx, op));
         if (conflict) return;
       }
       for (const op of batch) {
@@ -230,7 +246,9 @@ export class UndoService {
         opType: batch[0]?.opType ?? null,
         elementId: batch[0]?.elementId ?? null,
         label: "",
-        reason: "Batch no longer matches current schedule",
+        reason: options.requireCurrentReferenceFateMatch
+          ? "Batch no longer matches current reference state"
+          : "Batch no longer matches current schedule",
         count: 0,
       };
     }
@@ -341,6 +359,33 @@ export class UndoService {
     return true;
   }
 
+  private currentReferenceFateMatchesAppliedWithin(tx: DbClient, op: ParsedOp): boolean {
+    if (op.opType !== "update_element" || !op.elementId) return false;
+    const patch = op.payload.patch;
+    if (typeof patch !== "object" || patch === null) return false;
+    const applied = patch as Record<string, unknown>;
+    if (applied.status !== "done") return false;
+    if ((applied.dueAt ?? null) !== null) return false;
+    if (applied.extractFate !== "reference") return false;
+    const element = tx
+      .select({
+        deletedAt: elements.deletedAt,
+        status: elements.status,
+        dueAt: elements.dueAt,
+        extractFate: elements.extractFate,
+      })
+      .from(elements)
+      .where(eq(elements.id, op.elementId))
+      .get();
+    return (
+      Boolean(element) &&
+      element?.deletedAt === null &&
+      element.status === "done" &&
+      (element.dueAt ?? null) === null &&
+      element.extractFate === "reference"
+    );
+  }
+
   private invertWithin(
     tx: DbClient,
     op: ParsedOp,
@@ -411,13 +456,17 @@ export class UndoService {
                   .where(eq(reviewStates.elementId, id))
                   .get()?.dueAt ?? null) as IsoTimestamp | null)
               : undefined;
+          const extras = {
+            ...restoredPayloadExtras,
+            ...(currentReviewDueAt !== undefined
+              ? { queueExit: true, prevReviewDueAt: currentReviewDueAt }
+              : {}),
+          };
           const el = this.elements.updateWithin(
             tx,
             id,
             prev as Record<string, never>,
-            currentReviewDueAt !== undefined
-              ? { extras: { queueExit: true, prevReviewDueAt: currentReviewDueAt } }
-              : undefined,
+            Object.keys(extras).length > 0 ? { extras } : undefined,
           );
           if (prevReviewDueAt !== undefined) {
             tx.update(reviewStates)
@@ -537,5 +586,20 @@ function isOwnedPostponeBatch(batch: readonly ParsedOp[], options: UndoBatchOpti
       op.opType === "reschedule_element" &&
       op.payload.postpone === true &&
       postponeOriginKind(op.payload) === options.requirePostponeOriginKind,
+  );
+}
+
+function updateOriginKind(payload: Record<string, unknown>): string | null {
+  const origin = payload.extractAgingOrigin;
+  if (!origin || typeof origin !== "object") return null;
+  const kind = (origin as Record<string, unknown>).kind;
+  return typeof kind === "string" ? kind : null;
+}
+
+function isOwnedUpdateBatch(batch: readonly ParsedOp[], options: UndoBatchOptions): boolean {
+  return batch.every(
+    (op) =>
+      op.opType === "update_element" &&
+      updateOriginKind(op.payload) === options.requireUpdateOriginKind,
   );
 }

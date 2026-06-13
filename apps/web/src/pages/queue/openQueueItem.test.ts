@@ -41,6 +41,7 @@ function queueItem(overrides: Partial<QueueItemSummary>): QueueItemSummary {
     fallowUntil: null,
     fallowReason: null,
     fallowTopicId: null,
+    extractAging: null,
     ...overrides,
   };
 }

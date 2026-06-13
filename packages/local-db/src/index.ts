@@ -184,6 +184,26 @@ export {
   type UpsertEmbeddingInput,
 } from "./embedding-repository";
 export {
+  EXTRACT_AGING_POLICY_STATE_KEY,
+  EXTRACT_AGING_SWEEP_LIMIT,
+  type ExtractAgingApplyResult,
+  type ExtractAgingApplySkipReason,
+  type ExtractAgingCandidate,
+  type ExtractAgingMaterializeResult,
+  ExtractAgingPolicyService,
+  type ExtractAgingPreview,
+  type ExtractAgingReceipt,
+  type ExtractAgingReceiptStatus,
+  type ExtractAgingSkippedCandidate,
+  type ExtractAgingUndoResult,
+} from "./extract-aging-policy-service";
+export {
+  type ExtractAgeBand,
+  type ExtractAgingProjection,
+  type ExtractAgingThresholdSnapshot,
+  projectExtractAging,
+} from "./extract-aging-projection";
+export {
   EXTRACT_STAGES,
   type ExtractActionResult,
   ExtractService,
@@ -202,6 +222,7 @@ export {
   DEFAULT_EXTRACT_STAGNATION_LIMIT,
   type ExtractStagnationOptions,
   ExtractStagnationQuery,
+  type ExtractStagnationSignalRow,
   type ExtractStagnationSummary,
   type StagnantExtractRef,
   type StagnantExtractRow,

@@ -42,6 +42,7 @@ import {
   type SourceRetirementSuggestion,
   scoreQueueItems,
 } from "@interleave/scheduler";
+import { type ExtractAgingProjection, projectExtractAging } from "./extract-aging-projection";
 import type { Repositories } from "./index";
 import type { CurrentScheduleReason } from "./operation-log-repository";
 import { isQueueActionableStatus } from "./queue-repository";
@@ -162,6 +163,8 @@ export interface QueueItemSummary {
   readonly fallowReason: string | null;
   /** The topic whose fallow state explains this row, when present. */
   readonly fallowTopicId: string | null;
+  /** Backend-owned extract aging projection; null for non-extract rows or disabled policy. */
+  readonly extractAging: ExtractAgingProjection | null;
 }
 
 /** The filters a queue read accepts. All optional; absent = no narrowing. */
@@ -488,7 +491,11 @@ export class QueueQuery {
     // SECOND PASS (T100): now that the list is scored, filtered, and LIMITED, decorate
     // ONLY the surviving ≤limit rows with the expensive display-only fields (source
     // title/author, card kind, attention postpone count) — at most `limit` (≈50) reads.
-    rows = rows.map((r) => this.decorateDisplay(r, asOfMs));
+    const aging = this.extractAgingProjectionMap(
+      asOfIso,
+      rows.filter((row) => row.type === "extract").map((row) => row.id as ElementId),
+    );
+    rows = rows.map((r) => this.decorateDisplay(r, asOfMs, aging));
 
     // The budget gauge counts the items the user actually faces today — the FULL filtered
     // due set (so a status/concept filter narrows the gauge with the list).
@@ -509,9 +516,14 @@ export class QueueQuery {
     const element = this.repos.elements.findById(id);
     if (!element || element.deletedAt) return null;
     const asOfMs = Date.parse(asOf ?? (new Date().toISOString() as IsoTimestamp));
-    return element.type === "card"
-      ? this.toCardSummary(element, asOfMs)
-      : this.toAttentionSummary(element, asOfMs);
+    const row =
+      element.type === "card"
+        ? this.toCardSummary(element, asOfMs)
+        : this.toAttentionSummary(element, asOfMs);
+    if (element.type !== "extract") return row;
+    const asOfIso = asOf ?? (new Date(asOfMs).toISOString() as IsoTimestamp);
+    const aging = this.extractAgingProjectionMap(asOfIso, [element.id]);
+    return { ...row, extractAging: aging.get(element.id) ?? null };
   }
 
   /**
@@ -597,9 +609,12 @@ export class QueueQuery {
       timeCostSummary = queueTimeCostSummaryWithItem(timeCostSummary, element);
     }
     let rows = rowsForScoring;
-    rows = scoreQueueItems(rows, { mode, asOf: asOfIso }).map((row) =>
-      this.decorateDisplay(row, asOfMs),
+    rows = scoreQueueItems(rows, { mode, asOf: asOfIso });
+    const aging = this.extractAgingProjectionMap(
+      asOfIso,
+      rows.filter((row) => row.type === "extract").map((row) => row.id as ElementId),
     );
+    rows = rows.map((row) => this.decorateDisplay(row, asOfMs, aging));
     return { items: rows, timeCostSummary };
   }
 
@@ -780,6 +795,7 @@ export class QueueQuery {
       fallowUntil: fallow?.until ?? null,
       fallowReason: fallow?.reason ?? null,
       fallowTopicId: fallow?.topicId ?? null,
+      extractAging: null,
     };
   }
 
@@ -813,6 +829,7 @@ export class QueueQuery {
     const scheduleProjection = batch
       ? null
       : this.repos.operationLog.currentScheduleProjection(element.id, element.dueAt);
+    const postponed = scheduleProjection?.effectivePostponeCount ?? 0;
     return {
       id: element.id,
       type: element.type,
@@ -829,7 +846,7 @@ export class QueueQuery {
         fsrsState: null,
         lapses: null,
         stage: element.stage,
-        postponed: scheduleProjection?.effectivePostponeCount ?? 0,
+        postponed,
         scheduleReason: scheduleProjection?.reason ?? null,
         retirementSuggestion:
           !batch && element.type === "source"
@@ -866,6 +883,7 @@ export class QueueQuery {
       fallowUntil: fallow?.until ?? null,
       fallowReason: fallow?.reason ?? null,
       fallowTopicId: fallow?.topicId ?? null,
+      extractAging: null,
     };
   }
 
@@ -876,7 +894,11 @@ export class QueueQuery {
    * on ONLY the ≤limit rows that survive the score+filter+limit, so these per-row
    * reads run at most `limit` times instead of once per due element.
    */
-  private decorateDisplay(row: QueueItemSummary, asOfMs: number): QueueItemSummary {
+  private decorateDisplay(
+    row: QueueItemSummary,
+    asOfMs: number,
+    aging: ReadonlyMap<string, ExtractAgingProjection> = new Map(),
+  ): QueueItemSummary {
     const element = this.repos.elements.findById(row.id as ElementId);
     if (!element) return row;
     const { sourceTitle, author } = this.sourceContext(element);
@@ -906,6 +928,7 @@ export class QueueQuery {
       ...fallowFields,
       sourceTitle,
       author,
+      extractAging: aging.get(row.id) ?? null,
       schedulerSignals: {
         ...row.schedulerSignals,
         postponed: scheduleProjection.effectivePostponeCount,
@@ -916,6 +939,31 @@ export class QueueQuery {
             : null,
       },
     };
+  }
+
+  private extractAgingProjectionMap(
+    asOf: IsoTimestamp,
+    ids: readonly ElementId[],
+  ): ReadonlyMap<string, ExtractAgingProjection> {
+    if (ids.length === 0) return new Map();
+    const settings = this.repos.settings.getAppSettings();
+    if (settings.extractAgingPolicy === "off") return new Map();
+    const wanted = new Set(ids);
+    const rows = this.repos.extractStagnation.listSignalRows(asOf, {
+      postponeThreshold: settings.extractAgingReturnThreshold,
+      staleDays: settings.extractAgingAgeDays,
+    });
+    return new Map(
+      rows
+        .filter((row) => wanted.has(row.extract.id as ElementId))
+        .map((row) => [
+          row.extract.id,
+          projectExtractAging(row.verdict.daysSinceProgress, row.signals.postponeCount, {
+            returnThreshold: settings.extractAgingReturnThreshold,
+            ageDays: settings.extractAgingAgeDays,
+          }),
+        ]),
+    );
   }
 
   private fallowContextFor(element: Element, asOfMs: number): FallowContext | null {

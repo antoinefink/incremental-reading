@@ -554,7 +554,7 @@ describe("DbService", () => {
     const svc = Object.create(DbService.prototype) as DbService;
     const materialize = vi.fn();
     Object.defineProperty(svc, "sessionPlanQuery", { value: { preview } });
-    Object.defineProperty(svc, "materializeStandingAutoPostponeToday", { value: materialize });
+    Object.defineProperty(svc, "materializeDailyPoliciesToday", { value: materialize });
 
     svc.previewSessionPlan({
       targetMinutes: 25,
@@ -823,6 +823,9 @@ describe("DbService", () => {
       overloadPolicy: "suggest",
       parkedResurfaceAfterDays: 90,
       chronicPostponeThreshold: 5,
+      extractAgingPolicy: "off",
+      extractAgingReturnThreshold: 5,
+      extractAgingAgeDays: 30,
       weeklyReviewEnabled: true,
       weeklyReviewCadenceDays: 7,
       adaptiveAttentionIntervals: true,

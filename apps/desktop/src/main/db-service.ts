@@ -74,6 +74,10 @@ import {
   createRepositories,
   DailyWorkQuery,
   type DocumentMark,
+  type ExtractAgingApplyResult,
+  ExtractAgingPolicyService,
+  type ExtractAgingPreview,
+  type ExtractAgingUndoResult,
   ExtractionService,
   ExtractService,
   ExtractStagnationQuery,
@@ -125,9 +129,11 @@ import {
 } from "@interleave/scheduler";
 import {
   CI_SCALE_PROFILE,
+  type ExtractAgingCollection,
   type LargeSeedStats,
   type MaintenanceCollection,
   seedDemoCollection,
+  seedExtractAgingCollection,
   seedLargeCollection,
   seedMaintenanceCollection,
 } from "@interleave/testing";
@@ -232,6 +238,9 @@ import type {
   ElementsSoftDeleteSubtreeRequest,
   ElementsSoftDeleteSubtreeResult,
   ExtractActionSummary,
+  ExtractAgingApplyRequest,
+  ExtractAgingPreviewRequest,
+  ExtractAgingUndoReceiptRequest,
   ExtractionCreateRequest,
   ExtractionCreateResult,
   ExtractStagnationListRequest,
@@ -570,6 +579,7 @@ export class DbService {
   private sourceYield: SourceYieldQuery | null = null;
   /** The extract-stagnation scan (T084) — extracts that keep returning without progressing. */
   private extractStagnation: ExtractStagnationQuery | null = null;
+  private extractAging: ExtractAgingPolicyService | null = null;
   private inboxQuery: InboxQuery | null = null;
   private queueAction: QueueActionService | null = null;
   private blockProcessing: BlockProcessingService | null = null;
@@ -874,6 +884,7 @@ export class DbService {
     // advanced, no children, postponed repeatedly), with rewrite/convert/postpone/
     // delete suggestions. No mutation, no `operation_log`, no schedule change.
     this.extractStagnation = new ExtractStagnationQuery(this.handle.db);
+    this.extractAging = new ExtractAgingPolicyService(this.handle.db, this.repositories);
     this.queueAction = new QueueActionService(this.handle.db);
     this.blockProcessing = new BlockProcessingService(this.handle.db);
     this.dailyWork = new DailyWorkQuery(this.repositories, this.blockProcessing);
@@ -949,6 +960,7 @@ export class DbService {
     this.blockProcessing = null;
     this.autoPostpone = null;
     this.standingAutoPostpone = null;
+    this.extractAging = null;
     this.recoveryMode = null;
     this.inboxQuery = null;
     this.extraction = null;
@@ -1333,7 +1345,7 @@ export class DbService {
    * separate inside the read.
    */
   listQueue(request: QueueListRequest): QueueListResult {
-    this.materializeStandingAutoPostponeToday();
+    if (!request.asOf) this.materializeDailyPoliciesToday();
     const asOf = (request.asOf as IsoTimestamp | undefined) ?? nowIso();
     const settings = this.repos.settings.getAppSettings();
     const data = this.queueQuery.list({
@@ -1404,7 +1416,7 @@ export class DbService {
    * may converge today's queue before the read, but renderer `asOf` remains read-only.
    */
   previewSessionPlan(request: QueueSessionPlanRequest): QueueSessionPlanResult {
-    if (!request.asOf) this.materializeStandingAutoPostponeToday();
+    if (!request.asOf) this.materializeDailyPoliciesToday();
     const plan = this.sessionPlanQuery.preview({
       targetMinutes: request.targetMinutes,
       ...queueFiltersFromRequest(request),
@@ -1441,7 +1453,7 @@ export class DbService {
   previewConversionSession(
     request: ConversionSessionPreviewRequest = {},
   ): ConversionSessionPreviewResult {
-    this.materializeStandingAutoPostponeToday();
+    this.materializeDailyPoliciesToday();
     if (request.sessionId) {
       const snapshot = this.requireConversionSnapshot(request.sessionId);
       const current = this.currentConversionItems(snapshot);
@@ -1796,8 +1808,35 @@ export class DbService {
     return this.standingAutoPostpone;
   }
 
-  private materializeStandingAutoPostponeToday(): void {
+  private get extractAgingPolicyService(): ExtractAgingPolicyService {
+    if (!this.extractAging) {
+      throw new Error("DbService: database is not open");
+    }
+    return this.extractAging;
+  }
+
+  private materializeDailyPoliciesToday(): void {
+    this.extractAgingPolicyService.materializeToday();
     this.standingAutoPostponeService.materializeToday();
+  }
+
+  previewExtractAging(request: ExtractAgingPreviewRequest = {}): ExtractAgingPreview {
+    return this.extractAgingPolicyService.preview({
+      ...(request.asOf ? { asOf: request.asOf as IsoTimestamp } : {}),
+      ...(request.limit ? { limit: request.limit } : {}),
+    });
+  }
+
+  applyExtractAging(request: ExtractAgingApplyRequest = {}): ExtractAgingApplyResult {
+    return this.extractAgingPolicyService.applyPreview({
+      ...(request.asOf ? { asOf: request.asOf as IsoTimestamp } : {}),
+      ...(request.ids ? { ids: request.ids } : {}),
+      policy: "suggest",
+    });
+  }
+
+  undoExtractAgingReceipt(request: ExtractAgingUndoReceiptRequest): ExtractAgingUndoResult {
+    return this.extractAgingPolicyService.undoReceipt(request.batchId);
   }
 
   /**
@@ -5991,9 +6030,12 @@ export class DbService {
     if (!this.dailyWork) {
       throw new Error("DbService: database is not open");
     }
-    this.materializeStandingAutoPostponeToday();
+    if (!request?.asOf) this.materializeDailyPoliciesToday();
     const asOf = (request?.asOf ?? nowIso()) as IsoTimestamp;
-    return this.dailyWork.summary(asOf);
+    return {
+      ...this.dailyWork.summary(asOf),
+      extractAgingReceipts: this.extractAgingPolicyService.receiptsFor(asOf),
+    };
   }
 
   undoDailyWorkAutoPostponeReceipt(
@@ -6010,6 +6052,7 @@ export class DbService {
   }
 
   getWeeklyReviewSummary(request?: WeeklyReviewSummaryRequest): WeeklyReviewSummaryResult {
+    if (!request?.asOf) this.materializeDailyPoliciesToday();
     const asOf = (request?.asOf ?? nowIso()) as IsoTimestamp;
     return this.repos.weeklyReview.summary(asOf);
   }
@@ -6184,6 +6227,17 @@ export class DbService {
     const repos = this.repos;
     if (repos.elements.listByType("source").length > 0) return null;
     return seedMaintenanceCollection(repos, this.require().db);
+  }
+
+  /**
+   * Populate an EMPTY database with the T121 extract-aging fixture: one old, due,
+   * repeatedly returned extract. A no-op when any element exists. Opt-in via
+   * `INTERLEAVE_SEED_EXTRACT_AGING`; production never seeds.
+   */
+  seedExtractAgingIfEmpty(): ExtractAgingCollection | null {
+    const repos = this.repos;
+    if (repos.elements.listByType("source").length > 0) return null;
+    return seedExtractAgingCollection(repos, this.require().db);
   }
 
   /**

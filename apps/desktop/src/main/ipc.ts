@@ -68,6 +68,9 @@ import {
   ElementsCountDescendantsRequestSchema,
   ElementsSetPriorityRequestSchema,
   ElementsSoftDeleteSubtreeRequestSchema,
+  ExtractAgingApplyRequestSchema,
+  ExtractAgingPreviewRequestSchema,
+  ExtractAgingUndoReceiptRequestSchema,
   ExtractionCreateRequestSchema,
   ExtractStagnationListRequestSchema,
   ExtractsDeleteRequestSchema,
@@ -1477,6 +1480,21 @@ export function registerIpcHandlers(dbService: DbService, context?: IpcHandlerCo
   ipcMain.handle(IPC_CHANNELS.dailyWorkUndoAutoPostponeReceipt, (_event, rawRequest: unknown) => {
     const request = DailyWorkUndoAutoPostponeReceiptRequestSchema.parse(rawRequest);
     return dbService.undoDailyWorkAutoPostponeReceipt(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.extractAgingPreview, (_event, rawRequest: unknown) => {
+    const request = ExtractAgingPreviewRequestSchema.parse(rawRequest);
+    return dbService.previewExtractAging(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.extractAgingApply, (_event, rawRequest: unknown) => {
+    const request = ExtractAgingApplyRequestSchema.parse(rawRequest);
+    return dbService.applyExtractAging(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.extractAgingUndoReceipt, (_event, rawRequest: unknown) => {
+    const request = ExtractAgingUndoReceiptRequestSchema.parse(rawRequest);
+    return dbService.undoExtractAgingReceipt(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.weeklyReviewSummary, (_event, rawRequest: unknown) => {

@@ -33,6 +33,7 @@ const h = vi.hoisted(() => {
     fallowUntil: null,
     fallowReason: null,
     fallowTopicId: null,
+    extractAging: null,
   } as const;
   const cardRow: QueueItemSummary = {
     id: "card-1",
@@ -298,6 +299,7 @@ const h = vi.hoisted(() => {
     recommendedAction: "process_due_queue",
     graduationEvents: [],
     autoPostponeReceipt: null,
+    extractAgingReceipts: [],
   };
   const priorityIntegrity: PriorityIntegrityGetResult = {
     asOf: "2026-05-30T18:00:00.000Z",

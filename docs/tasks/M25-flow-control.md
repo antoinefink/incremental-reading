@@ -161,7 +161,8 @@ approve/edit/skip with the keyboard, optionally pre-drafted by AI.
 # T121 — Extract aging policy
 
 - **Milestone:** M25 — Extract-pipeline flow control
-- **Status:** `[ ]` not started
+- **Status:** `[x]` complete
+- **Commit:** `this commit`
 - **Depends on:** T084, T104
 - **Roadmap line:** extracts crossing an age/unproductive-returns threshold auto-demote to a
   recoverable T104 reference state via batched, op-logged, undoable sweeps — opt-in policy with
@@ -186,14 +187,14 @@ soft-delete/undo house invariants make this safe to automate in a way competitor
 
 ## Deliverables
 
-- [ ] Policy setting: off / suggest / automatic, plus thresholds (returns-without-progress
+- [x] Policy setting: off / suggest / automatic, plus thresholds (returns-without-progress
       count and/or age; defaults conservative, e.g. 5 unproductive returns).
-- [ ] Sweep mechanics: candidates from the stagnation predicate + thresholds → preview list →
+- [x] Sweep mechanics: candidates from the stagnation predicate + thresholds → preview list →
       batched demotion to `reference` with one `batchId`, receipt line (daily summary/weekly
       session), one-tap undo.
-- [ ] Age visibility: age/returns bands on extract rows (list + queue inventory), so pressure is
+- [x] Age visibility: age/returns bands on extract rows (list + queue inventory), so pressure is
       legible before the sweep fires.
-- [ ] Tests: unit (candidate selection respects T104 fates — synthesized/reference extracts are
+- [x] Tests: unit (candidate selection respects T104 fates — synthesized/reference extracts are
       never candidates; batch undo symmetric); e2e — automatic policy demotes a fixture
       graveyard with receipt; undo restores.
 
@@ -207,6 +208,28 @@ soft-delete/undo house invariants make this safe to automate in a way competitor
 
 - Pair the nudge with capacity, not guilt: the receipt should link to a T120 conversion session
   ("or convert them now") — drain or demote, both one tap.
+- Completion notes: T121 adds typed `extractAgingPolicy`, return-threshold, and age-threshold
+  settings, defaulting the policy to `off`. The local database policy service scans the full
+  stagnation signal universe with an extract-aging threshold snapshot, filters out terminal fates,
+  atomic statements, children, synthesis-referenced extracts, non-actionable rows, and future-due
+  rows, then revalidates every selected id inside the apply transaction. Applies demote eligible
+  extracts to T104 `reference` with `extractAgingOrigin` metadata under one `batchId`; receipts are
+  keyed by batch so multiple same-day suggest sweeps remain undoable. Receipt undo is targeted and
+  conflict-aware: it requires policy origin metadata, refuses rows no longer matching the system
+  reference demotion, and writes receipt-restore metadata so generic undo cannot partially reverse a
+  restored receipt batch. Trusted current-day Queue, Home, daily-work, and weekly-review reads
+  materialize automatic aging before standing auto-postpone; explicit historical `asOf` reads stay
+  read-only.
+- UI notes: Queue and Home render daily extract-aging receipts with one-tap undo. Maintenance
+  stagnant extracts now shows a sweep banner driven by the backend preview and applies only the
+  preview's candidate ids. Queue extract rows render backend-owned age/return bands.
+- Verification: `pnpm lint`; `pnpm typecheck`; `pnpm test`;
+  `pnpm e2e tests/electron/extract-aging-policy.spec.ts tests/electron/extract-stagnation.spec.ts tests/electron/auto-postpone.spec.ts`.
+- Learning captured in
+  [`docs/solutions/architecture-patterns/extract-aging-policy-receipt-demotion.md`](../solutions/architecture-patterns/extract-aging-policy-receipt-demotion.md).
+- Downstream notes: T122 can reduce future aging pressure by classifying card-ready captures as
+  atomic statements at birth. T120 remains the drain-now path for stale but still card-worthy
+  extracts before users let the policy demote them to reference.
 
 ---
 

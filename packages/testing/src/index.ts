@@ -16,10 +16,12 @@ export { createInMemoryDb } from "./db";
 export {
   DEMO_FIXTURES,
   type DemoCollection,
+  type ExtractAgingCollection,
   type MaintenanceCollection,
   type SeededConcepts,
   type SeedMaintenanceOptions,
   seedDemoCollection,
+  seedExtractAgingCollection,
   seedMaintenanceCollection,
 } from "./factories";
 /**

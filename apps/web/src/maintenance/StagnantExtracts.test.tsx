@@ -69,6 +69,8 @@ const h = vi.hoisted(() => {
     fallowTopic: vi.fn(),
     setExtractFate: vi.fn(),
     reactivateExtractFate: vi.fn(),
+    previewExtractAging: vi.fn(),
+    applyExtractAging: vi.fn(),
     navigate: vi.fn(),
   };
 });
@@ -94,6 +96,8 @@ vi.mock("../lib/appApi", async () => {
       fallowTopic: h.fallowTopic,
       setExtractFate: h.setExtractFate,
       reactivateExtractFate: h.reactivateExtractFate,
+      previewExtractAging: h.previewExtractAging,
+      applyExtractAging: h.applyExtractAging,
     },
   };
 });
@@ -120,6 +124,39 @@ beforeEach(() => {
   h.fallowTopic.mockResolvedValue({ applied: 1, skipped: [], batchId: "fb" });
   h.setExtractFate.mockResolvedValue({});
   h.reactivateExtractFate.mockResolvedValue({});
+  h.previewExtractAging.mockResolvedValue({
+    asOf: "2026-06-01T12:00:00.000Z",
+    policy: "suggest",
+    thresholds: { returnThreshold: 5, ageDays: 30, sweepLimit: 50 },
+    candidates: [
+      {
+        id: "ex-rewrite",
+        title: "A raw, half-formed thought",
+        stage: "raw_extract",
+        status: "active",
+        priority: 0.625,
+        dueAt: "2026-05-10T00:00:00.000Z",
+        age: {
+          band: "stale",
+          daysSinceProgress: 65,
+          postponeCount: 5,
+          thresholdReached: true,
+        },
+        reasons: ["postponed-repeatedly", "no-progress", "no-children", "stale"],
+        suggestion: "rewrite",
+      },
+    ],
+    candidateCount: 1,
+    remainingCandidateCount: 0,
+    receipts: [],
+  });
+  h.applyExtractAging.mockResolvedValue({
+    batchId: "batch-aging-1",
+    demoted: 1,
+    skipped: [],
+    remainingCandidateCount: 0,
+    receipt: null,
+  });
 });
 
 describe("StagnantExtracts", () => {
@@ -142,6 +179,16 @@ describe("StagnantExtracts", () => {
         "Rewrite",
       );
     }
+  });
+
+  it("shows and applies the extract aging sweep preview", async () => {
+    render(<StagnantExtracts />);
+
+    expect(await screen.findByTestId("extract-aging-sweep")).toHaveTextContent("1 eligible");
+    fireEvent.click(screen.getByTestId("extract-aging-apply"));
+
+    await waitFor(() => expect(h.applyExtractAging).toHaveBeenCalledWith({ ids: ["ex-rewrite"] }));
+    expect(h.getExtractStagnation).toHaveBeenCalledTimes(2);
   });
 
   it("highlights the suggested action (rewrite row → Rewrite button is suggested)", async () => {

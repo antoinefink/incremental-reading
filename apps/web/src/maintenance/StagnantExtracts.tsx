@@ -33,6 +33,7 @@ import { Snackbar } from "../components/Snackbar";
 import "../components/inspector/inspector.css";
 import {
   appApi,
+  type ExtractAgingPreviewResult,
   isDesktop,
   type StagnantExtractRow,
   type StagnationReason,
@@ -98,6 +99,9 @@ export function StagnantExtracts() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [agingPreview, setAgingPreview] = useState<ExtractAgingPreviewResult | null>(null);
+  const [agingBusy, setAgingBusy] = useState(false);
+  const [agingMessage, setAgingMessage] = useState("");
 
   const load = useCallback(async () => {
     if (!isDesktop()) {
@@ -105,8 +109,12 @@ export function StagnantExtracts() {
       return;
     }
     try {
-      const res = await appApi.getExtractStagnation(asOf ? { asOf } : undefined);
+      const [res, aging] = await Promise.all([
+        appApi.getExtractStagnation(asOf ? { asOf } : undefined),
+        appApi.previewExtractAging(asOf ? { asOf } : undefined),
+      ]);
       setRows(res.rows);
+      setAgingPreview(aging);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -153,6 +161,30 @@ export function StagnantExtracts() {
     },
     [load],
   );
+
+  const applyExtractAgingSweep = useCallback(async () => {
+    setAgingBusy(true);
+    setAgingMessage("Returning stale extracts to reference.");
+    setError(null);
+    try {
+      const ids = agingPreview?.candidates.map((candidate) => candidate.id) ?? [];
+      const result = await appApi.applyExtractAging({
+        ...(asOf ? { asOf } : {}),
+        ids,
+      });
+      setAgingMessage(
+        result.demoted > 0
+          ? `${result.demoted} extract${result.demoted === 1 ? "" : "s"} returned to reference.`
+          : "No eligible extracts changed.",
+      );
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setAgingMessage("Could not apply extract aging sweep.");
+    } finally {
+      setAgingBusy(false);
+    }
+  }, [agingPreview, asOf, load]);
 
   // Descendant-aware delete (T135 / U7): a leaf deletes quietly; a stagnant extract
   // that still anchors live descendants opens the intent menu instead of a silent prune.
@@ -208,6 +240,37 @@ export function StagnantExtracts() {
         <p className="pq-error" data-testid="stagnant-error" style={{ padding: "8px 24px" }}>
           {error}
         </p>
+      ) : null}
+
+      {agingPreview && agingPreview.policy !== "off" ? (
+        <div className="se-aging-sweep" data-testid="extract-aging-sweep">
+          <div className="se-aging-sweep__copy">
+            <div className="se-aging-sweep__title">
+              <Icon name="clock" size={14} />
+              Extract aging sweep
+            </div>
+            <div className="se-aging-sweep__meta">
+              {agingPreview.candidateCount} eligible after {agingPreview.thresholds.returnThreshold}{" "}
+              returns / {agingPreview.thresholds.ageDays} days
+              {agingPreview.remainingCandidateCount > 0
+                ? `, ${agingPreview.remainingCandidateCount} beyond this batch`
+                : ""}
+            </div>
+            <div className="sr-only" role="status" aria-live="polite">
+              {agingMessage}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="rv-repair__btn se-btn--suggested"
+            data-testid="extract-aging-apply"
+            disabled={agingBusy || agingPreview.candidates.length === 0}
+            onClick={() => void applyExtractAgingSweep()}
+          >
+            <Icon name="bookmark" size={14} />
+            {agingBusy ? "Applying" : "Return batch to reference"}
+          </button>
+        </div>
       ) : null}
 
       <div className="lc-list">

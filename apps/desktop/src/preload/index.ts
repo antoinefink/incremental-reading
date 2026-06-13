@@ -66,6 +66,9 @@ import type {
   ElementsCountDescendantsRequest,
   ElementsSetPriorityRequest,
   ElementsSoftDeleteSubtreeRequest,
+  ExtractAgingApplyRequest,
+  ExtractAgingPreviewRequest,
+  ExtractAgingUndoReceiptRequest,
   ExtractionCreateRequest,
   ExtractStagnationListRequest,
   ExtractsDeleteRequest,
@@ -528,6 +531,14 @@ const appApi: AppApi = {
       ipcRenderer.invoke(IPC_CHANNELS.dailyWorkAckGraduationEvents, request ?? {}),
     undoAutoPostponeReceipt: (request: DailyWorkUndoAutoPostponeReceiptRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.dailyWorkUndoAutoPostponeReceipt, request),
+  },
+  extractAging: {
+    preview: (request?: ExtractAgingPreviewRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.extractAgingPreview, request ?? {}),
+    apply: (request?: ExtractAgingApplyRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.extractAgingApply, request ?? {}),
+    undoReceipt: (request: ExtractAgingUndoReceiptRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.extractAgingUndoReceipt, request),
   },
   weeklyReview: {
     summary: (request?: WeeklyReviewSummaryRequest) =>

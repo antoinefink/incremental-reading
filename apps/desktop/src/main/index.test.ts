@@ -82,6 +82,7 @@ async function loadIndex(options: {
     open: vi.fn(),
     seedIfEmpty: vi.fn(() => false),
     seedMaintenanceIfEmpty: vi.fn(() => null),
+    seedExtractAgingIfEmpty: vi.fn(() => null),
     seedScaleIfEmpty: vi.fn(() => null),
     updateSetting: vi.fn(),
     close: vi.fn(),
@@ -382,6 +383,18 @@ describe("main entrypoint", () => {
     expect(harness.automaticBackupService.stop).toHaveBeenCalledOnce();
     expect(harness.disposeIpc).toHaveBeenCalledOnce();
     expect(harness.dbService.close).toHaveBeenCalledOnce();
+  });
+
+  it("seeds the extract-aging E2E fixture only when explicitly requested", async () => {
+    const harness = await loadIndex({
+      gotLock: true,
+      env: { INTERLEAVE_SEED_EXTRACT_AGING: "1" },
+    });
+
+    expect(harness.dbService.seedExtractAgingIfEmpty).toHaveBeenCalledOnce();
+    expect(harness.dbService.seedIfEmpty).not.toHaveBeenCalled();
+    expect(harness.dbService.seedMaintenanceIfEmpty).not.toHaveBeenCalled();
+    expect(harness.dbService.seedScaleIfEmpty).not.toHaveBeenCalled();
   });
 
   it("never honors VITE_DEV_SERVER_URL in packaged mode", async () => {

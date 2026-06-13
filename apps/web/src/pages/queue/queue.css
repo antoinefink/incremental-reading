@@ -408,6 +408,25 @@
 .qitem__sub i {
   font-style: italic;
 }
+.extract-age-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--r-full);
+  color: var(--text-2);
+  background: var(--surface-2);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+.extract-age-chip--stale,
+.extract-age-chip--graveyard {
+  color: var(--warn);
+  border-color: color-mix(in oklch, var(--warn) 42%, var(--border));
+  background: var(--warn-soft);
+}
 .qitem__action {
   display: flex;
   align-items: center;

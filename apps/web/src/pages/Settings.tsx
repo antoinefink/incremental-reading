@@ -69,6 +69,9 @@ const FALLBACK_SETTINGS: RendererSettings = {
   dailyBudgetMinutes: 60,
   distillationQuotaPercent: 15,
   overloadPolicy: "suggest",
+  extractAgingPolicy: "off",
+  extractAgingReturnThreshold: 5,
+  extractAgingAgeDays: 30,
   dailyReviewBudget: 60,
   defaultDesiredRetention: 0.9,
   defaultTopicIntervalDays: 7,
@@ -130,6 +133,18 @@ const OVERLOAD_POLICY_OPTIONS: { value: AppSettings["overloadPolicy"]; label: st
   { value: "suggest", label: "Suggest" },
   { value: "automatic", label: "Automatic" },
 ];
+const EXTRACT_AGING_POLICY_OPTIONS: {
+  value: AppSettings["extractAgingPolicy"];
+  label: string;
+}[] = [
+  { value: "off", label: "Off" },
+  { value: "suggest", label: "Suggest" },
+  { value: "automatic", label: "Automatic" },
+];
+const EXTRACT_AGING_RETURN_THRESHOLD_MIN = 1;
+const EXTRACT_AGING_RETURN_THRESHOLD_MAX = 50;
+const EXTRACT_AGING_AGE_DAYS_MIN = 1;
+const EXTRACT_AGING_AGE_DAYS_MAX = 3650;
 const KEYBOARD_LAYOUTS: { value: AppSettings["keyboardLayout"]; label: string }[] = [
   { value: "qwerty", label: "QWERTY" },
   { value: "dvorak", label: "Dvorak" },
@@ -873,6 +888,7 @@ export function Settings() {
   const [pairingError, setPairingError] = useState<string | null>(null);
   const [tokenCopied, setTokenCopied] = useState(false);
   const [tokenRevealed, setTokenRevealed] = useState(false);
+  const [confirmExtractAgingAutomatic, setConfirmExtractAgingAutomatic] = useState(false);
 
   const loadBackupArtifacts = useCallback(async () => {
     const requestId = backupListRequestId.current + 1;
@@ -1371,6 +1387,87 @@ export function Settings() {
             options={OVERLOAD_POLICY_OPTIONS}
             onChange={(overloadPolicy) => void patch({ overloadPolicy })}
           />
+        </SettingRow>
+
+        <SettingRow
+          label="Extract aging"
+          hint={
+            s.extractAgingPolicy === "automatic"
+              ? "Once per local day, due stagnant extracts that pass the return threshold are moved to reference before daily queue materialization."
+              : s.extractAgingPolicy === "suggest"
+                ? "Show a manual sweep for due extracts that have been postponed repeatedly without progress."
+                : "Extracts keep returning until you process them manually."
+          }
+        >
+          <div className="flex max-w-md flex-col items-end gap-3">
+            <Segmented
+              name="setting-extract-aging-policy"
+              value={confirmExtractAgingAutomatic ? "automatic" : s.extractAgingPolicy}
+              options={EXTRACT_AGING_POLICY_OPTIONS}
+              onChange={(extractAgingPolicy) => {
+                if (extractAgingPolicy === "automatic" && s.extractAgingPolicy !== "automatic") {
+                  setConfirmExtractAgingAutomatic(true);
+                  return;
+                }
+                setConfirmExtractAgingAutomatic(false);
+                void patch({ extractAgingPolicy });
+              }}
+            />
+            {confirmExtractAgingAutomatic ? (
+              <div className="flex items-center gap-2 rounded-md border border-border bg-surface-2 px-3 py-2 text-right text-sm">
+                <span className="text-text-2">
+                  Enable a daily automatic reference sweep for stale extracts?
+                </span>
+                <button
+                  type="button"
+                  className="inline-flex items-center rounded-md border border-accent-soft-bd bg-accent-soft px-2.5 py-1 font-medium text-accent-text"
+                  onClick={() => {
+                    setConfirmExtractAgingAutomatic(false);
+                    void patch({ extractAgingPolicy: "automatic" });
+                  }}
+                >
+                  Enable
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center rounded-md border border-border bg-surface px-2.5 py-1 font-medium text-text-2 hover:text-text"
+                  onClick={() => setConfirmExtractAgingAutomatic(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : null}
+            <div className="flex flex-wrap justify-end gap-3">
+              <label className="flex items-center gap-2 text-sm text-text-2">
+                <span>Returns</span>
+                <input
+                  type="number"
+                  min={EXTRACT_AGING_RETURN_THRESHOLD_MIN}
+                  max={EXTRACT_AGING_RETURN_THRESHOLD_MAX}
+                  step={1}
+                  value={s.extractAgingReturnThreshold}
+                  data-testid="setting-extract-aging-threshold"
+                  onChange={(e) =>
+                    void patch({ extractAgingReturnThreshold: Number(e.target.value) })
+                  }
+                  className="w-20 rounded-md border border-border bg-surface px-2 py-1 text-right font-mono font-semibold text-sm text-text"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-sm text-text-2">
+                <span>Days</span>
+                <input
+                  type="number"
+                  min={EXTRACT_AGING_AGE_DAYS_MIN}
+                  max={EXTRACT_AGING_AGE_DAYS_MAX}
+                  step={1}
+                  value={s.extractAgingAgeDays}
+                  data-testid="setting-extract-aging-days"
+                  onChange={(e) => void patch({ extractAgingAgeDays: Number(e.target.value) })}
+                  className="w-24 rounded-md border border-border bg-surface px-2 py-1 text-right font-mono font-semibold text-sm text-text"
+                />
+              </label>
+            </div>
+          </div>
         </SettingRow>
 
         <SettingRow

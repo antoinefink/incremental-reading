@@ -1,7 +1,7 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { QueueItemSummary } from "../../lib/appApi";
-import { actionFor, DueBadge, metaFor, titleFor } from "./queueRow";
+import { actionFor, DueBadge, ExtractAgeChip, metaFor, titleFor } from "./queueRow";
 
 function queueItem(overrides: Partial<QueueItemSummary>): QueueItemSummary {
   return {
@@ -26,6 +26,13 @@ function queueItem(overrides: Partial<QueueItemSummary>): QueueItemSummary {
     protected: false,
     due: "today",
     dueLabel: "Today",
+    queueEligible: true,
+    notInQueueReason: null,
+    fallowState: null,
+    fallowUntil: null,
+    fallowReason: null,
+    fallowTopicId: null,
+    extractAging: null,
     ...overrides,
   } as QueueItemSummary;
 }
@@ -99,5 +106,23 @@ describe("queue row helpers", () => {
 
     rerender(<DueBadge item={queueItem({ due: "soon", dueLabel: "Tomorrow" })} />);
     expect(getByTestId("queue-due-badge")).toHaveClass("badge--soft");
+  });
+
+  it("renders extract aging chip when the backend provides a projection", () => {
+    const { getByTestId } = render(
+      <ExtractAgeChip
+        item={queueItem({
+          type: "extract",
+          extractAging: {
+            band: "stale",
+            daysSinceProgress: 42,
+            postponeCount: 6,
+            thresholdReached: true,
+          },
+        })}
+      />,
+    );
+
+    expect(getByTestId("extract-age-chip")).toHaveTextContent("Stale · return");
   });
 });

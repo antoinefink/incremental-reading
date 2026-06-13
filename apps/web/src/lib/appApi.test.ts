@@ -268,6 +268,7 @@ function installAppApi(overrides: Partial<AppApi> = {}): AppApi {
         recommendedAction: "triage_inbox",
         graduationEvents: [],
         autoPostponeReceipt: null,
+        extractAgingReceipts: [],
         request,
       })),
       ackGraduationEvents: vi.fn(async (request?: unknown) => ({
@@ -283,6 +284,37 @@ function installAppApi(overrides: Partial<AppApi> = {}): AppApi {
         count: 2,
         label: "Undid 2 changes",
         receipt: null,
+        request,
+      })),
+    },
+    extractAging: {
+      preview: vi.fn(async (request?: unknown) => ({
+        asOf: "2026-06-08T09:00:00.000Z",
+        policy: "suggest",
+        thresholds: { returnThreshold: 5, ageDays: 30, sweepLimit: 50 },
+        candidates: [],
+        candidateCount: 0,
+        remainingCandidateCount: 0,
+        receipts: [],
+        request,
+      })),
+      apply: vi.fn(async (request?: unknown) => ({
+        batchId: "batch-aging-1",
+        demoted: 0,
+        skipped: [],
+        remainingCandidateCount: 0,
+        receipt: null,
+        request,
+      })),
+      undoReceipt: vi.fn(async (request?: unknown) => ({
+        receipt: null,
+        undo: {
+          undone: true,
+          count: 1,
+          label: "Undid 1 change",
+          opType: "update_element",
+          elementId: null,
+        },
         request,
       })),
     },
@@ -545,6 +577,17 @@ describe("renderer appApi wrapper", () => {
     expect(bridge.dailyWork.undoAutoPostponeReceipt).toHaveBeenCalledWith({
       batchId: "batch-1",
     });
+
+    await appApi.previewExtractAging({ asOf: "2026-06-08T09:00:00.000Z" });
+    expect(bridge.extractAging.preview).toHaveBeenCalledWith({
+      asOf: "2026-06-08T09:00:00.000Z",
+    });
+
+    await appApi.applyExtractAging({ ids: ["extract-1"] });
+    expect(bridge.extractAging.apply).toHaveBeenCalledWith({ ids: ["extract-1"] });
+
+    await appApi.undoExtractAgingReceipt({ batchId: "batch-aging-1" });
+    expect(bridge.extractAging.undoReceipt).toHaveBeenCalledWith({ batchId: "batch-aging-1" });
 
     await appApi.getWeeklyReviewSummary({ asOf: "2026-06-08T09:00:00.000Z" });
     expect(bridge.weeklyReview.summary).toHaveBeenCalledWith({

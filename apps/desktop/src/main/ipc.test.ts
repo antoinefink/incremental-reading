@@ -122,6 +122,8 @@ function fakeDbService() {
       resumeSource: null,
       recommendedAction: "clear",
       graduationEvents: [],
+      autoPostponeReceipt: null,
+      extractAgingReceipts: [],
     })),
     ackDailyWorkGraduationEvents: vi.fn((request?: unknown) => ({
       asOf: "2026-06-08T09:00:00.000Z",
@@ -130,6 +132,29 @@ function fakeDbService() {
           ? ((request as { eventIds?: readonly string[] }).eventIds ?? [])
           : [],
       observedSubjectCount: 0,
+    })),
+    previewExtractAging: vi.fn((request?: unknown) => ({
+      asOf:
+        request && typeof request === "object" && "asOf" in request
+          ? (request as { asOf?: string }).asOf
+          : "2026-06-08T09:00:00.000Z",
+      policy: "suggest",
+      thresholds: { returnThreshold: 5, ageDays: 30, sweepLimit: 50 },
+      candidates: [],
+      candidateCount: 0,
+      remainingCandidateCount: 0,
+      receipts: [],
+    })),
+    applyExtractAging: vi.fn(() => ({
+      batchId: "batch-aging-1",
+      demoted: 0,
+      skipped: [],
+      remainingCandidateCount: 0,
+      receipt: null,
+    })),
+    undoExtractAgingReceipt: vi.fn(() => ({
+      receipt: null,
+      undo: { undone: true, count: 1, label: "Undid 1 change", opType: "update_element" },
     })),
     getPriorityIntegrity: vi.fn((request?: unknown) => ({
       asOf: "2026-06-08T09:00:00.000Z",
@@ -483,6 +508,70 @@ describe("registerIpcHandlers", () => {
 
     expect(() => handler?.({}, { eventIds: ["ok", ""] })).toThrow();
     expect(db.ackDailyWorkGraduationEvents).not.toHaveBeenCalled();
+  });
+
+  it("validates and forwards extract aging preview requests", () => {
+    const db = fakeDbService();
+    registerIpcHandlers(db as never);
+    const request = { asOf: "2026-06-08T09:00:00.000Z", limit: 12 };
+    const handler = electron.handlers.get(IPC_CHANNELS.extractAgingPreview);
+
+    expect(handler?.({}, request)).toMatchObject({ policy: "suggest" });
+    expect(db.previewExtractAging).toHaveBeenCalledWith(request);
+  });
+
+  it("validates and forwards extract aging apply requests", () => {
+    const db = fakeDbService();
+    registerIpcHandlers(db as never);
+    const request = { asOf: "2026-06-08T09:00:00.000Z", ids: ["extract-1"] };
+    const handler = electron.handlers.get(IPC_CHANNELS.extractAgingApply);
+
+    expect(handler?.({}, request)).toMatchObject({ batchId: "batch-aging-1" });
+    expect(db.applyExtractAging).toHaveBeenCalledWith(request);
+  });
+
+  it("validates and forwards extract aging receipt undo requests", () => {
+    const db = fakeDbService();
+    registerIpcHandlers(db as never);
+    const handler = electron.handlers.get(IPC_CHANNELS.extractAgingUndoReceipt);
+
+    expect(handler?.({}, { batchId: "batch-aging-1" })).toMatchObject({
+      undo: { undone: true },
+    });
+    expect(db.undoExtractAgingReceipt).toHaveBeenCalledWith({ batchId: "batch-aging-1" });
+  });
+
+  it("rejects malformed extract aging payloads before invoking the database service", () => {
+    const db = fakeDbService();
+    registerIpcHandlers(db as never);
+
+    expect(() =>
+      electron.handlers.get(IPC_CHANNELS.extractAgingPreview)?.({}, { asOf: "not-a-date" }),
+    ).toThrow();
+    expect(() =>
+      electron.handlers.get(IPC_CHANNELS.extractAgingPreview)?.({}, { limit: 0 }),
+    ).toThrow();
+    expect(() =>
+      electron.handlers.get(IPC_CHANNELS.extractAgingPreview)?.({}, { limit: 51 }),
+    ).toThrow();
+    expect(() =>
+      electron.handlers.get(IPC_CHANNELS.extractAgingPreview)?.({}, { limit: 1.5 }),
+    ).toThrow();
+    expect(() =>
+      electron.handlers.get(IPC_CHANNELS.extractAgingApply)?.({}, { ids: [""] }),
+    ).toThrow();
+    expect(() =>
+      electron.handlers.get(IPC_CHANNELS.extractAgingApply)?.(
+        {},
+        { ids: Array.from({ length: 51 }, (_, i) => `extract-${i}`) },
+      ),
+    ).toThrow();
+    expect(() =>
+      electron.handlers.get(IPC_CHANNELS.extractAgingUndoReceipt)?.({}, { batchId: "" }),
+    ).toThrow();
+    expect(db.previewExtractAging).not.toHaveBeenCalled();
+    expect(db.applyExtractAging).not.toHaveBeenCalled();
+    expect(db.undoExtractAgingReceipt).not.toHaveBeenCalled();
   });
 
   it("validates and forwards priority integrity requests", () => {

@@ -27,6 +27,7 @@ import { DEFAULT_RANDOM_AUDIT_SIZE } from "@interleave/core";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { AutoPostponeReceiptLine } from "../../components/AutoPostponeReceiptLine";
+import { ExtractAgingReceiptLine } from "../../components/ExtractAgingReceiptLine";
 import { Icon } from "../../components/Icon";
 import {
   formatAttentionScheduleReason,
@@ -56,7 +57,7 @@ import { useSelection } from "../../shell/selection";
 import "../../analytics/analytics.css";
 import "../queue/queue.css";
 import { openQueueItem } from "../queue/openQueueItem";
-import { actionFor, DueBadge, metaFor, titleFor } from "../queue/queueRow";
+import { actionFor, DueBadge, ExtractAgeChip, metaFor, titleFor } from "../queue/queueRow";
 import { SessionAssemblyPreview } from "../queue/SessionAssemblyPreview";
 import "./home.css";
 
@@ -161,6 +162,7 @@ function PreviewRow({
           {meta}
           {item.concept ? <span className="concept-tag">{item.concept}</span> : null}
           <SchedulerChip scheduler={chip} />
+          <ExtractAgeChip item={item} />
         </span>
         {scheduleReasonText ? (
           <ScheduleReasonLine
@@ -580,6 +582,17 @@ export function HomeScreen() {
             return result;
           }}
         />
+        {(dailyWork?.extractAgingReceipts ?? []).map((receipt) => (
+          <ExtractAgingReceiptLine
+            key={receipt.batchId}
+            receipt={receipt}
+            onUndo={async (batchId) => {
+              const result = await appApi.undoExtractAgingReceipt({ batchId });
+              if (result.undo.undone) await load();
+              return result;
+            }}
+          />
+        ))}
 
         {/* Today's-status metric tiles (analytics chrome). */}
         <div className="an-metrics an-metrics--sm" style={{ marginBottom: 14 }}>

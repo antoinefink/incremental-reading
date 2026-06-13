@@ -26,6 +26,7 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { AutoPostponeReceiptLine } from "../../components/AutoPostponeReceiptLine";
+import { ExtractAgingReceiptLine } from "../../components/ExtractAgingReceiptLine";
 import { Icon, type IconName } from "../../components/Icon";
 import {
   formatAttentionScheduleReason,
@@ -76,7 +77,7 @@ import { HelpLink } from "../../help/Contextual";
 import { jitterOrder } from "./jitter";
 import { OverloadBanner } from "./OverloadBanner";
 import { openQueueItem } from "./openQueueItem";
-import { actionFor, DueBadge, metaFor, titleFor } from "./queueRow";
+import { actionFor, DueBadge, ExtractAgeChip, metaFor, titleFor } from "./queueRow";
 import { RecoveryPanel } from "./RecoveryPanel";
 import { SessionAssemblyPreview } from "./SessionAssemblyPreview";
 
@@ -263,6 +264,12 @@ function QueueItem({
             ) : null}
             {hasLeadingMeta ? <span className="dot-sep" /> : null}
             <SchedulerChip scheduler={chip} />
+            {item.extractAging ? (
+              <>
+                <span className="dot-sep" />
+                <ExtractAgeChip item={item} />
+              </>
+            ) : null}
             {item.fallowState ? (
               <>
                 <span className="dot-sep" />
@@ -984,6 +991,17 @@ export function QueueScreen() {
             return result;
           }}
         />
+        {(dailyWork?.extractAgingReceipts ?? []).map((receipt) => (
+          <ExtractAgingReceiptLine
+            key={receipt.batchId}
+            receipt={receipt}
+            onUndo={async (batchId) => {
+              const result = await appApi.undoExtractAgingReceipt({ batchId });
+              if (result.undo.undone) await refresh();
+              return result;
+            }}
+          />
+        ))}
 
         {/* catch-up & vacation (T078): recover from a backlog (spread overdue forward) or
             pre-adjust the away-window load — BOTH show the cost (the before/after per-day load

@@ -47,6 +47,36 @@
   color: var(--text-2);
 }
 
+.se-aging-sweep {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 24px 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 8px);
+  background: var(--surface-2);
+}
+
+.se-aging-sweep__copy {
+  min-width: 0;
+}
+
+.se-aging-sweep__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.se-aging-sweep__meta {
+  margin-top: 3px;
+  color: var(--text-2);
+  font-size: var(--t-sm);
+}
+
 /* The recommended remediation button — quietly emphasized, not loud. */
 .se-btn--suggested {
   border-color: color-mix(in oklch, var(--accent, var(--text-1)) 45%, var(--border));
