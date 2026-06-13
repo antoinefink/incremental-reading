@@ -25,30 +25,41 @@
  * only. The parse runs on the CALLING thread, bounded by the caller's size/page
  * caps.
  *
- * ## Bundled main-thread worker (load-bearing for the bundled `main.cjs`)
+ * ## Lazily bundled main-thread worker (load-bearing for the bundled `main.cjs`)
  *
  * pdfjs always routes parsing through a "worker". When NO real Web Worker is
  * available (the Electron main / a bundled Node CJS) it falls back to a fake
  * worker that, by default, dynamically `import()`s `pdf.worker.mjs` by PATH — which
  * does not exist next to our single bundled `main.cjs`, so the parse throws
- * "Setting up fake worker failed". We instead STATICALLY import the worker's
+ * "Setting up fake worker failed". We instead import the worker's
  * `WorkerMessageHandler` and register it on `globalThis.pdfjsWorker`; pdfjs then
  * uses that handler ON THE MAIN THREAD with NO path-based import (see pdf.mjs
- * `#mainThreadWorkerMessageHandler`). This bundles the worker code into the same
- * file and works identically in plain Node and the Electron main process.
+ * `#mainThreadWorkerMessageHandler`).
+ *
+ * Keep this loader LAZY. The desktop main imports the `@interleave/importers`
+ * barrel at startup for non-PDF helpers; if `pdfjs` is evaluated during bundle
+ * startup it probes for its optional native canvas package from `dist/main.cjs`
+ * and prints noisy `@napi-rs/canvas`/DOMMatrix warnings. We only need pdfjs when a
+ * PDF import is actually running.
  */
 
 /// <reference path="./pdfjs-worker.d.ts" />
 
-// The legacy build is the documented headless (DOM-free) entry point.
-import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
-// Register the worker handler on the main thread so the bundled build never tries
-// to dynamically import a missing `pdf.worker.mjs` (see the header note).
-import { WorkerMessageHandler } from "pdfjs-dist/legacy/build/pdf.worker.mjs";
+type PdfJsModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 
 const workerGlobal = globalThis as { pdfjsWorker?: { WorkerMessageHandler: unknown } };
-if (!workerGlobal.pdfjsWorker) {
-  workerGlobal.pdfjsWorker = { WorkerMessageHandler };
+let pdfjsPromise: Promise<PdfJsModule> | null = null;
+
+/** Load pdfjs only when parsing a PDF, after registering the bundled fake worker. */
+async function loadPdfJs(): Promise<PdfJsModule> {
+  pdfjsPromise ??= (async () => {
+    const { WorkerMessageHandler } = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+    if (!workerGlobal.pdfjsWorker) {
+      workerGlobal.pdfjsWorker = { WorkerMessageHandler };
+    }
+    return await import("pdfjs-dist/legacy/build/pdf.mjs");
+  })();
+  return await pdfjsPromise;
 }
 
 /** One extracted text line on a page, boxed in top-down PDF user space (scale 1). */
@@ -159,6 +170,7 @@ function itemsToLines(items: readonly RawTextItem[], pageHeight: number): PdfTex
  * @param bytes the raw PDF file bytes.
  */
 export async function extractPdfPages(bytes: Uint8Array): Promise<PdfPage[]> {
+  const pdfjs = await loadPdfJs();
   // A fresh copy: pdfjs may transfer/detach the buffer, and the caller often
   // reuses the same bytes to stream into the vault.
   const data = bytes.slice();
@@ -196,6 +208,7 @@ export async function extractPdfPages(bytes: Uint8Array): Promise<PdfPage[]> {
 
 /** The PDF's document `/Title` metadata, trimmed, or `null`. Pure (reuses pdfjs). */
 export async function extractPdfTitle(bytes: Uint8Array): Promise<string | null> {
+  const pdfjs = await loadPdfJs();
   const data = bytes.slice();
   const doc = await pdfjs.getDocument({
     data,
