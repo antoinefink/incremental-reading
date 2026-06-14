@@ -16,6 +16,12 @@ A source that has been captured but not yet accepted into the user's active know
 
 The origin and reliability context attached to a source, including where it came from and how the app should describe that origin to the user.
 
+### Capture origin
+
+The feeder a source entered the system through — browser-extension capture, URL import, highlight import, a manual note, or a file import — recorded durably at creation so the inbox can group a morning's arrivals by where they came from.
+
+Capture origin is a single provenance facet distinct from source type (the kind of material) and reliability. It is recorded only going forward; sources captured before it was tracked have no recorded origin and group under an explicit "Other" bucket rather than being guessed.
+
 ### Topic
 
 A schedulable knowledge-processing element that groups or narrows work under a broader source or idea.

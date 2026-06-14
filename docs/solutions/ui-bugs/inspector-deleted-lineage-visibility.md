@@ -1,6 +1,7 @@
 ---
 title: "Hide Inspector deleted lineage without losing restore"
 date: "2026-06-13"
+last_updated: "2026-06-15"
 category: "docs/solutions/ui-bugs/"
 module: "apps/web inspector lineage"
 problem_type: ui_bug
@@ -139,6 +140,8 @@ Depth normalization preserves the apparent tree shape after hidden deleted ances
 
 The `currentLineage` element-id guard prevents lineage fetched for one selection from rendering under another. Keying the body by element id also prevents per-element reveal state from surviving an element round trip.
 
+The same two-part rule recurred in the T126 inbox bulk-triage master-detail pane (`apps/web/src/pages/inbox/InboxScreen.tsx`), where it was the source of a **rare Electron e2e flake**: multi-select mode suppresses the per-cursor detail fetch (so a 50-item sweep does not fire 50 detail IPC calls), which left the previous single item's `detail` in state; on collapse back to single-select the effect re-fired and the stale `detail` painted under the new `selId` before the fresh fetch resolved — the preview title (`data-testid=inbox-preview-title`) momentarily rendered the previous item's title concatenated with its body. The fix was identical in shape: clear `detail` (`setDetail(null)`) when entering multi-select / before the async fetch, and render the pane only when `detail.summary.id === selId`. The flake is the tell — a fetch-on-selection detail render with no id-equality guard fails intermittently, not reproducibly, because it depends on the fetch resolving inside the transition window.
+
 The depth-stack ancestor check matches the tree model: only nodes currently on the active node's ancestry count. Deleted siblings and cousins no longer trigger ancestor restore hints.
 
 Compact tokenized restore controls keep tombstone recovery available without visually overpowering the lineage row.
@@ -149,6 +152,11 @@ Compact tokenized restore controls keep tombstone recovery available without vis
 - Any filtered tree display must normalize depth after removing ancestors.
 - For flattened tree ancestor logic, use a depth stack. Do not infer ancestry from list order alone.
 - Async lineage state must be keyed to the requested element id before rendering.
+- This generalizes to ANY master-detail pane that fetches detail on selection change: clear the stale
+  detail before the async refetch (and whenever entering a mode that suppresses the fetch), and gate the
+  detail render on an id-equality check (`detail.id === selectedId`), never on truthiness alone. The
+  failure mode is an intermittent flake, so add a test that injects a fetch delay during a selection
+  transition and asserts the pane shows ONLY the new item.
 - E2E coverage should include restart persistence for restore flows and visual measurements for compact controls.
 
 ## Related Issues
