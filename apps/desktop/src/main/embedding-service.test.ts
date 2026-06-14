@@ -18,7 +18,7 @@ import {
   FALLBACK_EMBEDDING_MODEL_ID,
 } from "@interleave/core";
 import { describe, expect, it, vi } from "vitest";
-import { EmbeddingService } from "./embedding-service";
+import { EmbeddingService, QUERY_CACHE_MAX } from "./embedding-service";
 
 /** A controllable fake runner: records enqueues + lets the test resolve terminals. */
 function makeFakeRunner() {
@@ -421,14 +421,48 @@ describe("EmbeddingService query-embedding cache (U2)", () => {
     await aAgain;
   });
 
+  it("invalidates the cache on a configured-model switch BEFORE a new vector is produced", async () => {
+    const runner = makeFakeRunner();
+    const modelA = "model-a";
+    const modelB = "model-b";
+    let configuredModelId = modelA;
+    // A service whose configured embeddingModelId can change between calls.
+    const service = new EmbeddingService({
+      db: {} as never,
+      repositories: { embeddings: { available: true } } as never,
+      getRunner: () => runner as never,
+      getSettings: () =>
+        ({
+          semanticSearchEnabled: true,
+          embeddingProvider: "local",
+          embeddingApiKey: "",
+          embeddingModelId: configuredModelId,
+          embeddingModelDownloaded: true,
+        }) as never,
+    });
+
+    // Cache "gamma" while model A is configured.
+    const first = service.embedQueryResult("gamma");
+    settleQuery(runner, service, "gamma", modelA, new Array(EMBEDDING_DIM).fill(0.3));
+    await first;
+    expect(runner.enqueued).toHaveLength(1);
+
+    // The configured model switches BEFORE any new vector is produced. The read-side
+    // guard must drop the now-stale model-A cache instead of serving it for model B.
+    configuredModelId = modelB;
+    const bVector = new Array(EMBEDDING_DIM).fill(0.7);
+    const second = service.embedQueryResult("gamma");
+    expect(runner.enqueued).toHaveLength(2);
+    settleQuery(runner, service, "gamma", modelB, bVector);
+    await expect(second).resolves.toMatchObject({ vector: bVector, modelId: modelB });
+  });
+
   it("is bounded: exceeding the cap evicts the oldest entry (it misses again)", async () => {
     const runner = makeFakeRunner();
     const service = makeService(runner);
     const cap = (service as unknown as { queryVectorCache: Map<string, unknown> }).queryVectorCache;
-    // Read the cap off the service's behavior by overflowing it; the constant is 256.
-    const QUERY_CACHE_MAX = 256;
 
-    // Fill the cache to exactly the cap with unique keys.
+    // Fill the cache to exactly the cap (imported from the source of truth) with unique keys.
     for (let i = 0; i < QUERY_CACHE_MAX; i += 1) {
       const text = `q${i}`;
       const p = service.embedQueryResult(text);

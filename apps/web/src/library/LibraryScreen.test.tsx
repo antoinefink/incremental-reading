@@ -1340,6 +1340,10 @@ describe("LibraryScreen", () => {
       // Snapshot the render count, then type another character. Within the debounce
       // window the parent must not re-render — the isolated field owns the raw text.
       const before = h.prioRenderCount.current;
+      // Guard against a vacuous pass: the counter must actually be counting Prio
+      // renders, else `toBe(before)` below would hold trivially at 0 if Prio were
+      // ever refactored out of the row.
+      expect(before).toBeGreaterThan(0);
       fireEvent.change(screen.getByTestId("library-search-input"), {
         target: { value: "intelligencee" },
       });

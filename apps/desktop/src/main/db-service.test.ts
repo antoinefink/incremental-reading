@@ -3295,6 +3295,33 @@ describe("DbService — review session (T037)", () => {
     svc.close();
   });
 
+  it("semantic.search skips counts on the no-type path too (includeCounts:false, no type filter)", async () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    // No type filter exercises the runFused(undefined) main pass — a different code
+    // path than the type:"source" tests above.
+    const withCounts = await svc.semanticSearch({ q: "intelligence" });
+    expect(withCounts.results.length).toBeGreaterThan(0);
+
+    const membershipSpy = vi.spyOn(svc.repos.concepts, "liveMembershipMapForMembers");
+    const skipped = await svc.semanticSearch({ q: "intelligence", includeCounts: false });
+
+    // Same results + mode as the counted run, but counts are zeroed and the fold skipped.
+    expect(skipped.results.map((r) => r.id)).toEqual(withCounts.results.map((r) => r.id));
+    expect(skipped.mode).toBe(withCounts.mode);
+    expect(skipped.counts).toEqual({
+      byType: { source: 0, extract: 0, card: 0 },
+      byConcept: {},
+      byPriority: { A: 0, B: 0, C: 0, D: 0 },
+    });
+    expect(membershipSpy).not.toHaveBeenCalled();
+
+    membershipSpy.mockRestore();
+    svc.close();
+  });
+
   it("semantic.search includeCounts:true explicit behaves like the omitted default", async () => {
     const svc = new DbService();
     svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });

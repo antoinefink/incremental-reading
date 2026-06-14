@@ -70,7 +70,7 @@ const PENDING_QUERY_MAX = 64;
  * once full, inserting evicts the oldest key. Repeat query embeds (backspace/retype,
  * re-runs, the palette's tight loop) then hit instantly instead of churning the worker.
  */
-const QUERY_CACHE_MAX = 256;
+export const QUERY_CACHE_MAX = 256;
 /**
  * Defensive bound on a cache key's length. A normalized query is already short, but a
  * pathological multi-KB "query" must not bloat the cache key; trimming the key only loses
@@ -386,6 +386,16 @@ export class EmbeddingService {
     // the model's CURRENT real/fallback/loading state, which a cached vector would mask.
     const useCache = opts?.useCache !== false;
     const cacheKey = queryCacheKey(text);
+    // Model-isolation guard (read side): if the configured embedding model changed
+    // since the cache was populated, every cached vector is from a now-stale model
+    // space and must not be served (an embedding belongs to the model that produced
+    // it; equal length is not comparability). The write side already clears on a
+    // produced-model change; this also covers a settings model-id switch that has not
+    // yet produced a new vector. Today the model id is pinned, so this is a forward guard.
+    if (this.cacheModelId !== null && this.cacheModelId !== settings.embeddingModelId) {
+      this.queryVectorCache.clear();
+      this.cacheModelId = null;
+    }
     if (useCache) {
       const cached = this.queryVectorCache.get(cacheKey);
       if (cached) return cached;

@@ -163,6 +163,44 @@ test("semantic search builds the index and finds related material, off-main", as
   await app.close();
 });
 
+test("the ⌘K command palette finds sources through the semantic bridge", async () => {
+  // The index was built + persisted by the prior serial test; relaunch against it.
+  const app = await launchApp(dataDir);
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  const status = await page.evaluate(() =>
+    (
+      window.appApi as unknown as {
+        semantic: { status(): Promise<{ vecAvailable: boolean; embedded: number }> };
+      }
+    ).semantic.status(),
+  );
+
+  // Land on a route so the global shell (and its ⌘K palette) is mounted.
+  await openSearch(page);
+
+  // Open the palette and search a keyword that matches a seeded source. This exercises
+  // the palette's live source lookup end-to-end through the NEW appApi.semanticSearch
+  // path (the swap's core regression risk) — it must still return rows in any mode.
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByTestId("command-palette")).toBeVisible();
+  await page.getByLabel("Command palette search").fill("intelligence");
+  await expect(page.getByTestId("command-palette-source").first()).toBeVisible({ timeout: 8000 });
+
+  // When the on-device vector index is functional, a semantically-related term that
+  // does NOT keyword-match still surfaces a source in the palette — proof it now uses
+  // embeddings like /search (an FTS-only lookup could not find it).
+  if (status.vecAvailable && status.embedded > 0) {
+    await page.getByLabel("Command palette search").fill("cognition skill acquisition");
+    await expect(page.getByTestId("command-palette-source").first()).toBeVisible({
+      timeout: 8000,
+    });
+  }
+
+  await app.close();
+});
+
 test("legacy semantic-search OFF patches are coerced back on", async () => {
   const app = await launchApp(dataDir);
   const page = await app.firstWindow();
