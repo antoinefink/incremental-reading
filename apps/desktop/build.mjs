@@ -161,7 +161,12 @@ function stageTesseract() {
  */
 async function stageTransformers() {
   const stageDir = path.join(distDir, "resources", "transformers");
-  rmSync(stageDir, { recursive: true, force: true });
+  // Re-stage ONLY the `node_modules/` tree on every build. The vendored `models/` dir is
+  // EXPENSIVE to re-acquire (hundreds of MB over the network) and is preserved across
+  // rebuilds — wiping the whole stageDir here is what silently deleted a previously
+  // vendored model on a plain `pnpm dev`, forcing the deterministic hash fallback.
+  const stagedNodeModules = path.join(stageDir, "node_modules");
+  rmSync(stagedNodeModules, { recursive: true, force: true });
 
   let transformersEntry;
   try {
@@ -180,7 +185,6 @@ async function stageTransformers() {
   ) {
     transformersDir = path.dirname(transformersDir);
   }
-  const stagedNodeModules = path.join(stageDir, "node_modules");
   mkdirSync(stagedNodeModules, { recursive: true });
 
   // pnpm's store is NESTED: each package's transitive deps live in its OWN
@@ -200,6 +204,13 @@ export async function stageEmbeddingModel(stageDir, options = {}) {
     required || (options.requested ?? process.env.INTERLEAVE_VENDOR_EMBEDDING_MODEL === "1");
   const modelDir = path.join(stageDir, "models");
   mkdirSync(modelDir, { recursive: true });
+  // Idempotent + sticky: a previously vendored model is preserved across rebuilds (the
+  // stage no longer wipes `models/`), so if a valid one is already present there is nothing
+  // to do — even a ship build need not re-download. Vendor once, every later `pnpm dev`
+  // keeps it, no `INTERLEAVE_VENDOR_EMBEDDING_MODEL=1` flag required after the first time.
+  if (isEmbeddingModelStaged(modelDir)) {
+    return;
+  }
   if (!requested) {
     console.warn(
       "[desktop] stageTransformers: skipping EmbeddingGemma model vendoring for this dev build.",
@@ -227,6 +238,23 @@ export async function stageEmbeddingModel(stageDir, options = {}) {
       `          ${error instanceof Error ? error.message : String(error)}`;
     if (required) throw new Error(message);
     console.warn(message);
+  }
+}
+
+/**
+ * Whether a usable EmbeddingGemma model is already staged under `modelDir`: the ready
+ * marker AND the q8 weights file both exist, AND the marker's recorded id matches the
+ * current {@link DEFAULT_EMBEDDING_MODEL_ID} (so a model-id bump re-vendors instead of
+ * silently keeping stale weights). This is the gate that makes vendoring idempotent.
+ */
+function isEmbeddingModelStaged(modelDir) {
+  const marker = path.join(modelDir, ".interleave-model-ready.json");
+  const weights = path.join(modelDir, DEFAULT_EMBEDDING_MODEL_ID, "onnx", "model_quantized.onnx");
+  if (!existsSync(marker) || !existsSync(weights)) return false;
+  try {
+    return JSON.parse(readFileSync(marker, "utf8"))?.modelId === DEFAULT_EMBEDDING_MODEL_ID;
+  } catch {
+    return false;
   }
 }
 
