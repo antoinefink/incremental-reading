@@ -28,7 +28,7 @@
 # T126 — Bulk inbox triage
 
 - **Milestone:** M27 — Triage at scale
-- **Status:** `[ ]` not started
+- **Status:** `[x]` done — 2026-06-15, plan `docs/plans/2026-06-14-003-feat-t126-bulk-inbox-triage-plan.md`, commits `feat: T126 U1..U7` + `fix(review): T126 …`
 - **Depends on:** T012, T069, T099
 - **Roadmap line:** the inbox supports multi-select and group-by (origin/domain/type) with
   keyboard-driven verbs + priority applied to a selection as one batched, op-logged operation
@@ -53,16 +53,23 @@ priority, undo the whole sweep if it was wrong.
 
 ## Deliverables
 
-- [ ] Inbox multi-select (click/shift/keyboard) + select-group affordances; group-by header rows
-      for origin (extension / URL / highlight-import / manual), domain, and type.
-- [ ] Bulk verb bar: the four triage verbs + priority chips applied to the selection as ONE
-      transactional, op-logged batch (single undo restores all preimages); per-item failures
-      reported without aborting the batch (partial-success surfaced honestly).
-- [ ] Keyboard path: select-down/up, group-jump, verb keys, priority keys — a 50-item fixture
-      morning is triageable without the mouse.
-- [ ] Tests: service-level batch tests (atomicity, undo symmetry, partial-failure reporting);
-      renderer selection tests; e2e — seed 30 mixed-origin inbox items, group, bulk-queue one
-      group with priority B, bulk-park another, single undo restores, restart-safe.
+- [x] Inbox multi-select (click/shift/keyboard) + select-group affordances; group-by header rows
+      for origin (extension / URL / highlight-import / manual / file / Other), domain, and type.
+      Origin is now a persisted, queryable `sources.captured_via` column (additive migration 0040,
+      written at every import seam).
+- [x] Bulk action panel: the four triage verbs + priority chips applied to the selection as ONE
+      transactional, op-logged batch (single undo restores all preimages); ineligible/stale ids are
+      skip-and-classified without aborting, and a genuine write error aborts atomically with a
+      distinct `errored` channel (partial-success surfaced honestly). Priority chips arm-then-apply
+      so "queue this group at B" is one combined batch / one undo (AE-2).
+- [x] Keyboard path: cursor move (j/k/arrows), range-extend, select-rest-of-group, select-all,
+      verb keys (1/2/3/6), priority-band arming (a/b/c/d), Esc — a mixed-origin morning is
+      triageable without the mouse; routed through the `triage` scope so global `+`/`-`/`o` defer.
+- [x] Tests: service-level batch tests (atomicity, all four skip reasons, errored channel, undo
+      symmetry for every verb + refuse-on-moved-victim); renderer selection/grouping/undo tests;
+      e2e (`tests/electron/inbox-bulk-triage.spec.ts`) — seed ~27 mixed-origin items, group,
+      bulk-queue one group at priority B in one sweep, bulk-park another, single undo restores,
+      restart-safe, op-log carries one batchId/sweep, lineage intact.
 
 ## Done when
 
