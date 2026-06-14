@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { WeeklyReviewProgress, WeeklyReviewSummaryResult } from "../lib/appApi";
 
 const h = vi.hoisted(() => ({
   getWeeklyReviewSummary: vi.fn(),
@@ -29,7 +30,26 @@ vi.mock("../lib/appApi", async () => {
 
 import { WeeklyReviewScreen } from "./WeeklyReviewScreen";
 
-const SUMMARY = {
+/**
+ * A fully-populated, type-valid weekly summary: one parked row, one chronic row,
+ * a non-empty `integrity.resting`, active threshold flags, and the four optional
+ * `*Prev` ledger values (so the funnel renders week-over-week deltas). Individual
+ * tests override slices via `makeSummary(overrides)`.
+ */
+const BASE_PROGRESS: WeeklyReviewProgress = {
+  taskId: "weekly-1",
+  windowStart: "2026-06-06T00:00:00.000Z",
+  windowEnd: "2026-06-12T12:00:00.000Z",
+  sections: {
+    ledger: "pending",
+    integrity: "pending",
+    parked: "pending",
+    chronic: "pending",
+    fallow: "pending",
+  },
+};
+
+const BASE_SUMMARY: WeeklyReviewSummaryResult = {
   asOf: "2026-06-12T12:00:00.000Z",
   enabled: true,
   cadenceDays: 7,
@@ -49,36 +69,51 @@ const SUMMARY = {
     end: "2026-06-12T12:00:00.000Z",
     days: 7,
   },
-  progress: {
-    taskId: "weekly-1",
-    windowStart: "2026-06-06T00:00:00.000Z",
-    windowEnd: "2026-06-12T12:00:00.000Z",
-    sections: {
-      ledger: "pending",
-      integrity: "pending",
-      parked: "pending",
-      chronic: "pending",
-      fallow: "pending",
-    },
-  },
+  progress: BASE_PROGRESS,
   ledger: {
-    sources: 2,
-    extracts: 1,
-    cards: 1,
-    maturedCards: 0,
-    priorityMisses: [],
+    sources: 5,
+    extracts: 3,
+    cards: 4,
+    maturedCards: 2,
+    // Prior window: sources up (5 vs 2 → +3), extracts flat (3 vs 3 → ±0),
+    // cards down (4 vs 6 → −2), matured up (2 vs 1 → +1). Each delta magnitude is
+    // distinct so the funnel-delta test can target stages unambiguously by text.
+    sourcesPrev: 2,
+    extractsPrev: 3,
+    cardsPrev: 6,
+    maturedCardsPrev: 1,
+    priorityMisses: [
+      { band: "A", deferred: 4, postponeDebtDays: 6.5 },
+      { band: "C", deferred: 1, postponeDebtDays: 1.25 },
+    ],
   },
   integrity: {
     asOf: "2026-06-12T12:00:00.000Z",
     windowDays: 7,
+    priorityAttribution: "current",
     bands: [],
     topics: [],
     sacrificed: [],
-    resting: [],
+    resting: [
+      {
+        topicId: "topic-1",
+        title: "Stoic philosophy",
+        band: "B",
+        fallowUntil: "2026-06-26T00:00:00.000Z",
+        fallowReason: "Rested from weekly integrity session",
+      },
+      {
+        topicId: "topic-2",
+        title: "Compiler internals",
+        band: "C",
+        fallowUntil: "2026-06-22T00:00:00.000Z",
+        fallowReason: null,
+      },
+    ],
     thresholdFlags: {
-      aBandDeferredRecently: false,
-      postponeDebtHigh: false,
-      bandShareInflation: false,
+      aBandInflation: false,
+      aBandDeferredRecently: true,
+      postponeDebtHigh: true,
     },
   },
   decisions: {
@@ -122,16 +157,46 @@ const SUMMARY = {
       threshold: 5,
       limit: 8,
     },
-    fallowSuggestions: [],
+    fallowSuggestions: [
+      {
+        topicId: "fallow-1",
+        title: "Dormant topic",
+        band: "C",
+        deferred: 9,
+        postponeDebtDays: 12.5,
+      },
+    ],
   },
 };
 
+function makeSummary(
+  overrides: Partial<WeeklyReviewSummaryResult> = {},
+): WeeklyReviewSummaryResult {
+  return { ...BASE_SUMMARY, ...overrides };
+}
+
+/** A calm week: every forced-decision queue empty, no misses, no resting topics. */
+function calmSummary(): WeeklyReviewSummaryResult {
+  return makeSummary({
+    ledger: { ...BASE_SUMMARY.ledger, priorityMisses: [] },
+    integrity: { ...BASE_SUMMARY.integrity, resting: [] },
+    decisions: {
+      parked: { rows: [], totalDue: 0, limit: 8, asOf: BASE_SUMMARY.asOf },
+      chronic: { rows: [], totalDue: 0, threshold: 5, limit: 8 },
+      fallowSuggestions: [],
+    },
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
-  h.getWeeklyReviewSummary.mockResolvedValue(SUMMARY);
-  h.updateWeeklyReviewProgress.mockResolvedValue(SUMMARY.progress);
+  h.getWeeklyReviewSummary.mockResolvedValue(BASE_SUMMARY);
+  h.updateWeeklyReviewProgress.mockResolvedValue(BASE_SUMMARY.progress);
   h.completeWeeklyReview.mockResolvedValue({ task: null, progress: null });
-  h.dismissWeeklyReview.mockResolvedValue({ task: SUMMARY.session, progress: SUMMARY.progress });
+  h.dismissWeeklyReview.mockResolvedValue({
+    task: BASE_SUMMARY.session,
+    progress: BASE_SUMMARY.progress,
+  });
   h.parkedResurfacingApply.mockResolvedValue({ applied: 1, skipped: [], batchId: "p1" });
   h.chronicPostponesApply.mockResolvedValue({ applied: 1, skipped: [], batchId: "c1" });
 });
@@ -164,5 +229,130 @@ describe("WeeklyReviewScreen", () => {
       taskId: "weekly-1",
       sections: { chronic: "done" },
     });
+  });
+
+  it("renders week-over-week funnel deltas (up and ±0) when prior-window counts are present", async () => {
+    render(<WeeklyReviewScreen />);
+    await screen.findByTestId("weekly-review");
+
+    // Every stage with a *Prev value shows the delta sub-line.
+    const deltas = await screen.findAllByText(/vs last wk/);
+    expect(deltas.length).toBe(4);
+
+    // Sources went 2 → 5: an "up" delta of 3.
+    const sourcesUp = deltas.find((node) => node.textContent?.includes("3 vs last wk"));
+    expect(sourcesUp).toBeTruthy();
+    expect(sourcesUp).toHaveClass("up");
+
+    // Extracts were flat (3 → 3): the ±0 case renders on the "down"/neutral track.
+    const flat = deltas.find((node) => node.textContent?.includes("±0 vs last wk"));
+    expect(flat).toBeTruthy();
+    expect(flat).toHaveClass("down");
+
+    // Cards went 6 → 4: a "down" delta of 2.
+    const cardsDown = deltas.find((node) => node.textContent?.includes("2 vs last wk"));
+    expect(cardsDown).toBeTruthy();
+    expect(cardsDown).toHaveClass("down");
+  });
+
+  it("renders no delta text when prior-window counts are omitted (R6 graceful degradation)", async () => {
+    h.getWeeklyReviewSummary.mockResolvedValue(
+      makeSummary({
+        ledger: {
+          sources: 5,
+          extracts: 3,
+          cards: 4,
+          maturedCards: 2,
+          priorityMisses: [],
+        },
+      }),
+    );
+    render(<WeeklyReviewScreen />);
+    await screen.findByTestId("weekly-review");
+
+    expect(screen.queryByText(/vs last wk/)).toBeNull();
+  });
+
+  it("derives the progress ring from server-persisted section progress", async () => {
+    h.getWeeklyReviewSummary.mockResolvedValue(
+      makeSummary({
+        progress: {
+          ...BASE_PROGRESS,
+          sections: {
+            ledger: "done",
+            integrity: "pending",
+            parked: "pending",
+            chronic: "pending",
+            fallow: "pending",
+          },
+        },
+      }),
+    );
+    render(<WeeklyReviewScreen />);
+    await screen.findByTestId("weekly-review");
+
+    const ring = screen.getByTitle("1 of 5 sections reviewed");
+    expect(ring).toBeInTheDocument();
+    expect(ring).toHaveTextContent("1/5");
+  });
+
+  it("renders active integrity flags as amber cards and resting topics as concept tags", async () => {
+    render(<WeeklyReviewScreen />);
+    await screen.findByTestId("weekly-review");
+
+    // The A-band deferred flag is active → amber card showing "Yes".
+    const aBandLabel = screen.getByText("A-band deferred");
+    const aBandCard = aBandLabel.closest(".wk-flag");
+    expect(aBandCard).not.toBeNull();
+    expect(aBandCard).toHaveClass("wk-flag--on");
+    expect(within(aBandCard as HTMLElement).getByText("Yes")).toBeInTheDocument();
+
+    // The postpone-debt flag is active → amber card showing "High".
+    const debtCard = screen.getByText("Postpone debt").closest(".wk-flag");
+    expect(debtCard).toHaveClass("wk-flag--on");
+    expect(within(debtCard as HTMLElement).getByText("High")).toBeInTheDocument();
+
+    // Resting topics surface their titles as concept-tag pills.
+    expect(screen.getByText("Stoic philosophy")).toBeInTheDocument();
+    expect(screen.getByText("Compiler internals")).toBeInTheDocument();
+  });
+
+  it("renders the calm-week empty states for a fully-empty summary", async () => {
+    h.getWeeklyReviewSummary.mockResolvedValue(calmSummary());
+    render(<WeeklyReviewScreen />);
+
+    // Still mounts.
+    expect(await screen.findByTestId("weekly-review")).toBeInTheDocument();
+
+    expect(
+      screen.getByText("No priority misses in this window. Every due band was served."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("No parked sources are due to resurface.")).toBeInTheDocument();
+    expect(screen.getByText("No chronic postpones are due for reckoning.")).toBeInTheDocument();
+    expect(
+      screen.getByText("No fallow suggestions — nothing is ready to rest."),
+    ).toBeInTheDocument();
+
+    // No resting topics → the resting flag reads 0 and no concept pills appear.
+    expect(screen.queryByText("Stoic philosophy")).toBeNull();
+  });
+
+  it("renders the load error state when the summary fetch rejects", async () => {
+    h.getWeeklyReviewSummary.mockRejectedValue(new Error("vault offline"));
+    render(<WeeklyReviewScreen />);
+
+    expect(await screen.findByTestId("weekly-error")).toBeInTheDocument();
+    expect(screen.getByText("vault offline")).toBeInTheDocument();
+  });
+
+  it("surfaces an action error when a decision apply rejects", async () => {
+    h.parkedResurfacingApply.mockRejectedValue(new Error("apply failed"));
+    render(<WeeklyReviewScreen />);
+    await screen.findByTestId("weekly-review");
+
+    fireEvent.click(screen.getByText("Apply parked decisions"));
+
+    expect(await screen.findByTestId("weekly-action-error")).toBeInTheDocument();
+    expect(screen.getByText("apply failed")).toBeInTheDocument();
   });
 });
