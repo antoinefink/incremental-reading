@@ -9,6 +9,8 @@ const h = vi.hoisted(() => ({
   listInbox: vi.fn(),
   getInboxItem: vi.fn(),
   triageInboxItem: vi.fn(),
+  bulkTriageInbox: vi.fn(),
+  bulkTriageInboxUndo: vi.fn(),
   importPdfSource: vi.fn(),
   pickImportFile: vi.fn(),
   importMediaSource: vi.fn(),
@@ -199,6 +201,8 @@ vi.mock("../../lib/appApi", async () => {
       listInbox: h.listInbox,
       getInboxItem: h.getInboxItem,
       triageInboxItem: h.triageInboxItem,
+      bulkTriageInbox: h.bulkTriageInbox,
+      bulkTriageInboxUndo: h.bulkTriageInboxUndo,
       importPdfSource: h.importPdfSource,
       pickImportFile: h.pickImportFile,
       importMediaSource: h.importMediaSource,
@@ -220,6 +224,8 @@ const items = [
     charCount: 1234,
     priority: 0.375,
     accessedAt: "2026-06-03T00:00:00.000Z",
+    origin: "url" as const,
+    domain: "example.com",
   },
   {
     id: "src-2",
@@ -231,6 +237,8 @@ const items = [
     charCount: 456,
     priority: 0.875,
     accessedAt: null,
+    origin: "file" as const,
+    domain: null,
   },
 ];
 
@@ -285,6 +293,8 @@ beforeEach(() => {
   h.listInbox.mockReset();
   h.getInboxItem.mockReset();
   h.triageInboxItem.mockReset();
+  h.bulkTriageInbox.mockReset();
+  h.bulkTriageInboxUndo.mockReset();
   h.importPdfSource.mockReset();
   h.pickImportFile.mockReset();
   h.importMediaSource.mockReset();
@@ -292,6 +302,13 @@ beforeEach(() => {
   h.listInbox.mockResolvedValue({ items });
   h.getInboxItem.mockImplementation(({ id }) => Promise.resolve({ detail: detail(id) }));
   h.triageInboxItem.mockResolvedValue({ item: items[0], deleted: false });
+  h.bulkTriageInbox.mockResolvedValue({
+    batchId: "batch-1",
+    applied: 0,
+    skipped: [],
+    errored: [],
+  });
+  h.bulkTriageInboxUndo.mockResolvedValue({ undone: true, count: 0 });
   h.importPdfSource.mockResolvedValue({ status: "imported", id: "pdf-1" });
   h.getAppSettings.mockResolvedValue({ settings: { defaultSourcePriority: 0.875 } });
   h.pickImportFile
@@ -767,5 +784,502 @@ describe("InboxScreen", () => {
     const { findByTestId } = render(<InboxScreen />);
 
     expect(await findByTestId("inbox-empty")).toBeInTheDocument();
+  });
+});
+
+// --- Bulk triage (T126 — U5): multi-select + grouping + the bulk panel + undo. ---
+
+type BulkRow = Omit<(typeof items)[number], "origin" | "domain"> & {
+  origin: "manual" | "url" | "extension" | "highlight_import" | "file" | null;
+  domain: string | null;
+};
+
+const bulkRows: readonly BulkRow[] = [
+  {
+    id: "u1",
+    type: "source",
+    status: "inbox",
+    title: "URL one",
+    srcType: "Web article",
+    author: null,
+    charCount: 100,
+    priority: 0.375,
+    accessedAt: null,
+    origin: "url",
+    domain: "example.com",
+  },
+  {
+    id: "u2",
+    type: "source",
+    status: "inbox",
+    title: "URL two",
+    srcType: "Web article",
+    author: null,
+    charCount: 200,
+    priority: 0.375,
+    accessedAt: null,
+    origin: "url",
+    domain: "other.com",
+  },
+  {
+    id: "m1",
+    type: "source",
+    status: "inbox",
+    title: "Manual one",
+    srcType: "Note",
+    author: null,
+    charCount: 300,
+    priority: 0.375,
+    accessedAt: null,
+    origin: "manual",
+    domain: null,
+  },
+  {
+    id: "x1",
+    type: "source",
+    status: "inbox",
+    title: "Unknown origin",
+    srcType: "Note",
+    author: null,
+    charCount: 400,
+    priority: 0.375,
+    accessedAt: null,
+    origin: null,
+    domain: null,
+  },
+];
+
+/** Resolve the bulk fixtures into the inbox list + detail responses. */
+function mountBulk(rows: readonly BulkRow[] = bulkRows) {
+  h.listInbox.mockResolvedValue({ items: rows });
+  h.getInboxItem.mockImplementation(({ id }: { id: string }) => {
+    const summary = rows.find((r) => r.id === id) ?? rows[0];
+    return Promise.resolve({
+      detail: {
+        summary,
+        provenance: {
+          url: null,
+          canonicalUrl: null,
+          author: null,
+          publishedAt: null,
+          accessedAt: null,
+          reasonAdded: null,
+        },
+        bodyDoc: null,
+        bodyText: null,
+        bodyPreview: null,
+      },
+    });
+  });
+}
+
+function rowById(container: HTMLElement, id: string): HTMLElement {
+  const node = container.querySelector<HTMLElement>(
+    `[data-testid="inbox-row"][data-element-id="${id}"]`,
+  );
+  if (!node) throw new Error(`expected inbox row ${id}`);
+  return node;
+}
+
+describe("InboxScreen bulk triage (T126)", () => {
+  it("buckets rows by origin, domain, and type with a stable Other group", async () => {
+    mountBulk();
+    const { findAllByTestId, getAllByTestId, getByTestId } = render(<InboxScreen />);
+
+    await findAllByTestId("inbox-row");
+    // Origin axis: URL / Manual / Other (null origin -> Other), counts correct.
+    let labels = getAllByTestId("inbox-group-label").map((n) => n.textContent);
+    expect(labels).toEqual(["URL", "Manual", "Other"]);
+    const counts = getAllByTestId("inbox-group-count").map((n) => n.textContent);
+    expect(counts).toEqual(["2", "1", "1"]);
+
+    // Domain axis: example.com / other.com / Other (null domain rows -> Other).
+    fireEvent.click(getByTestId("inbox-group-by-domain"));
+    labels = getAllByTestId("inbox-group-label").map((n) => n.textContent);
+    expect(labels).toEqual(["example.com", "other.com", "Other"]);
+
+    // Type axis: the existing source-type label.
+    fireEvent.click(getByTestId("inbox-group-by-type"));
+    labels = getAllByTestId("inbox-group-label").map((n) => n.textContent);
+    expect(labels).toEqual(["Web article", "Note"]);
+  });
+
+  it("renders a single-item domain group", async () => {
+    mountBulk();
+    const { findByTestId, getByTestId, getAllByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(getByTestId("inbox-group-by-domain"));
+    const labels = getAllByTestId("inbox-group-label").map((n) => n.textContent);
+    expect(labels).toContain("other.com");
+  });
+
+  it("click selects a single row; the bulk panel stays hidden at size 1", async () => {
+    mountBulk();
+    const { container, findByTestId, getByTestId, queryByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(rowById(container, "u1"));
+
+    expect(rowById(container, "u1")).toHaveAttribute("data-selected", "true");
+    expect(queryByTestId("inbox-bulk-panel")).not.toBeInTheDocument();
+    // size === 1 keeps the per-item detail pane.
+    expect(getByTestId("inbox-preview")).toBeInTheDocument();
+  });
+
+  it("shift-click selects the contiguous range from the anchor", async () => {
+    mountBulk();
+    const { container, findByTestId, getByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(rowById(container, "u1"));
+    fireEvent.click(rowById(container, "m1"), { shiftKey: true });
+
+    // u1, u2, m1 are contiguous in display order; x1 is not.
+    expect(rowById(container, "u1")).toHaveAttribute("data-selected", "true");
+    expect(rowById(container, "u2")).toHaveAttribute("data-selected", "true");
+    expect(rowById(container, "m1")).toHaveAttribute("data-selected", "true");
+    expect(rowById(container, "x1")).not.toHaveAttribute("data-selected", "true");
+    expect(getByTestId("inbox-bulk-headline")).toHaveTextContent("3 selected");
+  });
+
+  it("ctrl/cmd-click toggles a single id in and out of the set", async () => {
+    mountBulk();
+    const { container, findByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(rowById(container, "u1"));
+    fireEvent.click(rowById(container, "x1"), { metaKey: true });
+    expect(rowById(container, "u1")).toHaveAttribute("data-selected", "true");
+    expect(rowById(container, "x1")).toHaveAttribute("data-selected", "true");
+
+    fireEvent.click(rowById(container, "x1"), { metaKey: true });
+    expect(rowById(container, "x1")).not.toHaveAttribute("data-selected", "true");
+  });
+
+  it("select-group selects every id in the group", async () => {
+    mountBulk();
+    const { container, findByTestId, getAllByTestId, getByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    // The first group header (URL) — select its two rows.
+    fireEvent.click(getAllByTestId("inbox-select-group")[0] as HTMLElement);
+    expect(rowById(container, "u1")).toHaveAttribute("data-selected", "true");
+    expect(rowById(container, "u2")).toHaveAttribute("data-selected", "true");
+    expect(rowById(container, "m1")).not.toHaveAttribute("data-selected", "true");
+    expect(getByTestId("inbox-bulk-headline")).toHaveTextContent("2 selected");
+  });
+
+  it("select-all selects the whole inbox and Esc clears it", async () => {
+    mountBulk();
+    const { container, findByTestId, getByTestId, queryByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(getByTestId("inbox-select-all"));
+    expect(getByTestId("inbox-bulk-headline")).toHaveTextContent("4 selected");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(queryByTestId("inbox-bulk-panel")).not.toBeInTheDocument();
+    expect(rowById(container, "u1")).not.toHaveAttribute("data-selected", "true");
+  });
+
+  it("switching the group-by axis keeps the selected id set", async () => {
+    mountBulk();
+    const { container, findByTestId, getByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(rowById(container, "u1"));
+    fireEvent.click(rowById(container, "x1"), { metaKey: true });
+    expect(getByTestId("inbox-bulk-headline")).toHaveTextContent("2 selected");
+
+    fireEvent.click(getByTestId("inbox-group-by-domain"));
+    // Same ids stay selected across the axis switch.
+    expect(rowById(container, "u1")).toHaveAttribute("data-selected", "true");
+    expect(rowById(container, "x1")).toHaveAttribute("data-selected", "true");
+    expect(getByTestId("inbox-bulk-headline")).toHaveTextContent("2 selected");
+  });
+
+  it("size>=2 shows the bulk panel and suppresses the per-cursor detail fetch", async () => {
+    mountBulk();
+    const { container, findByTestId, getByTestId, queryByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(rowById(container, "u1"));
+    await waitFor(() => expect(h.getInboxItem).toHaveBeenCalledWith({ id: "u1" }));
+    h.getInboxItem.mockClear();
+
+    // Extend to two — the bulk panel replaces the detail pane; no new detail fetch.
+    fireEvent.click(rowById(container, "u2"), { metaKey: true });
+    expect(getByTestId("inbox-bulk-panel")).toBeInTheDocument();
+    expect(queryByTestId("inbox-preview")).not.toBeInTheDocument();
+    expect(h.getInboxItem).not.toHaveBeenCalled();
+  });
+
+  it("reverts to the cursor row's detail when the selection empties to 0", async () => {
+    mountBulk();
+    const { container, findByTestId, getByTestId, queryByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(rowById(container, "u1"));
+    fireEvent.click(rowById(container, "u2"), { metaKey: true });
+    expect(getByTestId("inbox-bulk-panel")).toBeInTheDocument();
+
+    // Toggle both back off -> size 0 -> the cursor row's detail pane returns.
+    fireEvent.click(rowById(container, "u1"), { metaKey: true });
+    fireEvent.click(rowById(container, "u2"), { metaKey: true });
+    expect(queryByTestId("inbox-bulk-panel")).not.toBeInTheDocument();
+    await waitFor(() => expect(getByTestId("inbox-preview")).toBeInTheDocument());
+  });
+
+  it("a verb fires exactly ONE bulk call with the selected ids + action", async () => {
+    mountBulk();
+    h.bulkTriageInbox.mockResolvedValue({
+      batchId: "batch-q",
+      applied: 2,
+      skipped: [],
+      errored: [],
+    });
+    const { container, findByTestId, getByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(getByTestId("inbox-select-all"));
+    h.listInbox.mockClear();
+    fireEvent.click(getByTestId("inbox-bulk-queue-soon"));
+
+    await waitFor(() => expect(h.bulkTriageInbox).toHaveBeenCalledTimes(1));
+    expect(h.bulkTriageInbox).toHaveBeenCalledWith({
+      ids: ["u1", "u2", "m1", "x1"],
+      action: "queueSoon",
+    });
+    expect(h.navigate).not.toHaveBeenCalled();
+    // Removing verb refreshes the list.
+    await waitFor(() => expect(h.listInbox).toHaveBeenCalled());
+    void container;
+  });
+
+  it("clicking a priority chip ARMS it without firing any IPC call", async () => {
+    mountBulk();
+    const { findByTestId, getAllByTestId, getByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(getAllByTestId("inbox-select-group")[0] as HTMLElement); // URL group (u1,u2)
+
+    fireEvent.click(getByTestId("inbox-bulk-priority-B"));
+    // The chip reads armed, but NO batch fired — it is a pure UI toggle.
+    expect(getByTestId("inbox-bulk-priority-B")).toHaveAttribute("aria-pressed", "true");
+    expect(h.bulkTriageInbox).not.toHaveBeenCalled();
+
+    // Clicking the armed band again disarms it (still no IPC).
+    fireEvent.click(getByTestId("inbox-bulk-priority-B"));
+    expect(getByTestId("inbox-bulk-priority-B")).toHaveAttribute("aria-pressed", "false");
+    expect(h.bulkTriageInbox).not.toHaveBeenCalled();
+  });
+
+  it("a verb with an armed band fires exactly ONE combined bulk call (queue at B)", async () => {
+    mountBulk();
+    h.bulkTriageInbox.mockResolvedValue({
+      batchId: "batch-qb",
+      applied: 2,
+      skipped: [],
+      errored: [],
+    });
+    const { findByTestId, getAllByTestId, getByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(getAllByTestId("inbox-select-group")[0] as HTMLElement); // URL group (u1,u2)
+
+    // Arm B (no batch), then queue — ONE combined batch carrying the band.
+    fireEvent.click(getByTestId("inbox-bulk-priority-B"));
+    fireEvent.click(getByTestId("inbox-bulk-queue-soon"));
+
+    await waitFor(() => expect(h.bulkTriageInbox).toHaveBeenCalledTimes(1));
+    expect(h.bulkTriageInbox).toHaveBeenCalledWith({
+      ids: ["u1", "u2"],
+      action: "queueSoon",
+      priority: "B",
+    });
+    // Exactly one batch (one snackbar / one undo).
+    expect(h.bulkTriageInbox).toHaveBeenCalledTimes(1);
+  });
+
+  it("the Set priority button fires one setPriority call and KEEPS the selection + armed band", async () => {
+    mountBulk();
+    h.bulkTriageInbox.mockResolvedValue({
+      batchId: "batch-sp",
+      applied: 2,
+      skipped: [],
+      errored: [],
+    });
+    const { container, findByTestId, getAllByTestId, getByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(getAllByTestId("inbox-select-group")[0] as HTMLElement); // URL group (u1,u2)
+
+    // Set priority is disabled until a band is armed.
+    expect(getByTestId("inbox-bulk-set-priority")).toBeDisabled();
+    fireEvent.click(getByTestId("inbox-bulk-priority-B"));
+    expect(getByTestId("inbox-bulk-set-priority")).not.toBeDisabled();
+
+    fireEvent.click(getByTestId("inbox-bulk-set-priority"));
+    await waitFor(() => expect(h.bulkTriageInbox).toHaveBeenCalledTimes(1));
+    expect(h.bulkTriageInbox).toHaveBeenCalledWith({
+      ids: ["u1", "u2"],
+      action: "setPriority",
+      priority: "B",
+    });
+
+    // Priority-only sweep KEEPS the selection AND the armed band (chain a verb next).
+    expect(getByTestId("inbox-bulk-panel")).toBeInTheDocument();
+    expect(rowById(container, "u1")).toHaveAttribute("data-selected", "true");
+    expect(getByTestId("inbox-bulk-priority-B")).toHaveAttribute("aria-pressed", "true");
+    expect(await findByTestId("inbox-snackbar")).toHaveTextContent("Set priority on 2");
+  });
+
+  it("surfaces applied + skipped honestly in the snackbar", async () => {
+    mountBulk();
+    h.bulkTriageInbox.mockResolvedValue({
+      batchId: "batch-s",
+      applied: 12,
+      skipped: [
+        { id: "a", reason: "deleted" },
+        { id: "b", reason: "not_inbox" },
+      ],
+      errored: [],
+    });
+    const { findByTestId, getByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(getByTestId("inbox-select-all"));
+    fireEvent.click(getByTestId("inbox-bulk-queue-soon"));
+
+    expect(await findByTestId("inbox-snackbar")).toHaveTextContent("Queued 12 · 2 skipped");
+  });
+
+  it("does not show the bulk panel for an empty selection", async () => {
+    mountBulk();
+    const { findByTestId, queryByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    expect(queryByTestId("inbox-bulk-panel")).not.toBeInTheDocument();
+    expect(queryByTestId("inbox-bulk-queue-soon")).not.toBeInTheDocument();
+    expect(h.bulkTriageInbox).not.toHaveBeenCalled();
+  });
+
+  it("a removing verb clears the selection; a priority-only sweep keeps it", async () => {
+    mountBulk();
+    h.bulkTriageInbox.mockResolvedValue({
+      batchId: "batch-p",
+      applied: 2,
+      skipped: [],
+      errored: [],
+    });
+    const { container, findByTestId, getAllByTestId, getByTestId, queryByTestId } = render(
+      <InboxScreen />,
+    );
+
+    await findByTestId("inbox-list");
+    fireEvent.click(getAllByTestId("inbox-select-group")[0] as HTMLElement); // u1,u2
+
+    // A committed priority-only sweep KEEPS the selection (so a verb can chain).
+    fireEvent.click(getByTestId("inbox-bulk-priority-A")); // arm A (no batch)
+    fireEvent.click(getByTestId("inbox-bulk-set-priority")); // commit the priority-only sweep
+    await waitFor(() => expect(h.bulkTriageInbox).toHaveBeenCalled());
+    expect(getByTestId("inbox-bulk-panel")).toBeInTheDocument();
+    expect(rowById(container, "u1")).toHaveAttribute("data-selected", "true");
+
+    // A removing verb CLEARS the selection.
+    fireEvent.click(getByTestId("inbox-bulk-delete"));
+    await waitFor(() => expect(queryByTestId("inbox-bulk-panel")).not.toBeInTheDocument());
+  });
+
+  it("recomputes group headers + the count and shows inbox-zero after a sweep empties the inbox", async () => {
+    mountBulk([bulkRows[0] as BulkRow, bulkRows[1] as BulkRow]); // two URL rows only
+    h.bulkTriageInbox.mockResolvedValue({
+      batchId: "batch-z",
+      applied: 2,
+      skipped: [],
+      errored: [],
+    });
+    const { findByTestId, getByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(getByTestId("inbox-select-all"));
+    // After the sweep the backend returns an empty inbox -> inbox-zero.
+    h.listInbox.mockResolvedValue({ items: [] });
+    fireEvent.click(getByTestId("inbox-bulk-delete"));
+
+    expect(await findByTestId("inbox-empty")).toBeInTheDocument();
+    expect(getByTestId("inbox-count")).toHaveTextContent("0 items awaiting triage");
+  });
+
+  it("drops a whole group header and recomputes the count when a sweep empties one group", async () => {
+    mountBulk();
+    h.bulkTriageInbox.mockResolvedValue({
+      batchId: "batch-g",
+      applied: 2,
+      skipped: [],
+      errored: [],
+    });
+    const { findByTestId, getAllByTestId, getByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(getAllByTestId("inbox-select-group")[0] as HTMLElement); // URL group
+    // The backend list after the sweep no longer has the URL rows.
+    h.listInbox.mockResolvedValue({
+      items: [bulkRows[2] as BulkRow, bulkRows[3] as BulkRow],
+    });
+    fireEvent.click(getByTestId("inbox-bulk-delete"));
+
+    await waitFor(() => {
+      const labels = getAllByTestId("inbox-group-label").map((n) => n.textContent);
+      expect(labels).toEqual(["Manual", "Other"]);
+    });
+    expect(getByTestId("inbox-count")).toHaveTextContent("2 items awaiting triage");
+  });
+
+  it("announces the selection count and the batch result via the live region", async () => {
+    mountBulk();
+    h.bulkTriageInbox.mockResolvedValue({
+      batchId: "batch-a",
+      applied: 2,
+      skipped: [{ id: "z", reason: "deleted" }],
+      errored: [],
+    });
+    const { findByTestId, getAllByTestId, getByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(getAllByTestId("inbox-select-group")[0] as HTMLElement);
+    expect(getByTestId("inbox-announce")).toHaveTextContent("2 items selected");
+
+    fireEvent.click(getByTestId("inbox-bulk-queue-soon"));
+    await waitFor(() =>
+      expect(getByTestId("inbox-announce")).toHaveTextContent(
+        "Queued applied to 2 items. 1 skipped.",
+      ),
+    );
+  });
+
+  it("the snackbar Undo calls bulkTriageInboxUndo with the batch id and refreshes", async () => {
+    mountBulk();
+    h.bulkTriageInbox.mockResolvedValue({
+      batchId: "batch-undo",
+      applied: 2,
+      skipped: [],
+      errored: [],
+    });
+    const { findByTestId, getByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    fireEvent.click(getByTestId("inbox-select-all"));
+    fireEvent.click(getByTestId("inbox-bulk-queue-soon"));
+
+    const undo = await findByTestId("inbox-snackbar-undo");
+    h.listInbox.mockClear();
+    fireEvent.click(undo);
+
+    await waitFor(() =>
+      expect(h.bulkTriageInboxUndo).toHaveBeenCalledWith({ batchId: "batch-undo" }),
+    );
+    await waitFor(() => expect(h.listInbox).toHaveBeenCalled());
   });
 });

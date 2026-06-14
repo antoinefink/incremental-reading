@@ -21,14 +21,17 @@
 
 import { buildSchema, SourceEditor } from "@interleave/editor";
 import { useNavigate } from "@tanstack/react-router";
-import { type Ref, useCallback, useEffect, useRef, useState } from "react";
+import { type Ref, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BalanceBanner } from "../../components/BalanceBanner";
 import { ExternalUrlLink } from "../../components/ExternalUrlLink";
 import { Icon, type IconName } from "../../components/Icon";
-import { Prio, Status, TypeIcon } from "../../components/inspector/primitives";
+import { Status } from "../../components/inspector/primitives";
+import { Snackbar } from "../../components/Snackbar";
 import { HelpLink, InlineHint } from "../../help/Contextual";
 import {
   appApi,
+  type InboxBulkTriageAction,
+  type InboxBulkTriageResult,
   type InboxItemDetail,
   type InboxItemSummary,
   isDesktop,
@@ -36,12 +39,45 @@ import {
   type SourceDuplicateSummary,
 } from "../../lib/appApi";
 import { Kbd } from "../../shell/Kbd";
-import { NEW_SOURCE_EVENT } from "../../shell/nav";
+import { NEW_SOURCE_EVENT, UNDO_EVENT } from "../../shell/nav";
 import { useSelection } from "../../shell/selection";
+import { BulkActionPanel } from "./BulkActionPanel";
 import { ImportFileModal } from "./ImportFileModal";
 import { ImportUrlModal } from "./ImportUrlModal";
+import { groupInboxItems, type InboxGroupBy, InboxGroupedList } from "./InboxGroupedList";
 import { NewSourceModal } from "./NewSourceModal";
 import "../source/reader.css";
+
+/** Past-tense verb label for the snackbar + aria-live wording of a bulk sweep. */
+const BULK_VERB_LABEL: Record<InboxBulkTriageAction, string> = {
+  accept: "Read now",
+  queueSoon: "Queued",
+  keepForLater: "Saved for later",
+  delete: "Deleted",
+  setPriority: "Set priority",
+};
+
+/** A REMOVING verb empties the inbox of the acted ids; `setPriority` keeps them. */
+function isRemovingBulkAction(action: InboxBulkTriageAction): boolean {
+  return action !== "setPriority";
+}
+
+/**
+ * Honest sweep summary for the snackbar + aria-live: the verb, the applied count,
+ * and the skipped/errored tallies surfaced rather than masked.
+ * e.g. "Queued 12 · 2 skipped" / "Set priority on 12".
+ */
+function bulkResultMessage(action: InboxBulkTriageAction, result: InboxBulkTriageResult): string {
+  // "Set priority on 12" reads more naturally than "Set priority 12".
+  const lead =
+    action === "setPriority"
+      ? `${BULK_VERB_LABEL[action]} on ${result.applied}`
+      : `${BULK_VERB_LABEL[action]} ${result.applied}`;
+  const parts = [lead];
+  if (result.skipped.length > 0) parts.push(`${result.skipped.length} skipped`);
+  if (result.errored.length > 0) parts.push(`${result.errored.length} failed`);
+  return parts.join(" · ");
+}
 
 /** Numeric priority `0.0`–`1.0` → coarse A/B/C/D label (mirrors core/priority). */
 function priorityToLabel(priority: number): PriorityLabelInput {
@@ -120,65 +156,6 @@ function mediaImportMessage(error: unknown): string {
   const sep = raw.indexOf(":");
   const code = sep > 0 ? raw.slice(0, sep).trim() : "";
   return codes[code] ?? "Could not import that media.";
-}
-
-function formatInboxCharCount(charCount: number): string {
-  if (charCount < 1000) return `${charCount} ch`;
-  const compact = Math.round((charCount / 1000) * 10) / 10;
-  return `${Number.isInteger(compact) ? compact.toFixed(0) : compact.toFixed(1)}k ch`;
-}
-
-/** A single left-list row for one inbox source. */
-function InboxRow({
-  item,
-  active,
-  onSelect,
-}: {
-  item: InboxItemSummary;
-  active: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      data-testid="inbox-row"
-      data-element-id={item.id}
-      aria-current={active ? "true" : undefined}
-      onClick={onSelect}
-      className={
-        active
-          ? "flex w-full cursor-pointer items-start gap-2.5 rounded-md border border-accent-soft-bd bg-accent-soft px-3.5 py-3 text-left"
-          : "flex w-full cursor-pointer items-start gap-2.5 rounded-md border border-transparent px-3.5 py-3 text-left hover:bg-surface-2"
-      }
-    >
-      <TypeIcon type={item.type} />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium text-sm text-text">{item.title}</span>
-        <span className="mt-1 flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-text-3 text-xs">
-          <span className="max-w-[calc(var(--s-12)+var(--s-10))] shrink-0 truncate whitespace-nowrap rounded bg-surface-2 px-1.5 py-0.5 text-2xs">
-            {item.srcType}
-          </span>
-          {item.author ? (
-            <>
-              <span aria-hidden className="shrink-0">
-                ·
-              </span>
-              <span className="min-w-0 flex-1 truncate whitespace-nowrap">{item.author}</span>
-            </>
-          ) : null}
-          <span aria-hidden className="shrink-0">
-            ·
-          </span>
-          <span className="shrink-0 whitespace-nowrap font-mono">
-            {formatInboxCharCount(item.charCount)}
-          </span>
-        </span>
-      </span>
-      <span className="shrink-0">
-        <Prio priority={item.priority} />
-      </span>
-    </button>
-  );
 }
 
 /** A triage action button (block, with a keyboard hint). */
@@ -483,6 +460,25 @@ export function InboxScreen() {
   // the week's counts without a full remount.
   const [balanceRefresh, setBalanceRefresh] = useState(0);
 
+  // --- Bulk triage (T126 — U5): renderer-only selection + group-by + snackbar undo. ---
+  // The selected set (multi-select), distinct from the roving cursor (`selId`).
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
+  // The shift-range anchor — the row a contiguous range extends from.
+  const anchorRef = useRef<string | null>(null);
+  // The active group-by axis (instant pure-renderer transform; switching keeps the set).
+  const [groupBy, setGroupBy] = useState<InboxGroupBy>("origin");
+  // The armed priority band for the bulk panel (rides with the next verb, or alone).
+  const [bulkPriority, setBulkPriority] = useState<PriorityLabelInput | null>(null);
+  // The snackbar's bound batch id + message (the Undo reverses exactly that batch).
+  const [snack, setSnack] = useState<string | null>(null);
+  const [snackBatchId, setSnackBatchId] = useState<string | null>(null);
+  // The polite live-region announcement (selection count / sweep result).
+  const [announce, setAnnounce] = useState("");
+  // In-flight guard for a bulk sweep — reset when `busy` settles (the DoneIntentMenu rule).
+  const bulkInFlightRef = useRef(false);
+
+  const multiSelect = selectedIds.size >= 2;
+
   /** Reload the list; keep/repair the current selection. */
   const refresh = useCallback(async (preferId?: string | null): Promise<boolean> => {
     if (!isDesktop()) return true;
@@ -535,13 +531,16 @@ export function InboxScreen() {
   }, [desktop]);
 
   // Whenever the selected inbox id changes, fetch its detail + drive the shell
-  // inspector selection so it shows the same element.
+  // inspector selection so it shows the same element. In multi-select mode
+  // (`size >= 2`) the bulk panel REPLACES the detail pane, so the per-cursor detail
+  // fetch is SUPPRESSED — a 50-item sweep must not fire 50 detail IPC calls (KTD-7).
   useEffect(() => {
     if (!isDesktop() || !selId) {
       setDetail(null);
       return;
     }
     select(selId);
+    if (multiSelect) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -557,12 +556,7 @@ export function InboxScreen() {
     return () => {
       cancelled = true;
     };
-  }, [selId, select]);
-
-  const onSelect = useCallback((id: string) => {
-    selIdRef.current = id;
-    setSelId(id);
-  }, []);
+  }, [selId, select, multiSelect]);
 
   const revealInboxTriageActions = useCallback(() => {
     const triageActions = triageActionsRef.current;
@@ -684,6 +678,10 @@ export function InboxScreen() {
         return;
       }
       setError(null);
+      // Navigating away into the reader clears the bulk selection (KTD-7 rule).
+      setSelectedIds((prev) => (prev.size === 0 ? prev : new Set()));
+      setBulkPriority(null);
+      anchorRef.current = null;
       void navigate({ to: "/source/$id", params: { id: selId } });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -775,6 +773,233 @@ export function InboxScreen() {
     [selId, busy, refresh],
   );
 
+  // --- Selection / grouping / bulk dispatch (T126 — U5) ---
+
+  // Group the list by the active axis (pure renderer transform; no fetch). A flat,
+  // display-ordered id list mirrors the rendered order so shift-range picks a
+  // contiguous run across group boundaries the way the user sees them.
+  const groups = useMemo(() => groupInboxItems(items, groupBy), [items, groupBy]);
+  const orderedIds = useMemo(
+    () => groups.flatMap((group) => group.items.map((it) => it.id)),
+    [groups],
+  );
+
+  // The secondary group-breakdown line for the bulk panel: the labels of the groups
+  // the current selection spans, in display order, deduplicated.
+  const selectionBreakdown = useMemo(() => {
+    if (selectedIds.size < 2) return [];
+    const labels: string[] = [];
+    for (const group of groups) {
+      if (group.items.some((it) => selectedIds.has(it.id))) labels.push(group.label);
+    }
+    return labels;
+  }, [groups, selectedIds]);
+
+  /** Clear the whole selection + the armed priority + the shift anchor. */
+  const clearSelection = useCallback(() => {
+    setSelectedIds((prev) => (prev.size === 0 ? prev : new Set()));
+    setBulkPriority(null);
+    anchorRef.current = null;
+  }, []);
+
+  /**
+   * Mouse selection (KTD-7): plain click selects a single id (and sets the cursor +
+   * anchor); shift-click selects the contiguous range from the anchor to the clicked
+   * id; ctrl/cmd-click toggles one id. The cursor (`selId`) always follows the click.
+   */
+  const onSelectRow = useCallback(
+    (id: string, modifiers: { shift: boolean; toggle: boolean }) => {
+      selIdRef.current = id;
+      setSelId(id);
+      if (modifiers.toggle) {
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(id)) next.delete(id);
+          else next.add(id);
+          return next;
+        });
+        anchorRef.current = id;
+        return;
+      }
+      if (modifiers.shift && anchorRef.current) {
+        const from = orderedIds.indexOf(anchorRef.current);
+        const to = orderedIds.indexOf(id);
+        if (from !== -1 && to !== -1) {
+          const [lo, hi] = from <= to ? [from, to] : [to, from];
+          setSelectedIds(new Set(orderedIds.slice(lo, hi + 1)));
+          return;
+        }
+      }
+      // Plain click: single-select, reset the anchor here.
+      setSelectedIds(new Set([id]));
+      anchorRef.current = id;
+    },
+    [orderedIds],
+  );
+
+  /** "Select group" — add every id in the group to the selection. */
+  const onSelectGroup = useCallback((ids: readonly string[]) => {
+    if (ids.length === 0) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+    const last = ids[ids.length - 1];
+    if (last) anchorRef.current = last;
+  }, []);
+
+  /** "Select all" — the whole visible inbox (capped main-side at 1000 per request). */
+  const onSelectAll = useCallback(() => {
+    if (orderedIds.length === 0) return;
+    setSelectedIds(new Set(orderedIds));
+    anchorRef.current = orderedIds[orderedIds.length - 1] ?? null;
+  }, [orderedIds]);
+
+  /**
+   * Move focus to the next remaining row after a REMOVING sweep dropped the acted
+   * ids — keeps the keyboard path fluid (the first surviving row in display order;
+   * a no-op when none remain, where the inbox-zero state takes over).
+   */
+  const focusNextRemainingRow = useCallback((remainingIds: readonly string[]) => {
+    const target = remainingIds[0];
+    if (!target) return;
+    // Defer to the next frame so the re-render has painted the surviving rows.
+    requestAnimationFrame(() => {
+      const node = document.querySelector<HTMLButtonElement>(
+        `[data-testid="inbox-row"][data-element-id="${target}"]`,
+      );
+      node?.focus({ preventScroll: true });
+    });
+  }, []);
+
+  /**
+   * Fire ONE bulk sweep over the current selection (KTD-3). A verb optionally carries
+   * the armed priority in the SAME batch; a priority-only sweep (`setPriority`) keeps
+   * the selection so the user can chain. Surfaces `{ applied, skipped, errored }`
+   * honestly and arms the snackbar Undo to the batch id.
+   */
+  const runBulk = useCallback(
+    async (action: InboxBulkTriageAction, priority: PriorityLabelInput | null) => {
+      if (busy || bulkInFlightRef.current) return;
+      const ids = [...selectedIds];
+      if (ids.length === 0) return;
+      bulkInFlightRef.current = true;
+      setBusy(true);
+      try {
+        const result = await appApi.bulkTriageInbox({
+          ids,
+          action,
+          ...(priority ? { priority } : {}),
+        });
+        const message = bulkResultMessage(action, result);
+        setSnack(message);
+        setSnackBatchId(result.applied > 0 ? result.batchId : null);
+        setAnnounce(
+          `${BULK_VERB_LABEL[action]} applied to ${result.applied} items. ${result.skipped.length} skipped.`,
+        );
+        if (isRemovingBulkAction(action)) {
+          // A removing verb empties the acted rows; clear the selection (+ the armed
+          // band) and refocus the next remaining row.
+          const acted = new Set(ids);
+          const remaining = orderedIds.filter((id) => !acted.has(id));
+          clearSelection();
+          focusNextRemainingRow(remaining);
+        }
+        // A priority-only sweep KEEPS the selection AND the armed band, so the user
+        // can chain a verb that combines the same band in one batch (KTD-3).
+        await refresh(null);
+        setError(null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        bulkInFlightRef.current = false;
+        setBusy(false);
+      }
+    },
+    [busy, selectedIds, orderedIds, clearSelection, focusNextRemainingRow, refresh],
+  );
+
+  /**
+   * A bulk verb button: fire the verb + the armed band (if any) in ONE combined
+   * batch — so "queue this group at B" is one `bulkTriageInbox`, one snackbar, one
+   * undo (AE-2). A removing verb then clears the selection AND the armed band.
+   */
+  const onBulkVerb = useCallback(
+    (kind: Exclude<InboxBulkTriageAction, "setPriority">) => {
+      void runBulk(kind, bulkPriority);
+    },
+    [runBulk, bulkPriority],
+  );
+
+  /**
+   * A bulk priority chip is a pure ARM TOGGLE — it fires NO batch on its own. Clicking
+   * an unarmed band arms it; clicking the armed band disarms. The armed band then
+   * rides with the next verb (combined, one batch) or is committed via "Set priority".
+   */
+  const onArmBulkPriority = useCallback((label: PriorityLabelInput) => {
+    setBulkPriority((prev) => (prev === label ? null : label));
+  }, []);
+
+  /**
+   * "Set priority" commits the armed band as a priority-only sweep (one batch). It
+   * KEEPS the selection and the armed band so the user can chain a verb afterward.
+   */
+  const onSetBulkPriority = useCallback(() => {
+    if (!bulkPriority) return;
+    void runBulk("setPriority", bulkPriority);
+  }, [runBulk, bulkPriority]);
+
+  /** The snackbar Undo reverses exactly the bound batch (NOT the global undoLast). */
+  const onBulkUndo = useCallback(() => {
+    const batchId = snackBatchId;
+    setSnack(null);
+    setSnackBatchId(null);
+    if (!batchId) return;
+    void appApi
+      .bulkTriageInboxUndo({ batchId })
+      .then(() => refresh(null))
+      .then(() => window.dispatchEvent(new CustomEvent(UNDO_EVENT)))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+  }, [snackBatchId, refresh]);
+
+  // Drop ids from the selection that have left the list (a sweep / refresh removed
+  // them). Live arrivals NEVER auto-join — the set only ever shrinks here.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(items.map((it) => it.id));
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (live.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [items]);
+
+  // Announce the selection count politely on every change (size >= 1).
+  useEffect(() => {
+    if (selectedIds.size > 0) {
+      setAnnounce(`${selectedIds.size} item${selectedIds.size === 1 ? "" : "s"} selected`);
+    }
+  }, [selectedIds.size]);
+
+  // Esc clears the selection (the rest of the keymap is U6).
+  useEffect(() => {
+    if (!desktop || modalOpen || urlModalOpen || fileModalOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (selectedIds.size === 0) return;
+      const target = e.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      clearSelection();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [desktop, modalOpen, urlModalOpen, fileModalOpen, selectedIds.size, clearSelection]);
+
   // Keyboard triage: 1 = read now, 2 = queue soon, 3 = save for later, 6 = delete (ignore when a
   // field/modal is focused, matching the kit's 1–6 hints).
   useEffect(() => {
@@ -826,6 +1051,7 @@ export function InboxScreen() {
           <h1 className="font-semibold text-text text-xl tracking-tight">Import &amp; Inbox</h1>
           <span className="text-sm text-text-3" data-testid="inbox-count">
             {items.length} item{items.length !== 1 ? "s" : ""} awaiting triage
+            {selectedIds.size > 0 ? ` · ${selectedIds.size} selected` : ""}
           </span>
         </div>
         <div className="flex flex-wrap gap-2.5" data-coach="import">
@@ -926,20 +1152,29 @@ export function InboxScreen() {
           </div>
         ) : (
           <>
-            <div
-              className="w-[360px] flex-none space-y-1 overflow-y-auto border-border border-r p-2"
-              data-testid="inbox-list"
-            >
-              {items.map((it) => (
-                <InboxRow
-                  key={it.id}
-                  item={it}
-                  active={it.id === selId}
-                  onSelect={() => onSelect(it.id)}
-                />
-              ))}
-            </div>
-            {detail ? (
+            <InboxGroupedList
+              groups={groups}
+              groupBy={groupBy}
+              onGroupByChange={setGroupBy}
+              selectedIds={selectedIds}
+              cursorId={selId}
+              totalCount={items.length}
+              onSelectRow={onSelectRow}
+              onSelectGroup={onSelectGroup}
+              onSelectAll={onSelectAll}
+            />
+            {multiSelect ? (
+              // size >= 2 -> the bulk panel REPLACES the per-item detail pane (KTD-7).
+              <BulkActionPanel
+                selectedCount={selectedIds.size}
+                breakdown={selectionBreakdown}
+                busy={busy}
+                pendingPriority={bulkPriority}
+                onVerb={onBulkVerb}
+                onArmPriority={onArmBulkPriority}
+                onSetPriority={onSetBulkPriority}
+              />
+            ) : detail ? (
               <PreviewPane
                 detail={detail}
                 busy={busy}
@@ -958,6 +1193,22 @@ export function InboxScreen() {
           </>
         )}
       </div>
+
+      {/* Polite live region: selection count + sweep result, mirroring the snackbar. */}
+      <div className="sr-only" role="status" aria-live="polite" data-testid="inbox-announce">
+        {announce}
+      </div>
+
+      <Snackbar
+        message={snack}
+        onUndo={snackBatchId ? onBulkUndo : undefined}
+        onClose={() => {
+          setSnack(null);
+          setSnackBatchId(null);
+        }}
+        testId="inbox-snackbar"
+        icon="check"
+      />
 
       <NewSourceModal
         open={modalOpen}
