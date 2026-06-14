@@ -84,6 +84,8 @@ import {
   emptySearchFacetCounts,
   foldSearchFacetCounts,
   HEAVY_FIT_REVIEW_THRESHOLD,
+  type InboxBulkTriageResult,
+  InboxBulkTriageService,
   InboxQuery,
   InspectorQuery,
   inboxSourceDomain,
@@ -123,6 +125,7 @@ import {
   type SynthesisData,
   type SynthesisLinkedElement,
   TimeCostQuery,
+  type UndoResult,
   UndoService,
   WorkloadService,
 } from "@interleave/local-db";
@@ -270,6 +273,9 @@ import type {
   ExtractsUpdateStageRequest,
   ExtractsUpdateStageResult,
   FactLifetimeSummary,
+  InboxBulkTriageRequest,
+  InboxBulkTriageUndoRequest,
+  InboxBulkTriageUndoResult,
   InboxGetResult,
   InboxItemSummary,
   InboxListResult,
@@ -599,6 +605,8 @@ export class DbService {
   /** The re-verify drain orchestrator (T124) — preview/resolve/undo + the flagged rollup. */
   private reverify: ReverifyResolutionService | null = null;
   private inboxQuery: InboxQuery | null = null;
+  /** The inbox BULK-triage batch boundary (T126) — built lazily on first use. */
+  private inboxBulkTriageService: InboxBulkTriageService | null = null;
   private queueAction: QueueActionService | null = null;
   private blockProcessing: BlockProcessingService | null = null;
   /** The overload AUTO-POSTPONE apply seam (T077) — preview + apply, one `batchId` per sweep. */
@@ -999,6 +1007,7 @@ export class DbService {
     this.reverify = null;
     this.recoveryMode = null;
     this.inboxQuery = null;
+    this.inboxBulkTriageService = null;
     this.extraction = null;
     this.extractReview = null;
     this.cardService = null;
@@ -3490,6 +3499,49 @@ export class DbService {
     // Re-read it as a fresh summary so the renderer reflects the new state.
     const summary: InboxItemSummary | null = this.summaryForId(id);
     return { item: summary, deleted: false };
+  }
+
+  /**
+   * The inbox BULK-triage batch boundary (T126), built lazily over the same deps the
+   * per-item {@link triageInboxItem} uses: the element repository, the attention
+   * scheduler, and the global {@link UndoService}. The renderer reaches this only over
+   * validated IPC (U4) — there is no generic `db.query`.
+   */
+  private get inboxBulkTriage(): InboxBulkTriageService {
+    if (!this.inboxBulkTriageService) {
+      this.inboxBulkTriageService = new InboxBulkTriageService(this.require().db, {
+        elements: this.repos.elements,
+        scheduler: this.attentionScheduleService,
+        undo: this.undo,
+      });
+    }
+    return this.inboxBulkTriageService;
+  }
+
+  /**
+   * Apply ONE triage verb (optionally + ONE priority band) to N inbox ids as ONE
+   * transactional, op-logged batch sharing one `batchId` (T126). Reuses the EXACT
+   * per-item verb writes — no new op type, no new status, no new mutation shape. Stale
+   * ids are skip-and-classified (never thrown); a real write error aborts the whole
+   * transaction and is surfaced via the result's `errored` channel. U4 wires the typed
+   * IPC channel to this; the renderer never reaches it directly.
+   */
+  bulkTriageInboxItems(request: InboxBulkTriageRequest): InboxBulkTriageResult {
+    return this.inboxBulkTriage.apply(request.ids, request.action, request.priority ?? null);
+  }
+
+  /**
+   * Undo a bulk-triage batch by its `batchId` (T126) through {@link UndoService.undoBatch}
+   * with the OP-TYPE-AGNOSTIC movement guard — restoring every row to its pre-image, or
+   * refusing cleanly (no clobber) if any victim moved since the batch wrote it.
+   */
+  bulkTriageUndo(request: InboxBulkTriageUndoRequest): InboxBulkTriageUndoResult {
+    const result: UndoResult = this.inboxBulkTriage.undoBatch(request.batchId);
+    return {
+      undone: result.undone,
+      count: result.count,
+      ...(result.reason !== undefined ? { reason: result.reason } : {}),
+    };
   }
 
   /** A fresh inbox summary for one source id (whatever its current status), or `null`. */

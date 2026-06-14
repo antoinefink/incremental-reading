@@ -2956,6 +2956,60 @@ export interface InboxTriageResult {
 }
 
 // ---------------------------------------------------------------------------
+// inbox.bulkTriage() / inbox.bulkTriageUndo()  (T126 — bulk inbox triage)
+// ---------------------------------------------------------------------------
+
+/**
+ * The ONE verb a bulk sweep applies to N selected inbox ids (T126). Identical to the
+ * per-item {@link InboxTriageRequestSchema} action union, flattened to a kind string —
+ * `setPriority` is a priority-only sweep (the band rides in `priority`). U4 wires the
+ * zod schema (`ids` min-1 / max-1000, optional `priority`) + IPC plumbing; U3 defines
+ * the request/result TS shape so the DbService methods can be typed.
+ */
+export type InboxBulkTriageAction =
+  | "accept"
+  | "queueSoon"
+  | "keepForLater"
+  | "delete"
+  | "setPriority";
+
+/** Why an id in a bulk selection was skipped (never thrown — classified + counted). */
+export type InboxBulkTriageSkipReason = "not_inbox" | "deleted" | "wrong_type" | "already_acted";
+
+/** One bulk-triage request: a verb over N ids, optionally + one priority band. */
+export interface InboxBulkTriageRequest {
+  readonly ids: readonly string[];
+  readonly action: InboxBulkTriageAction;
+  /** When present, every applied id ALSO gets this band in the same batch (T126). */
+  readonly priority?: PriorityLabel;
+}
+
+/** The outcome of one bulk sweep: counts + the per-id skip/error channels (T126). */
+export interface InboxBulkTriageResult {
+  /** The shared batch id, so the whole sweep undoes as one (the snackbar binds this). */
+  readonly batchId: string;
+  /** How many ids had the verb (and optional priority) applied. */
+  readonly applied: number;
+  /** Ineligible/stale ids with classified reasons (the batch did NOT abort for these). */
+  readonly skipped: readonly { readonly id: string; readonly reason: InboxBulkTriageSkipReason }[];
+  /** Ids whose write failed unexpectedly — the whole tx aborted (`applied` is 0). */
+  readonly errored: readonly { readonly id: string; readonly error: string }[];
+}
+
+/** Undo a bulk-triage batch by its `batchId` (T126). */
+export interface InboxBulkTriageUndoRequest {
+  readonly batchId: string;
+}
+
+/** The outcome of a bulk-triage undo: how many ops reversed, or a clean refusal (T126). */
+export interface InboxBulkTriageUndoResult {
+  readonly undone: boolean;
+  readonly count: number;
+  /** Why nothing was undone (e.g. a victim moved since the batch), when `undone` is false. */
+  readonly reason?: string;
+}
+
+// ---------------------------------------------------------------------------
 // documents.get() / documents.save()  (T015 — editable rich-text body)
 // ---------------------------------------------------------------------------
 

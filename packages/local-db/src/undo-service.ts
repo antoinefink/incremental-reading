@@ -77,6 +77,18 @@ export interface UndoBatchOptions {
   readonly requireUpdateOriginKind?: string;
   readonly requireCurrentDueMatch?: boolean;
   readonly requireCurrentReferenceFateMatch?: boolean;
+  /**
+   * OP-TYPE-AGNOSTIC movement guard for a HETEROGENEOUS bulk batch (T126 inbox bulk
+   * triage). A single bulk verb can emit `reschedule_element` (accept/queueSoon),
+   * `update_element` (park/setPriority), or `soft_delete_element` (delete) — and a
+   * combined verb+priority sweep mixes `update_element` with a reschedule/soft-delete
+   * in one batch. Unlike {@link requireCurrentDueMatch} (only validates reschedule ops)
+   * or {@link requireCurrentReferenceFateMatch} (only a done/reference update), this
+   * checks, per op, that the element's CURRENT state still equals the POST-IMAGE the op
+   * wrote — so undo refuses cleanly if ANY victim moved since the batch, regardless of
+   * op type, and never clobbers a later edit.
+   */
+  readonly requireCurrentBulkTriageStateMatch?: boolean;
   readonly restoredPayloadExtras?: Readonly<Record<string, unknown>>;
   readonly afterUndo?: (tx: TransactionClient) => void;
 }
@@ -231,6 +243,10 @@ export class UndoService {
         conflict = batch.some((op) => !this.currentReferenceFateMatchesAppliedWithin(tx, op));
         if (conflict) return;
       }
+      if (options.requireCurrentBulkTriageStateMatch) {
+        conflict = batch.some((op) => !this.currentBulkTriageStateMatchesAppliedWithin(tx, op));
+        if (conflict) return;
+      }
       for (const op of batch) {
         const opLabel = this.invertWithin(tx, op, options.restoredPayloadExtras ?? {});
         if (opLabel === null) continue;
@@ -248,7 +264,9 @@ export class UndoService {
         label: "",
         reason: options.requireCurrentReferenceFateMatch
           ? "Batch no longer matches current reference state"
-          : "Batch no longer matches current schedule",
+          : options.requireCurrentBulkTriageStateMatch
+            ? "One or more items have changed since this batch"
+            : "Batch no longer matches current schedule",
         count: 0,
       };
     }
@@ -413,6 +431,69 @@ export class UndoService {
       (element.dueAt ?? null) === null &&
       element.extractFate === "reference"
     );
+  }
+
+  /**
+   * Whether the element's CURRENT state still equals the POST-IMAGE this op wrote — the
+   * op-type-agnostic conflict check for a bulk inbox-triage batch (T126). Per op type:
+   *  - `reschedule_element` (bulk accept/queueSoon): same `due_at` + same `status` the
+   *    op wrote, still live;
+   *  - `update_element` (bulk park/setPriority): every applied `patch` field still holds
+   *    (status / priority / dueAt / parkedAt), still live;
+   *  - `soft_delete_element` (bulk delete): the row is still soft-deleted.
+   * Anything else (or a row that vanished) is a conflict, so undo refuses cleanly.
+   */
+  private currentBulkTriageStateMatchesAppliedWithin(tx: DbClient, op: ParsedOp): boolean {
+    if (!op.elementId) return false;
+    const element = tx
+      .select({
+        deletedAt: elements.deletedAt,
+        status: elements.status,
+        dueAt: elements.dueAt,
+        priority: elements.priority,
+        parkedAt: elements.parkedAt,
+      })
+      .from(elements)
+      .where(eq(elements.id, op.elementId))
+      .get();
+    if (!element) return false;
+    switch (op.opType) {
+      case "reschedule_element": {
+        if (element.deletedAt !== null) return false;
+        if (!Object.hasOwn(op.payload, "dueAt")) return false;
+        const appliedDueAt = (op.payload.dueAt ?? null) as IsoTimestamp | null;
+        if ((element.dueAt ?? null) !== appliedDueAt) return false;
+        const appliedStatus = typeof op.payload.status === "string" ? op.payload.status : undefined;
+        return appliedStatus === undefined || element.status === appliedStatus;
+      }
+      case "update_element": {
+        if (element.deletedAt !== null) return false;
+        const patch = op.payload.patch;
+        if (typeof patch !== "object" || patch === null) return false;
+        const applied = patch as Record<string, unknown>;
+        if (Object.hasOwn(applied, "status") && element.status !== applied.status) return false;
+        if (Object.hasOwn(applied, "priority") && element.priority !== applied.priority) {
+          return false;
+        }
+        if (
+          Object.hasOwn(applied, "dueAt") &&
+          (element.dueAt ?? null) !== (applied.dueAt ?? null)
+        ) {
+          return false;
+        }
+        if (
+          Object.hasOwn(applied, "parkedAt") &&
+          (element.parkedAt ?? null) !== (applied.parkedAt ?? null)
+        ) {
+          return false;
+        }
+        return true;
+      }
+      case "soft_delete_element":
+        return element.deletedAt !== null;
+      default:
+        return false;
+    }
   }
 
   private invertWithin(

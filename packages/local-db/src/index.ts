@@ -255,6 +255,15 @@ export {
   nowIso,
 } from "./ids";
 export {
+  type InboxBulkTriageAction,
+  type InboxBulkTriageDeps,
+  type InboxBulkTriageErrored,
+  type InboxBulkTriageResult,
+  InboxBulkTriageService,
+  type InboxBulkTriageSkipped,
+  type InboxBulkTriageSkipReason,
+} from "./inbox-bulk-triage-service";
+export {
   type InboxItemDetail,
   type InboxItemSummary,
   type InboxProvenance,

@@ -17,7 +17,8 @@
 
 import type { IsoTimestamp } from "@interleave/core";
 import { priorityFromLabel } from "@interleave/core";
-import type { DbHandle } from "@interleave/db";
+import { type DbHandle, elements as elementsTable } from "@interleave/db";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ElementRepository } from "./element-repository";
 import { InboxQuery } from "./inbox-query";
@@ -345,6 +346,19 @@ describe("InboxQuery origin + domain read model (T126)", () => {
     // An accepted source must not appear in the list.
     const accepted = importInboxWith("Accepted", { capturedVia: "file" }).element;
     elements.update(accepted.id, { status: "active" });
+    // `create()` stamps `createdAt = nowIso()`; two rapid creates can land in the same
+    // millisecond and tie-break nondeterministically. Pin distinct timestamps so the
+    // newest-first ordering assertion is deterministic.
+    handle.db
+      .update(elementsTable)
+      .set({ createdAt: "2026-05-01T00:00:00.000Z" })
+      .where(eq(elementsTable.id, older.id))
+      .run();
+    handle.db
+      .update(elementsTable)
+      .set({ createdAt: "2026-05-02T00:00:00.000Z" })
+      .where(eq(elementsTable.id, newer.id))
+      .run();
 
     const list = inbox.list();
     // Newest-first ordering preserved.

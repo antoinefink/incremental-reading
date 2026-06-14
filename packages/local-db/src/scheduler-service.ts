@@ -448,14 +448,20 @@ export class SchedulerService {
   /**
    * Transaction-composable form for inbox triage. The caller has already loaded and
    * validated the live source row inside its own mutation transaction.
+   *
+   * `opExtras.batchId` (when set) is recorded in the `reschedule_element` op payload so
+   * a BULK accept's N rows share one batch id and undo as one (T126) — exactly like the
+   * sibling {@link rescheduleForActionWithin}. The closed op set is unchanged; this only
+   * enriches the payload (NOT a new mutation shape).
    */
   activateSourceWithReturnWithin(
     tx: TransactionClient,
     id: ElementId,
     now: IsoTimestamp = nowIso(),
+    opExtras: Readonly<{ batchId?: string } & Record<string, unknown>> = {},
   ): ScheduleResult {
     const element = this.requireAttentionElementWithin(tx, id);
-    return this.activateSourceWithReturnElement(tx, element, now);
+    return this.activateSourceWithReturnElement(tx, element, now, opExtras);
   }
 
   /**
@@ -469,6 +475,7 @@ export class SchedulerService {
     tx: TransactionClient,
     id: ElementId,
     now: IsoTimestamp = nowIso(),
+    opExtras: Readonly<{ batchId?: string } & Record<string, unknown>> = {},
   ): ScheduleResult {
     const element = this.requireAttentionElementWithin(tx, id);
     if (element.type !== "source") {
@@ -484,6 +491,7 @@ export class SchedulerService {
       {
         action: "queueSoon",
         queueSoon: true,
+        ...opExtras,
       },
       { updatedAt: now },
     );
@@ -494,6 +502,7 @@ export class SchedulerService {
     tx: TransactionClient | InterleaveDatabase,
     element: Element,
     now: IsoTimestamp,
+    opExtras: Readonly<{ batchId?: string } & Record<string, unknown>> = {},
   ): ScheduleResult {
     if (element.type !== "source") {
       throw new Error(
@@ -510,6 +519,7 @@ export class SchedulerService {
         action: "activate",
         scheduledAt: now,
         ...(decision.scheduleReason ? { scheduleReason: decision.scheduleReason } : {}),
+        ...opExtras,
       },
       {
         updatedAt: now,
