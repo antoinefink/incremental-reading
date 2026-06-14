@@ -17,197 +17,6 @@
  */
 
 /* ============================================================
-   Ported kit classes (token-for-token from design/kit/styles/app.css)
-   ============================================================ */
-
-/* ---------- Buttons ---------- */
-.btn {
-  font-family: var(--font-ui);
-  font-size: var(--t-sm);
-  font-weight: 500;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-2);
-  padding: 0 var(--s-5);
-  height: 30px;
-  border-radius: var(--r-md);
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
-  color: var(--text);
-  cursor: pointer;
-  white-space: nowrap;
-  transition:
-    background var(--fast) var(--ease),
-    border-color var(--fast) var(--ease),
-    box-shadow var(--fast) var(--ease),
-    transform var(--fast) var(--ease);
-  user-select: none;
-}
-.btn:hover {
-  background: var(--surface-2);
-  border-color: var(--text-3);
-}
-.btn:active {
-  transform: translateY(0.5px);
-}
-.btn:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-.btn svg {
-  width: 14px;
-  height: 14px;
-  flex: none;
-}
-
-.btn--primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--text-on-accent);
-}
-.btn--primary:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
-}
-.btn--ghost {
-  background: transparent;
-  border-color: transparent;
-  color: var(--text-2);
-}
-.btn--ghost:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-.btn--soft {
-  background: var(--accent-soft);
-  border-color: transparent;
-  color: var(--accent-text);
-}
-.btn--soft:hover {
-  background: var(--accent-soft);
-  filter: brightness(0.97);
-}
-.btn--danger {
-  color: var(--danger);
-  border-color: var(--border-strong);
-}
-.btn--danger:hover {
-  background: var(--danger-soft);
-  border-color: var(--danger);
-}
-.btn--sm {
-  height: 25px;
-  padding: 0 var(--s-4);
-  font-size: var(--t-xs);
-}
-.btn--lg {
-  height: 38px;
-  padding: 0 var(--s-7);
-  font-size: var(--t-base);
-}
-.btn--icon {
-  padding: 0;
-  width: 30px;
-  justify-content: center;
-}
-.btn--icon.btn--sm {
-  width: 25px;
-}
-.btn--block {
-  width: 100%;
-  justify-content: center;
-}
-.btn[disabled] {
-  opacity: 0.45;
-  pointer-events: none;
-}
-
-/* ---------- Priority dot ---------- */
-.prio-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
-  flex: none;
-}
-.prio-dot--a {
-  background: var(--prio-a);
-}
-.prio-dot--b {
-  background: var(--prio-b);
-}
-.prio-dot--c {
-  background: var(--prio-c);
-}
-.prio-dot--d {
-  background: var(--prio-d);
-}
-
-/* ---------- Banner ---------- */
-.banner {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--s-4);
-  padding: var(--s-4) var(--s-5);
-  border-radius: var(--r-md);
-  border: 1px solid var(--warn);
-  background: var(--warn-soft);
-  color: var(--text);
-  font-size: var(--t-sm);
-}
-.banner svg {
-  width: 16px;
-  height: 16px;
-  flex: none;
-  color: var(--warn);
-  margin-top: 1px;
-}
-.banner--info {
-  border-color: var(--accent-soft-bd);
-  background: var(--accent-soft);
-}
-.banner--info svg {
-  color: var(--accent-text);
-}
-.banner--danger {
-  border-color: var(--danger);
-  background: var(--danger-soft);
-}
-.banner--danger svg {
-  color: var(--danger);
-}
-.banner__title {
-  font-weight: 600;
-}
-.banner__body {
-  color: var(--text-2);
-  margin-top: 2px;
-}
-.banner__actions {
-  margin-left: auto;
-  display: flex;
-  gap: var(--s-2);
-  align-items: center;
-}
-
-/* ---------- Utilities ---------- */
-.dot-sep {
-  width: 3px;
-  height: 3px;
-  border-radius: var(--r-full);
-  background: var(--text-3);
-  flex: none;
-}
-.mono {
-  font-family: var(--font-mono);
-}
-.truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ============================================================
    Weekly Review layer (ported from the design handoff weekly/weekly.css)
    ============================================================ */
 
@@ -833,4 +642,195 @@
   .wk-flags {
     grid-template-columns: 1fr;
   }
+}
+
+/* ============================================================
+   Ported kit classes (token-for-token from design/kit/styles/app.css)
+   ============================================================ */
+
+/* ---------- Buttons ---------- */
+.wk .btn {
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 0 var(--s-5);
+  height: 30px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+  user-select: none;
+}
+.wk .btn:hover {
+  background: var(--surface-2);
+  border-color: var(--text-3);
+}
+.wk .btn:active {
+  transform: translateY(0.5px);
+}
+.wk .btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.wk .btn svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.wk .btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+.wk .btn--primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+.wk .btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-2);
+}
+.wk .btn--ghost:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.wk .btn--soft {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent-text);
+}
+.wk .btn--soft:hover {
+  background: var(--accent-soft);
+  filter: brightness(0.97);
+}
+.wk .btn--danger {
+  color: var(--danger);
+  border-color: var(--border-strong);
+}
+.wk .btn--danger:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+.wk .btn--sm {
+  height: 25px;
+  padding: 0 var(--s-4);
+  font-size: var(--t-xs);
+}
+.wk .btn--lg {
+  height: 38px;
+  padding: 0 var(--s-7);
+  font-size: var(--t-base);
+}
+.wk .btn--icon {
+  padding: 0;
+  width: 30px;
+  justify-content: center;
+}
+.wk .btn--icon.btn--sm {
+  width: 25px;
+}
+.wk .btn--block {
+  width: 100%;
+  justify-content: center;
+}
+.wk .btn[disabled] {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* ---------- Priority dot ---------- */
+.wk .prio-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  flex: none;
+}
+.wk .prio-dot--a {
+  background: var(--prio-a);
+}
+.wk .prio-dot--b {
+  background: var(--prio-b);
+}
+.wk .prio-dot--c {
+  background: var(--prio-c);
+}
+.wk .prio-dot--d {
+  background: var(--prio-d);
+}
+
+/* ---------- Banner ---------- */
+.wk .banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-4);
+  padding: var(--s-4) var(--s-5);
+  border-radius: var(--r-md);
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+  color: var(--text);
+  font-size: var(--t-sm);
+}
+.wk .banner svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--warn);
+  margin-top: 1px;
+}
+.wk .banner--info {
+  border-color: var(--accent-soft-bd);
+  background: var(--accent-soft);
+}
+.wk .banner--info svg {
+  color: var(--accent-text);
+}
+.wk .banner--danger {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+.wk .banner--danger svg {
+  color: var(--danger);
+}
+.wk .banner__title {
+  font-weight: 600;
+}
+.wk .banner__body {
+  color: var(--text-2);
+  margin-top: 2px;
+}
+.wk .banner__actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+}
+
+/* ---------- Utilities ---------- */
+.wk .dot-sep {
+  width: 3px;
+  height: 3px;
+  border-radius: var(--r-full);
+  background: var(--text-3);
+  flex: none;
+}
+.wk .mono {
+  font-family: var(--font-mono);
+}
+.wk .truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

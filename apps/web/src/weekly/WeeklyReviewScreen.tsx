@@ -32,7 +32,9 @@ import {
   type ChronicPostponeRowSummary,
   type ParkedResurfacingDecisionKind,
   type ParkedResurfacingRowSummary,
+  type WeeklyReviewFallowSuggestion,
   type WeeklyReviewLedger,
+  type WeeklyReviewPriorityMiss,
   type WeeklyReviewSectionId,
   type WeeklyReviewSummaryResult,
 } from "../lib/appApi";
@@ -96,6 +98,10 @@ const PRIO_VAR: Record<string, string> = {
   c: "var(--prio-c)",
   d: "var(--prio-d)",
 };
+
+/** Tiny readable className join (page-local; not the help-layer `cx`). */
+const cx = (...parts: (string | false | null | undefined)[]): string =>
+  parts.filter(Boolean).join(" ");
 
 type LoadState =
   | { status: "loading" }
@@ -343,76 +349,30 @@ function WeeklyReviewBody({
       <LedgerFunnel ledger={summary.ledger} />
 
       <Section {...sectionProps("ledger")}>
-        {summary.ledger.priorityMisses.length === 0
-          ? emptyOk("No priority misses in this window. Every due band was served.")
-          : (() => {
-              const max = Math.max(
-                1,
-                ...summary.ledger.priorityMisses.map((miss) => miss.deferred),
-              );
-              return (
-                <div className="wk-misses">
-                  {summary.ledger.priorityMisses.map((miss) => {
-                    const band = miss.band.toLowerCase();
-                    return (
-                      <div className="wk-miss" key={miss.band}>
-                        <span className="wk-miss__band">
-                          <span className={`prio-dot prio-dot--${band}`} />
-                          Band {miss.band}
-                        </span>
-                        <span className="wk-miss__bar">
-                          <i
-                            style={{
-                              width: `${(miss.deferred / max) * 100}%`,
-                              background: PRIO_VAR[band] ?? "var(--text-3)",
-                            }}
-                          />
-                        </span>
-                        <span className="wk-miss__debt">
-                          <b>{miss.deferred}</b> deferred · {miss.postponeDebtDays.toFixed(1)}d debt
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
+        {summary.ledger.priorityMisses.length === 0 ? (
+          emptyOk("No priority misses in this window. Every due band was served.")
+        ) : (
+          <PriorityMissList misses={summary.ledger.priorityMisses} />
+        )}
       </Section>
 
       <Section {...sectionProps("integrity")}>
         <div className="wk-flags">
-          <div
-            className={`wk-flag${
-              summary.integrity.thresholdFlags.aBandDeferredRecently ? " wk-flag--on" : ""
-            }`}
-          >
-            <div className="wk-flag__top">
-              <span className="wk-flag__lbl">A-band deferred</span>
-              <span className="wk-flag__dot" />
-            </div>
-            <span className="wk-flag__val">
-              {summary.integrity.thresholdFlags.aBandDeferredRecently ? "Yes" : "No"}
-            </span>
-          </div>
-          <div
-            className={`wk-flag${
-              summary.integrity.thresholdFlags.postponeDebtHigh ? " wk-flag--on" : ""
-            }`}
-          >
-            <div className="wk-flag__top">
-              <span className="wk-flag__lbl">Postpone debt</span>
-              <span className="wk-flag__dot" />
-            </div>
-            <span className="wk-flag__val">
-              {summary.integrity.thresholdFlags.postponeDebtHigh ? "High" : "Normal"}
-            </span>
-          </div>
-          <div className="wk-flag">
-            <div className="wk-flag__top">
-              <span className="wk-flag__lbl">Resting topics</span>
-              <span className="wk-flag__dot" />
-            </div>
-            <span className="wk-flag__val">{summary.integrity.resting.length}</span>
+          {[
+            {
+              label: "A-band deferred",
+              active: summary.integrity.thresholdFlags.aBandDeferredRecently,
+              value: summary.integrity.thresholdFlags.aBandDeferredRecently ? "Yes" : "No",
+            },
+            {
+              label: "Postpone debt",
+              active: summary.integrity.thresholdFlags.postponeDebtHigh,
+              value: summary.integrity.thresholdFlags.postponeDebtHigh ? "High" : "Normal",
+            },
+          ].map((flag) => (
+            <FlagCard key={flag.label} label={flag.label} active={flag.active} value={flag.value} />
+          ))}
+          <FlagCard label="Resting topics" active={false} value={summary.integrity.resting.length}>
             {summary.integrity.resting.length > 0 ? (
               <div className="wk-flag__pills">
                 {summary.integrity.resting.map((topic) => (
@@ -420,7 +380,7 @@ function WeeklyReviewBody({
                 ))}
               </div>
             ) : null}
-          </div>
+          </FlagCard>
         </div>
       </Section>
 
@@ -450,26 +410,7 @@ function WeeklyReviewBody({
       </Section>
 
       <Section {...sectionProps("fallow")}>
-        {summary.decisions.fallowSuggestions.length === 0 ? (
-          emptyOk("No fallow suggestions — nothing is ready to rest.")
-        ) : (
-          <div className="wk-decisions">
-            {summary.decisions.fallowSuggestions.map((row) => (
-              <div className="wk-decision" key={row.topicId}>
-                <div className="wk-decision__main">
-                  <TypeIcon type="topic" />
-                  <div className="wk-decision__txt">
-                    <div className="wk-decision__title truncate">{row.title}</div>
-                    <div className="wk-decision__meta">
-                      <span className="badge badge--soft">Band {row.band}</span>
-                      <span className="mono">{row.deferred} deferred</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        <FallowDecisions rows={summary.decisions.fallowSuggestions} locked={locked} />
       </Section>
     </div>
   );
@@ -490,9 +431,11 @@ function Section({
   readonly onToggle: (target: "done" | "skipped") => void;
   readonly children: ReactNode;
 }) {
-  const cls = `wk-sec${state === "done" ? " wk-sec--done" : ""}${
-    state === "skipped" ? " wk-sec--skipped" : ""
-  }`;
+  const cls = cx(
+    "wk-sec",
+    state === "done" && "wk-sec--done",
+    state === "skipped" && "wk-sec--skipped",
+  );
   return (
     <section className={cls} data-state={state} data-screen-label={`Weekly · ${meta.title}`}>
       <div className="wk-sec__head">
@@ -623,6 +566,92 @@ function Delta({ cur, prev }: { cur: number; prev: number | undefined }) {
       <Icon name={up ? "arrowUp" : "arrowDown"} size={11} />
       {Math.abs(diff)} vs last wk
     </span>
+  );
+}
+
+/** A single integrity boolean-flag card (`.wk-flag`, amber when `active`). */
+function FlagCard({
+  label,
+  active,
+  value,
+  children,
+}: {
+  readonly label: string;
+  readonly active: boolean;
+  readonly value: ReactNode;
+  readonly children?: ReactNode;
+}) {
+  return (
+    <div className={cx("wk-flag", active && "wk-flag--on")}>
+      <div className="wk-flag__top">
+        <span className="wk-flag__lbl">{label}</span>
+        <span className="wk-flag__dot" />
+      </div>
+      <span className="wk-flag__val">{value}</span>
+      {children}
+    </div>
+  );
+}
+
+/** Priority-miss severity bars, normalized to the largest deferred count. */
+function PriorityMissList({ misses }: { misses: readonly WeeklyReviewPriorityMiss[] }) {
+  const max = Math.max(1, ...misses.map((miss) => miss.deferred));
+  return (
+    <div className="wk-misses">
+      {misses.map((miss) => {
+        const band = miss.band.toLowerCase();
+        return (
+          <div className="wk-miss" key={miss.band}>
+            <span className="wk-miss__band">
+              <span className={`prio-dot prio-dot--${band}`} />
+              Band {miss.band}
+            </span>
+            <span className="wk-miss__bar">
+              <i
+                style={{
+                  width: `${(miss.deferred / max) * 100}%`,
+                  background: PRIO_VAR[band] ?? "var(--text-3)",
+                }}
+              />
+            </span>
+            <span className="wk-miss__debt">
+              <b>{miss.deferred}</b> deferred · {miss.postponeDebtDays.toFixed(1)}d debt
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Display-only fallow suggestions (no apply); parallels Parked/Chronic decisions. */
+function FallowDecisions({
+  rows,
+  locked: _locked,
+}: {
+  readonly rows: readonly WeeklyReviewFallowSuggestion[];
+  readonly locked: boolean;
+}) {
+  if (rows.length === 0) {
+    return emptyOk("No fallow suggestions — nothing is ready to rest.");
+  }
+  return (
+    <div className="wk-decisions">
+      {rows.map((row) => (
+        <div className="wk-decision" key={row.topicId}>
+          <div className="wk-decision__main">
+            <TypeIcon type="topic" />
+            <div className="wk-decision__txt">
+              <div className="wk-decision__title truncate">{row.title}</div>
+              <div className="wk-decision__meta">
+                <span className="badge badge--soft">Band {row.band}</span>
+                <span className="mono">{row.deferred} deferred</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -769,8 +798,11 @@ function ChronicDecisions({
     }
   };
 
-  const verdictCount = selected.length + (hasInvalidFallowDate ? 1 : 0);
-  const readyCount = Object.values(decisions).filter(Boolean).length;
+  const applyNote = hasInvalidFallowDate
+    ? "Set a valid return date to apply."
+    : selected.length > 0
+      ? `${selected.length} verdict${selected.length === 1 ? "" : "s"} ready.`
+      : "Pick a verdict for each chronic item.";
 
   return (
     <>
@@ -825,11 +857,7 @@ function ChronicDecisions({
         })}
       </div>
       <div className="wk-applybar">
-        <span className="wk-applybar__note">
-          {readyCount === 0
-            ? "Pick a verdict for each chronic item."
-            : `${verdictCount} verdict${verdictCount === 1 ? "" : "s"} ready.`}
-        </span>
+        <span className="wk-applybar__note">{applyNote}</span>
         <button
           type="button"
           className="btn btn--soft"
