@@ -4,7 +4,8 @@
  * A filterable, keyboard-driven launcher rebuilt from the kit's CommandPalette:
  * type to filter, ↑/↓ to move, Enter to run, Esc to close. Command rows come
  * from the static catalogue in `nav.ts`; live source rows are fetched through
- * the typed `appApi.searchQuery` bridge, with navigation delegated to the caller.
+ * the typed `appApi.semanticSearch` bridge (the SAME embedding-based retrieval as
+ * the main `/search` box), with navigation delegated to the caller.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
@@ -50,7 +51,15 @@ function matchesCommand(item: CommandItem, query: string): boolean {
     .some((part) => part.toLowerCase().includes(normalized));
 }
 
-function isSourceResult(result: SearchResult): result is SourcePaletteResult {
+/**
+ * Generic over the row shape so it narrows whichever search-result variant the
+ * bridge returns (plain `SearchResult` or the semantic `SemanticSearchResultRow`
+ * that extends it) to its `type: "source"` subset, instead of widening it back
+ * to a bare `SearchResult`.
+ */
+function isSourceResult<T extends SearchResult>(
+  result: T,
+): result is T & { readonly type: "source" } {
   return result.type === "source";
 }
 
@@ -204,7 +213,7 @@ export function CommandPalette({
     setSourceStatus("loading");
 
     void appApi
-      .searchQuery({
+      .semanticSearch({
         q: debouncedQuery,
         type: "source",
         limit: SOURCE_SEARCH_LIMIT,

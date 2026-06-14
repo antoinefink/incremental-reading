@@ -12,16 +12,22 @@
  *  - a plain navigation command still navigates without an action.
  *
  * The palette is renderer-only: route/action handlers are mocked, and the live
- * source section calls the typed `appApi.searchQuery` bridge (mocked here) rather
- * than touching SQLite, IPC internals, or filesystem APIs.
+ * source section calls the typed `appApi.semanticSearch` bridge (mocked here) —
+ * the SAME embedding-based retrieval as the main `/search` box — rather than
+ * touching SQLite, IPC internals, or filesystem APIs.
  */
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SearchQueryResult, SearchResult } from "../lib/appApi";
+import type {
+  SearchResult,
+  SemanticSearchMode,
+  SemanticSearchResult,
+  SemanticSearchResultRow,
+} from "../lib/appApi";
 import { CommandPalette } from "./CommandPalette";
 
-const EMPTY_TEST_SEARCH_COUNTS: SearchQueryResult["counts"] = {
+const EMPTY_TEST_SEARCH_COUNTS: SemanticSearchResult["counts"] = {
   byType: { source: 0, extract: 0, card: 0 },
   byConcept: {},
   byPriority: { A: 0, B: 0, C: 0, D: 0 },
@@ -29,12 +35,12 @@ const EMPTY_TEST_SEARCH_COUNTS: SearchQueryResult["counts"] = {
 
 const bridge = vi.hoisted(() => ({
   isDesktop: vi.fn(),
-  searchQuery: vi.fn(),
+  semanticSearch: vi.fn(),
 }));
 
 vi.mock("../lib/appApi", () => ({
   appApi: {
-    searchQuery: bridge.searchQuery,
+    semanticSearch: bridge.semanticSearch,
   },
   isDesktop: bridge.isDesktop,
 }));
@@ -49,14 +55,18 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function searchResponse(results: readonly SearchResult[]): SearchQueryResult {
+function searchResponse(
+  results: readonly SearchResult[],
+  mode: SemanticSearchMode = "semantic",
+): SemanticSearchResult {
   return {
-    results,
+    results: results.map((result) => ({ semantic: false, vecDistance: null, ...result })),
+    mode,
     counts: EMPTY_TEST_SEARCH_COUNTS,
   };
 }
 
-function sourceHit(overrides: Partial<SearchResult> = {}): SearchResult {
+function sourceHit(overrides: Partial<SemanticSearchResultRow> = {}): SearchResult {
   return {
     id: "src-1",
     type: "source",
@@ -109,8 +119,8 @@ function setup(hasSelection: boolean) {
 beforeEach(() => {
   bridge.isDesktop.mockReset();
   bridge.isDesktop.mockReturnValue(true);
-  bridge.searchQuery.mockReset();
-  bridge.searchQuery.mockResolvedValue(searchResponse([]));
+  bridge.semanticSearch.mockReset();
+  bridge.semanticSearch.mockResolvedValue(searchResponse([]));
 });
 
 /** Click the palette row whose visible label matches. */
@@ -243,20 +253,20 @@ describe("CommandPalette — action entries (T048)", () => {
 
     fireEvent.change(input, { target: { value: "  intelligence  " } });
 
-    await waitFor(() => expect(bridge.searchQuery).toHaveBeenCalledTimes(1));
-    expect(bridge.searchQuery).toHaveBeenCalledWith({
+    await waitFor(() => expect(bridge.semanticSearch).toHaveBeenCalledTimes(1));
+    expect(bridge.semanticSearch).toHaveBeenCalledWith({
       q: "intelligence",
       type: "source",
       limit: expect.any(Number),
       includeCounts: false,
     });
-    const request = bridge.searchQuery.mock.calls[0]?.[0] as { limit: number };
+    const request = bridge.semanticSearch.mock.calls[0]?.[0] as { limit: number };
     expect(request.limit).toBeGreaterThan(0);
     expect(request.limit).toBeLessThanOrEqual(20);
   });
 
   it("keeps matching app links above the live Sources section while typing", async () => {
-    bridge.searchQuery.mockResolvedValue(
+    bridge.semanticSearch.mockResolvedValue(
       searchResponse([
         sourceHit({
           id: "src-review",
@@ -280,8 +290,8 @@ describe("CommandPalette — action entries (T048)", () => {
   });
 
   it("shows source-search status below app links before results arrive", async () => {
-    const pending = deferred<SearchQueryResult>();
-    bridge.searchQuery.mockReturnValue(pending.promise);
+    const pending = deferred<SemanticSearchResult>();
+    bridge.semanticSearch.mockReturnValue(pending.promise);
     setup(false);
     const input = screen.getByLabelText("Command palette search");
 
@@ -297,7 +307,7 @@ describe("CommandPalette — action entries (T048)", () => {
   });
 
   it("navigates to the selected source route and closes the palette", async () => {
-    bridge.searchQuery.mockResolvedValue(
+    bridge.semanticSearch.mockResolvedValue(
       searchResponse([
         sourceHit({
           id: "src-alpha",
@@ -318,7 +328,7 @@ describe("CommandPalette — action entries (T048)", () => {
   });
 
   it("runs a selected source row with Enter", async () => {
-    bridge.searchQuery.mockResolvedValue(
+    bridge.semanticSearch.mockResolvedValue(
       searchResponse([
         sourceHit({
           id: "src-keyboard",
@@ -339,9 +349,9 @@ describe("CommandPalette — action entries (T048)", () => {
   });
 
   it("ignores stale source-search responses from earlier queries", async () => {
-    const first = deferred<SearchQueryResult>();
-    const second = deferred<SearchQueryResult>();
-    bridge.searchQuery.mockImplementation((request: { q: string }) =>
+    const first = deferred<SemanticSearchResult>();
+    const second = deferred<SemanticSearchResult>();
+    bridge.semanticSearch.mockImplementation((request: { q: string }) =>
       request.q === "alpha" ? first.promise : second.promise,
     );
     setup(false);
@@ -349,14 +359,14 @@ describe("CommandPalette — action entries (T048)", () => {
 
     fireEvent.change(input, { target: { value: "alpha" } });
     await waitFor(() =>
-      expect(bridge.searchQuery).toHaveBeenCalledWith(
+      expect(bridge.semanticSearch).toHaveBeenCalledWith(
         expect.objectContaining({ q: "alpha", type: "source" }),
       ),
     );
 
     fireEvent.change(input, { target: { value: "beta" } });
     await waitFor(() =>
-      expect(bridge.searchQuery).toHaveBeenCalledWith(
+      expect(bridge.semanticSearch).toHaveBeenCalledWith(
         expect.objectContaining({ q: "beta", type: "source" }),
       ),
     );
@@ -396,11 +406,11 @@ describe("CommandPalette — action entries (T048)", () => {
 
     fireEvent.change(input, { target: { value: "alpha" } });
     await waitFor(() =>
-      expect(bridge.searchQuery).toHaveBeenCalledWith(
+      expect(bridge.semanticSearch).toHaveBeenCalledWith(
         expect.objectContaining({ q: "alpha", type: "source" }),
       ),
     );
-    bridge.searchQuery.mockClear();
+    bridge.semanticSearch.mockClear();
 
     rerender(
       <CommandPalette
@@ -425,12 +435,12 @@ describe("CommandPalette — action entries (T048)", () => {
       await new Promise((resolve) => window.setTimeout(resolve, 180));
     });
 
-    expect(bridge.searchQuery).not.toHaveBeenCalled();
+    expect(bridge.semanticSearch).not.toHaveBeenCalled();
     expect((screen.getByLabelText("Command palette search") as HTMLInputElement).value).toBe("");
   });
 
   it("renders a source-search error state while command rows remain usable", async () => {
-    bridge.searchQuery.mockRejectedValue(new Error("search failed"));
+    bridge.semanticSearch.mockRejectedValue(new Error("search failed"));
     const { onNavigate } = setup(false);
     const input = screen.getByLabelText("Command palette search");
 
@@ -452,7 +462,7 @@ describe("CommandPalette — action entries (T048)", () => {
       await new Promise((resolve) => window.setTimeout(resolve, 180));
     });
 
-    expect(bridge.searchQuery).not.toHaveBeenCalled();
+    expect(bridge.semanticSearch).not.toHaveBeenCalled();
     expect(screen.getByText("Daily Queue")).toBeInTheDocument();
     expect(screen.queryByText("Sources")).toBeNull();
 
@@ -461,7 +471,7 @@ describe("CommandPalette — action entries (T048)", () => {
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 180));
     });
-    expect(bridge.searchQuery).not.toHaveBeenCalled();
+    expect(bridge.semanticSearch).not.toHaveBeenCalled();
   });
 
   it("keeps command rows usable when source search is unavailable outside desktop", async () => {
@@ -472,15 +482,15 @@ describe("CommandPalette — action entries (T048)", () => {
     fireEvent.change(input, { target: { value: "review" } });
 
     expect(await screen.findByText("Source search is available in the desktop app.")).toBeVisible();
-    expect(bridge.searchQuery).not.toHaveBeenCalled();
+    expect(bridge.semanticSearch).not.toHaveBeenCalled();
     const commandRow = screen.getByRole("button", { name: /Review session/i });
     fireEvent.click(commandRow);
     expect(onNavigate).toHaveBeenCalledWith("/review");
   });
 
   it("renders loading and no-match source states while command rows remain usable", async () => {
-    const pending = deferred<SearchQueryResult>();
-    bridge.searchQuery.mockReturnValue(pending.promise);
+    const pending = deferred<SemanticSearchResult>();
+    bridge.semanticSearch.mockReturnValue(pending.promise);
     setup(false);
     const input = screen.getByLabelText("Command palette search");
 
@@ -488,7 +498,7 @@ describe("CommandPalette — action entries (T048)", () => {
 
     expect(await screen.findByText("Searching sources...")).toBeInTheDocument();
     await waitFor(() =>
-      expect(bridge.searchQuery).toHaveBeenCalledWith(
+      expect(bridge.semanticSearch).toHaveBeenCalledWith(
         expect.objectContaining({ q: "review", type: "source", includeCounts: false }),
       ),
     );
@@ -501,7 +511,7 @@ describe("CommandPalette — action entries (T048)", () => {
   });
 
   it("defensively ignores non-source bridge results", async () => {
-    bridge.searchQuery.mockResolvedValue(
+    bridge.semanticSearch.mockResolvedValue(
       searchResponse([
         sourceHit({
           id: "card-1",
@@ -523,5 +533,76 @@ describe("CommandPalette — action entries (T048)", () => {
 
     expect(await screen.findByText("Real source result")).toBeInTheDocument();
     expect(screen.queryByText("Card result that should not render")).toBeNull();
+  });
+
+  it("surfaces a purely-semantic ('related') source row and runs it", async () => {
+    // A vector-neighbor hit with no keyword match: `semantic: true`, no FTS score.
+    bridge.semanticSearch.mockResolvedValue(
+      searchResponse([
+        sourceHit({
+          id: "src-related",
+          title: "Conceptually related source",
+          snippet: "Surfaced by meaning, not a keyword match.",
+          semantic: true,
+          vecDistance: 0.21,
+        }),
+      ]),
+    );
+    const { onNavigate, onClose } = setup(false);
+    const input = screen.getByLabelText("Command palette search");
+
+    fireEvent.change(input, { target: { value: "intelligence" } });
+
+    await screen.findByText("Conceptually related source");
+    expect(screen.getByText("Surfaced by meaning, not a keyword match.")).toBeInTheDocument();
+    clickRow("Conceptually related source");
+
+    expect(onNavigate).toHaveBeenCalledWith("/source/$id", { params: { id: "src-related" } });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("lists source hits with no error state when semantic degrades to FTS", async () => {
+    // `vec0`/model unavailable: semanticSearch returns mode "fts" with keyword rows.
+    bridge.semanticSearch.mockResolvedValue(
+      searchResponse(
+        [
+          sourceHit({
+            id: "src-fts",
+            title: "Keyword-only source",
+            snippet: "Returned via FTS degrade.",
+          }),
+        ],
+        "fts",
+      ),
+    );
+    setup(false);
+    const input = screen.getByLabelText("Command palette search");
+
+    fireEvent.change(input, { target: { value: "keyword" } });
+
+    expect(await screen.findByText("Keyword-only source")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("lists source hits with no error state when semantic search is disabled", async () => {
+    bridge.semanticSearch.mockResolvedValue(
+      searchResponse(
+        [
+          sourceHit({
+            id: "src-disabled",
+            title: "Source while disabled",
+            snippet: "Returned even with semantic off.",
+          }),
+        ],
+        "disabled",
+      ),
+    );
+    setup(false);
+    const input = screen.getByLabelText("Command palette search");
+
+    fireEvent.change(input, { target: { value: "disabled" } });
+
+    expect(await screen.findByText("Source while disabled")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
