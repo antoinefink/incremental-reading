@@ -337,3 +337,82 @@ describe("formatInterval", () => {
     expect(formatInterval(400)).toMatch(/y$/);
   });
 });
+
+describe("CardSchedulerService.reStabilize (T125 write barrier)", () => {
+  /** A matured, high-stability card due far in the future — the "9 months out" case. */
+  function matureFarFuture(): ReviewState {
+    return {
+      elementId: CARD_ID,
+      dueAt: "2027-03-15T00:00:00.000Z" as IsoTimestamp,
+      stability: 270,
+      difficulty: 6.4,
+      elapsedDays: 30,
+      scheduledDays: 270,
+      reps: 12,
+      lapses: 1,
+      fsrsState: "review",
+      learningSteps: 0,
+      lastReviewedAt: "2026-06-01T00:00:00.000Z" as IsoTimestamp,
+    };
+  }
+
+  it("pulls a far-future mature card in to the confirmation window and collapses stability", () => {
+    const out = service().reStabilize(matureFarFuture(), NOW);
+    expect(out).not.toBeNull();
+    const next = out?.next;
+    if (!next) throw new Error("expected a re-stabilization");
+    // Due within the short confirmation window (≈1 day), not months out.
+    expect(intervalDays(NOW, next.dueAt as IsoTimestamp)).toBeLessThanOrEqual(1 + 1e-9);
+    expect(intervalDays(NOW, next.dueAt as IsoTimestamp)).toBeGreaterThan(0);
+    // Stability collapsed; difficulty / reps / lapses / learningSteps / lastReviewedAt preserved.
+    expect(next.stability).toBeLessThan(270);
+    expect(next.stability).toBeLessThanOrEqual(1);
+    expect(next.difficulty).toBe(6.4);
+    expect(next.reps).toBe(12);
+    expect(next.lapses).toBe(1);
+    expect(next.learningSteps).toBe(0);
+    expect(next.lastReviewedAt).toBe("2026-06-01T00:00:00.000Z");
+    // The preimage is the untouched prior state.
+    expect(out?.prev.stability).toBe(270);
+    expect(out?.prev.dueAt).toBe("2027-03-15T00:00:00.000Z");
+  });
+
+  it("is floor-only: a card already due sooner keeps its sooner due but still collapses stability", () => {
+    const soon: ReviewState = {
+      ...matureFarFuture(),
+      dueAt: "2026-06-15T06:00:00.000Z" as IsoTimestamp, // 6h after NOW, sooner than 1d
+    };
+    const out = service().reStabilize(soon, NOW);
+    const next = out?.next;
+    if (!next) throw new Error("expected a re-stabilization");
+    // Due NOT pushed out — it keeps the sooner 6h due.
+    expect(next.dueAt).toBe("2026-06-15T06:00:00.000Z");
+    // Stability is still collapsed (so the next pass doesn't rebound to the old interval).
+    expect(next.stability).toBeLessThanOrEqual(1);
+  });
+
+  it("returns null for a new / never-reviewed card (nothing to demote)", () => {
+    const fresh = service().newCardState(CARD_ID);
+    expect(service().reStabilize(fresh, NOW)).toBeNull();
+    // reps 0 even with a due date (first-scheduled new card) → still null.
+    expect(service().reStabilize({ ...fresh, dueAt: NOW }, NOW)).toBeNull();
+  });
+
+  it("is deterministic for fixed input", () => {
+    const a = service().reStabilize(matureFarFuture(), NOW);
+    const b = service().reStabilize(matureFarFuture(), NOW);
+    expect(a).toEqual(b);
+  });
+
+  it("produces a state that round-trips through the FSRS adapters without drift", () => {
+    const svc = service();
+    const out = svc.reStabilize(matureFarFuture(), NOW);
+    const next = out?.next;
+    if (!next) throw new Error("expected a re-stabilization");
+    const roundTripped = svc.fromFsrsCard(CARD_ID, svc.toFsrsCard(next, NOW), next.lastReviewedAt);
+    expect(roundTripped.stability).toBeCloseTo(next.stability, 9);
+    expect(roundTripped.difficulty).toBeCloseTo(next.difficulty, 9);
+    expect(roundTripped.fsrsState).toBe(next.fsrsState);
+    expect(roundTripped.dueAt).toBe(next.dueAt);
+  });
+});

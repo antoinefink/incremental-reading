@@ -357,7 +357,9 @@ export class InspectorQuery {
         lifetime = { ...fields, status: deriveExpiryStatus(fields, asOf) };
       }
       const state = review.findReviewState(id);
-      const logCount = review.listReviewLogs(id).length;
+      // Exclude T125 re-stabilization marker rows — the inspector's review count is real
+      // grades only (a marker is not a review).
+      const logCount = review.listReviewLogs(id).filter((log) => log.editMarkerAt == null).length;
       const retrievability = state
         ? approximateRetrievability(state.stability, state.lastReviewedAt, asOf)
         : null;

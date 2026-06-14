@@ -346,3 +346,47 @@ describe("AnalyticsService.computeReviewActivity", () => {
     expect(activity.nextYear).toBe(2028);
   });
 });
+
+describe("AnalyticsService — T125 re-stabilization marker rows are invisible (R9)", () => {
+  /** Insert a re-stabilization MARKER row (editMarkerAt set), as the write barrier writes. */
+  function seedMarker(handle: DbHandle, elementId: ElementId, at: IsoTimestamp): void {
+    handle.db
+      .insert(reviewLogs)
+      .values({
+        id: newReviewLogId(),
+        elementId,
+        rating: "good", // CHECK-valid placeholder; never read as a grade
+        reviewedAt: at,
+        responseMs: 0,
+        prevState: "review",
+        nextState: "review",
+        nextStability: 1,
+        nextDifficulty: 5,
+        nextDueAt: at,
+        editMarkerAt: at,
+        editClass: "substantive",
+        editChoice: "re_stabilize",
+      })
+      .run();
+  }
+
+  it("a marker row does not change reviewsTotal / retention", () => {
+    const asOf = new Date(2026, 4, 30, 18, 0, 0);
+    const asOfIso = asOf.toISOString() as IsoTimestamp;
+    const card = seedCard(handle, localNoon(asOf, 5));
+    seedReview(handle, card, "good", localNoon(asOf, 0));
+    seedReview(handle, card, "again", localNoon(asOf, 1));
+    seedReview(handle, card, "good", localNoon(asOf, 2));
+
+    const before = new AnalyticsService(handle.db).computeAnalytics(asOfIso);
+
+    // Re-stabilize the card (a marker row lands in the same window).
+    seedMarker(handle, card, localNoon(asOf, 1));
+
+    const after = new AnalyticsService(handle.db).computeAnalytics(asOfIso);
+
+    // The fabricated marker row is invisible to every analytics number.
+    expect(after.reviewsTotal).toBe(before.reviewsTotal);
+    expect(after.retention30d).toBe(before.retention30d);
+  });
+});

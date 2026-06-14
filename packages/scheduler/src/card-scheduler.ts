@@ -79,6 +79,35 @@ export interface ReviewOutcome {
   readonly nextLearningSteps: number;
 }
 
+/**
+ * A re-stabilization (T125 card-edit write barrier): the pre-demotion `prev` review
+ * state and the demoted `next` state, or `null` when the card has nothing to demote (a
+ * brand-new / never-reviewed card has earned no stability). Both snapshots are full
+ * {@link ReviewState}s so the caller can persist `next` AND log `prev` as an exact undo
+ * preimage. NOT a {@link ReviewOutcome} — a re-stabilization is NOT a graded review (no
+ * rating, no `lastReviewedAt` advance), so it is never fed to the FSRS optimizer.
+ */
+export interface ReStabilizeOutcome {
+  readonly prev: ReviewState;
+  readonly next: ReviewState;
+}
+
+/**
+ * The short confirmation interval (days) a substantive card edit re-stabilizes to. The
+ * next encounter verifies the NEW formulation soon, instead of the card surfacing months
+ * out on stability its old formulation earned. A documented constant (NOT FSRS math — a
+ * re-stabilization is a deliberate demotion, not a grade).
+ */
+export const RE_STABILIZE_CONFIRMATION_DAYS = 1;
+
+/**
+ * The stability (days) a re-stabilized card collapses to, so the FIRST pass after the
+ * confirmation schedules a modest interval rather than rebounding to the old long one.
+ * Difficulty is preserved (the card is reformulated, not brand-new); only the
+ * trustworthiness of the stability estimate is in doubt, so only stability collapses.
+ */
+export const RE_STABILIZE_STABILITY_DAYS = 1;
+
 /** One previewed grade outcome: the resulting due time + interval (days) + a human label. */
 export interface IntervalPreview {
   readonly dueAt: IsoTimestamp;
@@ -330,6 +359,50 @@ export class CardSchedulerService {
       lapses: next.lapses,
       nextLearningSteps: next.learning_steps,
     };
+  }
+
+  /**
+   * Re-stabilize a card after a SUBSTANTIVE body edit (T125 write barrier). A rewritten
+   * card stops inheriting the stability its OLD formulation earned: this collapses
+   * `stability` toward {@link RE_STABILIZE_STABILITY_DAYS} and pulls the due date in to a
+   * short confirmation interval ({@link RE_STABILIZE_CONFIRMATION_DAYS}), so the next
+   * encounter verifies the new formulation soon instead of months out. PURE — it mutates
+   * nothing; the caller persists `next` and logs `prev` as the undo preimage.
+   *
+   * Invariants (the M7 rule's refined intent — demote the PERSISTED state, never a grade):
+   *  - **Difficulty, reps, lapses, learning steps, and `lastReviewedAt` are PRESERVED** —
+   *    a re-stabilization is not a review, so it must not advance `lastReviewedAt` (that
+   *    would corrupt the elapsed-days of a subsequently-landing in-flight grade).
+   *  - **Floor-only:** the due date is never pushed LATER than it already is (a card
+   *    already due sooner than the confirmation window keeps its sooner due), and
+   *    stability is only ever collapsed, never increased.
+   *  - **New / never-reviewed cards return `null`** (`reps <= 0`): they have earned no
+   *    stability, so there is nothing to demote and no marker is written.
+   */
+  reStabilize(state: ReviewState, now: IsoTimestamp): ReStabilizeOutcome | null {
+    if (state.reps <= 0) return null;
+    const nowMs = this.toClock(now).getTime();
+    const confirmDueMs = nowMs + RE_STABILIZE_CONFIRMATION_DAYS * MS_PER_DAY;
+    const currentDueMs = state.dueAt ? Date.parse(state.dueAt) : Number.POSITIVE_INFINITY;
+    // Floor-only: never push the due date out — keep an already-sooner due, otherwise pull
+    // it in to the confirmation interval.
+    const newDueMs = Math.min(
+      confirmDueMs,
+      Number.isNaN(currentDueMs) ? confirmDueMs : currentDueMs,
+    );
+    const newDueAt = new Date(newDueMs).toISOString() as IsoTimestamp;
+    // Collapse stability (only ever down): the old estimate is no longer trusted.
+    const newStability = Math.min(state.stability, RE_STABILIZE_STABILITY_DAYS);
+    const newScheduledDays = Math.max(0, (newDueMs - nowMs) / MS_PER_DAY);
+    const next: ReviewState = {
+      ...state,
+      dueAt: newDueAt,
+      stability: newStability,
+      scheduledDays: newScheduledDays,
+      // difficulty / reps / lapses / fsrsState / learningSteps / elapsedDays /
+      // lastReviewedAt are all preserved (spread from `state`).
+    };
+    return { prev: state, next };
   }
 }
 

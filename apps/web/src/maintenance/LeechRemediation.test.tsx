@@ -96,7 +96,7 @@ import { LeechRemediation } from "./LeechRemediation";
 beforeEach(() => {
   vi.clearAllMocks();
   h.reviewLeeches.mockResolvedValue({ cards: [h.leechQa] });
-  h.updateCard.mockResolvedValue({ card: { id: "card-leech" } });
+  h.updateCard.mockResolvedValue({ card: { id: "card-leech" }, reStabilized: null });
   h.markLeechCard.mockResolvedValue({ card: { id: "card-leech" } });
   h.suspendCard.mockResolvedValue({ card: { id: "card-leech" } });
   h.deleteCard.mockResolvedValue({ card: { id: "card-leech" } });
@@ -153,6 +153,14 @@ describe("LeechRemediation", () => {
       { timeout: 1200 },
     );
     fireEvent.click(screen.getByTestId("leech-edit-resolve"));
+    // A substantive rewrite surfaces the T125 keep/re-verify choice before the leech is
+    // cleared; confirming (re-verify) applies the demotion, then the leech is cleared.
+    fireEvent.click(await screen.findByTestId("restabilize-choice-confirm"));
+    await waitFor(() =>
+      expect(h.updateCard).toHaveBeenCalledWith(
+        expect.objectContaining({ cardId: "card-leech", editChoice: "re_stabilize" }),
+      ),
+    );
     await waitFor(() =>
       expect(h.markLeechCard).toHaveBeenCalledWith({ cardId: "card-leech", leech: false }),
     );

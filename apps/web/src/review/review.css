@@ -525,6 +525,89 @@
   gap: 8px;
 }
 
+/* ---------- card-edit write-barrier choice + receipt (T125) ---------- */
+.rv-restab {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.rv-restab__prompt {
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--text-2);
+}
+.rv-restab__options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.rv-restab__opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  cursor: pointer;
+}
+.rv-restab__opt--active {
+  border-color: var(--accent);
+  background: var(--accent-weak, var(--surface));
+  color: var(--text);
+  font-weight: 600;
+}
+.rv-restab__hint {
+  font-size: var(--t-2xs);
+  color: var(--text-3);
+  margin-left: auto;
+}
+.rv-restab-receipt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  font-size: var(--t-sm);
+}
+.rv-restab-receipt__msg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+}
+.rv-restab-receipt__undo {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.rv-restab-receipt__note {
+  color: var(--text-3);
+}
+.rv-restab-receipt__dismiss {
+  margin-left: auto;
+  border: none;
+  background: none;
+  padding: 2px;
+  color: var(--text-3);
+  cursor: pointer;
+  display: inline-flex;
+}
+
 /* ---------- source-context drawer (T038, kit `.drawer`) ---------- */
 .drawer-overlay {
   position: fixed;

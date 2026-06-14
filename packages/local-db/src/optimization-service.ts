@@ -115,8 +115,25 @@ export class OptimizationService {
     for (const cardId of cardIds) {
       const logs = this.review.listReviewLogs(cardId);
       if (logs.length === 0) continue;
+      // T125 write-barrier cut: a substantive card edit re-stabilizes the card and writes a
+      // non-grade MARKER row (`editMarkerAt` set). Pre-edit grades measured a now-superseded
+      // formulation, so they must NOT train the optimizer. The cut is the LATEST marker; drop
+      // every marker row (a marker is not a grade) AND every grade at/before the cut. Done
+      // BEFORE the elapsed-days delta computation so the first post-edit review resets to 0.
+      let cutMs: number | null = null;
+      for (const log of logs) {
+        if (log.editMarkerAt != null) {
+          const ms = Date.parse(log.editMarkerAt);
+          if (cutMs === null || ms > cutMs) cutMs = ms;
+        }
+      }
+      const grades = logs.filter(
+        (log) =>
+          log.editMarkerAt == null && (cutMs === null || Date.parse(log.reviewedAt) >= cutMs),
+      );
+      if (grades.length === 0) continue;
       // Re-sort ASCENDING (listReviewLogs is DESC). A stable copy.
-      const ascending = [...logs].sort(
+      const ascending = [...grades].sort(
         (a, b) => Date.parse(a.reviewedAt) - Date.parse(b.reviewedAt),
       );
       const reviews: OptimizerReview[] = [];
@@ -138,7 +155,11 @@ export class OptimizationService {
    */
   reviewCount(cardIds: readonly ElementId[]): number {
     let total = 0;
-    for (const cardId of cardIds) total += this.review.listReviewLogs(cardId).length;
+    for (const cardId of cardIds) {
+      // Exclude T125 re-stabilization marker rows — only real grades count toward the
+      // heavy-fit routing threshold (the optimizer trains on grades, not markers).
+      total += this.review.listReviewLogs(cardId).filter((log) => log.editMarkerAt == null).length;
+    }
     return total;
   }
 

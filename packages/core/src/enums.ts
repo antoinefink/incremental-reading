@@ -157,6 +157,23 @@ export const REVIEW_RATING_VALUE: Readonly<Record<ReviewRating, 1 | 2 | 3 | 4>> 
 };
 
 /**
+ * The shape of a card-body edit (T125 write barrier): `typo` (a small fix or a
+ * prompt-only reword — no schedule change) or `substantive` (the answer-bearing side
+ * changed materially — re-stabilization may apply). Used by the `review_logs`
+ * `edit_class` marker column and the substantive-edit classifier.
+ */
+export const CARD_EDIT_CLASSES = ["typo", "substantive"] as const;
+export type CardEditClassValue = (typeof CARD_EDIT_CLASSES)[number];
+
+/**
+ * The user's resolved choice for a substantive card edit (T125): `keep` the existing
+ * schedule, or `re_stabilize` (demote to a short confirmation interval). Recorded on the
+ * `review_logs` `edit_choice` marker column. Only `re_stabilize` writes a marker row.
+ */
+export const CARD_EDIT_CHOICES = ["keep", "re_stabilize"] as const;
+export type CardEditChoiceValue = (typeof CARD_EDIT_CHOICES)[number];
+
+/**
  * Kinds of large binary an {@link Asset} can describe. The bytes live in the
  * filesystem asset vault, never in SQLite (see asset-vault separation).
  */

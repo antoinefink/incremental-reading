@@ -13,10 +13,11 @@
  *  - the workload preview is read-only.
  */
 
-import type { ElementId, ReviewRating } from "@interleave/core";
+import type { ElementId, IsoTimestamp, ReviewRating } from "@interleave/core";
 import type { DbHandle } from "@interleave/db";
 import { CardSchedulerService } from "@interleave/scheduler";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { CardEditService } from "./card-edit-service";
 import { createRepositories, type Repositories } from "./index";
 import { OptimizationService } from "./optimization-service";
 import { createInMemoryDb } from "./test-db";
@@ -90,6 +91,56 @@ describe("OptimizationService.buildHistory", () => {
       answer: "A",
     }).element.id;
     expect(service.buildHistory([cardId])).toEqual([]);
+  });
+
+  it("excludes pre-edit grades + the marker row after a T125 re-stabilization", () => {
+    const cardEdit = new CardEditService(handle.db);
+    const cardId = repos.review.createCard({
+      kind: "qa",
+      title: "Edited card",
+      priority: 0.5,
+      prompt: "Q",
+      answer: "Original answer",
+    }).element.id;
+
+    // Three pre-edit grades.
+    const gradeAt = (iso: string) => {
+      const state = repos.review.findReviewState(cardId);
+      if (!state) throw new Error("missing state");
+      const outcome = scheduler.gradeCard(state, "good", iso as IsoTimestamp, 1200);
+      repos.review.recordReview(cardId, outcome);
+    };
+    gradeAt("2025-01-01T00:00:00.000Z");
+    gradeAt("2025-01-06T00:00:00.000Z");
+    gradeAt("2025-01-20T00:00:00.000Z");
+
+    // A substantive edit re-stabilizes at a time AFTER the third grade.
+    const editAt = "2025-02-01T00:00:00.000Z" as IsoTimestamp;
+    const state = repos.review.findReviewState(cardId);
+    if (!state) throw new Error("missing state");
+    const outcome = scheduler.reStabilize(state, editAt);
+    expect(outcome).not.toBeNull();
+    cardEdit.updateBody(
+      cardId,
+      { answer: "A materially rewritten answer" },
+      outcome ? { outcome, at: editAt } : null,
+    );
+
+    // Two post-edit grades.
+    gradeAt("2025-02-02T00:00:00.000Z");
+    gradeAt("2025-02-07T00:00:00.000Z");
+
+    // 5 real grades + 1 marker row exist...
+    expect(repos.review.listReviewLogs(cardId)).toHaveLength(6);
+    // ...but the optimizer history sees ONLY the 2 post-edit grades (pre-edit + marker dropped).
+    const [history] = service.buildHistory([cardId]);
+    expect(history?.reviews).toHaveLength(2);
+    // The first post-edit review resets elapsedDays to 0 (cut applied before delta derivation).
+    expect(history?.reviews[0]?.elapsedDays).toBe(0);
+    expect(history?.reviews[1]?.elapsedDays).toBeCloseTo(5, 5);
+
+    // reviewCount excludes the marker row (5 real grades, not 6 rows).
+    expect(service.reviewCount([cardId])).toBe(5);
   });
 });
 

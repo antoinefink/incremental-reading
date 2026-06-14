@@ -38,6 +38,7 @@ import {
   CardsImportAnkiRequestSchema,
   type CardsImportAnkiResult,
   CardsMarkLeechRequestSchema,
+  CardsReStabilizeUndoRequestSchema,
   CardsRetireRequestSchema,
   CardsSiblingAnswersRequestSchema,
   CardsSuspendRequestSchema,
@@ -268,6 +269,7 @@ describe("IPC channels", () => {
         "cards:create",
         "cards:generateOcclusion",
         "cards:update",
+        "cards:reStabilizeUndo",
         "cards:suspend",
         "cards:delete",
         "cards:flag",
@@ -1698,6 +1700,41 @@ describe("Card repair schemas (T038)", () => {
     expect(() => CardsUpdateRequestSchema.parse({ cardId: "el_1" })).toThrow();
     // Missing id → rejected.
     expect(() => CardsUpdateRequestSchema.parse({ prompt: "x" })).toThrow();
+  });
+
+  it("cards.update validates the T125 editChoice enum (optional; only keep/re_stabilize)", () => {
+    expect(
+      CardsUpdateRequestSchema.parse({ cardId: "el_1", answer: "A", editChoice: "re_stabilize" })
+        .editChoice,
+    ).toBe("re_stabilize");
+    expect(
+      CardsUpdateRequestSchema.parse({ cardId: "el_1", answer: "A", editChoice: "keep" })
+        .editChoice,
+    ).toBe("keep");
+    // Omitted is fine (keeps the schedule).
+    expect(
+      CardsUpdateRequestSchema.parse({ cardId: "el_1", answer: "A" }).editChoice,
+    ).toBeUndefined();
+    // A bogus value is rejected.
+    expect(() =>
+      CardsUpdateRequestSchema.parse({ cardId: "el_1", answer: "A", editChoice: "demote" }),
+    ).toThrow();
+  });
+
+  it("cards.reStabilizeUndo validates cardId + reviewLogId bounds (T125)", () => {
+    expect(
+      CardsReStabilizeUndoRequestSchema.parse({ cardId: "el_1", reviewLogId: "rl_1" }),
+    ).toEqual({ cardId: "el_1", reviewLogId: "rl_1" });
+    // Empty reviewLogId → rejected (min 1).
+    expect(() =>
+      CardsReStabilizeUndoRequestSchema.parse({ cardId: "el_1", reviewLogId: "" }),
+    ).toThrow();
+    // Over-long reviewLogId → rejected (max 64).
+    expect(() =>
+      CardsReStabilizeUndoRequestSchema.parse({ cardId: "el_1", reviewLogId: "x".repeat(65) }),
+    ).toThrow();
+    // Missing cardId → rejected.
+    expect(() => CardsReStabilizeUndoRequestSchema.parse({ reviewLogId: "rl_1" })).toThrow();
   });
 
   it("cards.suspend / cards.delete require a cardId", () => {

@@ -85,6 +85,9 @@ export {
   type CardSchedulerServiceOptions,
   formatInterval,
   type IntervalPreview,
+  RE_STABILIZE_CONFIRMATION_DAYS,
+  RE_STABILIZE_STABILITY_DAYS,
+  type ReStabilizeOutcome,
   type ReviewOutcome,
   SCHEDULER_REVIEW_RATINGS,
 } from "./card-scheduler";

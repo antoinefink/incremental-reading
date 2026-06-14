@@ -25,6 +25,7 @@ import {
   type AiProviderKind,
   type AiSuggestionKind,
   type AppSettings,
+  CARD_EDIT_CHOICES,
   CARD_KINDS,
   CHRONIC_POSTPONE_THRESHOLD_MAX,
   CHRONIC_POSTPONE_THRESHOLD_MIN,
@@ -3895,14 +3896,62 @@ export const CardsUpdateRequestSchema = z
     answer: z.string().trim().max(20_000).optional(),
     /** New canonical `{{c1::answer}}` cloze text (for a `cloze` card); ignored for Q&A. */
     cloze: z.string().trim().max(20_000).optional(),
+    /**
+     * The card-edit write-barrier choice (T125). **Choice-explicit:** OMITTED ⇒ keep the
+     * schedule (today's behaviour, no demotion). The card is re-stabilized — demoted to a
+     * short confirmation interval — ONLY when this is explicitly `"re_stabilize"`. There is
+     * no server-side default-to-demote; the renderer pre-selects via the pure
+     * `classifyCardEdit` heuristic and the user confirms. `"keep"` is equivalent to
+     * omitting it (kept for an explicit-intent record). A new / never-reviewed card has
+     * nothing to demote, so `"re_stabilize"` is a no-op there.
+     */
+    editChoice: z.enum(CARD_EDIT_CHOICES).optional(),
   })
   .refine((value) => value.prompt != null || value.answer != null || value.cloze != null, {
     message: "cards.update requires at least one of prompt / answer / cloze",
   });
 export type CardsUpdateRequest = z.infer<typeof CardsUpdateRequestSchema>;
 
+/**
+ * The receipt of a card re-stabilization (T125) returned by `cards.update` when a
+ * substantive edit demoted the card. The renderer shows the "Keep schedule instead" undo
+ * affordance from this without re-deriving state. `null` when the edit kept the schedule.
+ */
+export interface CardReStabilizeSummary {
+  /** The marker `review_logs` row id — the handle for the receipt undo. */
+  readonly reviewLogId: string;
+  /** The schedule before the demotion (restored on undo). */
+  readonly previousDueAt: string | null;
+  /** The short confirmation due the card was demoted to. */
+  readonly newDueAt: string | null;
+}
+
 export interface CardsUpdateResult {
   readonly card: CardEditSummary;
+  /** The re-stabilization receipt when a substantive edit demoted the card; else `null`. */
+  readonly reStabilized: CardReStabilizeSummary | null;
+}
+
+/**
+ * Undo a re-stabilization (T125 "Keep schedule instead") — the guarded, receipt-scoped
+ * reversal. Restores the exact prior FSRS schedule from the marker row's preimage, unless
+ * the card was reviewed since the edit (then it is refused — newer FSRS intent wins).
+ */
+export const CardsReStabilizeUndoRequestSchema = z.object({
+  /** The card whose re-stabilization to undo. */
+  cardId: ElementIdSchema,
+  /** The marker `review_logs` row id from the `cards.update` receipt. */
+  reviewLogId: z.string().min(1).max(64),
+});
+export type CardsReStabilizeUndoRequest = z.infer<typeof CardsReStabilizeUndoRequestSchema>;
+
+export interface CardsReStabilizeUndoResult {
+  /** Whether the schedule was restored. */
+  readonly undone: boolean;
+  /** The restored due date when undone, else `null`. */
+  readonly restoredDueAt: string | null;
+  /** Why nothing was restored, when `undone` is `false`. */
+  readonly reason?: string;
 }
 
 /**
@@ -7427,6 +7476,12 @@ export interface AppApi {
      * `review_states`, or `review_logs`.
      */
     update(request: CardsUpdateRequest): Promise<CardsUpdateResult>;
+    /**
+     * Undo a re-stabilization (T125 "Keep schedule instead") — restores the exact prior
+     * FSRS schedule from the marker preimage under a current-state guard (refused if the
+     * card was reviewed since the edit). Receipt-scoped, never global ⌘Z.
+     */
+    reStabilizeUndo(request: CardsReStabilizeUndoRequest): Promise<CardsReStabilizeUndoResult>;
     /**
      * Set/clear a card's claim-lifetime fields (T090) — `fact_stability`/`valid_from`/
      * `valid_until`/`jurisdiction`/`software_version`/`review_by` — in one transaction;

@@ -59,6 +59,17 @@ export {
   IMPORT_BALANCE_FLOOR,
   judgeBalance,
 } from "./balance";
+// Card-edit shape classifier — substantive-vs-typo heuristic for the write barrier (T125).
+export type {
+  CardEditBody,
+  CardEditClass,
+  CardEditClassification,
+} from "./card-edit-classifier";
+export {
+  classifyCardEdit,
+  SUBSTANTIVE_DISTANCE_RATIO,
+  SUBSTANTIVE_MIN_DISTANCE,
+} from "./card-edit-classifier";
 // Card-quality heuristics — pure domain checks for the `qc` checklist (./card-quality).
 export type {
   AudioQualitySignals,
@@ -137,6 +148,8 @@ export {
 // Canonical enums — derived union types (./enums).
 export type {
   AssetKind,
+  CardEditChoiceValue,
+  CardEditClassValue,
   CardKind,
   DistillationStage,
   ElementStatus,
@@ -154,6 +167,8 @@ export type {
 // Canonical enums — const tuples + value maps (./enums).
 export {
   ASSET_KINDS,
+  CARD_EDIT_CHOICES,
+  CARD_EDIT_CLASSES,
   CARD_KINDS,
   DISTILLATION_STAGES,
   ELEMENT_STATUSES,

@@ -39,6 +39,7 @@ import type {
   CardsGenerateOcclusionRequest,
   CardsImportAnkiRequest,
   CardsMarkLeechRequest,
+  CardsReStabilizeUndoRequest,
   CardsRetireRequest,
   CardsSetLifetimeRequest,
   CardsSiblingAnswersRequest,
@@ -359,6 +360,8 @@ const appApi: AppApi = {
     generateOcclusion: (request: CardsGenerateOcclusionRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.cardsGenerateOcclusion, request),
     update: (request: CardsUpdateRequest) => ipcRenderer.invoke(IPC_CHANNELS.cardsUpdate, request),
+    reStabilizeUndo: (request: CardsReStabilizeUndoRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.cardsReStabilizeUndo, request),
     setLifetime: (request: CardsSetLifetimeRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.cardsSetLifetime, request),
     suspend: (request: CardsSuspendRequest) =>

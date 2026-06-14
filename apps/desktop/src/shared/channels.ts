@@ -97,6 +97,10 @@ export const IPC_CHANNELS = {
   cardsCreate: "cards:create",
   cardsGenerateOcclusion: "cards:generateOcclusion",
   cardsUpdate: "cards:update",
+  // Card-edit write barrier undo (T125). `cards:reStabilizeUndo` reverses a substantive
+  // edit's re-stabilization ("Keep schedule instead") — restores the exact prior FSRS
+  // schedule from the marker preimage under a current-state guard. Receipt-scoped.
+  cardsReStabilizeUndo: "cards:reStabilizeUndo",
   // Claim-lifetime (T090). `cards:setLifetime` writes the six expiry fields
   // (fact_stability/valid_from/valid_until/jurisdiction/software_version/review_by) in
   // one transaction (`update_element`); "expired" stays a DERIVED attribute, no status

@@ -45,6 +45,9 @@ describe("review model shapes", () => {
       nextReps: state.reps,
       nextLapses: state.lapses,
       nextLearningSteps: state.learningSteps,
+      editMarkerAt: null,
+      editClass: null,
+      editChoice: null,
     } satisfies ReviewLog;
 
     expect(state.fsrsState).toBe("review");

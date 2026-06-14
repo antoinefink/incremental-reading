@@ -200,6 +200,9 @@ export class TimeCostQuery {
         FROM ${reviewLogs}
         INNER JOIN ${cards} ON ${cards.elementId} = ${reviewLogs.elementId}
         WHERE ${reviewLogs.responseMs} > 0
+          -- Exclude T125 re-stabilization marker rows from response-time medians (a marker
+          -- carries responseMs of 0 so the positive-time filter already drops it; explicit + safe).
+          AND ${reviewLogs.editMarkerAt} IS NULL
           AND (${asOf ?? null} IS NULL OR ${reviewLogs.reviewedAt} <= ${asOf ?? null})
           AND (${reviewLogs.promptMs} IS NULL OR ${reviewLogs.promptMs} >= 0)
           AND (${reviewLogs.responseMs} + COALESCE(${reviewLogs.promptMs}, 0))

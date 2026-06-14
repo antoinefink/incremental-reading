@@ -81,7 +81,9 @@ M17's quality tasks compose. **Inspect these first.**
     logging `update_element`). `LeechCard = { element, card, lapses, reps, lastReviewedAt }`.
 - **In-review repair (T038) — complete and is the action substrate T085 reuses:**
   - `packages/local-db/src/card-edit-service.ts` `CardEditService`: `updateBody(id, patch)`
-    (edit prompt/answer/cloze, `update_element`, never touches `review_states`/lineage),
+    (edit prompt/answer/cloze, `update_element`, never touches lineage; as of T125 a
+    SUBSTANTIVE rewrite may also re-stabilize `review_states` through the scheduler service when
+    the caller passes a resolved demotion — the card-edit write barrier — see M26/T125),
     `suspend(id)` (status `suspended`, `update_element`), `delete(id)` (soft-delete,
     `soft_delete_element`), `flag(id, flagged, reason?)` / `flagState(id)` / `isFlagged(id)`
     (op-log-derived flag, no column).

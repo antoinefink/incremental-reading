@@ -21,10 +21,12 @@
  * preload bridge; the main process owns the transaction + the `operation_log` op.
  */
 
+import type { CardEditBody } from "@interleave/core";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { TypeIcon } from "../components/inspector/primitives";
 import { appApi, type CardEditSummary, type ReviewCardView } from "../lib/appApi";
+import { ReStabilizeChoice, ReStabilizeReceipt } from "./ReStabilizeChoice";
 
 /** A patch applied to the in-flight card after an edit/flag (body + flag fields). */
 export type ReviewCardPatch = Pick<
@@ -103,6 +105,14 @@ export function ReviewRepairBar({
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // T125 write barrier: the body captured when the editor opened (the classifier's
+  // `before`), the pending substantive-edit choice, and the demotion receipt.
+  const originalBody = useRef<CardEditBody>({ prompt: null, answer: null, cloze: null });
+  const [pendingChoice, setPendingChoice] = useState<{
+    readonly before: CardEditBody;
+    readonly after: CardEditBody;
+  } | null>(null);
+  const [receipt, setReceipt] = useState<{ readonly reviewLogId: string } | null>(null);
 
   // Inline edit-form fields, seeded from the card on open. An `image_occlusion`
   // card has no prompt/answer text body — its content is the image + masked region.
@@ -151,6 +161,12 @@ export function ReviewRepairBar({
     const nextPrompt = card.prompt ?? "";
     const nextAnswer = card.answer ?? "";
     const nextCloze = card.cloze ?? card.prompt ?? "";
+    // Capture the pre-edit body so the T125 classifier can diff it at commit time.
+    originalBody.current = {
+      prompt: card.prompt ?? null,
+      answer: card.answer ?? null,
+      cloze: card.cloze ?? null,
+    };
     setPrompt(nextPrompt);
     setAnswer(nextAnswer);
     setCloze(nextCloze);
@@ -181,8 +197,12 @@ export function ReviewRepairBar({
 
   useLayoutEffect(() => {
     setDirty(dirtyNow);
-    if (!saving) onBusyChange?.(dirtyNow);
-  }, [dirtyNow, saving, onBusyChange]);
+    // T125: while the keep/re-verify choice is OPEN the body is already saved (so
+    // `dirtyNow` is false), but it is a PENDING decision — report busy so the parent
+    // review screen refuses grades/keys until the choice resolves. Otherwise a reflexive
+    // grade keypress would advance the card and silently discard the re-verify decision.
+    if (!saving) onBusyChange?.(dirtyNow || pendingChoice != null);
+  }, [dirtyNow, saving, pendingChoice, onBusyChange]);
 
   const saveEditPatch = useCallback(
     async ({
@@ -322,8 +342,25 @@ export function ReviewRepairBar({
 
   const closeEditor = useCallback(async () => {
     const saved = await persistEdit(true);
-    if (saved) setEditing(false);
-  }, [persistEdit]);
+    if (!saved) return;
+    // T125: on the EXPLICIT commit (not autosave), offer the keep/re-verify choice when the
+    // edit is substantive. The body is already saved (keep-schedule); the choice only adds a
+    // demotion when the user picks re-verify. `ReStabilizeChoice` resolves a typo immediately.
+    const after: CardEditBody = {
+      prompt: card.kind === "cloze" || card.kind === "image_occlusion" ? null : prompt,
+      answer: card.kind === "cloze" ? null : answer,
+      cloze: card.kind === "cloze" ? cloze : null,
+    };
+    setPendingChoice({ before: originalBody.current, after });
+  }, [persistEdit, card.kind, prompt, answer, cloze]);
+
+  // Clear the choice + receipt whenever the card changes (a new card, or this one left
+  // the deck) so a stale receipt never lingers across cards.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: card.id is the deliberate reset trigger
+  useEffect(() => {
+    setPendingChoice(null);
+    setReceipt(null);
+  }, [card.id]);
 
   const suspend = useCallback(async () => {
     if (busy || saving || editDirty) return;
@@ -482,17 +519,41 @@ export function ReviewRepairBar({
               {error}
             </p>
           ) : null}
-          <div className="rv-edit__actions">
-            <button
-              type="button"
-              className="rv-btn"
-              data-testid="review-edit-done"
-              onClick={() => void closeEditor()}
-            >
-              Done
-            </button>
-          </div>
+          {pendingChoice ? (
+            <ReStabilizeChoice
+              cardId={card.id}
+              kind={card.kind}
+              before={pendingChoice.before}
+              after={pendingChoice.after}
+              onResolved={(result) => {
+                setPendingChoice(null);
+                setEditing(false);
+                if (result.reStabilized) {
+                  setReceipt({ reviewLogId: result.reStabilized.reviewLogId });
+                }
+              }}
+            />
+          ) : (
+            <div className="rv-edit__actions">
+              <button
+                type="button"
+                className="rv-btn"
+                data-testid="review-edit-done"
+                onClick={() => void closeEditor()}
+              >
+                Done
+              </button>
+            </div>
+          )}
         </div>
+      ) : null}
+
+      {receipt ? (
+        <ReStabilizeReceipt
+          cardId={card.id}
+          reviewLogId={receipt.reviewLogId}
+          onDone={() => setReceipt(null)}
+        />
       ) : null}
 
       {error && !editing ? (

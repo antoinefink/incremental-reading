@@ -188,6 +188,10 @@ export function rowToReviewLog(row: ReviewLogRow): ReviewLog {
     nextReps: row.nextReps,
     nextLapses: row.nextLapses,
     nextLearningSteps: row.nextLearningSteps,
+    // Card-edit write-barrier marker (T125) — non-null only on a re-stabilization row.
+    editMarkerAt: row.editMarkerAt,
+    editClass: row.editClass as ReviewLog["editClass"],
+    editChoice: row.editChoice as ReviewLog["editChoice"],
   };
 }
 

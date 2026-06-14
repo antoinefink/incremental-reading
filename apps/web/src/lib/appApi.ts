@@ -2492,10 +2492,41 @@ export interface CardsUpdateRequest {
   readonly answer?: string;
   /** New canonical `{{c1::answer}}` cloze text (for a `cloze` card); ignored for Q&A. */
   readonly cloze?: string;
+  /**
+   * Card-edit write-barrier choice (T125). OMITTED ⇒ keep the schedule (no demotion).
+   * `"re_stabilize"` demotes the card to a short confirmation interval (only valid on a
+   * substantive edit — the renderer pre-selects via the pure `classifyCardEdit` heuristic
+   * and the user confirms). `"keep"` is equivalent to omitting it.
+   */
+  readonly editChoice?: "keep" | "re_stabilize";
+}
+
+/**
+ * The receipt of a card re-stabilization (T125), returned by `cards.update` when a
+ * substantive edit demoted the card. Backs the "Keep schedule instead" undo affordance.
+ */
+export interface CardReStabilizeSummary {
+  readonly reviewLogId: string;
+  readonly previousDueAt: string | null;
+  readonly newDueAt: string | null;
 }
 
 export interface CardsUpdateResult {
   readonly card: CardEditSummary;
+  /** The re-stabilization receipt when a substantive edit demoted the card; else `null`. */
+  readonly reStabilized: CardReStabilizeSummary | null;
+}
+
+/** Undo a re-stabilization (T125 "Keep schedule instead") — guarded, receipt-scoped. */
+export interface CardsReStabilizeUndoRequest {
+  readonly cardId: string;
+  readonly reviewLogId: string;
+}
+
+export interface CardsReStabilizeUndoResult {
+  readonly undone: boolean;
+  readonly restoredDueAt: string | null;
+  readonly reason?: string;
 }
 
 /**
@@ -4946,6 +4977,7 @@ export interface AppApi {
       request: CardsGenerateOcclusionRequest,
     ): Promise<CardsGenerateOcclusionResult>;
     update(request: CardsUpdateRequest): Promise<CardsUpdateResult>;
+    reStabilizeUndo(request: CardsReStabilizeUndoRequest): Promise<CardsReStabilizeUndoResult>;
     setLifetime(request: CardsSetLifetimeRequest): Promise<CardsSetLifetimeResult>;
     suspend(request: CardsSuspendRequest): Promise<CardsSuspendResult>;
     delete(request: CardsDeleteRequest): Promise<CardsDeleteResult>;
@@ -5676,6 +5708,13 @@ export const appApi = {
    */
   updateCard(request: CardsUpdateRequest): Promise<CardsUpdateResult> {
     return requireAppApi().cards.update(request);
+  },
+  /**
+   * Undo a re-stabilization (T125 "Keep schedule instead") — restores the exact prior FSRS
+   * schedule from the marker preimage, unless the card was reviewed since the edit.
+   */
+  reStabilizeUndoCard(request: CardsReStabilizeUndoRequest): Promise<CardsReStabilizeUndoResult> {
+    return requireAppApi().cards.reStabilizeUndo(request);
   },
   /**
    * Set/clear a card's claim-lifetime fields (T090) — `fact_stability`/`valid_from`/

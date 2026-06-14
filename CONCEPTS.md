@@ -368,9 +368,9 @@ The flow that presents due cards for recall practice and records the user's grad
 
 ### Review log
 
-The durable record of one graded card review, including the grade, review timing, and the scheduling transition produced by that grade.
+The durable, append-only record of one graded card review, including the grade, review timing, and the scheduling transition produced by that grade.
 
-Review logs are the source of truth for historical review stats. Aggregate reports derive from them later rather than being captured in a separate analytics history.
+Review logs are the source of truth for historical review stats. Aggregate reports derive from them later rather than being captured in a separate analytics history. Not every review-log row is a grade: a Card re-stabilization writes a non-grade marker row (a re-stabilization marker) into the same table, which every stats reader excludes so it never counts as a real review.
 
 ### Review activity
 
@@ -383,6 +383,12 @@ Review activity is analytics over completed reviews, not the set of currently du
 The review action that intentionally exposes a card's answer and source context after the user has attempted recall.
 
 Before reveal, answer and source context stay hidden across the review surface, global shortcuts, and persistent inspector so the user cannot accidentally inspect the evidence first.
+
+### Card re-stabilization
+
+The card-edit write barrier: when a card's answer is rewritten substantively, its persisted FSRS schedule is demoted to a short confirmation interval so the new wording is re-verified soon instead of inheriting the stability its old formulation earned. A typo edit changes nothing.
+
+Re-stabilization mutates only the persisted review state — never the in-flight review the user is grading — and is the user's explicit choice (keep-schedule vs re-verify), reversible through a guarded "Keep schedule instead" receipt. It is recorded as a non-grade re-stabilization marker on the Review log, excluded from every review stat.
 
 ## Local Durability
 

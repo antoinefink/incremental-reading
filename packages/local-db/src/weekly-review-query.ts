@@ -1,6 +1,6 @@
 import type { ElementId, IsoTimestamp, PriorityLabel } from "@interleave/core";
 import { elements, type InterleaveDatabase, reviewLogs } from "@interleave/db";
-import { type AnyColumn, and, count, eq, gte, lt, lte, sql } from "drizzle-orm";
+import { type AnyColumn, and, count, eq, gte, isNull, lt, lte, sql } from "drizzle-orm";
 import { nowIso } from "./ids";
 import type { Repositories } from "./index";
 import type {
@@ -163,6 +163,9 @@ export class WeeklyReviewQuery {
           eq(reviewLogs.nextState, "review"),
           gte(reviewLogs.reviewedAt, window.start),
           upperBound(reviewLogs.reviewedAt, window),
+          // Exclude T125 re-stabilization marker rows — a re-stabilized `review`-state card
+          // would otherwise be miscounted as a card that matured this week.
+          isNull(reviewLogs.editMarkerAt),
         ),
       )
       .get();

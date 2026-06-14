@@ -469,8 +469,20 @@ an `operation_log` row, and every edit keeps `card → source location → sourc
   add them together in T040's migration (see T040) to avoid two migrations.
 - Full card-quality warnings on edit are **M6/T035** — T038 reuses them if present, otherwise
   does minimal validation and leaves a TODO.
-- Editing a card mid-review must not corrupt the in-flight FSRS state — edit the body only;
-  never touch `review_states` from an edit.
+- Editing a card mid-review must not corrupt the **in-flight** FSRS state.
+  - **Refined by T125 (the card-edit write barrier).** The original wording was "edit the body
+    only; never touch `review_states` from an edit", written to protect in-flight session state.
+    It over-applied: a *substantively rewritten* card kept the stability its old formulation
+    earned and resurfaced months out as "user error". The refined invariant is: **an edit never
+    corrupts in-flight review state; a SUBSTANTIVE edit re-stabilizes the PERSISTED state through
+    the scheduler service** (`CardSchedulerService.reStabilize`), demoting the card to a short
+    confirmation interval. A typo edit still changes nothing. The demotion writes only
+    `review_states` (never the in-session snapshot the user is grading) and does NOT advance
+    `last_reviewed_at` (it is not a review), so a grade landing after a mid-review edit keeps its
+    true elapsed days. The choice + edit linkage land on a non-grade `review_logs` marker row so
+    the T080 optimizer excludes pre-edit grades. See `docs/tasks/M26-lineage-integrity.md` (T125)
+    and the solution note
+    `docs/solutions/architecture-patterns/card-edit-write-barrier-restabilization.md`.
 
 ---
 

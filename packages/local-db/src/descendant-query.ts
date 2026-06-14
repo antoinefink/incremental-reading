@@ -130,7 +130,11 @@ export class DescendantQuery {
       const rows = this.db
         .selectDistinct({ elementId: reviewLogs.elementId })
         .from(reviewLogs)
-        .where(inArray(reviewLogs.elementId, chunk as ElementId[]))
+        // Exclude T125 re-stabilization marker rows — a re-stabilized but never-reviewed
+        // card must not appear as "reviewed".
+        .where(
+          and(inArray(reviewLogs.elementId, chunk as ElementId[]), isNull(reviewLogs.editMarkerAt)),
+        )
         .all();
       for (const row of rows) out.add(row.elementId as ElementId);
     }

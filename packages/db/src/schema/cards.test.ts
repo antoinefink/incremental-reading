@@ -73,6 +73,10 @@ describe("card schema", () => {
       "nextReps",
       "nextLapses",
       "nextLearningSteps",
+      // T125 card-edit write-barrier marker columns.
+      "editMarkerAt",
+      "editClass",
+      "editChoice",
     ]);
   });
 });

@@ -375,7 +375,9 @@ export class SourceYieldQuery {
           reviewedAt: reviewLogs.reviewedAt,
         })
         .from(reviewLogs)
-        .where(inArray(reviewLogs.elementId, allCardIds))
+        // Exclude T125 re-stabilization marker rows — not reviews; they must not inflate
+        // a source's review ms/count or advance its lastReviewedAt.
+        .where(and(inArray(reviewLogs.elementId, allCardIds), isNull(reviewLogs.editMarkerAt)))
         .all();
       for (const log of logs) {
         let agg = timeByCard.get(log.elementId);

@@ -387,15 +387,25 @@ export class TopicKnowledgeStateQuery {
   private reviewsForWindow(asOf: string, windowDays: number): ReviewInfo[] {
     const endMs = safeMs(asOf) ?? Date.now();
     const start = new Date(endMs - Math.max(1, windowDays) * DAY_MS).toISOString();
-    return this.db
-      .select({
-        cardId: reviewLogs.elementId,
-        rating: reviewLogs.rating,
-        reviewedAt: reviewLogs.reviewedAt,
-      })
-      .from(reviewLogs)
-      .where(and(gte(reviewLogs.reviewedAt, start), lte(reviewLogs.reviewedAt, asOf)))
-      .all();
+    return (
+      this.db
+        .select({
+          cardId: reviewLogs.elementId,
+          rating: reviewLogs.rating,
+          reviewedAt: reviewLogs.reviewedAt,
+        })
+        .from(reviewLogs)
+        // Exclude T125 re-stabilization marker rows — not graded reviews; they must not
+        // distort a concept's measured retention trend.
+        .where(
+          and(
+            gte(reviewLogs.reviewedAt, start),
+            lte(reviewLogs.reviewedAt, asOf),
+            isNull(reviewLogs.editMarkerAt),
+          ),
+        )
+        .all()
+    );
   }
 
   private openVerificationTasksByLinkedElement(): Map<string, number> {

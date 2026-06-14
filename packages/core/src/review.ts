@@ -12,7 +12,7 @@
  * (wrapping `ts-fsrs`, T036); this file only models the persisted state/log.
  */
 
-import type { FsrsState, ReviewRating } from "./enums";
+import type { CardEditChoiceValue, CardEditClassValue, FsrsState, ReviewRating } from "./enums";
 import type { ElementId, IsoTimestamp, ReviewLogId } from "./ids";
 
 /**
@@ -105,4 +105,17 @@ export interface ReviewLog {
   readonly nextLapses: number | null;
   /** FSRS short-term learning-step cursor after this review. */
   readonly nextLearningSteps: number | null;
+  /**
+   * Card-edit write barrier (T125). When non-null, THIS row is NOT a graded review — it
+   * is a re-stabilization MARKER written when a substantive card edit demoted the card to
+   * a short confirmation interval. The timestamp is the moment of the edit; it is the
+   * optimizer cut-point (pre-marker grades measured a now-superseded formulation and are
+   * excluded). EVERY `review_logs` reader must skip rows where this is set so the
+   * fabricated row never inflates streaks/retention/maturity/yield. `null` for a real grade.
+   */
+  readonly editMarkerAt: IsoTimestamp | null;
+  /** The edit's shape (`typo`/`substantive`) on a marker row; `null` on a real grade. */
+  readonly editClass: CardEditClassValue | null;
+  /** The user's choice (`keep`/`re_stabilize`) on a marker row; `null` on a real grade. */
+  readonly editChoice: CardEditChoiceValue | null;
 }

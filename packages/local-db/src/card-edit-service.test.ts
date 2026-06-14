@@ -16,9 +16,10 @@
  *  - every repair appends the CORRECT EXISTING op (the closed 15-op set is unchanged).
  */
 
-import type { BlockId, ElementId, Priority } from "@interleave/core";
+import type { BlockId, ElementId, IsoTimestamp, Priority, ReviewRating } from "@interleave/core";
 import type { DbHandle } from "@interleave/db";
-import { operationLog } from "@interleave/db";
+import { elements, operationLog, reviewLogs, reviewStates } from "@interleave/db";
+import { CardSchedulerService } from "@interleave/scheduler";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CardEditService } from "./card-edit-service";
@@ -271,5 +272,288 @@ describe("CardEditService.setLifetime (T090)", () => {
     expect(() =>
       service.setLifetime("el_missing" as ElementId, { reviewBy: "2025-01-01" }),
     ).toThrow(/not found/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T125 — Card-edit write barrier (re-stabilization + guarded undo).
+// ---------------------------------------------------------------------------
+
+const NOW = "2026-06-15T00:00:00.000Z" as IsoTimestamp;
+
+/** Force a card into a matured, high-stability, far-future-due review state. */
+function matureCard(handle: DbHandle, cardId: ElementId): void {
+  handle.db
+    .update(reviewStates)
+    .set({
+      dueAt: "2027-03-15T00:00:00.000Z",
+      stability: 270,
+      difficulty: 6.4,
+      elapsedDays: 30,
+      scheduledDays: 270,
+      reps: 12,
+      lapses: 1,
+      fsrsState: "review",
+      learningSteps: 0,
+      lastReviewedAt: "2026-06-01T00:00:00.000Z",
+    })
+    .where(eq(reviewStates.elementId, cardId))
+    .run();
+  handle.db
+    .update(elements)
+    .set({ dueAt: "2027-03-15T00:00:00.000Z" })
+    .where(eq(elements.id, cardId))
+    .run();
+}
+
+/** Resolve a re-stabilization for the card's current state (the DbService path). */
+function resolveReStabilize(handle: DbHandle, cardId: ElementId, at: IsoTimestamp) {
+  const state = new ReviewRepository(handle.db).findReviewState(cardId);
+  if (!state) throw new Error("no state");
+  const outcome = new CardSchedulerService({
+    desiredRetention: 0.9,
+    enableFuzz: false,
+  }).reStabilize(state, at);
+  return outcome ? { outcome, at } : null;
+}
+
+/** Grade a card through the real scheduler + repository path. */
+function gradeCard(handle: DbHandle, cardId: ElementId, rating: ReviewRating, at: IsoTimestamp) {
+  const review = new ReviewRepository(handle.db);
+  const state = review.findReviewState(cardId);
+  if (!state) throw new Error("no state");
+  const outcome = new CardSchedulerService({ desiredRetention: 0.9, enableFuzz: false }).gradeCard(
+    state,
+    rating,
+    at,
+    1500,
+  );
+  return review.recordReview(cardId, outcome, { promptMs: 200 });
+}
+
+function markerRowFor(handle: DbHandle, reviewLogId: string) {
+  return handle.db.select().from(reviewLogs).where(eq(reviewLogs.id, reviewLogId)).get();
+}
+
+describe("CardEditService re-stabilize (T125 write barrier)", () => {
+  it("demotes the persisted FSRS state, writes a marker row, mirrors elements.due_at, op-logs", () => {
+    const { cardId } = seedCard(handle);
+    matureCard(handle, cardId);
+    const service = new CardEditService(handle.db);
+    const review = new ReviewRepository(handle.db);
+
+    const reStabilize = resolveReStabilize(handle, cardId, NOW);
+    expect(reStabilize).not.toBeNull();
+    const result = service.updateBody(
+      cardId,
+      { answer: "A materially rewritten answer." },
+      reStabilize,
+    );
+
+    expect(result.reStabilized).not.toBeNull();
+    const receipt = result.reStabilized;
+    if (!receipt) throw new Error("expected a receipt");
+
+    // Persisted review state demoted: due soon, stability collapsed, difficulty + counters kept.
+    const state = review.findReviewState(cardId);
+    expect(Date.parse(state?.dueAt ?? "")).toBeLessThanOrEqual(
+      Date.parse(NOW) + 24 * 3600 * 1000 + 1,
+    );
+    expect(state?.stability).toBeLessThanOrEqual(1);
+    expect(state?.difficulty).toBe(6.4);
+    expect(state?.reps).toBe(12);
+    expect(state?.lapses).toBe(1);
+    // last_reviewed_at PRESERVED (a re-stabilization is not a review).
+    expect(state?.lastReviewedAt).toBe("2026-06-01T00:00:00.000Z");
+
+    // elements.due_at mirrors review_states.due_at.
+    const el = handle.db.select().from(elements).where(eq(elements.id, cardId)).get();
+    expect(el?.dueAt).toBe(state?.dueAt);
+
+    // The marker row carries the full preimage + the class/choice + a placeholder rating.
+    const marker = markerRowFor(handle, receipt.reviewLogId);
+    expect(marker?.editMarkerAt).toBe(NOW);
+    expect(marker?.editClass).toBe("substantive");
+    expect(marker?.editChoice).toBe("re_stabilize");
+    expect(marker?.rating).toBe("good");
+    expect(marker?.prevStability).toBe(270);
+    expect(marker?.prevDueAt).toBe("2027-03-15T00:00:00.000Z");
+
+    // The demotion is op-logged as reschedule_element (carrying the cardReStabilize marker).
+    expect(opCount(handle, cardId, "reschedule_element")).toBe(1);
+
+    // The body change landed.
+    expect(result.card.answer).toBe("A materially rewritten answer.");
+  });
+
+  it("keep-schedule (no re-stabilize arg) changes the body but not the schedule and writes no marker", () => {
+    const { cardId } = seedCard(handle);
+    matureCard(handle, cardId);
+    const service = new CardEditService(handle.db);
+    const review = new ReviewRepository(handle.db);
+    const dueBefore = review.findReviewState(cardId)?.dueAt;
+    const logsBefore = review.listReviewLogs(cardId).length;
+
+    const result = service.updateBody(cardId, { answer: "Kept-schedule edit." });
+
+    expect(result.reStabilized).toBeNull();
+    expect(review.findReviewState(cardId)?.dueAt).toBe(dueBefore);
+    expect(review.listReviewLogs(cardId).length).toBe(logsBefore);
+    expect(opCount(handle, cardId, "reschedule_element")).toBe(0);
+  });
+
+  it("returns null re-stabilize for a new / never-reviewed card (nothing to demote)", () => {
+    const { cardId } = seedCard(handle);
+    // A freshly seeded card has reps 0 → resolveReStabilize is null.
+    expect(resolveReStabilize(handle, cardId, NOW)).toBeNull();
+  });
+
+  it("undo restores the EXACT prior FSRS tuple, keeps the body edited, and is guarded", () => {
+    const { cardId } = seedCard(handle);
+    matureCard(handle, cardId);
+    const service = new CardEditService(handle.db);
+    const review = new ReviewRepository(handle.db);
+    const before = review.findReviewState(cardId);
+
+    const reStabilize = resolveReStabilize(handle, cardId, NOW);
+    const result = service.updateBody(cardId, { answer: "Rewritten." }, reStabilize);
+    const reviewLogId = result.reStabilized?.reviewLogId ?? "";
+
+    const undo = service.undoReStabilize(cardId, reviewLogId);
+    expect(undo.undone).toBe(true);
+
+    const restored = review.findReviewState(cardId);
+    expect(restored?.dueAt).toBe(before?.dueAt);
+    expect(restored?.stability).toBe(before?.stability);
+    expect(restored?.difficulty).toBe(before?.difficulty);
+    expect(restored?.reps).toBe(before?.reps);
+    expect(restored?.lapses).toBe(before?.lapses);
+    expect(restored?.fsrsState).toBe(before?.fsrsState);
+    // elements.due_at mirrors the restore.
+    const el = handle.db.select().from(elements).where(eq(elements.id, cardId)).get();
+    expect(el?.dueAt).toBe(before?.dueAt);
+    // Body text stays edited (undo reverses the SCHEDULE, not the rewrite).
+    expect(review.findCardById(cardId)?.card.answer).toBe("Rewritten.");
+    // The marker row survives (append-only).
+    expect(markerRowFor(handle, reviewLogId)).toBeDefined();
+  });
+
+  it("undo is refused after the card is reviewed since the edit (newer FSRS intent wins)", () => {
+    const { cardId } = seedCard(handle);
+    matureCard(handle, cardId);
+    const service = new CardEditService(handle.db);
+
+    const reStabilize = resolveReStabilize(handle, cardId, NOW);
+    const result = service.updateBody(cardId, { answer: "Rewritten." }, reStabilize);
+    const reviewLogId = result.reStabilized?.reviewLogId ?? "";
+
+    // A real grade lands after the edit, advancing FSRS state past the demotion.
+    gradeCard(handle, cardId, "good", "2026-06-16T00:00:00.000Z" as IsoTimestamp);
+
+    const undo = service.undoReStabilize(cardId, reviewLogId);
+    expect(undo.undone).toBe(false);
+    expect(undo.reason).toMatch(/reviewed/i);
+  });
+
+  it("in-flight: a grade landing after a re-stabilize lands cleanly and does not throw the stale-preimage guard", () => {
+    const { cardId } = seedCard(handle);
+    matureCard(handle, cardId);
+    const service = new CardEditService(handle.db);
+    const review = new ReviewRepository(handle.db);
+
+    const reStabilize = resolveReStabilize(handle, cardId, NOW);
+    service.updateBody(cardId, { answer: "Rewritten." }, reStabilize);
+
+    // The grade reads the CURRENT (demoted) state fresh → no stale-preimage throw.
+    expect(() =>
+      gradeCard(handle, cardId, "good", "2026-06-16T00:00:00.000Z" as IsoTimestamp),
+    ).not.toThrow();
+    // The card advanced from the demoted state on a real grade.
+    const after = review.findReviewState(cardId);
+    expect(after?.lastReviewedAt).toBe("2026-06-16T00:00:00.000Z");
+  });
+
+  it("undo is refused on a soft-deleted card (no restoring a schedule onto trash)", () => {
+    const { cardId } = seedCard(handle);
+    matureCard(handle, cardId);
+    const service = new CardEditService(handle.db);
+    const result = service.updateBody(
+      cardId,
+      { answer: "Rewritten." },
+      resolveReStabilize(handle, cardId, NOW),
+    );
+    const reviewLogId = result.reStabilized?.reviewLogId ?? "";
+
+    service.delete(cardId); // soft-delete
+
+    const undo = service.undoReStabilize(cardId, reviewLogId);
+    expect(undo.undone).toBe(false);
+    expect(undo.reason).toMatch(/not available/i);
+  });
+
+  it("undo of the FIRST marker is refused once a SECOND re-stabilization exists", () => {
+    const { cardId } = seedCard(handle);
+    matureCard(handle, cardId);
+    const service = new CardEditService(handle.db);
+    const review = new ReviewRepository(handle.db);
+
+    const r1 = service.updateBody(
+      cardId,
+      { answer: "First rewrite." },
+      resolveReStabilize(handle, cardId, NOW),
+    );
+    const firstLogId = r1.reStabilized?.reviewLogId ?? "";
+
+    const later = "2026-06-15T00:00:01.000Z" as IsoTimestamp;
+    const r2 = service.updateBody(
+      cardId,
+      { answer: "Second rewrite." },
+      resolveReStabilize(handle, cardId, later),
+    );
+    const secondLogId = r2.reStabilized?.reviewLogId ?? "";
+    expect(review.listReviewLogs(cardId).filter((l) => l.editMarkerAt != null)).toHaveLength(2);
+
+    // Undoing the FIRST marker must be refused (it would revert past BOTH demotions).
+    const undoFirst = service.undoReStabilize(cardId, firstLogId);
+    expect(undoFirst.undone).toBe(false);
+    expect(undoFirst.reason).toMatch(/newer re-stabilization/i);
+
+    // Undoing the LATEST marker is allowed (restores its own preimage).
+    expect(service.undoReStabilize(cardId, secondLogId).undone).toBe(true);
+  });
+
+  it("a repeated undo of the same marker reports 'already restored', not 'reviewed since'", () => {
+    const { cardId } = seedCard(handle);
+    matureCard(handle, cardId);
+    const service = new CardEditService(handle.db);
+    const result = service.updateBody(
+      cardId,
+      { answer: "Rewritten." },
+      resolveReStabilize(handle, cardId, NOW),
+    );
+    const reviewLogId = result.reStabilized?.reviewLogId ?? "";
+
+    expect(service.undoReStabilize(cardId, reviewLogId).undone).toBe(true);
+    const second = service.undoReStabilize(cardId, reviewLogId);
+    expect(second.undone).toBe(false);
+    expect(second.reason).toMatch(/already restored/i);
+  });
+
+  it("re-stabilizes a suspended card's persisted state without un-suspending it", () => {
+    const { cardId } = seedCard(handle);
+    matureCard(handle, cardId);
+    const service = new CardEditService(handle.db);
+    const review = new ReviewRepository(handle.db);
+    service.suspend(cardId);
+
+    const result = service.updateBody(
+      cardId,
+      { answer: "Rewritten." },
+      resolveReStabilize(handle, cardId, NOW),
+    );
+    expect(result.reStabilized).not.toBeNull();
+    expect(review.findReviewState(cardId)?.stability).toBeLessThanOrEqual(1);
+    // The card stays suspended (the demotion never resurrects it).
+    expect(new ElementRepository(handle.db).findById(cardId)?.status).toBe("suspended");
   });
 });

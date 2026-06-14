@@ -55,7 +55,18 @@ import {
   judgeBalance,
 } from "@interleave/core";
 import { elements, type InterleaveDatabase, reviewLogs } from "@interleave/db";
-import { and, asc, desc, eq, gte, isNotNull, lt, lte, count as sqlCount } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  count as sqlCount,
+} from "drizzle-orm";
 import { QueueRepository } from "./queue-repository";
 import { ReviewRepository } from "./review-repository";
 
@@ -276,10 +287,18 @@ export class AnalyticsService {
     const windowStartIso = windowStartDay.toISOString();
 
     // ---- reviews in the window (one query, bucketed in JS by local day) ----
+    // `isNull(editMarkerAt)` excludes T125 re-stabilization MARKER rows — they are not
+    // graded reviews and must never count toward reviews/retention/streak.
     const logs = this.db
       .select({ rating: reviewLogs.rating, reviewedAt: reviewLogs.reviewedAt })
       .from(reviewLogs)
-      .where(and(gte(reviewLogs.reviewedAt, windowStartIso), lte(reviewLogs.reviewedAt, asOf)))
+      .where(
+        and(
+          gte(reviewLogs.reviewedAt, windowStartIso),
+          lte(reviewLogs.reviewedAt, asOf),
+          isNull(reviewLogs.editMarkerAt),
+        ),
+      )
       .all();
 
     // Pre-seed every day bucket (so the spark has a bar per day, even at 0).
@@ -494,7 +513,14 @@ export class AnalyticsService {
       this.db
         .select({ n: sqlCount() })
         .from(reviewLogs)
-        .where(and(gte(reviewLogs.reviewedAt, start), lt(reviewLogs.reviewedAt, end)))
+        // Exclude T125 re-stabilization marker rows (not graded reviews).
+        .where(
+          and(
+            gte(reviewLogs.reviewedAt, start),
+            lt(reviewLogs.reviewedAt, end),
+            isNull(reviewLogs.editMarkerAt),
+          ),
+        )
         .get()?.n ?? 0
     );
   }
@@ -503,29 +529,33 @@ export class AnalyticsService {
     yearStartIso: string,
     nextYearStartIso: string,
   ): Pick<ReviewActivitySummary, "minYear" | "maxYear" | "previousYear" | "nextYear"> {
+    // All four boundaries exclude T125 re-stabilization marker rows (not graded reviews),
+    // so an edit never shifts the first/last/prev/next review-activity year.
     const first = this.db
       .select({ reviewedAt: reviewLogs.reviewedAt })
       .from(reviewLogs)
+      .where(isNull(reviewLogs.editMarkerAt))
       .orderBy(asc(reviewLogs.reviewedAt))
       .limit(1)
       .get();
     const last = this.db
       .select({ reviewedAt: reviewLogs.reviewedAt })
       .from(reviewLogs)
+      .where(isNull(reviewLogs.editMarkerAt))
       .orderBy(desc(reviewLogs.reviewedAt))
       .limit(1)
       .get();
     const previous = this.db
       .select({ reviewedAt: reviewLogs.reviewedAt })
       .from(reviewLogs)
-      .where(lt(reviewLogs.reviewedAt, yearStartIso))
+      .where(and(lt(reviewLogs.reviewedAt, yearStartIso), isNull(reviewLogs.editMarkerAt)))
       .orderBy(desc(reviewLogs.reviewedAt))
       .limit(1)
       .get();
     const next = this.db
       .select({ reviewedAt: reviewLogs.reviewedAt })
       .from(reviewLogs)
-      .where(gte(reviewLogs.reviewedAt, nextYearStartIso))
+      .where(and(gte(reviewLogs.reviewedAt, nextYearStartIso), isNull(reviewLogs.editMarkerAt)))
       .orderBy(asc(reviewLogs.reviewedAt))
       .limit(1)
       .get();

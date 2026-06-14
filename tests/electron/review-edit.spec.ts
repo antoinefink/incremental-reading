@@ -162,6 +162,11 @@ test("editing a card's body in review persists and survives a restart", async ()
       await page.getByTestId("review-edit-answer").fill(newAnswer);
     }
     await page.getByTestId("review-edit-done").click();
+    // T125: this substantive rewrite surfaces the keep/re-verify choice at commit (Playwright
+    // auto-waits for it). Keep the schedule — the body edit is already saved — so the editor
+    // closes with no demotion.
+    await page.getByTestId("restabilize-choice-keep").click();
+    await page.getByTestId("restabilize-choice-confirm").click();
     await expect(page.getByTestId("review-edit")).toHaveCount(0);
 
     // The edit is persisted (read back through the session bridge).

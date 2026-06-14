@@ -289,6 +289,13 @@ export class UndoService {
   private isInvertible(op: ParsedOp): boolean {
     if (!op.elementId) return false;
     if (op.payload.receiptRestore === true) return false;
+    // T125 card re-stabilization demotions are a COMPOUND mutation (body edit + FSRS
+    // demotion + marker row). Global ⌘Z must not partially reverse them — only the
+    // schedule, leaving the new body text on the old schedule would recreate the very
+    // contamination T125 prevents. The reversal is the guarded receipt undo
+    // (`CardEditService.undoReStabilize`). The body edit itself is already non-invertible
+    // (no `prev` preimage), so a re-stabilize commit is fully inert to global ⌘Z.
+    if (op.payload.cardReStabilize === true) return false;
     if (op.opType === "update_element") {
       if (
         op.payload.chronicPostponeReset === true ||
@@ -515,6 +522,9 @@ export class UndoService {
         return `Reverted "${updated.title}"`;
       }
       case "reschedule_element": {
+        // T125 re-stabilization demotions are reversed ONLY through the guarded receipt
+        // undo (`CardEditService.undoReStabilize`), never global ⌘Z (see isInvertible).
+        if (op.payload.cardReStabilize === true) return null;
         const prevDueAt = (op.payload.prevDueAt ?? null) as IsoTimestamp | null;
         const prevStatusRaw = op.payload.prevStatus;
         const prevStatus =

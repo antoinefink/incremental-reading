@@ -13,7 +13,7 @@
 
 import { type ElementStatus, type PriorityLabel, priorityToLabel } from "@interleave/core";
 import { cards, elements, type InterleaveDatabase, operationLog, reviewLogs } from "@interleave/db";
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
 import { isQueueActionableStatus } from "./queue-repository";
 
 export const DEFAULT_PRIORITY_INTEGRITY_WINDOW_DAYS = 30;
@@ -382,7 +382,14 @@ export class PriorityIntegrityQuery {
         reviewedAt: reviewLogs.reviewedAt,
       })
       .from(reviewLogs)
-      .where(and(gte(reviewLogs.reviewedAt, windowStartIso), lte(reviewLogs.reviewedAt, asOf)))
+      // Exclude T125 re-stabilization marker rows — they are not FSRS reviews serviced.
+      .where(
+        and(
+          gte(reviewLogs.reviewedAt, windowStartIso),
+          lte(reviewLogs.reviewedAt, asOf),
+          isNull(reviewLogs.editMarkerAt),
+        ),
+      )
       .all();
     for (const log of logs) {
       const element = info.get(log.elementId);

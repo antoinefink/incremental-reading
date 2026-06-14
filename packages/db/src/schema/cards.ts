@@ -13,7 +13,15 @@
  * are repairable and parameters can later be optimized.
  */
 
-import { CARD_KINDS, FACT_STABILITY, FSRS_STATES, REVIEW_RATINGS } from "@interleave/core";
+import {
+  CARD_EDIT_CHOICES,
+  CARD_EDIT_CLASSES,
+  CARD_KINDS,
+  FACT_STABILITY,
+  FSRS_STATES,
+  REVIEW_RATINGS,
+} from "@interleave/core";
+import { sql } from "drizzle-orm";
 import { check, index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { inList } from "./_shared";
 import { elements } from "./elements";
@@ -240,11 +248,33 @@ export const reviewLogs = sqliteTable(
     nextLapses: integer("next_lapses"),
     /** FSRS short-term learning-step cursor after this review. */
     nextLearningSteps: integer("next_learning_steps"),
+    /**
+     * Card-edit write barrier (T125). NON-NULL marks this row as a re-stabilization
+     * MARKER, not a graded review: the timestamp is the substantive edit and the
+     * optimizer cut-point. The row's `rating` is a CHECK-valid placeholder (e.g. `good`)
+     * with no recall meaning — every `review_logs` reader filters marker rows by
+     * `edit_marker_at IS NULL` so they never count as real reviews. `NULL` for a grade.
+     */
+    editMarkerAt: text("edit_marker_at"),
+    /** The edit's shape (`typo`/`substantive`) on a marker row; `NULL` on a grade. */
+    editClass: text("edit_class"),
+    /** The user's choice (`keep`/`re_stabilize`) on a marker row; `NULL` on a grade. */
+    editChoice: text("edit_choice"),
   },
   (table) => [
     check("review_logs_rating_check", inList(table.rating, REVIEW_RATINGS)),
     check("review_logs_prev_state_check", inList(table.prevState, FSRS_STATES)),
     check("review_logs_next_state_check", inList(table.nextState, FSRS_STATES)),
+    // Nullable-domain CHECKs (T125): NULL is allowed (a normal grade), otherwise the
+    // value must be in the canonical edit-class / edit-choice tuples.
+    check(
+      "review_logs_edit_class_check",
+      sql`${table.editClass} IS NULL OR ${inList(table.editClass, CARD_EDIT_CLASSES)}`,
+    ),
+    check(
+      "review_logs_edit_choice_check",
+      sql`${table.editChoice} IS NULL OR ${inList(table.editChoice, CARD_EDIT_CHOICES)}`,
+    ),
     index("review_logs_element_idx").on(table.elementId),
     index("review_logs_reviewed_idx").on(table.reviewedAt),
   ],

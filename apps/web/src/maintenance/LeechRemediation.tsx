@@ -31,6 +31,7 @@
  * lower-priority = T027 `elements.setPriority`. No action destroys `review_logs`.
  */
 
+import type { CardEditBody } from "@interleave/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { Prio, priorityLabel } from "../components/inspector/primitives";
@@ -43,6 +44,7 @@ import {
   type PriorityLabel,
 } from "../lib/appApi";
 import { useNavigateToLocation } from "../reader/navigateToLocation";
+import { ReStabilizeChoice } from "../review/ReStabilizeChoice";
 import { ReviewModeButton } from "../review/ReviewModeButton";
 import "../review/review.css";
 import "./leech-cleanup.css";
@@ -84,6 +86,15 @@ function RewriteEditor({
   const [answer, setAnswer] = useState(card.answer ?? "");
   const [cloze, setCloze] = useState(card.cloze ?? "");
   const [error, setError] = useState<string | null>(null);
+  // T125: a substantive leech rewrite offers re-stabilization before the leech is cleared.
+  const [pendingChoice, setPendingChoice] = useState<{
+    readonly before: CardEditBody;
+    readonly after: CardEditBody;
+  } | null>(null);
+  // Once demoted in this editor session, never re-offer (a retry must not double-demote).
+  const reStabilizedRef = useRef(false);
+  // Guards finalizeResolve against a double Resolve / racing re-render firing markLeech twice.
+  const finalizingRef = useRef(false);
   const editTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedEdit = useRef(
     cardEditFingerprint(
@@ -177,17 +188,53 @@ function RewriteEditor({
     return () => flushPendingRewriteOnUnmount();
   }, [flushPendingRewriteOnUnmount]);
 
-  const resolve = useCallback(async () => {
-    const saved = await persistRewrite(true);
-    if (!saved) return;
+  // Clear the leech flag and finish (the demotion, if any, already ran via the choice).
+  // Unleech is ordered AFTER the demotion so a markLeech failure never strands a demoted
+  // card outside the cleanup list — the card stays listed and the user can retry.
+  const finalizeResolve = useCallback(async () => {
+    if (finalizingRef.current) return;
+    finalizingRef.current = true;
     setError(null);
     try {
       await appApi.markLeechCard({ cardId: card.id, leech: false });
       await onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      finalizingRef.current = false; // allow a retry after a failure
     }
-  }, [persistRewrite, card.id, onSaved]);
+  }, [card.id, onSaved]);
+
+  const resolve = useCallback(async () => {
+    const saved = await persistRewrite(true);
+    if (!saved) return;
+    // T125: offer re-stabilization for a substantive rewrite before clearing the leech.
+    // A typo (or an already-demoted retry) skips straight to clearing the flag.
+    const after: CardEditBody = {
+      prompt: isCloze ? null : prompt,
+      answer: isCloze ? null : answer,
+      cloze: isCloze ? cloze : null,
+    };
+    const before: CardEditBody = {
+      prompt: card.prompt ?? null,
+      answer: card.answer ?? null,
+      cloze: card.cloze ?? null,
+    };
+    if (reStabilizedRef.current) {
+      await finalizeResolve();
+      return;
+    }
+    setPendingChoice({ before, after });
+  }, [
+    persistRewrite,
+    isCloze,
+    prompt,
+    answer,
+    cloze,
+    card.prompt,
+    card.answer,
+    card.cloze,
+    finalizeResolve,
+  ]);
 
   const close = useCallback(async () => {
     const saved = await persistRewrite(true);
@@ -239,25 +286,39 @@ function RewriteEditor({
           {error}
         </p>
       ) : null}
-      <div className="rv-edit__actions">
-        <button
-          type="button"
-          className="rv-btn"
-          data-testid="leech-edit-close"
-          onClick={() => void close()}
-        >
-          Close
-        </button>
-        <button
-          type="button"
-          className="rv-btn rv-btn--primary"
-          data-testid="leech-edit-resolve"
-          onClick={() => void resolve()}
-        >
-          <Icon name="check" size={14} />
-          Resolve
-        </button>
-      </div>
+      {pendingChoice ? (
+        <ReStabilizeChoice
+          cardId={card.id}
+          kind={card.kind}
+          before={pendingChoice.before}
+          after={pendingChoice.after}
+          onResolved={(result) => {
+            if (result.reStabilized) reStabilizedRef.current = true;
+            setPendingChoice(null);
+            void finalizeResolve();
+          }}
+        />
+      ) : (
+        <div className="rv-edit__actions">
+          <button
+            type="button"
+            className="rv-btn"
+            data-testid="leech-edit-close"
+            onClick={() => void close()}
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            className="rv-btn rv-btn--primary"
+            data-testid="leech-edit-resolve"
+            onClick={() => void resolve()}
+          >
+            <Icon name="check" size={14} />
+            Resolve
+          </button>
+        </div>
+      )}
     </div>
   );
 }

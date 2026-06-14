@@ -76,6 +76,13 @@ export class DescendantHealthQuery {
           eq(cards.isRetired, false),
           gte(reviewLogs.reviewedAt, since),
           lte(reviewLogs.reviewedAt, input.asOf),
+          // Exclude T125 re-stabilization marker rows EXPLICITLY (not just by construction):
+          // the `nextLapses > prevLapses` predicate below already drops them today because a
+          // re-stabilization preserves `lapses`, but keying the exclusion off another query's
+          // behaviour is fragile — this makes the invariant local and grep-able like every
+          // other review_logs reader.
+          isNull(reviewLogs.editMarkerAt),
+          // Only true lapse increments.
           sql`${reviewLogs.nextLapses} > ${reviewLogs.prevLapses}`,
         ),
       )

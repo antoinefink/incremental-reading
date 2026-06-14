@@ -163,7 +163,25 @@ its sources.
 # T125 — Card-edit write barrier
 
 - **Milestone:** M26 — Lineage integrity
-- **Status:** `[ ]` not started
+- **Status:** `[x]` complete — landed on `main`. A pure `classifyCardEdit` heuristic
+  (`packages/core`) labels an edit `typo`/`substantive` by diffing the answer-bearing side; a
+  SUBSTANTIVE edit, when the user picks re-verify, re-stabilizes the PERSISTED FSRS state through
+  the new `CardSchedulerService.reStabilize` (preserve difficulty, collapse stability, floor-only
+  short confirmation due, NEVER advancing `last_reviewed_at`) in the same transaction as the body
+  edit (`CardEditService.updateBody`), writing a non-grade MARKER row to `review_logs` (additive
+  migration `0039`, hand-edited to `ALTER ADD COLUMN` to dodge the 0030 rebuild) that carries the
+  full FSRS preimage + the edit class/choice. The demotion op (`reschedule_element` +
+  `cardReStabilize`) defers to a guarded receipt undo (`undoReStabilize`, four-part current-state
+  guard: refused if the card was reviewed since the edit); global ⌘Z is inert. EVERY `review_logs`
+  reader (optimizer cut + analytics/weekly-maturity/priority-integrity/source-yield/time-cost/
+  dedup/descendant/inspector counts) excludes marker rows via `edit_marker_at IS NULL`, so a
+  re-stabilization changes no streak/retention/maturity/yield number. The choice surfaces at the
+  EXPLICIT commit (never an autosave) in the review repair bar and the leech rewrite surface (`K`
+  flips, `Enter` confirms), with a one-tap "Keep schedule instead" receipt. The M7 "never touch
+  review_states" rule is refined in `docs/tasks/M7-fsrs-review.md`. Verification: `pnpm lint`,
+  `pnpm typecheck`, `pnpm test` (4146), and `pnpm e2e tests/electron/card-edit-write-barrier.spec.ts
+  tests/electron/review-edit.spec.ts tests/electron/leech-remediation.spec.ts`. Learning captured in
+  [`docs/solutions/architecture-patterns/card-edit-write-barrier-restabilization.md`](../solutions/architecture-patterns/card-edit-write-barrier-restabilization.md).
 - **Depends on:** T038, T080
 - **Roadmap line:** a substantive card edit offers keep-schedule vs re-stabilize (demote to a
   short confirmation interval); the choice + edit linkage land on review logs so T080

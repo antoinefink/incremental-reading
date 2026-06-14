@@ -380,7 +380,11 @@ export class DedupReportQuery {
     const rows = this.db
       .select({ elementId: reviewLogs.elementId, n: sql<number>`COUNT(*)` })
       .from(reviewLogs)
-      .where(inArray(reviewLogs.elementId, cardIds as ElementId[]))
+      // Exclude T125 re-stabilization marker rows — they are not reviews and must not
+      // inflate a card's review count.
+      .where(
+        and(inArray(reviewLogs.elementId, cardIds as ElementId[]), isNull(reviewLogs.editMarkerAt)),
+      )
       .groupBy(reviewLogs.elementId)
       .all();
     for (const r of rows) out.set(r.elementId as ElementId, Number(r.n));

@@ -21,6 +21,7 @@ import type { CardEditSummary, ReviewCardView } from "../lib/appApi";
 
 const h = vi.hoisted(() => ({
   updateCard: vi.fn(),
+  reStabilizeUndoCard: vi.fn(),
   suspendCard: vi.fn(),
   deleteCard: vi.fn(),
   flagCard: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock("../lib/appApi", async () => {
     isDesktop: () => true,
     appApi: {
       updateCard: h.updateCard,
+      reStabilizeUndoCard: h.reStabilizeUndoCard,
       suspendCard: h.suspendCard,
       deleteCard: h.deleteCard,
       flagCard: h.flagCard,
@@ -155,7 +157,8 @@ function renderBar(card: ReviewCardView = QA_CARD, busy = false) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  h.updateCard.mockResolvedValue({ card: summary() });
+  h.updateCard.mockResolvedValue({ card: summary(), reStabilized: null });
+  h.reStabilizeUndoCard.mockResolvedValue({ undone: true, restoredDueAt: null });
   h.suspendCard.mockResolvedValue({ card: summary({ status: "suspended" }) });
   h.deleteCard.mockResolvedValue({ card: summary({ status: "deleted", deleted: true }) });
   h.flagCard.mockResolvedValue({ card: summary({ flagged: true }) });
@@ -187,7 +190,12 @@ describe("ReviewRepairBar", () => {
       ),
     );
 
+    // A substantive answer rewrite surfaces the T125 keep/re-verify choice at commit;
+    // keeping the schedule closes the editor with no demotion.
     fireEvent.click(screen.getByTestId("review-edit-done"));
+    const keep = await screen.findByTestId("restabilize-choice-keep");
+    fireEvent.click(keep);
+    fireEvent.click(screen.getByTestId("restabilize-choice-confirm"));
     await waitFor(() => expect(screen.queryByTestId("review-edit")).not.toBeInTheDocument());
   });
 
@@ -690,5 +698,119 @@ describe("ReviewRepairBar", () => {
     // `s` typed into the prompt field must NOT suspend the card.
     fireEvent.keyDown(prompt, { key: "s" });
     expect(h.suspendCard).not.toHaveBeenCalled();
+  });
+});
+
+describe("ReviewRepairBar — T125 card-edit write barrier", () => {
+  it("offers re-verify on a substantive rewrite, sends editChoice, and shows the receipt", async () => {
+    h.updateCard.mockImplementation((req: { editChoice?: string }) =>
+      Promise.resolve({
+        card: summary(),
+        reStabilized:
+          req.editChoice === "re_stabilize"
+            ? { reviewLogId: "rl-1", previousDueAt: "2027-03-15", newDueAt: "2026-06-16" }
+            : null,
+      }),
+    );
+    renderBar();
+    fireEvent.click(screen.getByTestId("review-repair-edit"));
+    fireEvent.change(await screen.findByTestId("review-edit-answer"), {
+      target: { value: "A completely different and rewritten answer." },
+    });
+    await waitFor(() => expect(h.updateCard).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId("review-edit-done"));
+    // The substantive edit surfaces the choice, pre-selected to re-verify.
+    const reverify = await screen.findByTestId("restabilize-choice-reverify");
+    expect(reverify).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByTestId("restabilize-choice-confirm"));
+
+    await waitFor(() =>
+      expect(h.updateCard).toHaveBeenCalledWith(
+        expect.objectContaining({ cardId: "card-qa", editChoice: "re_stabilize" }),
+      ),
+    );
+    // The demotion receipt appears with a one-tap "Keep schedule instead" undo.
+    const undo = await screen.findByTestId("restabilize-receipt-undo");
+    fireEvent.click(undo);
+    await waitFor(() =>
+      expect(h.reStabilizeUndoCard).toHaveBeenCalledWith({
+        cardId: "card-qa",
+        reviewLogId: "rl-1",
+      }),
+    );
+  });
+
+  it("flips to keep schedule with the K key and closes with no demotion", async () => {
+    renderBar();
+    fireEvent.click(screen.getByTestId("review-repair-edit"));
+    fireEvent.change(await screen.findByTestId("review-edit-answer"), {
+      target: { value: "A completely different and rewritten answer." },
+    });
+    await waitFor(() => expect(h.updateCard).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId("review-edit-done"));
+    await screen.findByTestId("restabilize-choice");
+    // K flips the pre-selected re-verify to keep-schedule.
+    fireEvent.keyDown(window, { key: "k" });
+    expect(screen.getByTestId("restabilize-choice-keep")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByTestId("restabilize-choice-confirm"));
+
+    await waitFor(() => expect(screen.queryByTestId("review-edit")).not.toBeInTheDocument());
+    // Keep-schedule never sends editChoice and never shows a receipt.
+    expect(
+      h.updateCard.mock.calls.some((c: unknown[]) => (c[0] as { editChoice?: string }).editChoice),
+    ).toBe(false);
+    expect(screen.queryByTestId("restabilize-receipt")).not.toBeInTheDocument();
+  });
+
+  it("a typo edit closes directly with no choice", async () => {
+    renderBar();
+    fireEvent.click(screen.getByTestId("review-repair-edit"));
+    // A trailing-period fix to the answer is a typo (no demotion offered).
+    fireEvent.change(await screen.findByTestId("review-edit-answer"), {
+      target: { value: "As skill-acquisition efficiency.." },
+    });
+    await waitFor(() => expect(h.updateCard).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId("review-edit-done"));
+    await waitFor(() => expect(screen.queryByTestId("review-edit")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("restabilize-choice")).not.toBeInTheDocument();
+  });
+
+  it("reports busy to the parent while the choice is open (so grades are blocked)", async () => {
+    renderBar();
+    fireEvent.click(screen.getByTestId("review-repair-edit"));
+    fireEvent.change(await screen.findByTestId("review-edit-answer"), {
+      target: { value: "A completely different and rewritten answer." },
+    });
+    await waitFor(() => expect(h.updateCard).toHaveBeenCalled());
+
+    h.onBusyChange.mockClear();
+    fireEvent.click(screen.getByTestId("review-edit-done"));
+    await screen.findByTestId("restabilize-choice");
+    // The pending decision must report busy=true so ReviewScreen refuses grades/keys.
+    await waitFor(() => expect(h.onBusyChange).toHaveBeenCalledWith(true));
+  });
+
+  it("surfaces an error (and keeps the editor open) when the re-verify demotion fails", async () => {
+    h.updateCard.mockImplementation((req: { editChoice?: string }) =>
+      req.editChoice === "re_stabilize"
+        ? Promise.reject(new Error("demotion failed"))
+        : Promise.resolve({ card: summary(), reStabilized: null }),
+    );
+    renderBar();
+    fireEvent.click(screen.getByTestId("review-repair-edit"));
+    fireEvent.change(await screen.findByTestId("review-edit-answer"), {
+      target: { value: "A completely different and rewritten answer." },
+    });
+    await waitFor(() => expect(h.updateCard).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId("review-edit-done"));
+    fireEvent.click(await screen.findByTestId("restabilize-choice-confirm"));
+    // The failure is surfaced; the choice stays open (no silent fall-through to keep-schedule).
+    await screen.findByTestId("restabilize-choice-error");
+    expect(screen.getByTestId("restabilize-choice")).toBeInTheDocument();
+    expect(screen.queryByTestId("restabilize-receipt")).not.toBeInTheDocument();
   });
 });

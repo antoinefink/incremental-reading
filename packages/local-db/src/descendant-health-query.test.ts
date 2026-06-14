@@ -122,6 +122,51 @@ describe("DescendantHealthQuery.getSourceDescendantHealth", () => {
     });
   });
 
+  it("excludes T125 re-stabilization marker rows even if they carry a lapse increment", () => {
+    // Same above-threshold setup as the first test (descendantLapseCount 4, 2 affected cards)...
+    const sourceId = seedSource("Source");
+    const cardA = seedCard(sourceId, { status: "active" });
+    const cardB = seedCard(sourceId, { status: "scheduled" });
+    const cardC = seedCard(sourceId, { status: "active" });
+    seedLapseLog(cardA, daysAgo(2), { prevLapses: 0, nextLapses: 1 });
+    seedLapseLog(cardA, daysAgo(1), { prevLapses: 1, nextLapses: 3 });
+    seedLapseLog(cardB, daysAgo(3), { prevLapses: 0, nextLapses: 1 });
+    seedLapseLog(cardC, daysAgo(4), { prevLapses: 2, nextLapses: 2 });
+
+    // ...plus a marker row with a (fabricated) lapse-increment shape. The explicit
+    // edit_marker_at IS NULL filter MUST exclude it (locking the invariant against a future
+    // marker writer that does not preserve lapses), so the health numbers are unchanged.
+    handle.db
+      .insert(reviewLogs)
+      .values({
+        id: newReviewLogId(),
+        elementId: cardC,
+        rating: "good",
+        reviewedAt: daysAgo(1),
+        responseMs: 0,
+        prevState: "review",
+        nextState: "review",
+        nextStability: 1,
+        nextDifficulty: 5,
+        nextDueAt: daysAgo(1),
+        prevLapses: 0,
+        nextLapses: 5,
+        editMarkerAt: daysAgo(1),
+        editClass: "substantive",
+        editChoice: "re_stabilize",
+      })
+      .run();
+
+    expect(
+      new DescendantHealthQuery(handle.db).getSourceDescendantHealth({ sourceId, asOf: AS_OF }),
+    ).toEqual({
+      descendantLapseCount: 4,
+      affectedCardCount: 2,
+      descendantCardCount: 3,
+      descendantLapseRate: 4 / 3,
+    });
+  });
+
   it("ignores soft-deleted, suspended, and retired descendant cards", () => {
     const sourceId = seedSource("Source");
     const activeA = seedCard(sourceId);

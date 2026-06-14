@@ -131,6 +131,7 @@ import {
   type OptimizationSuggestionParts,
   optimizationSuggestionFromParts,
   planSession,
+  type ReStabilizeOutcome,
   type WorkloadChange,
 } from "@interleave/scheduler";
 import {
@@ -183,6 +184,8 @@ import type {
   CardsGenerateOcclusionResult,
   CardsMarkLeechRequest,
   CardsMarkLeechResult,
+  CardsReStabilizeUndoRequest,
+  CardsReStabilizeUndoResult,
   CardsRetiredResult,
   CardsRetireRequest,
   CardsRetireResult,
@@ -4044,12 +4047,57 @@ export class DbService {
    * is kept non-empty for the card's kind; the rich card-quality gate is M6/T035.
    */
   updateCard(request: CardsUpdateRequest): CardsUpdateResult {
-    const result = this.cardEdit.updateBody(request.cardId as ElementId, {
-      ...(request.prompt !== undefined ? { prompt: request.prompt } : {}),
-      ...(request.answer !== undefined ? { answer: request.answer } : {}),
-      ...(request.cloze !== undefined ? { cloze: request.cloze } : {}),
-    });
-    return { card: this.toCardEditSummary(result) };
+    const cardId = request.cardId as ElementId;
+    // T125 write barrier: a substantive edit the user confirmed re-stabilizes (demotes the
+    // PERSISTED FSRS state to a short confirmation interval). Choice-explicit — only an
+    // explicit `re_stabilize` demotes; the heuristic class is the renderer's pre-selection,
+    // not a server default. The demotion is resolved THROUGH the scheduler service (resolved
+    // retention/params via `schedulerForCard`), never raw field pokes, and is `null` for a
+    // new / never-reviewed card (nothing to demote).
+    let reStabilize: { readonly outcome: ReStabilizeOutcome; readonly at: IsoTimestamp } | null =
+      null;
+    if (request.editChoice === "re_stabilize") {
+      const state = this.repos.review.findReviewState(cardId);
+      if (state) {
+        const at = new Date().toISOString() as IsoTimestamp;
+        const outcome = this.schedulerForCard(cardId).reStabilize(state, at);
+        if (outcome) reStabilize = { outcome, at };
+      }
+    }
+    const result = this.cardEdit.updateBody(
+      cardId,
+      {
+        ...(request.prompt !== undefined ? { prompt: request.prompt } : {}),
+        ...(request.answer !== undefined ? { answer: request.answer } : {}),
+        ...(request.cloze !== undefined ? { cloze: request.cloze } : {}),
+      },
+      reStabilize,
+    );
+    return {
+      card: this.toCardEditSummary(result),
+      reStabilized: result.reStabilized
+        ? {
+            reviewLogId: result.reStabilized.reviewLogId,
+            previousDueAt: result.reStabilized.previousDueAt,
+            newDueAt: result.reStabilized.newDueAt,
+          }
+        : null,
+    };
+  }
+
+  /**
+   * Undo a re-stabilization (T125 "Keep schedule instead") via
+   * {@link CardEditService.undoReStabilize}: restores the exact prior FSRS schedule from the
+   * marker row's preimage under a four-part current-state guard (refused if the card was
+   * reviewed since the edit). Receipt-scoped — never global ⌘Z.
+   */
+  reStabilizeUndoCard(request: CardsReStabilizeUndoRequest): CardsReStabilizeUndoResult {
+    const result = this.cardEdit.undoReStabilize(request.cardId as ElementId, request.reviewLogId);
+    return {
+      undone: result.undone,
+      restoredDueAt: result.restoredDueAt,
+      ...(result.reason !== undefined ? { reason: result.reason } : {}),
+    };
   }
 
   /**
