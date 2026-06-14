@@ -5469,6 +5469,14 @@ export const SemanticSearchRequestSchema = z.object({
   q: z.string().max(512),
   type: SearchableTypeSchema.optional(),
   limit: z.number().int().min(1).max(200).optional(),
+  /**
+   * Compact lookup surfaces (e.g. the ⌘K command palette) may skip the
+   * drill-down facet counts they do not render. When `false`, only the single
+   * fused pass runs and `counts` is the zeroed shape — the per-type count passes
+   * and the concept-membership fold are skipped. The default remains `true` so
+   * `/search` facet semantics are intact.
+   */
+  includeCounts: z.boolean().optional(),
 });
 export type SemanticSearchRequest = z.infer<typeof SemanticSearchRequestSchema>;
 

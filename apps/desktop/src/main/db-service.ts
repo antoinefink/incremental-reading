@@ -338,6 +338,7 @@ import type {
   ReviewSessionNextRequest,
   ReviewSessionNextResult,
   SearchableType,
+  SearchCounts,
   SearchQueryRequest,
   SearchQueryResult,
   SearchResult,
@@ -3034,16 +3035,28 @@ export class DbService {
     const results = fused.hits
       .map((hit) => this.enrichFusedHit(hit))
       .filter((r): r is SemanticSearchResultRow => r !== null);
-    const countRows = toCountRows(fused.hits);
-    const membership = this.repos.concepts.liveMembershipMapForMembers(
-      countRows.map((row) => row.id),
-    );
-    const counts = foldSearchFacetCounts(countRows, membership, {
-      ...(request.type ? { type: request.type } : {}),
-    });
-    for (const type of ["source", "extract", "card"] as const) {
-      counts.byType[type] = toCountRows(runFused(type).hits).length;
-    }
+
+    // DRILL-DOWN faceted counts for the `/search` filterbar. Compact lookup
+    // surfaces such as the command palette opt out (`includeCounts:false`) because
+    // they render only bounded rows — that skips the per-type fusion passes and the
+    // concept-membership fold, leaving the single main pass above. The default keeps
+    // `/search` byte-for-byte.
+    const counts = ((): SearchCounts => {
+      if (request.includeCounts === false) {
+        return emptySearchFacetCounts();
+      }
+      const countRows = toCountRows(fused.hits);
+      const membership = this.repos.concepts.liveMembershipMapForMembers(
+        countRows.map((row) => row.id),
+      );
+      const folded = foldSearchFacetCounts(countRows, membership, {
+        ...(request.type ? { type: request.type } : {}),
+      });
+      for (const type of ["source", "extract", "card"] as const) {
+        folded.byType[type] = toCountRows(runFused(type).hits).length;
+      }
+      return folded;
+    })();
 
     const mode: SemanticSearchMode = !enabled
       ? "disabled"

@@ -3702,6 +3702,12 @@ export interface SemanticSearchRequest {
   readonly q: string;
   readonly type?: SearchableType;
   readonly limit?: number;
+  /**
+   * Palette and other compact lookup surfaces can opt out of drill-down counts
+   * they do not render — only the single fused pass runs and `counts` is zeroed.
+   * `/search` omits this and keeps exact facet counts.
+   */
+  readonly includeCounts?: boolean;
 }
 
 export interface SemanticSearchResult {

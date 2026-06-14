@@ -3231,6 +3231,88 @@ describe("DbService — review session (T037)", () => {
     svc.close();
   });
 
+  it("semantic.search can skip drill-down counts for compact lookup surfaces (includeCounts:false)", async () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    // Baseline: counts computed (default, omitted includeCounts).
+    const withCounts = await svc.semanticSearch({ q: "intelligence", type: "source" });
+    expect(withCounts.results.length).toBeGreaterThan(0);
+    // The default actually folds counts — at least one type bucket is populated.
+    const totalCount = (["source", "extract", "card"] as const).reduce(
+      (sum, type) => sum + withCounts.counts.byType[type],
+      0,
+    );
+    expect(totalCount).toBeGreaterThan(0);
+
+    // Spy on the per-type/membership work that the compact path must skip.
+    const membershipSpy = vi.spyOn(svc.repos.concepts, "liveMembershipMapForMembers");
+    const fusionSpy = vi.spyOn(svc.repos.semanticSearch, "search");
+
+    // includeCounts:false → identical results + mode, but zeroed counts.
+    const skipped = await svc.semanticSearch({
+      q: "intelligence",
+      type: "source",
+      includeCounts: false,
+    });
+    expect(skipped.results.map((r) => r.id)).toEqual(withCounts.results.map((r) => r.id));
+    expect(skipped.mode).toBe(withCounts.mode);
+    expect(skipped.counts).toEqual({
+      byType: { source: 0, extract: 0, card: 0 },
+      byConcept: {},
+      byPriority: { A: 0, B: 0, C: 0, D: 0 },
+    });
+    // The membership fold is skipped entirely, and the fusion runs exactly once
+    // (the single main pass) rather than once-per-type for byType counts.
+    expect(membershipSpy).not.toHaveBeenCalled();
+    expect(fusionSpy).toHaveBeenCalledTimes(1);
+
+    membershipSpy.mockRestore();
+    fusionSpy.mockRestore();
+    svc.close();
+  });
+
+  it("semantic.search caps results to limit while skipping counts (limit + includeCounts:false)", async () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    const limited = await svc.semanticSearch({
+      q: "intelligence",
+      type: "source",
+      limit: 1,
+      includeCounts: false,
+    });
+    expect(limited.results.length).toBeLessThanOrEqual(1);
+    expect(limited.results.every((r) => r.type === "source")).toBe(true);
+    expect(limited.counts).toEqual({
+      byType: { source: 0, extract: 0, card: 0 },
+      byConcept: {},
+      byPriority: { A: 0, B: 0, C: 0, D: 0 },
+    });
+
+    svc.close();
+  });
+
+  it("semantic.search includeCounts:true explicit behaves like the omitted default", async () => {
+    const svc = new DbService();
+    svc.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
+    expect(svc.seedIfEmpty()).toBe(true);
+
+    const omitted = await svc.semanticSearch({ q: "intelligence", type: "source" });
+    const explicit = await svc.semanticSearch({
+      q: "intelligence",
+      type: "source",
+      includeCounts: true,
+    });
+    expect(explicit.results.map((r) => r.id)).toEqual(omitted.results.map((r) => r.id));
+    expect(explicit.mode).toBe(omitted.mode);
+    expect(explicit.counts).toEqual(omitted.counts);
+
+    svc.close();
+  });
+
   it("search excludes soft-deleted elements and survives a close + reopen (T042 restart analogue)", () => {
     const first = new DbService();
     first.open(dbPath, { migrationsDir: MIGRATIONS_DIR });
