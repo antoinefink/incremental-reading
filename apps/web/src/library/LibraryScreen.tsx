@@ -15,7 +15,7 @@
  */
 
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConceptGraph } from "../components/ConceptGraph";
 import { Icon } from "../components/Icon";
 import {
@@ -28,6 +28,7 @@ import {
 import { RefBlock } from "../components/RefBlock";
 import { AutoVirtualList } from "../components/VirtualList";
 import { CollectionExplorerModeSwitch } from "./CollectionExplorerModeSwitch";
+import { LibrarySearchField } from "./LibrarySearchField";
 import "../components/inspector/inspector.css";
 import {
   appApi,
@@ -149,8 +150,14 @@ export function LibraryScreen() {
   const routePriority = parsePriority(routeSearch.priority);
 
   const [tab, setTab] = useState<Tab>("results");
-  const [rawQuery, setRawQuery] = useState(() => routeQuery);
+  // The raw input text + its 150 ms debounce now live inside `LibrarySearchField`
+  // (U1) so a keystroke no longer re-renders this screen's heavy results/filterbar
+  // subtree. This component holds only the DEBOUNCED query, which drives the search
+  // effect + `highlight()` and changes at most every 150 ms.
   const [debouncedQuery, setDebouncedQuery] = useState(() => routeQuery);
+  // Bumped on every external route-sync so the field re-syncs its text + refocuses
+  // even when the route resets to the same `q` value.
+  const [searchSyncToken, setSearchSyncToken] = useState(0);
   const [typeFilter, setTypeFilter] = useState<SearchableType | null>(() => routeType);
   const [conceptFilter, setConceptFilter] = useState<string | null>(() => routeConceptId);
   const [priorityFilter, setPriorityFilter] = useState<PriorityLetter | null>(() => routePriority);
@@ -175,7 +182,6 @@ export function LibraryScreen() {
   // a user watching the index self-heal isn't told search is broken.
   const [indexHealth, setIndexHealth] = useState<SemanticIndexHealth>("healthy");
   const [reindexing, setReindexing] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const debouncedTerm = debouncedQuery.trim();
   const hasQuery = debouncedTerm.length > 0;
@@ -226,24 +232,16 @@ export function LibraryScreen() {
   }, [navigate, typeFilter, conceptFilter, priorityFilter]);
 
   useEffect(() => {
-    setRawQuery(routeQuery);
+    // Drive the debounced query directly from the route so the search effect runs
+    // immediately on navigation (no 150 ms wait for a keystroke). The field syncs
+    // its own visible text + refocuses off `searchSyncToken` (bumped here).
     setDebouncedQuery(routeQuery);
     setTypeFilter(routeType);
     setConceptFilter(routeConceptId);
     setPriorityFilter(routePriority);
     setSelId(null);
-    searchInputRef.current?.focus();
+    setSearchSyncToken((t) => t + 1);
   }, [routeQuery, routeType, routeConceptId, routePriority]);
-
-  // Debounce the raw input into the query that actually hits the bridge.
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setDebouncedQuery(rawQuery), 150);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [rawQuery]);
 
   // Load the concept list once (filterbar + map).
   useEffect(() => {
@@ -513,19 +511,11 @@ export function LibraryScreen() {
           onBrowse={openBrowseMode}
           onSearch={() => undefined}
         />
-        <div className="lib-searchbar">
-          <Icon name="search" size={15} />
-          <input
-            ref={searchInputRef}
-            type="search"
-            data-testid="library-search-input"
-            value={rawQuery}
-            onChange={(e) => setRawQuery(e.target.value)}
-            placeholder="Search sources, extracts, cards, concepts…"
-            // biome-ignore lint/a11y/noAutofocus: search is the screen's primary action
-            autoFocus
-          />
-        </div>
+        <LibrarySearchField
+          syncQuery={routeQuery}
+          syncToken={searchSyncToken}
+          onDebouncedChange={setDebouncedQuery}
+        />
         <div className="lib-grow" />
         <div className="lib-seg" role="tablist">
           <button

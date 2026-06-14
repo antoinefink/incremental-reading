@@ -199,6 +199,10 @@ const h = vi.hoisted(() => {
     searchQuery: vi.fn(),
     libraryBrowse: vi.fn(),
     listConcepts: vi.fn(),
+    // U1 regression guard — counts each render of the per-row `Prio` badge. Typing
+    // into the isolated search field must NOT re-render the heavy results subtree,
+    // so this counter must stay flat across keystrokes within the debounce window.
+    prioRenderCount: { current: 0 },
     // Semantic search (T087) — vector index unavailable by default so these tests exercise the FTS path.
     semanticStatus: vi.fn(),
     semanticSearch: vi.fn(),
@@ -233,11 +237,28 @@ vi.mock("../lib/appApi", async () => {
   };
 });
 
+// Partial-mock the inspector primitives so `Prio` (rendered once per result row)
+// becomes a render counter — the load-bearing stutter regression signal. Every other
+// primitive stays real so the rest of the screen renders normally.
+vi.mock("../components/inspector/primitives", async () => {
+  const actual = await vi.importActual<typeof import("../components/inspector/primitives")>(
+    "../components/inspector/primitives",
+  );
+  return {
+    ...actual,
+    Prio: (props: { priority: number }) => {
+      h.prioRenderCount.current += 1;
+      return actual.Prio(props);
+    },
+  };
+});
+
 import { LibraryScreen } from "./LibraryScreen";
 
 beforeEach(() => {
   vi.clearAllMocks();
   h.routeSearch = {};
+  h.prioRenderCount.current = 0;
   // The backend now returns DRILL-DOWN per-concept counts alongside the rows; the
   // chip renders these (NOT the global ConceptNode.memberCount). The mock honors
   // the active type facet so empty Search count reads behave like the real bridge.
@@ -1299,6 +1320,43 @@ describe("LibraryScreen", () => {
 
     expect(h.selectSpy).toHaveBeenCalledWith("src-1");
     expect(await screen.findByTestId("library-detail")).toBeTruthy();
+  });
+
+  it("does NOT re-render the heavy results subtree on a keystroke (U1 stutter regression)", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<LibraryScreen />);
+      // Drive a query and let the debounced search resolve so result rows (each with
+      // a counted `Prio`) are on screen.
+      fireEvent.change(screen.getByTestId("library-search-input"), {
+        target: { value: "intelligence" },
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200); // debounce (150 ms) + the search promise
+      });
+      // Sanity: result rows rendered (so the heavy subtree is actually present).
+      expect(screen.getAllByTestId("library-result").length).toBeGreaterThan(0);
+
+      // Snapshot the render count, then type another character. Within the debounce
+      // window the parent must not re-render — the isolated field owns the raw text.
+      const before = h.prioRenderCount.current;
+      fireEvent.change(screen.getByTestId("library-search-input"), {
+        target: { value: "intelligencee" },
+      });
+      // The visible input reflects the keystroke immediately…
+      expect((screen.getByTestId("library-search-input") as HTMLInputElement).value).toBe(
+        "intelligencee",
+      );
+      // …but the heavy results subtree did NOT re-render (Prio count unchanged).
+      expect(h.prioRenderCount.current).toBe(before);
+
+      // Drain the pending debounce timer so no act() warning leaks past the test.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows the scheduler chip + due badge in the selection detail (kit parity)", async () => {
