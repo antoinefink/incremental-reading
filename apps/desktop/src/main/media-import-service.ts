@@ -336,8 +336,9 @@ export class MediaImportService {
       snapshotKey: null,
       reasonAdded: nonEmpty(input.reasonAdded ?? null),
       mediaKind: "youtube",
-      // Capture origin (T126): a YouTube reference import (the media-import seam).
-      capturedVia: "file",
+      // Capture origin (T126): a YouTube reference is captured FROM A URL (no local bytes),
+      // so its origin is `url` — not `file`, which is reserved for on-disk file imports.
+      capturedVia: "url",
       conversion,
     });
 

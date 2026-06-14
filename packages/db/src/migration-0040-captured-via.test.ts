@@ -118,6 +118,16 @@ describe("migration 0040 — captured_via", () => {
       };
       expect(sourceCount.n).toBe(2);
 
+      // KTD-5 totality: the two backfill UPDATEs (url → 'url', no-url → 'manual')
+      // together cover EVERY legacy row, so NO row is left NULL. A genuinely-null
+      // "Other" row cannot arise from the backfill — every source has a url or it
+      // doesn't, and both classes are filled. (Assert the absence honestly rather
+      // than a null path that cannot occur.)
+      const stillNull = handle.sqlite
+        .prepare("SELECT COUNT(*) AS n FROM sources WHERE captured_via IS NULL")
+        .get() as { n: number };
+      expect(stillNull.n).toBe(0);
+
       // Lineage columns are untouched (the 0030 regression guard).
       expect(
         handle.sqlite.prepare("SELECT parent_id, source_id FROM elements WHERE id = 'ext'").get(),

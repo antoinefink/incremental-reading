@@ -18,9 +18,11 @@
  */
 
 import { Icon, type IconName } from "../../components/Icon";
-import type { InboxBulkTriageAction, PriorityLabelInput } from "../../lib/appApi";
-
-const PRIORITY_LABELS: readonly PriorityLabelInput[] = ["A", "B", "C", "D"];
+import {
+  type InboxBulkTriageAction,
+  PRIORITY_LABELS,
+  type PriorityLabelInput,
+} from "../../lib/appApi";
 
 type BulkVerb = Exclude<InboxBulkTriageAction, "setPriority">;
 

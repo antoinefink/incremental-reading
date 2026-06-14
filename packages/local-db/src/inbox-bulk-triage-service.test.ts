@@ -363,6 +363,9 @@ describe("InboxBulkTriageService.apply — errored channel (atomic abort)", () =
     expect(result.skipped).toEqual([]);
     expect(result.errored.length).toBe(3);
     expect(result.errored[0]?.error).toMatch(/disk on fire/);
+    // The errored channel carries the correct input ids (every eligible id of the
+    // aborted batch), not a placeholder — so the renderer can name the failures.
+    expect(result.errored.map((e) => e.id).sort()).toEqual([a, b, c].sort());
     // Nothing persisted — the transaction rolled back fully.
     expect(handle.db.select().from(operationLog).all().length).toBe(opsBefore);
     expect(rowFor(a)?.status).toBe("inbox");

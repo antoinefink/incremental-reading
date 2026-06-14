@@ -1260,7 +1260,7 @@ describe("InboxScreen bulk triage (T126)", () => {
     );
   });
 
-  it("the snackbar Undo calls bulkTriageInboxUndo with the batch id and refreshes", async () => {
+  it("the snackbar Undo calls bulkTriageInboxUndo with the batch id, refreshes, and dispatches UNDO_EVENT", async () => {
     mountBulk();
     h.bulkTriageInbox.mockResolvedValue({
       batchId: "batch-undo",
@@ -1268,6 +1268,85 @@ describe("InboxScreen bulk triage (T126)", () => {
       skipped: [],
       errored: [],
     });
+    h.bulkTriageInboxUndo.mockResolvedValue({ undone: true, count: 2 });
+    const undoListener = vi.fn();
+    window.addEventListener("interleave:undo", undoListener);
+    const { findByTestId, getByTestId, queryByTestId } = render(<InboxScreen />);
+
+    try {
+      await findByTestId("inbox-list");
+      fireEvent.click(getByTestId("inbox-select-all"));
+      fireEvent.click(getByTestId("inbox-bulk-queue-soon"));
+
+      const undo = await findByTestId("inbox-snackbar-undo");
+      h.listInbox.mockClear();
+      fireEvent.click(undo);
+
+      await waitFor(() =>
+        expect(h.bulkTriageInboxUndo).toHaveBeenCalledWith({ batchId: "batch-undo" }),
+      );
+      await waitFor(() => expect(h.listInbox).toHaveBeenCalled());
+      // A successful undo dispatches the global UNDO_EVENT and surfaces no error.
+      await waitFor(() => expect(undoListener).toHaveBeenCalledTimes(1));
+      expect(queryByTestId("inbox-error")).not.toBeInTheDocument();
+    } finally {
+      window.removeEventListener("interleave:undo", undoListener);
+    }
+  });
+
+  it("surfaces a REFUSED bulk undo as an inbox error and does NOT dispatch UNDO_EVENT", async () => {
+    mountBulk();
+    h.bulkTriageInbox.mockResolvedValue({
+      batchId: "batch-refuse",
+      applied: 2,
+      skipped: [],
+      errored: [],
+    });
+    // The movement guard refused — a victim moved since the batch wrote it.
+    h.bulkTriageInboxUndo.mockResolvedValue({
+      undone: false,
+      count: 0,
+      reason: "One or more items changed",
+    });
+    const undoListener = vi.fn();
+    window.addEventListener("interleave:undo", undoListener);
+    const { findByTestId, getByTestId } = render(<InboxScreen />);
+
+    try {
+      await findByTestId("inbox-list");
+      fireEvent.click(getByTestId("inbox-select-all"));
+      fireEvent.click(getByTestId("inbox-bulk-queue-soon"));
+
+      const undo = await findByTestId("inbox-snackbar-undo");
+      fireEvent.click(undo);
+
+      await waitFor(() =>
+        expect(h.bulkTriageInboxUndo).toHaveBeenCalledWith({ batchId: "batch-refuse" }),
+      );
+      // The refusal reason is surfaced honestly via the inbox error UI...
+      expect(await findByTestId("inbox-error")).toHaveTextContent("One or more items changed");
+      // ...and a refused undo must NOT look like a success: no UNDO_EVENT fires.
+      expect(undoListener).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("interleave:undo", undoListener);
+    }
+  });
+
+  it("fires only ONE undo call when the snackbar Undo is double-clicked", async () => {
+    mountBulk();
+    h.bulkTriageInbox.mockResolvedValue({
+      batchId: "batch-dbl",
+      applied: 2,
+      skipped: [],
+      errored: [],
+    });
+    // Keep the undo in-flight so a second click can race the first.
+    let resolveUndo!: (value: { undone: boolean; count: number }) => void;
+    h.bulkTriageInboxUndo.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveUndo = resolve;
+      }),
+    );
     const { findByTestId, getByTestId } = render(<InboxScreen />);
 
     await findByTestId("inbox-list");
@@ -1275,13 +1354,43 @@ describe("InboxScreen bulk triage (T126)", () => {
     fireEvent.click(getByTestId("inbox-bulk-queue-soon"));
 
     const undo = await findByTestId("inbox-snackbar-undo");
-    h.listInbox.mockClear();
+    fireEvent.click(undo);
     fireEvent.click(undo);
 
-    await waitFor(() =>
-      expect(h.bulkTriageInboxUndo).toHaveBeenCalledWith({ batchId: "batch-undo" }),
-    );
-    await waitFor(() => expect(h.listInbox).toHaveBeenCalled());
+    // The in-flight guard collapses the double-click into exactly one undo IPC call.
+    await waitFor(() => expect(h.bulkTriageInboxUndo).toHaveBeenCalledTimes(1));
+    resolveUndo({ undone: true, count: 2 });
+    await waitFor(() => expect(h.bulkTriageInboxUndo).toHaveBeenCalledTimes(1));
+  });
+
+  it("an errored sweep surfaces 'failed' and a fully-errored removing sweep KEEPS the selection", async () => {
+    mountBulk();
+    // One id errored, applied 0 — the whole tx aborted (the errored-channel shape).
+    h.bulkTriageInbox.mockResolvedValue({
+      batchId: "batch-err",
+      applied: 0,
+      skipped: [],
+      errored: [{ id: "u1", error: "disk on fire" }],
+    });
+    const { container, findByTestId, getAllByTestId, getByTestId } = render(<InboxScreen />);
+
+    await findByTestId("inbox-list");
+    // Select the two URL rows (u1, u2), then fire a REMOVING verb (Queue soon).
+    fireEvent.click(getAllByTestId("inbox-select-group")[0] as HTMLElement);
+    expect(getByTestId("inbox-bulk-headline")).toHaveTextContent("2 selected");
+    fireEvent.click(getByTestId("inbox-bulk-queue-soon"));
+
+    await waitFor(() => expect(h.bulkTriageInbox).toHaveBeenCalledTimes(1));
+    // The snackbar message includes the "N failed" tally (via bulkResultMessage).
+    expect(await findByTestId("inbox-snackbar")).toHaveTextContent("1 failed");
+    // The aria-live announce string also includes the "N failed." tally.
+    expect(getByTestId("inbox-announce")).toHaveTextContent("1 failed.");
+    // applied === 0 on a removing verb must NOT clear the selection (so the user retries):
+    // the bulk panel still shows the count and the rows stay selected.
+    expect(getByTestId("inbox-bulk-panel")).toBeInTheDocument();
+    expect(getByTestId("inbox-bulk-headline")).toHaveTextContent("2 selected");
+    expect(rowById(container, "u1")).toHaveAttribute("data-selected", "true");
+    expect(rowById(container, "u2")).toHaveAttribute("data-selected", "true");
   });
 });
 

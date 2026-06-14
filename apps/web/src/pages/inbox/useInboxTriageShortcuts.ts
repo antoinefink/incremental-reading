@@ -45,8 +45,6 @@
 
 import { useEffect, useRef } from "react";
 import type { PriorityLabelInput } from "../../lib/appApi";
-import type { InboxGroupBy } from "./InboxGroupedList";
-
 /** The actions the inbox triage scope binds to the keyboard. */
 export interface InboxTriageShortcutHandlers {
   /** Move the roving cursor by one row (clamped at the list ends). */
@@ -59,6 +57,8 @@ export interface InboxTriageShortcutHandlers {
   selectRestOfGroup(): void;
   /** Select the whole visible inbox (the parent caps the request main-side). */
   selectAll(): void;
+  /** Whether anything is selected — gates Escape so it stays free to close overlays. */
+  hasSelection(): boolean;
   /** Clear the entire selection (+ the armed band + the shift anchor). */
   clearSelection(): void;
   /**
@@ -116,19 +116,15 @@ export const INBOX_TRIAGE_BOUND_KEYS: ReadonlySet<string> = new Set([
  * active triage surface). Handlers are read through a ref so the listener never
  * re-binds on every render.
  *
- * `groupBy` is accepted so a future per-axis nuance can read it; today the keymap is
- * axis-agnostic (select-rest-of-group walks the cursor's rendered group regardless
- * of axis), but threading it keeps the hook's contract honest about what it reads.
+ * The keymap is axis-agnostic (select-rest-of-group walks the cursor's rendered group
+ * regardless of group-by axis), so the hook does not read the axis.
  */
 export function useInboxTriageShortcuts(
   handlers: InboxTriageShortcutHandlers,
   enabled: boolean,
-  groupBy: InboxGroupBy,
 ): void {
   const ref = useRef(handlers);
   ref.current = handlers;
-  const groupByRef = useRef(groupBy);
-  groupByRef.current = groupBy;
 
   useEffect(() => {
     if (!enabled) return;
@@ -195,8 +191,10 @@ export function useInboxTriageShortcuts(
         case "Escape":
           // Only consume Escape when there is something to clear (so it stays
           // available to close a popover / overlay otherwise).
-          e.preventDefault();
-          h.clearSelection();
+          if (h.hasSelection()) {
+            e.preventDefault();
+            h.clearSelection();
+          }
           return;
         default:
           break;

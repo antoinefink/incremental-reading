@@ -2966,30 +2966,39 @@ export interface InboxTriageResult {
  * zod schema (`ids` min-1 / max-1000, optional `priority`) + IPC plumbing; U3 defines
  * the request/result TS shape so the DbService methods can be typed.
  */
-export type InboxBulkTriageAction =
-  | "accept"
-  | "queueSoon"
-  | "keepForLater"
-  | "delete"
-  | "setPriority";
+/**
+ * The verb kinds a bulk sweep applies (T126) — the SINGLE source for both the TS type and
+ * the zod enum. Flattened to a string enum: the per-item {@link InboxTriageRequestSchema}
+ * union bundles the band INTO its `setPriority` variant, whereas a bulk sweep carries ONE
+ * optional top-level `priority` band that can ride ALONGSIDE any verb (KTD-3). A bare
+ * `"setPriority"` is a priority-only sweep — the request schema's refine requires a band.
+ *
+ * Declared statically (not derived from the per-item union at runtime) so adding a per-item
+ * action variant can NOT silently expand the bulk surface; the compile-time guard below
+ * still keeps the two in lockstep by asserting every bulk verb IS a per-item action kind.
+ */
+export const INBOX_BULK_TRIAGE_ACTIONS = [
+  "accept",
+  "queueSoon",
+  "keepForLater",
+  "delete",
+  "setPriority",
+] as const;
+export type InboxBulkTriageAction = (typeof INBOX_BULK_TRIAGE_ACTIONS)[number];
+export const InboxBulkTriageActionSchema = z.enum(INBOX_BULK_TRIAGE_ACTIONS);
+
+// Lockstep guard: every bulk verb must be a per-item triage action kind. If a bulk action
+// is added that the per-item union does not have, this assignment is a compile error.
+type _BulkActionsAreTriageKinds = InboxBulkTriageAction extends z.infer<
+  typeof InboxTriageRequestSchema
+>["action"]["kind"]
+  ? true
+  : never;
+const _bulkActionsAreTriageKinds: _BulkActionsAreTriageKinds = true;
+void _bulkActionsAreTriageKinds;
 
 /** Why an id in a bulk selection was skipped (never thrown — classified + counted). */
 export type InboxBulkTriageSkipReason = "not_inbox" | "deleted" | "wrong_type" | "already_acted";
-
-/**
- * The verb-kind enum a bulk sweep applies (T126). Derived from the per-item
- * {@link InboxTriageRequestSchema} action union's `kind` set so the two stay in lockstep,
- * but FLATTENED to a string enum: the per-item union bundles the band INTO its
- * `setPriority` variant, whereas a bulk sweep carries ONE optional top-level `priority`
- * band that can ride ALONGSIDE any verb (KTD-3). A bare `"setPriority"` is a priority-only
- * sweep — the schema's refine below requires `priority` in that case.
- */
-export const InboxBulkTriageActionSchema = z.enum(
-  InboxTriageRequestSchema.shape.action.options.map((option) => option.shape.kind.value) as [
-    InboxBulkTriageAction,
-    ...InboxBulkTriageAction[],
-  ],
-);
 
 /**
  * One bulk-triage request (T126): a verb over N ids (`min(1)`/`max(1000)` — the cap protects
@@ -3029,7 +3038,7 @@ export interface InboxBulkTriageResult {
  * is the single source of truth and {@link InboxBulkTriageUndoRequest} is its inferred type.
  */
 export const InboxBulkTriageUndoRequestSchema = z.object({
-  batchId: z.string().min(1),
+  batchId: z.string().min(1).max(128),
 });
 export type InboxBulkTriageUndoRequest = z.infer<typeof InboxBulkTriageUndoRequestSchema>;
 

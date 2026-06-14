@@ -35,6 +35,7 @@ import {
   type InboxItemDetail,
   type InboxItemSummary,
   isDesktop,
+  PRIORITY_LABELS,
   type PriorityLabelInput,
   type SourceDuplicateSummary,
 } from "../../lib/appApi";
@@ -90,7 +91,13 @@ function priorityToLabel(priority: number): PriorityLabelInput {
   return "D";
 }
 
-const PRIORITY_LABELS: readonly PriorityLabelInput[] = ["A", "B", "C", "D"];
+/**
+ * The per-sweep selection cap, mirroring the IPC contract's `ids.max(1000)` (KTD-8 —
+ * one synchronous better-sqlite3 transaction must stay bounded). The renderer caps the
+ * dispatched ids HERE so a select-all over a huge inbox triages the first N rather than
+ * failing the whole batch at zod validation.
+ */
+const BULK_SELECTION_CAP = 1000;
 const PRIORITY_HINT: Record<PriorityLabelInput, string> = {
   A: "Protected · review daily",
   B: "Important · frequent",
@@ -478,6 +485,8 @@ export function InboxScreen() {
   const [announce, setAnnounce] = useState("");
   // In-flight guard for a bulk sweep — reset when `busy` settles (the DoneIntentMenu rule).
   const bulkInFlightRef = useRef(false);
+  // In-flight guard for the snackbar Undo, so a double-click fires only one undo call.
+  const undoInFlightRef = useRef(false);
 
   const multiSelect = selectedIds.size >= 2;
 
@@ -542,7 +551,12 @@ export function InboxScreen() {
       return;
     }
     select(selId);
-    if (multiSelect) return;
+    if (multiSelect) {
+      // The bulk panel replaces the detail pane (KTD-7); drop any stale single-item
+      // detail so it can never paint against a mismatched cursor on the next collapse.
+      setDetail(null);
+      return;
+    }
     let cancelled = false;
     void (async () => {
       try {
@@ -851,11 +865,15 @@ export function InboxScreen() {
     if (last) anchorRef.current = last;
   }, []);
 
-  /** "Select all" — the whole visible inbox (capped main-side at 1000 per request). */
+  /** "Select all" — the visible inbox, capped at the per-sweep limit (KTD-8). */
   const onSelectAll = useCallback(() => {
     if (orderedIds.length === 0) return;
-    setSelectedIds(new Set(orderedIds));
-    anchorRef.current = orderedIds[orderedIds.length - 1] ?? null;
+    const capped = orderedIds.slice(0, BULK_SELECTION_CAP);
+    setSelectedIds(new Set(capped));
+    anchorRef.current = capped[capped.length - 1] ?? null;
+    if (orderedIds.length > BULK_SELECTION_CAP) {
+      setAnnounce(`Selected the first ${BULK_SELECTION_CAP} of ${orderedIds.length} items.`);
+    }
   }, [orderedIds]);
 
   // --- Keyboard cursor + selection mutators (T126 — U6) ---
@@ -993,8 +1011,12 @@ export function InboxScreen() {
   const runBulk = useCallback(
     async (action: InboxBulkTriageAction, priority: PriorityLabelInput | null) => {
       if (busy || bulkInFlightRef.current) return;
-      const ids = [...selectedIds];
-      if (ids.length === 0) return;
+      const selected = [...selectedIds];
+      if (selected.length === 0) return;
+      // Cap the dispatched ids to the contract limit so a >1000 select-all triages the
+      // first N rather than failing the entire batch at the IPC zod guard (KTD-8).
+      const ids = selected.slice(0, BULK_SELECTION_CAP);
+      const orderedSnapshot = orderedIds; // snapshot before the await (focus uses it post-await)
       bulkInFlightRef.current = true;
       setBusy(true);
       try {
@@ -1006,14 +1028,21 @@ export function InboxScreen() {
         const message = bulkResultMessage(action, result);
         setSnack(message);
         setSnackBatchId(result.applied > 0 ? result.batchId : null);
+        const cappedNote =
+          selected.length > ids.length
+            ? ` First ${ids.length} of ${selected.length} selected.`
+            : "";
+        const erroredNote = result.errored.length > 0 ? ` ${result.errored.length} failed.` : "";
         setAnnounce(
-          `${BULK_VERB_LABEL[action]} applied to ${result.applied} items. ${result.skipped.length} skipped.`,
+          `${BULK_VERB_LABEL[action]} applied to ${result.applied} items. ${result.skipped.length} skipped.${erroredNote}${cappedNote}`,
         );
-        if (isRemovingBulkAction(action)) {
+        // Only a removing verb that actually applied to something clears the selection;
+        // a fully-skipped/errored sweep (applied === 0) keeps the set so the user can retry.
+        if (isRemovingBulkAction(action) && result.applied > 0) {
           // A removing verb empties the acted rows; clear the selection (+ the armed
           // band) and refocus the next remaining row.
           const acted = new Set(ids);
-          const remaining = orderedIds.filter((id) => !acted.has(id));
+          const remaining = orderedSnapshot.filter((id) => !acted.has(id));
           clearSelection();
           focusNextRemainingRow(remaining);
         }
@@ -1082,15 +1111,29 @@ export function InboxScreen() {
 
   /** The snackbar Undo reverses exactly the bound batch (NOT the global undoLast). */
   const onBulkUndo = useCallback(() => {
+    if (undoInFlightRef.current) return;
     const batchId = snackBatchId;
     setSnack(null);
     setSnackBatchId(null);
     if (!batchId) return;
+    undoInFlightRef.current = true;
     void appApi
       .bulkTriageInboxUndo({ batchId })
-      .then(() => refresh(null))
-      .then(() => window.dispatchEvent(new CustomEvent(UNDO_EVENT)))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .then(async (result) => {
+        await refresh(null);
+        if (!result.undone) {
+          // The movement guard refused (an item moved since the batch wrote it). Surface
+          // the refusal honestly — a resolved refusal must NOT look like a success.
+          setError(result.reason ?? "Undo refused — one or more items changed since this batch.");
+          return;
+        }
+        setError(null);
+        window.dispatchEvent(new CustomEvent(UNDO_EVENT));
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => {
+        undoInFlightRef.current = false;
+      });
   }, [snackBatchId, refresh]);
 
   // Drop ids from the selection that have left the list (a sweep / refresh removed
@@ -1137,12 +1180,12 @@ export function InboxScreen() {
       toggleCursorRow,
       selectRestOfGroup,
       selectAll: onSelectAll,
+      hasSelection: () => selectedIds.size > 0,
       clearSelection,
       triageVerb,
       armPriority: onArmBulkPriority,
     },
     triageScopeActive,
-    groupBy,
   );
 
   // Open the New-source modal when the ⌘K command palette fires its event
@@ -1302,7 +1345,7 @@ export function InboxScreen() {
                 onArmPriority={onArmBulkPriority}
                 onSetPriority={onSetBulkPriority}
               />
-            ) : detail ? (
+            ) : detail && detail.summary.id === selId ? (
               <PreviewPane
                 detail={detail}
                 busy={busy}

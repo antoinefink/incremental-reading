@@ -1158,6 +1158,9 @@ export interface LineageGetResult {
 /** The four coarse priority labels the UI exposes. */
 export type PriorityLabelInput = "A" | "B" | "C" | "D";
 
+/** The priority bands in display order (A highest), shared by the inbox priority chips. */
+export const PRIORITY_LABELS: readonly PriorityLabelInput[] = ["A", "B", "C", "D"];
+
 /** Request to create a source in the inbox with its body (T012 + T013 + T014). */
 export interface SourcesImportManualRequest {
   readonly title: string;
@@ -1183,6 +1186,11 @@ export interface SourcesImportManualRequest {
  * Capture origin (T126) — WHERE a source entered the system, mirrored from the
  * core `CapturedVia` tuple. The renderer labels it via `capturedViaLabel`
  * (`null` ⇒ "Other") for the inbox group-by-origin view.
+ *
+ * KEEP IN SYNC with the canonical `CAPTURED_VIA` tuple in
+ * `packages/core/src/capture-origin.ts` (the renderer mirrors it locally rather than
+ * importing, to stay decoupled from the package boundary). Adding an origin requires
+ * editing core, the DB CHECK, the contract, AND this mirror.
  */
 export type CapturedVia = "manual" | "url" | "extension" | "highlight_import" | "file";
 
@@ -2088,6 +2096,10 @@ export interface InboxTriageResult {
  * Bulk inbox triage (T126) — renderer-local mirrors of the desktop contract shapes (the
  * renderer never imports desktop package types). The ONE verb a bulk sweep applies to N
  * selected ids; `setPriority` is a priority-only sweep (the band rides in `priority`).
+ *
+ * KEEP IN SYNC with `InboxBulkTriageAction` / `InboxBulkTriageSkipReason` in
+ * `apps/desktop/src/shared/contract.ts` and `packages/local-db/src/inbox-bulk-triage-service.ts`.
+ * Adding a verb or skip reason requires editing all three sites (no compile-time link).
  */
 export type InboxBulkTriageAction =
   | "accept"
